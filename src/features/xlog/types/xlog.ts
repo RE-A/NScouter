@@ -1,5 +1,7 @@
 // src/features/xlog/types/xlog.ts
 
+import { XLOG_BACKGROUND, XLOG_COLORS } from '../utils/colorPalette';
+
 /** Rust XLogPack 직렬화 구조 (txid/caller/gxid는 string) */
 export interface XLogPack {
   end_time: number;
@@ -51,6 +53,8 @@ export interface XLogPack {
 export interface SXLog {
   txid: string;
   gxid: string;
+  /** 부모 트랜잭션의 txid. 0 이면 이 요청의 시작점이다 */
+  caller: string;
   endTime: number;
   elapsed: number;        // ms
   objHash: number;
@@ -71,6 +75,7 @@ export function xlogPackToSXLog(p: XLogPack): SXLog {
   return {
     txid: p.txid,
     gxid: p.gxid,
+    caller: p.caller,
     endTime: p.end_time,
     elapsed: p.elapsed,
     objHash: p.obj_hash,
@@ -132,8 +137,9 @@ export const DEFAULT_CHART_CONFIG: XLogChartConfig = {
   yMax: 9,
   showIgnoreArea: false,
   ignoreThresholdMs: 0,
-  backgroundColor: '#ffffff',
-  gridColor: 'rgb(220, 228, 255)',
+  // 값은 colorPalette.ts 하나에만 둔다 (여기와 두 벌이 되면 그리드만 흰 배경용으로 남는다).
+  backgroundColor: XLOG_BACKGROUND,
+  gridColor: XLOG_COLORS.GRID,
 };
 
 export interface ChartLayout {
@@ -168,17 +174,56 @@ export function buildLayout(w: number, h: number): ChartLayout {
   };
 }
 
+/**
+ * 문자열 조건. **포함과 제외를 같은 칸에서 뒤집는다.**
+ *
+ * 두 칸(포함용/제외용)으로 나누면 "shop 을 포함하면서 shop 을 제외" 같은
+ * 앞뒤가 안 맞는 상태를 만들 수 있다. 한 칸에 방향 스위치를 둔다.
+ *
+ * `text` 가 비면 **방향과 무관하게 조건이 없다** — 빈 문자열을 제외 조건으로 읽으면
+ * 모든 행이 사라진다.
+ */
+export interface TextFilter {
+  text: string;
+  /** true 면 **일치하지 않는 것만** 통과 */
+  exclude: boolean;
+}
+
 export interface XLogFilterState {
-  minElapsed: number;
+  /**
+   * 응답시간 임계(ms). **0 이면 방향과 무관하게 조건이 없다** —
+   * 0 을 "미만" 으로 읽으면 아무것도 통과하지 못한다.
+   */
+  elapsedMs: number;
+  /** true 면 임계 **미만**만 통과 (제외) */
+  elapsedExclude: boolean;
   errorOnly: boolean;
   objHashSet: Set<number>;
+  /** 서비스명(URL) 부분 일치. 대소문자를 가리지 않는다 */
+  service: TextFilter;
+  /** 호출자 IP 부분 일치 */
+  ip: TextFilter;
 }
 
 export const DEFAULT_FILTER: XLogFilterState = {
-  minElapsed: 0,
+  elapsedMs: 0,
+  elapsedExclude: false,
   errorOnly: false,
   objHashSet: new Set(),
+  service: { text: '', exclude: false },
+  ip: { text: '', exclude: false },
 };
+
+/** 조건이 하나라도 걸려 있는가 — "왜 비었지"를 화면이 설명할 근거 */
+export function hasActiveFilter(f: XLogFilterState): boolean {
+  return (
+    f.errorOnly ||
+    f.elapsedMs > 0 ||
+    f.service.text.trim() !== '' ||
+    f.ip.text.trim() !== '' ||
+    f.objHashSet.size > 0
+  );
+}
 
 // ─── 에이전트(Object) ─────────────────────────────────────────
 
@@ -190,4 +235,12 @@ export interface AgentObject {
   address: string;
   version: string;
   alive: boolean;
+  /** 에이전트가 마지막으로 살아 있음을 알린 시각 (epoch ms). 0이면 알린 적 없음 */
+  wakeup: number;
+  /**
+   * 에이전트가 붙여 보내는 부가 정보. **키는 에이전트 종류·버전마다 다르다.**
+   * 실측: tomcat 은 `ADC/counter/detected`, linux 는 `hostName/podName/kubeSeq` 등.
+   * 고정 스키마로 다루면 없는 환경에서 조용히 빈다 — 온 대로 편다.
+   */
+  tags: [string, string][];
 }

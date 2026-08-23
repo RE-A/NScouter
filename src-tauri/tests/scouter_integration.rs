@@ -7,7 +7,7 @@ use nscouter_lib::scouter::connection::ScouterConnection;
 use nscouter_lib::scouter::mock_server::MockServer;
 use nscouter_lib::scouter::pack::{AnyPack, MapPack};
 use nscouter_lib::scouter::protocol::{
-    CMD_GET_OBJECT_LIST_REAL_TIME, CMD_TRANX_REAL_TIME_GROUP_LATEST,
+    CMD_OBJECT_LIST_REAL_TIME, CMD_TRANX_REAL_TIME_GROUP_LATEST,
 };
 use nscouter_lib::scouter::value::ScouterValue;
 
@@ -28,6 +28,10 @@ fn test_connect_login_success() {
     server.stop();
 }
 
+/// 오브젝트 목록은 **ObjectPack(타입 80)** 으로 온다.
+///
+/// 이전 mock 은 MapPack 으로 답했다. 파싱 경로가 실서버와 달라서
+/// 통과해도 아무것도 보장하지 못했다 (O-2). 이제 실제 필드 순서로 보낸다.
 #[test]
 fn test_get_object_list() {
     let server = MockServer::start().expect("Mock 서버 시작 실패");
@@ -38,25 +42,54 @@ fn test_get_object_list() {
 
     let param = MapPack::new();
     let session = conn.session;
-    conn.send_request(CMD_GET_OBJECT_LIST_REAL_TIME, session, &param)
+    conn.send_request(CMD_OBJECT_LIST_REAL_TIME, session, &param)
         .expect("오브젝트 목록 요청 실패");
 
-    let mut objects: Vec<MapPack> = Vec::new();
+    let mut objects = Vec::new();
     loop {
         match conn.read_next_pack().unwrap() {
-            Some(AnyPack::Map(m)) => objects.push(m),
+            Some(AnyPack::Object(o)) => objects.push(o),
             Some(_) => {}
             None => break,
         }
     }
 
-    assert!(!objects.is_empty(), "오브젝트가 1개 이상 반환되어야 함");
+    assert_eq!(objects.len(), 1, "ObjectPack 1건이 와야 한다");
     let obj = &objects[0];
-    assert_eq!(
-        obj.get_decimal("objHash"),
-        Some(1001),
-        "objHash가 1001이어야 함"
-    );
+    // 필드 하나만 보면 순서가 밀려도 통과할 수 있다. 전부 확인한다.
+    assert_eq!(obj.obj_type, "tomcat");
+    assert_eq!(obj.obj_hash, 1001);
+    assert_eq!(obj.obj_name, "/mock-host/mock-app");
+    assert_eq!(obj.address, "127.0.0.1");
+    assert_eq!(obj.version, "2.21.3");
+    assert!(obj.alive);
+
+    server.stop();
+}
+
+/// O-5: 모르는 Pack 타입을 만나면 **에러여야 한다.**
+///
+/// 이 프로토콜은 팩 길이를 앞에 두지 않는다. 본문을 읽지 않고 넘어가면
+/// 다음 팩의 시작 위치가 어긋나 이후 전부가 쓰레기가 된다.
+/// 조용히 망가진 데이터를 내놓는 것보다 멈추는 게 낫다.
+#[test]
+fn 모르는_팩_타입은_조용히_넘어가지_않는다() {
+    let server = MockServer::start().expect("Mock 서버 시작 실패");
+    let port = server.port;
+
+    let mut conn = ScouterConnection::connect("127.0.0.1", port).unwrap();
+    conn.login("admin", "admin").unwrap();
+
+    let session = conn.session;
+    conn.send_request("MOCK_UNKNOWN_PACK", session, &MapPack::new())
+        .expect("요청 실패");
+
+    let msg = match conn.read_next_pack() {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("모르는 팩인데 성공을 돌려줬다 — 스트림이 조용히 어긋난다"),
+    };
+    // 무엇이 문제인지 메시지에 팩 타입이 있어야 다음 구현 대상을 안다.
+    assert!(msg.contains("0xEE"), "에러 메시지에 팩 타입이 없다: {msg}");
 
     server.stop();
 }

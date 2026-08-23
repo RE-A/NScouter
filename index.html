@@ -4,7 +4,18 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>NScouter</title>
+    <style>
+      /* 브라우저 기본 body margin(8px) 때문에 100vh 레이아웃이 화면 밖으로 밀린다.
+         그러면 플로팅 패널 하단(XLog 목록 220px)이 창 아래로 잘려 안 보인다.
+         App.css 는 import 되지 않으므로 여기서 잡는다. */
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+    </style>
   </head>
 
   <body>

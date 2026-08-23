@@ -8,15 +8,30 @@ const MAX_ITEMS = 100_000;
 export class XLogDataStore {
   private items: SXLog[] = [];
   private dirty = false;
+  private lastReceived: number | null = null;
 
-  add(xlog: SXLog): void {
-    this.items.push(xlog);
-    this.dirty = true;
+  /**
+   * 마지막으로 데이터를 실제 수신한 시각(epoch ms). 한 번도 없으면 null.
+   *
+   * 화면이 비었을 때 **고장인지 데이터가 없는 건지** 구분하는 근거다.
+   * `prune` 으로 항목이 0이 되어도 이 값은 유지된다 — "받은 적은 있다"가 중요하다.
+   */
+  get lastReceivedAt(): number | null {
+    return this.lastReceived;
   }
 
-  addBatch(xlogs: SXLog[]): void {
+  add(xlog: SXLog, receivedAt: number = Date.now()): void {
+    this.items.push(xlog);
+    this.dirty = true;
+    this.lastReceived = receivedAt;
+  }
+
+  addBatch(xlogs: SXLog[], receivedAt: number = Date.now()): void {
     for (const x of xlogs) this.items.push(x);
-    if (xlogs.length > 0) this.dirty = true;
+    if (xlogs.length > 0) {
+      this.dirty = true;
+      this.lastReceived = receivedAt;
+    }
   }
 
   /** 시간 윈도우 밖 데이터 제거 + MAX_ITEMS 초과 시 오래된 항목 제거 */

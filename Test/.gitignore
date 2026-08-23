@@ -1,0 +1,14 @@
+# Scouter 릴리스 바이너리 (65MB) — scripts/fetch-scouter.ps1 로 내려받는다
+vendor/
+
+# 빌드 산출물
+**/target/
+
+# SQLite 파일
+*.db
+*.db-shm
+*.db-wal
+
+# 콜렉터 런타임 산출물
+database/
+logs/

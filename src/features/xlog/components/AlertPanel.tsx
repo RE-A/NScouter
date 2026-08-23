@@ -4,37 +4,28 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { AlertPack } from '../types/alert';
 import { alertLevelColor, alertLevelLabel } from '../types/alert';
-import { onAlertData } from '../api/scouterApi';
-
-const MAX_ALERTS = 200;
+import { formatTime } from '../utils/colorPalette';
+import { T, F } from '../../../styles/tokens';
 
 interface AlertPanelProps {
-  isStreaming: boolean;
+  /** **앱이 쥐고 있는 하나의 버퍼**를 받는다. 여기서 따로 모으면 탭과 어긋난다 */
+  alerts: AlertPack[];
+  unread: number;
+  onClear: () => void;
+  onMarkRead: () => void;
   /** 배지 클릭 시 외부 콜백 (예: Alert 탭으로 이동) */
   onBadgeClick?: () => void;
 }
 
-export const AlertPanel = memo(function AlertPanel({ isStreaming, onBadgeClick }: AlertPanelProps) {
-  const [alerts, setAlerts] = useState<AlertPack[]>([]);
+export const AlertPanel = memo(function AlertPanel({
+  alerts,
+  unread,
+  onClear,
+  onMarkRead,
+  onBadgeClick,
+}: AlertPanelProps) {
   const [open, setOpen] = useState(false);
-  const [unread, setUnread] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
-
-  // 알림 수신
-  useEffect(() => {
-    if (!isStreaming) return;
-
-    let unlisten: (() => void) | null = null;
-    onAlertData((pack: AlertPack) => {
-      setAlerts(prev => {
-        const next = [pack, ...prev];
-        return next.length > MAX_ALERTS ? next.slice(0, MAX_ALERTS) : next;
-      });
-      setUnread(prev => prev + 1);
-    }).then(fn => { unlisten = fn; });
-
-    return () => { unlisten?.(); };
-  }, [isStreaming]);
 
   // 패널 외부 클릭 시 닫기
   useEffect(() => {
@@ -54,15 +45,10 @@ export const AlertPanel = memo(function AlertPanel({ isStreaming, onBadgeClick }
       return;
     }
     setOpen(prev => {
-      if (!prev) setUnread(0);
+      if (!prev) onMarkRead();
       return !prev;
     });
-  }, [onBadgeClick]);
-
-  const handleClear = useCallback(() => {
-    setAlerts([]);
-    setUnread(0);
-  }, []);
+  }, [onBadgeClick, onMarkRead]);
 
   return (
     <div ref={panelRef} style={wrapStyle}>
@@ -79,7 +65,7 @@ export const AlertPanel = memo(function AlertPanel({ isStreaming, onBadgeClick }
         <div style={dropdownStyle}>
           <div style={dropHeaderStyle}>
             <span>알림 ({alerts.length})</span>
-            <button onClick={handleClear} style={clearBtnStyle}>Clear</button>
+            <button onClick={onClear} style={clearBtnStyle}>Clear</button>
           </div>
           {alerts.length === 0 ? (
             <div style={emptyStyle}>알림 없음</div>
@@ -99,7 +85,7 @@ export const AlertPanel = memo(function AlertPanel({ isStreaming, onBadgeClick }
 function AlertRow({ alert }: { alert: AlertPack }) {
   const color = alertLevelColor(alert.level);
   const label = alertLevelLabel(alert.level);
-  const time = new Date(alert.time).toLocaleTimeString('ko-KR', { hour12: false });
+  const time = formatTime(alert.time);
 
   return (
     <div style={rowStyle}>
@@ -125,7 +111,7 @@ const wrapStyle: React.CSSProperties = {
 function badgeBtnStyle(active: boolean): React.CSSProperties {
   return {
     position: 'relative',
-    background: active ? '#2a2a4e' : 'none',
+    background: active ? T.bgHover : 'none',
     border: active ? '1px solid #444' : '1px solid transparent',
     borderRadius: 4,
     cursor: 'pointer',
@@ -137,7 +123,7 @@ function badgeBtnStyle(active: boolean): React.CSSProperties {
 }
 
 const bellStyle: React.CSSProperties = {
-  fontSize: 14,
+  fontSize: F.base,
   lineHeight: 1,
 };
 
@@ -145,9 +131,9 @@ const countStyle: React.CSSProperties = {
   position: 'absolute',
   top: 0,
   right: 0,
-  background: '#ef5350',
-  color: '#fff',
-  fontSize: 9,
+  background: T.error,
+  color: T.text,
+  fontSize: F.micro,
   fontWeight: 700,
   borderRadius: 6,
   padding: '1px 3px',
@@ -162,7 +148,7 @@ const dropdownStyle: React.CSSProperties = {
   right: 0,
   width: 360,
   maxHeight: 420,
-  background: '#1a1a2e',
+  background: T.bgInput,
   border: '1px solid #333',
   borderRadius: 6,
   boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
@@ -178,16 +164,16 @@ const dropHeaderStyle: React.CSSProperties = {
   alignItems: 'center',
   padding: '6px 12px',
   borderBottom: '1px solid #222',
-  fontSize: 12,
-  color: '#aaa',
+  fontSize: F.body,
+  color: T.textMuted,
   flexShrink: 0,
 };
 
 const clearBtnStyle: React.CSSProperties = {
   background: 'none',
   border: '1px solid #333',
-  color: '#666',
-  fontSize: 10,
+  color: T.textDim,
+  fontSize: F.micro,
   padding: '2px 6px',
   borderRadius: 3,
   cursor: 'pointer',
@@ -200,8 +186,8 @@ const listStyle: React.CSSProperties = {
 
 const emptyStyle: React.CSSProperties = {
   padding: '16px',
-  fontSize: 12,
-  color: '#555',
+  fontSize: F.body,
+  color: T.textFaint,
   textAlign: 'center',
 };
 
@@ -220,8 +206,8 @@ const rowTopStyle: React.CSSProperties = {
 function levelBadgeStyle(color: string): React.CSSProperties {
   return {
     background: color,
-    color: '#fff',
-    fontSize: 9,
+    color: T.text,
+    fontSize: F.micro,
     fontWeight: 700,
     padding: '1px 4px',
     borderRadius: 2,
@@ -230,22 +216,22 @@ function levelBadgeStyle(color: string): React.CSSProperties {
 }
 
 const rowTimeStyle: React.CSSProperties = {
-  fontSize: 10,
-  color: '#555',
+  fontSize: F.micro,
+  color: T.textFaint,
   flexShrink: 0,
 };
 
 const rowTitleStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#ccc',
+  fontSize: F.small,
+  color: T.text,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 };
 
 const rowMsgStyle: React.CSSProperties = {
-  fontSize: 10,
-  color: '#888',
+  fontSize: F.micro,
+  color: T.textMuted,
   marginLeft: 2,
   wordBreak: 'break-all',
 };

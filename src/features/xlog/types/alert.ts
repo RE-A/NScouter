@@ -1,3 +1,4 @@
+import { T, CAT } from '../../../styles/tokens';
 // src/features/xlog/types/alert.ts
 // 알림 타입 정의 (Rust AlertPack 직렬화 구조)
 // 참조: docs/asis/01-common-data-model.md AlertPack 섹션
@@ -28,11 +29,11 @@ export function alertLevelLabel(level: number): AlertLevel {
 
 export function alertLevelColor(level: number): string {
   switch (level) {
-    case 0: return '#888';     // DEBUG - 회색
-    case 1: return '#4fc3f7';  // INFO - 파랑
-    case 2: return '#ffb74d';  // WARN - 주황
-    case 3: return '#ef5350';  // ERROR - 빨강
-    case 4: return '#b71c1c';  // FATAL - 진빨강
-    default: return '#888';
+    case 0: return T.textMuted;  // DEBUG
+    case 1: return CAT.api;      // INFO
+    case 2: return T.warn;       // WARN
+    case 3: return T.error;      // ERROR
+    case 4: return '#b71c1c';    // FATAL — 유일하게 더 진한 빨강이 필요해 예외
+    default: return T.textMuted;
   }
 }

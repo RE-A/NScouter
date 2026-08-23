@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { setLogLevel, type LogLevel } from '../api/scouterApi';
+import { T, F } from '../../../styles/tokens';
 
 const LEVELS: { value: LogLevel; label: string }[] = [
   { value: 'error', label: 'ERROR (일반)' },
@@ -44,11 +45,11 @@ export function LogLevelSelector() {
 }
 
 const selectStyle: React.CSSProperties = {
-  background: '#2a2a3e',
+  background: T.bgInput,
   border: '1px solid #444',
   borderRadius: 4,
-  color: '#aaa',
+  color: T.textMuted,
   padding: '3px 6px',
-  fontSize: 11,
+  fontSize: F.small,
   cursor: 'pointer',
 };

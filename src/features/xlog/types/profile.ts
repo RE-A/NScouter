@@ -52,6 +52,21 @@ export interface SocketStep extends StepBase {
   error: number;
 }
 
+/**
+ * ThreadCallPossibleStep — 여기서 다른 스레드로 넘어갔을 수 있다는 표시.
+ *
+ * `threaded` 가 true 면 실제로 넘어갔고 `txid` 가 **그 스레드의 트랜잭션**이다.
+ * 그 프로파일을 열면 이어지는 작업이 보인다 (ASIS XLogThreadProfileView).
+ */
+export interface ThreadCallStep extends StepBase {
+  kind: 'ThreadCall';
+  /** 넘어간 스레드의 트랜잭션 ID (i64 → string). '0' 이면 없다 */
+  txid: string;
+  hash: number;
+  elapsed: number;
+  threaded: boolean;
+}
+
 export interface UnknownStep {
   kind: 'Unknown';
   step_type: number;
@@ -63,6 +78,7 @@ export type ProfileStep =
   | ApiCallStep
   | MessageStep
   | SocketStep
+  | ThreadCallStep
   | UnknownStep;
 
 // ─── XLogProfile ─────────────────────────────────────────────
@@ -90,11 +106,13 @@ export function collectStepHashes(steps: ProfileStep[]): {
   sql: number[];
   apicall: number[];
   error: number[];
+  hmsg: number[];
 } {
   const method: number[] = [];
   const sql: number[] = [];
   const apicall: number[] = [];
   const error: number[] = [];
+  const hmsg: number[] = [];
 
   for (const step of steps) {
     switch (step.kind) {
@@ -110,13 +128,16 @@ export function collectStepHashes(steps: ProfileStep[]): {
         if (step.error !== 0) error.push(step.error);
         break;
       case 'Message':
-        if (step.hash !== 0) {
-          // HashedMessageStep → hashMsg 타입으로 조회
-          method.push(step.hash);
-        }
+        // HashedMessageStep 은 **`hmsg`** 타입이다 (ASIS TextTypes.HASH_MSG).
+        // `method` 로 조회하면 에러 없이 빈 결과가 와서 해시가 그대로 남는다.
+        if (step.hash !== 0) hmsg.push(step.hash);
+        break;
+      case 'ThreadCall':
+        // 이름은 apicall 사전에 있다 (ASIS XLogFlowView 도 apicall 로 푼다).
+        if (step.hash !== 0) apicall.push(step.hash);
         break;
     }
   }
 
-  return { method, sql, apicall, error };
+  return { method, sql, apicall, error, hmsg };
 }

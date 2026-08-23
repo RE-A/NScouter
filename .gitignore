@@ -41,3 +41,8 @@ desktop.ini
 
 # ── ASIS 참조 소스 (원본 Java Scouter 클라이언트, 별도 repo) ──
 ASIS/
+
+# ── 테스트 환경 산출물 ────────────────────────────────────────
+# vendor/ 는 65MB 다. scripts/fetch-scouter.ps1 로 받는다 (Test/README.md)
+Test/vendor/
+Test/apps/*/target/

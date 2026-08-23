@@ -1,0 +1,9 @@
+# k6 부하 생성기
+# 시나리오를 볼륨 마운트가 아니라 이미지에 굽는다 (postgres 초기화 SQL 과 같은 이유).
+FROM grafana/k6:latest
+
+COPY loadgen/scenario.js /scripts/scenario.js
+
+# grafana/k6 의 ENTRYPOINT 가 k6 이므로 CMD 에는 인자만 준다.
+# VU / duration 은 K6_VUS / K6_DURATION 환경변수로 덮어쓴다.
+CMD ["run", "/scripts/scenario.js"]

@@ -1,0 +1,24 @@
+# Scouter Host Agent 2.21.3
+# 콜렉터와 마찬가지로 공식 릴리스 바이너리(vendor/scouter/agent.host)를 그대로 쓴다.
+FROM eclipse-temurin:17-jre
+
+# 콜렉터와 타임존을 맞춘다. 어긋나면 카운터 시각이 밀린다.
+ENV TZ=Asia/Seoul
+
+WORKDIR /scouter/host
+
+COPY vendor/scouter/agent.host/ ./
+COPY agent-host/conf/scouter.conf ./conf/scouter.conf
+
+# scouter.host.jar 은 부트로더 + sigar 네이티브만 들어 있고,
+# 실제 에이전트 코드(scouter-agent-host-*.jar, sigar.jar)는 **런타임에 ./lib 로 풀린다**.
+# 그래서 작업 디렉토리가 쓰기 가능해야 한다.
+RUN mkdir -p ./lib ./logs
+
+# 콜렉터와 같은 이유로 모듈 접근을 열어 준다.
+# scouter.util.* 이 Unsafe.defineClass 를 쓰므로 JDK 17 에서는 없으면 초기화 단계에서 죽는다.
+ENTRYPOINT ["java", \
+    "--add-opens=java.base/java.lang=ALL-UNNAMED", \
+    "--add-exports=java.base/sun.net=ALL-UNNAMED", \
+    "-classpath", "./scouter.host.jar", \
+    "scouter.boot.Boot", "./lib"]

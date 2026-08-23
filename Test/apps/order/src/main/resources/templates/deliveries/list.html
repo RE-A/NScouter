@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>배송 목록 - order-app</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: .5rem; text-align: left; }
+        th { background: #f4f4f4; }
+        nav a { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+<h1>배송 목록 <small th:text="'(총 ' + ${total} + '건)'">()</small></h1>
+<nav>
+    <a href="/order/orders">주문</a>
+    <a href="/order/deliveries">배송</a>
+    <a href="/order/reports/daily">집계</a>
+</nav>
+<table>
+    <thead>
+    <tr><th>ID</th><th>주문 ID</th><th>주소</th><th>상태</th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="d : ${deliveries}">
+        <td th:text="${d.id}">1</td>
+        <td><a th:href="@{'/order/orders/' + ${d.orderId}}" th:text="${d.orderId}">1</a></td>
+        <td th:text="${d.address}">-</td>
+        <td th:text="${d.status}">READY</td>
+    </tr>
+    </tbody>
+</table>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+    "permissions": {
+        "defaultMode": "dontAsk",
+        "allow": [
+            "Bash(*)",
+            "PowerShell(*)",
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "WebSearch"
+        ],
+        "ask": [
+            "Bash(rm *)",
+            "Bash(rmdir *)",
+            "Bash(del *)",
+            "Bash(unlink *)",
+            "Bash(shred *)",
+            "Bash(find * -delete*)",
+            "Bash(find * -exec rm*)",
+            "Bash(git clean *)",
+            "PowerShell(Remove-Item *)",
+            "PowerShell(ri *)",
+            "PowerShell(rm *)",
+            "PowerShell(rmdir *)",
+            "PowerShell(del *)",
+            "PowerShell(erase *)",
+            "PowerShell(rd *)",
+            "PowerShell(Clear-Content *)",
+            "PowerShell(git clean *)"
+        ]
+    }
+}

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>주문 상세 - order-app</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        dt { font-weight: bold; margin-top: .5rem; }
+        table { border-collapse: collapse; margin-top: 1rem; }
+        th, td { border: 1px solid #ddd; padding: .4rem .8rem; }
+    </style>
+</head>
+<body>
+<h1 th:text="'주문 #' + ${order.id}">주문</h1>
+<dl>
+    <dt>상품</dt><dd th:text="${order.productName} + ' (ID ' + ${order.productId} + ')'">-</dd>
+    <dt>수량</dt><dd th:text="${order.quantity}">1</dd>
+    <dt>단가</dt><dd th:text="${order.unitPrice}">0</dd>
+    <dt>총액</dt><dd th:text="${order.totalPrice}">0</dd>
+    <dt>상태</dt><dd th:text="${order.status}">ORDERED</dd>
+    <dt>주문일시</dt><dd th:text="${order.orderedAt}">-</dd>
+</dl>
+
+<h2>배송</h2>
+<table>
+    <tr><th>ID</th><th>주소</th><th>상태</th></tr>
+    <tr th:each="d : ${deliveries}">
+        <td th:text="${d.id}">1</td>
+        <td th:text="${d.address}">-</td>
+        <td th:text="${d.status}">READY</td>
+    </tr>
+</table>
+
+<p>
+    <form th:action="@{'/order/orders/' + ${order.id} + '/cancel'}" method="post">
+        <button type="submit">주문 취소</button>
+    </form>
+    <a href="/order/orders">목록</a>
+</p>
+</body>
+</html>

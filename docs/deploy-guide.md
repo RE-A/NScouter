@@ -42,22 +42,47 @@ NScouter는 Tauri v2 기반 데스크톱 앱이다. 단일 `npm run tauri build`
 
 ## 3. 빌드 명령
 
-### 3.1 전체 빌드
+### 3.1 단독 실행파일 빌드 (기본 권장)
+
+인스톨러 없이 `.exe` 하나만 생성한다. Tauri 번들러를 거치지 않아 빌드가 빠르다.
 
 ```bash
 # 의존성 설치 (최초 1회 또는 package.json 변경 시)
 npm install
 
-# 릴리스 빌드
-npm run tauri build
+# 단독 실행파일 빌드
+npm run build:exe
 ```
 
-빌드 완료 후 산출물 위치:
+산출물:
+```
+src-tauri/target/release/nscouter.exe
+```
+
+프론트엔드가 exe 안에 내장되므로 **exe 파일 하나만 복사해서 배포**하면 된다.
+설정 파일(`config.json`)과 로그(`logs/`)는 실행 시 exe 옆에 자동 생성된다.
+
+> **WebView2**: Windows 11은 OS 내장. Windows 10은 별도 설치 필요.
+> 수동 설치: https://developer.microsoft.com/microsoft-edge/webview2/
+
+---
+
+### 3.2 인스톨러 빌드
+
+설치 패키지(MSI, NSIS)까지 함께 생성한다. 배포용 설치 파일이 필요할 때 사용한다.
+
+```bash
+npm run build:installer
+```
+
+산출물:
 ```
 src-tauri/target/release/bundle/
+  ├─ msi/    ← Windows MSI 설치 파일
+  └─ nsis/   ← Windows NSIS 경량 인스톨러
 ```
 
-### 3.2 플랫폼별 타겟 지정 빌드
+### 3.3 플랫폼별 타겟 지정 빌드
 
 ```bash
 # Windows MSI만 빌드
@@ -73,7 +98,7 @@ npm run tauri build -- --bundles app
 npm run tauri build -- --bundles deb
 ```
 
-### 3.3 디버그 빌드 (느리지만 디버그 심볼 포함)
+### 3.4 디버그 빌드 (느리지만 디버그 심볼 포함)
 
 ```bash
 npm run tauri build -- --debug

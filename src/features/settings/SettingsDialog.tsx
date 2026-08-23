@@ -2,6 +2,8 @@
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
+import { applyConfigToViewOptions } from '../xlog/hooks/useViewOptions';
+import { T, F } from '../../styles/tokens';
 
 interface SettingsDialogProps {
   onClose: () => void;
@@ -10,6 +12,8 @@ interface SettingsDialogProps {
 export const SettingsDialog = memo(function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [config, setConfig] = useState<AppConfig>({});
   const [dataDir, setDataDir] = useState('');
+  /** SQL 바인딩 값을 문장에 채울지. 기본은 채우기 */
+  const [bindInline, setBindInline] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -18,6 +22,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     getConfig().then(cfg => {
       setConfig(cfg);
       setDataDir(cfg.data_dir ?? '');
+      setBindInline(cfg.sql_bind_inline ?? true);
     }).catch(() => {});
   }, []);
 
@@ -29,9 +34,13 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       const next: AppConfig = {
         ...config,
         data_dir: dataDir.trim() || null,
+        sql_bind_inline: bindInline,
       };
       await saveConfig(next);
       setConfig(next);
+      // **저장만 하면 열려 있는 화면은 안 바뀐다.** 설정을 닫고 다시 열어야
+      // 반영되면 저장이 안 된 것으로 읽힌다.
+      applyConfigToViewOptions(next);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -39,7 +48,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     } finally {
       setSaving(false);
     }
-  }, [config, dataDir]);
+  }, [config, dataDir, bindInline]);
 
   // ESC 닫기
   useEffect(() => {
@@ -75,6 +84,33 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
             />
           </div>
 
+          {/* SQL 표시 */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>SQL 바인딩 파라미터</div>
+            <div style={sectionDescStyle}>
+              프로파일의 SQL 은 값 대신 <code style={codeStyle}>?</code> 로 옵니다.
+              값을 문장에 채워 넣으면 그대로 복사해 DB 에 붙일 수 있습니다.
+            </div>
+            {([
+              ['inline', '문장에 채워서 보기', '예) where id=126'],
+              ['separate', '값을 따로 보기', '예) where id=? · 바인딩 126'],
+            ] as const).map(([mode, label, hint]) => {
+              const on = mode === 'inline' ? bindInline : !bindInline;
+              return (
+                <label key={mode} style={radioRowStyle}>
+                  <input
+                    type="radio"
+                    name="sql-bind"
+                    checked={on}
+                    onChange={() => setBindInline(mode === 'inline')}
+                  />
+                  <span style={{ color: on ? T.text : T.textDim }}>{label}</span>
+                  <span style={{ color: T.textFaint, fontSize: F.micro }}>{hint}</span>
+                </label>
+              );
+            })}
+          </div>
+
           {/* 현재 경로 정보 */}
           <div style={sectionStyle}>
             <div style={sectionTitleStyle}>현재 저장 경로</div>
@@ -94,7 +130,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                   : '(실행파일 경로)\\logs\\nscouter.log'}
               </span>
             </div>
-            <div style={{ ...sectionDescStyle, marginTop: 8, color: '#f5a623' }}>
+            <div style={{ ...sectionDescStyle, marginTop: 8, color: T.warn }}>
               ※ 경로 변경은 앱 재시작 후 적용됩니다.
             </div>
           </div>
@@ -123,7 +159,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
 
         {/* 푸터 */}
         <div style={modalFooterStyle}>
-          {saved && <span style={{ color: '#3dd68c', fontSize: 12 }}>저장 완료</span>}
+          {saved && <span style={{ color: T.success, fontSize: F.body }}>저장 완료</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button onClick={onClose} style={cancelBtnStyle}>취소</button>
             <button onClick={handleSave} disabled={saving} style={saveBtnStyle}>
@@ -149,7 +185,7 @@ const backdropStyle: React.CSSProperties = {
 };
 
 const modalStyle: React.CSSProperties = {
-  background: '#111120',
+  background: T.bgRaised,
   border: '1px solid #1e1e3a',
   borderRadius: 8,
   width: 500,
@@ -168,17 +204,17 @@ const modalHeaderStyle: React.CSSProperties = {
 };
 
 const modalTitleStyle: React.CSSProperties = {
-  fontSize: 14,
+  fontSize: F.base,
   fontWeight: 700,
-  color: '#e8e8ff',
+  color: T.text,
   letterSpacing: 0.3,
 };
 
 const closeBtnStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
-  color: '#505070',
-  fontSize: 14,
+  color: T.textFaint,
+  fontSize: F.base,
   cursor: 'pointer',
   padding: '2px 6px',
   borderRadius: 4,
@@ -199,36 +235,45 @@ const sectionStyle: React.CSSProperties = {
 };
 
 const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: F.small,
   fontWeight: 700,
-  color: '#9090b0',
+  color: T.textMuted,
   letterSpacing: 1,
   textTransform: 'uppercase',
   marginBottom: 2,
 };
 
 const sectionDescStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#505070',
+  fontSize: F.small,
+  color: T.textFaint,
   lineHeight: 1.6,
 };
 
+/** 라디오 한 줄 — 이름표와 예시를 같은 줄에 둔다 */
+const radioRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: 8,
+  padding: '3px 0',
+  cursor: 'pointer',
+};
+
 const codeStyle: React.CSSProperties = {
-  background: '#1e1e38',
+  background: T.bgHover,
   padding: '1px 5px',
   borderRadius: 3,
   fontFamily: 'monospace',
-  fontSize: 11,
-  color: '#9090b0',
+  fontSize: F.small,
+  color: T.textMuted,
 };
 
 const inputStyle: React.CSSProperties = {
-  background: '#0d0d1a',
+  background: T.bgSurface,
   border: '1px solid #252542',
   borderRadius: 4,
-  color: '#e8e8ff',
+  color: T.text,
   padding: '7px 10px',
-  fontSize: 12,
+  fontSize: F.body,
   fontFamily: 'monospace',
   outline: 'none',
   width: '100%',
@@ -242,16 +287,16 @@ const pathRowStyle: React.CSSProperties = {
 };
 
 const pathLabelStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#505070',
+  fontSize: F.small,
+  color: T.textFaint,
   width: 60,
   flexShrink: 0,
   paddingTop: 1,
 };
 
 const pathValueStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#7070a0',
+  fontSize: F.small,
+  color: T.textDim,
   fontFamily: 'monospace',
   wordBreak: 'break-all',
 };
@@ -265,22 +310,22 @@ const modalFooterStyle: React.CSSProperties = {
 };
 
 const cancelBtnStyle: React.CSSProperties = {
-  background: '#1e1e38',
+  background: T.bgHover,
   border: '1px solid #252542',
   borderRadius: 4,
-  color: '#9090b0',
-  fontSize: 12,
+  color: T.textMuted,
+  fontSize: F.body,
   padding: '5px 16px',
   cursor: 'pointer',
   fontFamily: 'inherit',
 };
 
 const saveBtnStyle: React.CSSProperties = {
-  background: '#4f72ff',
+  background: T.accent,
   border: '1px solid #4f72ff',
   borderRadius: 4,
-  color: '#fff',
-  fontSize: 12,
+  color: T.text,
+  fontSize: F.body,
   padding: '5px 20px',
   cursor: 'pointer',
   fontFamily: 'inherit',
@@ -288,8 +333,8 @@ const saveBtnStyle: React.CSSProperties = {
 };
 
 const errorStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#ff4d4f',
+  fontSize: F.body,
+  color: T.error,
   background: 'rgba(255,77,79,0.08)',
   border: '1px solid rgba(255,77,79,0.2)',
   borderRadius: 4,

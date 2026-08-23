@@ -86,9 +86,13 @@ fn fetch_chunk(
         match conn.read_next_pack()? {
             Some(AnyPack::Map(map)) => {
                 for (key, val) in &map.entries {
-                    if let Ok(hash) = key.parse::<i32>() {
+                    // **응답 키는 Hexa32 다.** 10진수로 파싱하면 전부 실패해
+                    // 텍스트를 하나도 못 얻는다 (N-18, F-21).
+                    if let Some(hash) = hexa32_to_i64(key) {
                         if let Some(text) = val.as_text() {
-                            cache.insert(type_key, hash, text);
+                            if !text.is_empty() {
+                                cache.insert(type_key, hash as i32, text);
+                            }
                         }
                     }
                 }
@@ -131,4 +135,70 @@ pub fn prefetch_xlog_hashes(
     }
 
     Ok(())
+}
+
+// ─── Hexa32 ──────────────────────────────────────────────────
+
+/// Scouter 의 해시 키 인코딩 (`scouter.util.Hexa32`).
+///
+/// **GET_TEXT_100 응답의 MapPack 키가 이 형식이다.** 10진수로 파싱하면
+/// 전부 실패해서 텍스트를 하나도 못 얻는다 (N-18).
+///
+/// ```text
+/// 0~9      그대로 10진수      "5"
+/// 양수     'x' + base32       "x1jrf6b3"
+/// 음수     'z' + base32       "z1pa9p0"
+/// i64::MIN "z8000000000000"
+/// ```
+pub fn hexa32_to_i64(s: &str) -> Option<i64> {
+    let mut chars = s.chars();
+    match chars.next()? {
+        'z' => {
+            if s == "z8000000000000" {
+                return Some(i64::MIN);
+            }
+            i64::from_str_radix(&s[1..], 32).ok().map(|v| -v)
+        }
+        'x' => i64::from_str_radix(&s[1..], 32).ok(),
+        _ => s.parse::<i64>().ok(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 실서버 GET_TEXT_100 응답에서 그대로 가져온 값이다.
+    #[test]
+    fn 실서버_응답_키를_해석한다() {
+        assert_eq!(hexa32_to_i64("z1pa9p0"), Some(-60106528));
+        assert_eq!(hexa32_to_i64("x1jrf6b3"), Some(1740085603));
+        assert_eq!(hexa32_to_i64("z173cbsq"), Some(-1312173978));
+    }
+
+    // 10 미만은 접두 없이 10진수로 온다 (Hexa32.toString32).
+    #[test]
+    fn 한자리_숫자는_접두가_없다() {
+        assert_eq!(hexa32_to_i64("0"), Some(0));
+        assert_eq!(hexa32_to_i64("9"), Some(9));
+    }
+
+    #[test]
+    fn i64_최솟값은_특수_표기다() {
+        assert_eq!(hexa32_to_i64("z8000000000000"), Some(i64::MIN));
+    }
+
+    #[test]
+    fn 잘못된_키는_None() {
+        assert_eq!(hexa32_to_i64(""), None);
+        assert_eq!(hexa32_to_i64("x!!!"), None);
+        assert_eq!(hexa32_to_i64("hello"), None);
+    }
+
+    // 10진수 파싱으로는 실서버 키를 하나도 못 읽는다 — N-18 의 원인.
+    #[test]
+    fn 십진수_파싱으로는_읽히지_않는다() {
+        assert!("z1pa9p0".parse::<i32>().is_err());
+        assert!("x1jrf6b3".parse::<i32>().is_err());
+    }
 }

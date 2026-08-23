@@ -1,0 +1,147 @@
+/* 스타일 진입점
+ *
+ * tokens.css 는 **순수 CSS 변수만** 담는다 (tokens.test.ts 가 강제).
+ * Tailwind 연결은 여기서 한다.
+ *
+ * `@theme inline` 은 변수를 **복제하지 않고 참조**한다.
+ * 그래서 색을 바꿀 곳은 여전히 tokens.css 하나뿐이고,
+ * Tailwind 유틸(`bg-surface`)과 인라인 스타일(`T.bgSurface`)이 같은 값을 본다.
+ */
+
+@import "tailwindcss";
+@import "./tokens.css";
+
+@theme inline {
+  /* 표면 */
+  --color-base: var(--bg-base);
+  --color-surface: var(--bg-surface);
+  --color-raised: var(--bg-raised);
+  --color-overlay: var(--bg-overlay);
+  --color-input: var(--bg-input);
+  --color-hover: var(--bg-hover);
+
+  /* 테두리 */
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  /* 글자 */
+  --color-fg: var(--text);
+  --color-fg-muted: var(--text-muted);
+  --color-fg-dim: var(--text-dim);
+  --color-fg-faint: var(--text-faint);
+
+  /* 의미 */
+  --color-accent: var(--accent);
+  --color-ok: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--error);
+
+  /* 타이포 — 통합한 5단계를 그대로 노출 */
+  --text-micro: var(--fs-micro);
+  --text-small: var(--fs-small);
+  --text-body: var(--fs-body);
+  --text-base: var(--fs-base);
+  --text-title: var(--fs-title);
+
+  --font-ui: var(--font-ui);
+  --font-mono: var(--font-mono);
+}
+
+/* ── 폼 컨트롤 ─────────────────────────────────────────────
+ * 브라우저 기본 select/input/checkbox 가 다크 배경에서 가장 튀는 요소다.
+ * 개별 컴포넌트가 아니라 여기서 한 번에 잡는다.
+ */
+@layer base {
+  input,
+  select,
+  button,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* 네이티브 화살표를 지우고 직접 그린다 — 기본 화살표는 밝은 회색이라 눈에 띈다 */
+  select {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+      linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 26px;
+  }
+
+  input[type='checkbox'] {
+    appearance: none;
+    width: 13px;
+    height: 13px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    background: var(--bg-input);
+    display: inline-grid;
+    place-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  input[type='checkbox']:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  input[type='checkbox']:checked::after {
+    content: '';
+    width: 3px;
+    height: 7px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: translateY(-1px) rotate(45deg);
+  }
+
+  /* 숫자 입력의 스피너는 폭만 먹고 쓰이지 않는다 */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* 숫자·ID 는 자릿수가 흔들리면 비교가 어렵다 */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ── 스크롤바 ───────────────────────────────────────────────
+ * 기본 스크롤바가 밝아서 다크 패널 위에서 도드라진다.
+ */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-faint);
+  }
+}

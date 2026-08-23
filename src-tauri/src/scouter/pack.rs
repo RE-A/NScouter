@@ -297,6 +297,29 @@ pub struct ObjectPack {
     pub address: String,
     pub version: String,
     pub alive: bool,
+    /// 에이전트가 마지막으로 살아 있음을 알린 시각 (epoch ms). 0이면 알린 적이 없다
+    pub wakeup: i64,
+    /// 에이전트가 붙여 보내는 부가 정보. 키는 에이전트/버전마다 다르다.
+    ///
+    /// **고정 스키마가 아니다.** 특정 키를 구조체 필드로 뽑으면 없는 환경에서 조용히 빈다 —
+    /// 온 것을 온 대로 보여준다 (ASIS `ObjectPropertiesDialog` 도 tags 를 통째로 편다).
+    pub tags: Vec<(String, String)>,
+}
+
+// ─── StackPack ────────────────────────────────────────────────
+
+/// 샘플링으로 뜬 스레드 스택 한 장 (PackType: 62)
+///
+/// ASIS: `scouter.lang.pack.StackPack`
+///
+/// **본문이 GZIP 으로 눌려 있다** (`CompressUtil.doZip`). blob 을 그대로 문자열로
+/// 읽으면 깨진 바이트가 나온다 — 풀어야 한다 (F-45).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct StackPack {
+    pub time: i64,
+    pub obj_hash: i32,
+    /// 푼 뒤의 스택 원문
+    pub stack: String,
 }
 
 // ─── PerfCounterPack ──────────────────────────────────────────
@@ -326,6 +349,32 @@ pub struct AlertPack {
     pub message: String,
 }
 
+/// 인터랙션(토폴로지) 카운터 — `PackEnum.PERF_INTERACTION_COUNTER`(65).
+///
+/// **"누가 누구를 부르나"** 를 5분 단위로 집계한 것이다. XLog 가 트랜잭션 하나하나라면
+/// 이건 호출 관계 자체를 센다.
+///
+/// 에이전트가 기본으로 수집하지 않는다 — `counter_interaction_enabled=true` 가 필요하다 (F-40).
+///
+/// `read()` 필드 순서. **`time`·`totalElapsed` 는 8바이트 고정(readLong),
+/// `fromHash`~`errorCount` 는 4바이트 고정(readInt)이다.** readDecimal 이 아니다 (F-17 과 같은 함정).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct InteractionCounterPack {
+    pub time: i64,
+    pub obj_name: String,
+    /// `INTR_API_OUTGOING` 등 10종 중 하나
+    pub interaction_type: String,
+    /// 호출한 쪽. objHash 이거나 외부 대상 해시다
+    pub from_hash: i32,
+    /// 불린 쪽
+    pub to_hash: i32,
+    /// 집계 구간(초)
+    pub period: i32,
+    pub count: i32,
+    pub error_count: i32,
+    pub total_elapsed: i64,
+}
+
 // ─── Pack 디스패처 ────────────────────────────────────────────
 
 /// 스트리밍 수신 시 PackType에 따라 분기
@@ -336,12 +385,13 @@ pub enum AnyPack {
     Profile(Box<crate::scouter::profile::XLogProfilePack>),
     PerfCounter(PerfCounterPack),
     Alert(AlertPack),
-    Unknown(u8),
+    Interaction(InteractionCounterPack),
+    Stack(StackPack),
 }
 
 // ─── 헬퍼 ────────────────────────────────────────────────────
 
-fn bytes_to_ip(bytes: &[u8]) -> String {
+pub fn bytes_to_ip(bytes: &[u8]) -> String {
     if bytes.len() == 4 {
         format!("{}.{}.{}.{}", bytes[0], bytes[1], bytes[2], bytes[3])
     } else {
@@ -354,6 +404,17 @@ where
     S: serde::Serializer,
 {
     s.serialize_str(&val.to_string())
+}
+
+/// txid 처럼 JS 정밀도를 넘는 i64 를 문자열로 보내되, 없으면 null 로 둔다.
+pub fn serialize_opt_i64_as_string<S>(val: &Option<i64>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match val {
+        Some(v) => s.serialize_str(&v.to_string()),
+        None => s.serialize_none(),
+    }
 }
 
 pub fn deserialize_i64_from_string<'de, D>(d: D) -> Result<i64, D::Error>

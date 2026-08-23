@@ -189,28 +189,50 @@ commands.rs
 
 ### 4.2 ScouterConnection 내부 구조
 
+**Collector는 TCP 연결 하나당 명령을 1개만 처리하고 끊는다.** 따라서 `ScouterConnection`은
+소켓을 오래 들고 있는 객체가 아니라 **접속 정보 + 세션을 들고 요청마다 소켓을 다시 여는** 객체다.
+세션 토큰은 소켓과 무관하게 계속 재사용된다. (실측 근거: [verified-facts.md](verified-facts.md) F-1)
+
 ```
 ScouterConnection {
-    reader: BufReader<TcpStream>   ← 수신 전용
-    writer: BufWriter<TcpStream>   ← 송신 전용
-    session: i64                   ← 로그인 후 발급
+    host: String                   ← reopen()에 필요
+    port: u16
+    reader: BufReader<TcpStream>   ← 현재 요청용 (매 요청마다 교체됨)
+    writer: BufWriter<TcpStream>
+    session: i64                   ← 로그인 후 발급, 소켓과 무관하게 유지
     server_id: String
 }
 
-┌─────────────────────────────────────────────────┐
-│               연결 초기화 시퀀스                   │
-│                                                   │
-│  1. TcpStream::connect_timeout(addr, 3000ms)     │
-│  2. stream.set_nodelay(true)                      │
-│  3. writer ← 0xCAFE2001 (BE u32)                 │
-│  4. writer.flush()                               │
-│  5. login() 호출                                 │
-│     a. SHA256(salt || password) 계산             │
-│     b. MapPack 전송 (id, pass, version, hostname)│
-│     c. FLAG_HAS_NEXT 루프로 응답 수신             │
-│     d. session = map["session"]                   │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  open_socket()  — 소켓 한 쌍을 만드는 공통 경로        │
+│                                                        │
+│  1. TcpStream::connect_timeout(addr, 3000ms)          │
+│  2. stream.set_nodelay(true)                           │
+│  3. writer ← 0xCAFE2001 (BE u32)                      │
+│  4. writer.flush()                                    │
+└──────────────────────────────────────────────────────┘
+                          │
+        ┌─────────────────┴──────────────────┐
+        ▼                                    ▼
+  connect()                          reopen()
+  최초 1회. 접속 가능 여부를          send_request() 진입 시마다 호출.
+  이 시점에 확인한다.                 이전 소켓은 drop 된다.
+
+┌──────────────────────────────────────────────────────┐
+│  send_request(cmd, session, param)                    │
+│    1. reopen()          ← 새 소켓 + 매직 넘버          │
+│    2. writeText(cmd)                                  │
+│    3. writeLong(session)                              │
+│    4. writePack(param)                                │
+│    5. flush()                                         │
+│  이후 호출부는 read_next_pack()을 NO_NEXT까지 반복     │
+└──────────────────────────────────────────────────────┘
 ```
+
+이 구조 덕분에 호출부(`commands.rs` / `streaming.rs` / `dictionary.rs`)는
+`send_request` → `read_next_pack` 루프를 그대로 반복하면 되고, 연결 수명을 신경 쓰지 않는다.
+
+`login()`도 `send_request(CMD_LOGIN, 0, param)`을 쓰므로 같은 경로를 탄다.
 
 ### 4.3 Scouter 바이너리 프로토콜 요약
 

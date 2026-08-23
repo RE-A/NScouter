@@ -1,33 +1,47 @@
 // src/features/xlog/utils/colorPalette.ts
-// ASIS XLogViewPainter.drawXPerfData() 색상 규칙 포팅
+// ASIS XLogViewPainter.drawXPerfData() 의 **색상 규칙**을 포팅한다.
+//
+// 규칙(에이전트별 색 순환 / 에러는 빨강 / xType 3·4 는 흐리게)은 그대로지만
+// **색값은 다르다.** ASIS 는 흰 배경 위에 그렸다.
+// 앱 전체가 다크인데 차트만 흰 판이면 그 자체로 시선을 뺏고,
+// 흰 배경용으로 고른 어두운 채도색(RoyalBlue, DarkViolet, SeaGreen …)은
+// #0d0d1a 위에서 서로 구분되지 않는다. 다크 배경용으로 다시 고른다.
+//
+// Canvas 는 var() 를 못 읽어 실제 색 문자열이 필요하다.
+// 이건 의미색이 아니라 **분류색**이라 tokens.css 가 아니라 여기에 둔다 (SERIES 와 같은 취급).
 
 export const XLOG_COLORS = {
-  ERROR:        '#FF0000',
-  ERROR_LIGHT:  '#FF9999',
-  NORMAL_LIGHT: '#AAAAAA',
-  GRID:         'rgb(220, 228, 255)',
-  GRID_WIDE:    'rgb(200, 208, 255)',
-  IGNORE_AREA:  'rgb(234, 234, 234)',
-  BORDER:       '#888888',
-  META_TEXT:    '#333333',
-  SELECT_FILL:  'rgba(0, 100, 255, 0.15)',
-  SELECT_STROKE:'rgba(0, 100, 255, 0.8)',
+  /** 에러는 다른 어떤 점과도 헷갈리면 안 된다 — 아래 팔레트에서 붉은 계열을 뺐다 */
+  ERROR:        '#ff4d4f',
+  ERROR_LIGHT:  '#8f3436',
+  NORMAL_LIGHT: '#454563',
+  GRID:         '#1a1a30',
+  GRID_WIDE:    '#252542',
+  IGNORE_AREA:  'rgba(255,255,255,0.035)',
+  BORDER:       '#252542',
+  META_TEXT:    '#606080',
+  SELECT_FILL:  'rgba(79, 114, 255, 0.18)',
+  SELECT_STROKE:'rgba(79, 114, 255, 0.9)',
 } as const;
 
-// 에이전트별 색상 팔레트 (objHash 기반 순환 할당)
+/** 차트 판 색 — 패널 본문보다 한 단 낮춰 눌린 면으로 읽히게 한다 */
+export const XLOG_BACKGROUND = '#0d0d1a';
+
+// 에이전트별 색상 팔레트 (objHash 기반 순환 할당).
+// 다크 배경에서 서로 구분되는 밝은 색만 쓴다. 붉은 계열은 에러 전용이라 제외.
 const AGENT_COLORS: readonly string[] = [
-  '#4169E1', // RoyalBlue
-  '#32CD32', // LimeGreen
-  '#FF8C00', // DarkOrange
-  '#9400D3', // DarkViolet
-  '#008B8B', // DarkCyan
-  '#B8860B', // DarkGoldenrod
-  '#6A5ACD', // SlateBlue
-  '#2E8B57', // SeaGreen
-  '#DC143C', // Crimson
-  '#1E90FF', // DodgerBlue
-  '#FF1493', // DeepPink
-  '#00CED1', // DarkTurquoise
+  '#5b8cff', // blue
+  '#3dd68c', // green
+  '#ffa53d', // orange
+  '#c77dff', // violet
+  '#2fd4d4', // teal
+  '#e8c547', // gold
+  '#8b93ff', // periwinkle
+  '#4ade80', // lime
+  '#38bdf8', // sky
+  '#7fe3d4', // aqua
+  '#a78bfa', // purple
+  '#f0abfc', // orchid
 ];
 
 const agentColorMap = new Map<number, string>();
@@ -39,7 +53,13 @@ export function getDotColor(objHash: number, xType: number, hasError: boolean): 
   return getAgentColor(objHash);
 }
 
-function getAgentColor(objHash: number): string {
+/**
+ * 오브젝트에 고정 배정되는 색.
+ *
+ * **objHash 로만 정한다** — 목록 순서로 정하면 에이전트가 하나 붙고 빠질 때마다
+ * 모든 오브젝트의 색이 밀린다. 산점도와 속성 창이 같은 색을 써야 서로 짚어 볼 수 있다.
+ */
+export function getAgentColor(objHash: number): string {
   let color = agentColorMap.get(objHash);
   if (!color) {
     const idx = Math.abs(objHash) % AGENT_COLORS.length;

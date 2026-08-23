@@ -3,9 +3,15 @@
 // ASIS: XLogViewPainter.java draw() 메서드 포팅
 
 import { CoordinateMapper } from './CoordinateMapper';
+import type { TimeWindow } from './CoordinateMapper';
 import { DotImageCache } from './DotImageCache';
 import { GridCalculator } from './GridCalculator';
 import { PointMap } from './PointMap';
+import { findNearestPixel } from './pixelQuery';
+import { passesFilter, selectInRect } from './rectSelect';
+import type { StreamStatus } from '../utils/streamStatus';
+// Canvas 는 var() 를 못 읽으므로 실제 색 상수를 쓴다.
+import { CANVAS } from '../../../styles/tokens';
 import type { ChartLayout, SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import { buildLayout, Y_AXIS_CONFIGS } from '../types/xlog';
 import { getDotColor, XLOG_COLORS } from '../utils/colorPalette';
@@ -27,6 +33,16 @@ export class XLogChartRenderer {
   private dotCache = new DotImageCache();
   // xlog 인덱스를 픽셀 위치에 저장 (hover 조회용)
   private pixelToXLogIndex = new Map<number, number>();
+  // 드래그 선택은 그릴 때와 **같은** 좌표계·필터를 써야 눈에 보이는 사각형과 맞는다.
+  private lastMapper: CoordinateMapper | null = null;
+  private lastFilter: XLogFilterState | null = null;
+  /**
+   * 서비스 해시 → 이름. 서비스명 필터에만 쓴다.
+   *
+   * **렌더러가 직접 해석하지 않는다.** 텍스트 조회는 비동기인데 그리기는 프레임마다
+   * 도는 동기 루프라 여기서 기다릴 수 없다. 이미 받아 둔 것을 읽기만 한다.
+   */
+  private serviceName: ((hash: number) => string | undefined) | undefined;
 
   constructor(canvas: HTMLCanvasElement, config: XLogChartConfig) {
     this.ctx = canvas.getContext('2d')!;
@@ -45,21 +61,30 @@ export class XLogChartRenderer {
   }
 
   /** 전체 프레임 렌더링 (rAF에서 호출) */
+  /**
+   * @param window 그릴 시간 구간. 실시간이면 `rollingWindow(now, timeRangeMs)`,
+   *               과거 조회면 사용자가 고른 절대 구간이다.
+   */
   render(
     data: SXLog[],
     filter: XLogFilterState,
-    now: number,
+    window: TimeWindow,
     selection: SelectionRect | null,
+    status?: StreamStatus,
   ): void {
-    const mapper = new CoordinateMapper(this.layout, this.config, now);
+    const mapper = new CoordinateMapper(this.layout, this.config, window);
+    this.lastMapper = mapper;
+    this.lastFilter = filter;
 
     this.drawBackground();
     this.drawIgnoreArea(mapper);
     this.drawYGrid();
     this.drawXGrid(mapper);
-    this.drawDataPoints(data, filter, mapper);
+    // **버퍼 크기를 세면 안 된다.** 에러만 켜면 60개가 보이는데 7,503 이라고 적힌다.
+    // 화면의 숫자는 화면에 있는 것을 말해야 한다.
+    const visible = this.drawDataPoints(data, filter, mapper);
     this.drawBorder();
-    this.drawMetadata(data, selection);
+    this.drawMetadata(visible, selection, status);
 
     if (selection) {
       this.drawSelectionRect(selection);
@@ -142,15 +167,17 @@ export class XLogChartRenderer {
   }
 
   /** 5단계: 데이터 점 ★ 핵심 */
+  /** @returns 이 창에 실제로 들어온 트랜잭션 수 (겹쳐서 못 그린 것도 포함) */
   private drawDataPoints(
     data: SXLog[],
     filter: XLogFilterState,
     mapper: CoordinateMapper,
-  ): void {
+  ): number {
     this.pointMap.clear();
     this.pixelToXLogIndex.clear();
 
     const half = Math.floor(DOT_SIZE / 2);
+    let visible = 0;
 
     for (let i = 0; i < data.length; i++) {
       const xlog = data[i];
@@ -163,6 +190,9 @@ export class XLogChartRenderer {
 
       // 플롯 영역 밖이면 스킵
       if (!mapper.isInPlotArea(x, y)) continue;
+
+      // 겹쳐서 안 그려지는 것도 **이 구간에 있는 트랜잭션**이다. 세기는 여기서 한다.
+      visible += 1;
 
       // 충돌 체크 (이미 그려진 위치 스킵)
       if (this.pointMap.has(x, y)) continue;
@@ -178,6 +208,8 @@ export class XLogChartRenderer {
       const key = Math.round(y) * this.layout.canvasWidth + Math.round(x);
       this.pixelToXLogIndex.set(key, i);
     }
+
+    return visible;
   }
 
   /** 6단계: 테두리 */
@@ -192,21 +224,41 @@ export class XLogChartRenderer {
   }
 
   /** 7단계: 메타데이터 오버레이 */
-  private drawMetadata(data: SXLog[], _selection: SelectionRect | null): void {
+  private drawMetadata(
+    /** 이 창에 실제로 들어온 건수. 버퍼 전체가 아니다 */
+    visible: number,
+    _selection: SelectionRect | null,
+    status?: StreamStatus,
+  ): void {
     const { plotAreaX, plotAreaY } = this.layout;
     const modeLabel = Y_AXIS_CONFIGS[this.config.yAxisMode].label;
 
     this.ctx.save();
-    this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    this.ctx.fillStyle = XLOG_COLORS.META_TEXT;
     this.ctx.font = '11px monospace';
     this.ctx.textBaseline = 'top';
 
     this.ctx.textAlign = 'left';
-    this.ctx.fillText(`${data.length.toLocaleString()} dots`, plotAreaX + 4, plotAreaY + 4);
+    this.ctx.fillText(`${visible.toLocaleString()} dots`, plotAreaX + 4, plotAreaY + 4);
 
     this.ctx.textAlign = 'right';
     const { plotAreaWidth } = this.layout;
     this.ctx.fillText(modeLabel, plotAreaX + plotAreaWidth - 4, plotAreaY + 4);
+
+    // 비어 있을 때 **왜** 비었는지 알려준다.
+    // "0 dots" 만 보면 고장인지 데이터가 없는 건지 알 수 없다.
+    if (status && status.kind !== 'live' && visible === 0) {
+      const { plotAreaHeight } = this.layout;
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.font = '13px sans-serif';
+      this.ctx.fillStyle = status.kind === 'stale' ? CANVAS.error : CANVAS.textDim;
+      this.ctx.fillText(
+        status.message,
+        plotAreaX + plotAreaWidth / 2,
+        plotAreaY + plotAreaHeight / 2,
+      );
+    }
 
     this.ctx.restore();
   }
@@ -227,11 +279,13 @@ export class XLogChartRenderer {
     this.ctx.restore();
   }
 
+  /** 서비스명 필터가 읽을 사전을 꽂는다 */
+  setServiceNameResolver(fn: (hash: number) => string | undefined): void {
+    this.serviceName = fn;
+  }
+
   private passesFilter(xlog: SXLog, filter: XLogFilterState): boolean {
-    if (filter.errorOnly && xlog.error === 0) return false;
-    if (xlog.elapsed < filter.minElapsed) return false;
-    if (filter.objHashSet.size > 0 && !filter.objHashSet.has(xlog.objHash)) return false;
-    return true;
+    return passesFilter(xlog, filter, this.serviceName);
   }
 
   /** 픽셀 위치에 해당하는 SXLog 인덱스 반환 (hover용) */
@@ -240,16 +294,28 @@ export class XLogChartRenderer {
     return this.pixelToXLogIndex.get(key);
   }
 
-  /** 사각형 영역 내 XLog 목록 반환 (선택용) */
+  /**
+   * 클릭 지점 근처의 XLog 1건 반환.
+   *
+   * 점이 2~4px 이라 클릭이 정확히 같은 픽셀에 떨어지지 않는다.
+   * `radius` 안에서 가장 가까운 점을 고른다.
+   */
+  queryPoint(px: number, py: number, data: SXLog[], radius = 5): SXLog | undefined {
+    const idx = findNearestPixel(this.pixelToXLogIndex, this.layout.canvasWidth, px, py, radius);
+    return idx === undefined ? undefined : data[idx];
+  }
+
+  /**
+   * 사각형 영역 내 XLog 목록 반환 (선택용).
+   *
+   * **픽셀 지도를 쓰지 않는다.** 그리기는 겹친 점을 건너뛰므로(충돌 회피)
+   * 화면에 찍힌 점을 세면 촘촘한 구간에서 실제의 10분의 1도 안 나온다.
+   * 데이터를 직접 훑어 전부 담는다 — 자세한 이유는 `rectSelect.ts`.
+   */
   querySelection(sel: SelectionRect, data: SXLog[]): SXLog[] {
-    const hits = this.pointMap.queryRect(sel.x1, sel.y1, sel.x2, sel.y2);
-    const result: SXLog[] = [];
-    for (const { x, y } of hits) {
-      const key = y * this.layout.canvasWidth + x;
-      const idx = this.pixelToXLogIndex.get(key);
-      if (idx !== undefined) result.push(data[idx]);
-    }
-    return result;
+    // 아직 한 번도 그리지 않았으면 좌표를 알 수 없다.
+    if (!this.lastMapper || !this.lastFilter) return [];
+    return selectInRect(data, sel, this.lastMapper, this.lastFilter, this.serviceName);
   }
 
   dispose(): void {

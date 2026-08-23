@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>재고 목록 - shop-app</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: .5rem; text-align: left; }
+        th { background: #f4f4f4; }
+        nav a { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+<h1>재고 목록 <small th:text="'(총 ' + ${total} + '건)'">()</small></h1>
+<nav>
+    <a href="/shop/products">상품</a>
+    <a href="/shop/stocks">재고</a>
+</nav>
+<table>
+    <thead>
+    <tr><th>ID</th><th>상품 ID</th><th>수량</th><th>창고</th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="s : ${stocks}">
+        <td th:text="${s.id}">1</td>
+        <td><a th:href="@{'/shop/products/' + ${s.productId}}" th:text="${s.productId}">1</a></td>
+        <td th:text="${s.quantity}">0</td>
+        <td th:text="${s.warehouse}">-</td>
+    </tr>
+    </tbody>
+</table>
+</body>
+</html>

@@ -121,9 +121,7 @@ fn poll_once(
                 log::trace!("XLog 수신: txid={}, elapsed={}ms", xlog.txid, xlog.elapsed);
                 let _ = app.emit("xlog-data", xlog);
             }
-            Some(AnyPack::Unknown(t)) => {
-                log::trace!("알 수 없는 Pack 타입 무시: 0x{t:02X}");
-            }
+            // 모르는 팩 타입은 여기까지 오지 않는다 — read_next_pack 이 에러를 낸다 (O-5).
             Some(_) => {} // Object / Profile / PerfCounter / Alert → XLog 스트림에서 무시
             None => break, // FLAG_NO_NEXT: 스트림 종료
         }
@@ -132,7 +130,13 @@ fn poll_once(
     Ok(())
 }
 
-fn build_request_param(obj_hashes: &[i32], cursor: &StreamCursor) -> MapPack {
+/// 1회 폴링으로 가져올 XLog 최대 건수.
+/// ASIS: scouter.webapp XLogConsumer.handleRealTimeXLog() 의 firstRetrieveLimit
+const XLOG_RETRIEVE_LIMIT: i64 = 10_000;
+
+/// XLog 실시간 조회 파라미터 구성.
+/// 실서버 대상 통합 테스트(tests/live_collector.rs)에서도 같은 구성을 검증하므로 pub 이다.
+pub fn build_request_param(obj_hashes: &[i32], cursor: &StreamCursor) -> MapPack {
     let mut param = MapPack::new();
 
     // objHash: ListValue of Decimal
@@ -143,6 +147,8 @@ fn build_request_param(obj_hashes: &[i32], cursor: &StreamCursor) -> MapPack {
     param.put("objHash", ScouterValue::List(hash_list));
     param.put("loop", ScouterValue::Decimal(cursor.loop_val));
     param.put("index", ScouterValue::Decimal(cursor.index));
+    // count(ParamConstant.XLOG_COUNT)가 없으면 Collector가 에러 없이 0건을 반환한다.
+    param.put("count", ScouterValue::Decimal(XLOG_RETRIEVE_LIMIT));
 
     param
 }

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>상품 목록 - shop-app</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: .5rem; text-align: left; }
+        th { background: #f4f4f4; }
+        nav a { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+<h1>상품 목록 <small th:text="'(총 ' + ${total} + '건)'">()</small></h1>
+<nav>
+    <a href="/shop/products">상품</a>
+    <a href="/shop/stocks">재고</a>
+    <a href="/shop/products/new">상품 등록</a>
+</nav>
+<table>
+    <thead>
+    <tr><th>ID</th><th>이름</th><th>분류</th><th>가격</th><th></th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="p : ${products}">
+        <td th:text="${p.id}">1</td>
+        <td><a th:href="@{'/shop/products/' + ${p.id}}" th:text="${p.name}">상품</a></td>
+        <td th:text="${p.category}">분류</td>
+        <td th:text="${p.price}">0</td>
+        <td>
+            <form th:action="@{'/shop/products/' + ${p.id} + '/delete'}" method="post">
+                <button type="submit">삭제</button>
+            </form>
+        </td>
+    </tr>
+    </tbody>
+</table>
+</body>
+</html>

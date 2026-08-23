@@ -1,0 +1,121 @@
+# 이미지 빌드는 compose가 하지 않는다. scripts/build.ps1 로 먼저 빌드할 것.
+#
+# 이유: podman-compose 1.6.0 의 is_context_git_url() 이 Windows 드라이브 문자 절대경로
+#       ("E:\...")를 git URL로 오인해(urlparse가 "E"를 scheme으로 파싱) dockerfile 해석
+#       블록 전체를 건너뛴다. 그 결과 podman build 에 -f 가 전달되지 않아
+#       "no Containerfile or Dockerfile specified or found in context directory" 로 실패한다.
+#       build: 섹션을 쓰지 않으면 이 경로를 타지 않는다.
+
+services:
+  postgres:
+    image: nscouter-test/postgres:17
+    container_name: postgres
+    hostname: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - scouter-net
+
+  scouter-collector:
+    image: nscouter-test/collector:${SCOUTER_VERSION}
+    container_name: scouter-collector
+    hostname: scouter-collector
+    # TZ 는 collector/Containerfile 에 굽는다 (podman-compose 가 environment: 를 전달하지 않음)
+    ports:
+      - "${COLLECTOR_TCP_PORT}:6100/tcp"
+      - "${COLLECTOR_UDP_PORT}:6100/udp"
+    networks:
+      - scouter-net
+
+  # 머신 지표(CPU/Memory/Swap/Net/Disk) 수집. counters.xml 의 host Family 담당.
+  # 자바 에이전트와 달리 앱에 붙지 않고 독립 프로세스로 돈다.
+  scouter-host-agent:
+    image: nscouter-test/host-agent:${SCOUTER_VERSION}
+    container_name: scouter-host-agent
+    hostname: scouter-host-agent
+    depends_on:
+      scouter-collector:
+        condition: service_started
+    restart: on-failure
+    networks:
+      - scouter-net
+
+  shop-app:
+    image: nscouter-test/shop-app:latest
+    container_name: shop-app
+    hostname: shop-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scouter-collector:
+        condition: service_started
+    # DB 기동 순서가 어긋나 앱이 먼저 죽어도 재기동으로 복구되게 한다.
+    restart: on-failure
+    environment:
+      DB_HOST: postgres
+      DB_NAME: shopdb
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${SHOP_PORT}:8081"
+    networks:
+      - scouter-net
+
+  order-app:
+    image: nscouter-test/order-app:latest
+    container_name: order-app
+    hostname: order-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scouter-collector:
+        condition: service_started
+      shop-app:
+        condition: service_started
+    restart: on-failure
+    environment:
+      DB_HOST: postgres
+      DB_NAME: orderdb
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      SHOP_BASE_URL: http://shop-app:8081
+    ports:
+      - "${ORDER_PORT}:8082"
+    networks:
+      - scouter-net
+
+  # 기본 기동에서 제외된다. scripts/load.ps1 로 시작할 것.
+  load-gen:
+    image: nscouter-test/loadgen:latest
+    container_name: load-gen
+    profiles:
+      - load
+    # k6 는 duration 이 끝나면 종료한다. 그대로 두면 부하가 조용히 멈춰서
+    # 화면이 비었을 때 "고장인지 트래픽이 없는 건지" 또 헷갈린다.
+    # 끝나면 바로 다시 돌린다. 멈추려면 down.ps1 또는 load.ps1 -Stop.
+    restart: always
+    depends_on:
+      shop-app:
+        condition: service_started
+      order-app:
+        condition: service_started
+    environment:
+      SHOP_URL: http://shop-app:8081
+      ORDER_URL: http://order-app:8082
+      K6_VUS: ${K6_VUS}
+      K6_DURATION: ${K6_DURATION}
+    networks:
+      - scouter-net
+
+networks:
+  scouter-net:
+    name: scouter-net

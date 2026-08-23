@@ -1,0 +1,39 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: order-app
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:orderdb}
+    username: ${DB_USER:scouter}
+    password: ${DB_PASSWORD:scouter}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # **Scouter 의 datasource 카운터(ConnActive/ConnIdle/ConnMax)는 JMX 로 읽는다.**
+      # HikariCP 기본값이 false 라 MBean 이 없으면 에이전트가 풀을 못 찾고,
+      # 커넥션 풀 카운터가 통째로 0건이 된다 (증상: 서브오브젝트 tomcat_ds 미등록).
+      register-mbeans: true
+      maximum-pool-size: 10
+      initialization-fail-timeout: 60000
+      connection-timeout: 10000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+  thymeleaf:
+    cache: false
+
+# shop-app 호출 설정. 이 호출이 XLogPack 의 gxid / caller 와 apicall 프로파일을 만든다.
+shop:
+  base-url: ${SHOP_BASE_URL:http://shop-app:8081}
+  connect-timeout-ms: 2000
+  read-timeout-ms: 3000
+
+logging:
+  level:
+    root: INFO
+    com.nscouter.test.order: INFO

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>주문 목록 - order-app</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: .5rem; text-align: left; }
+        th { background: #f4f4f4; }
+        nav a { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+<h1>주문 목록 <small th:text="'(총 ' + ${total} + '건)'">()</small></h1>
+<nav>
+    <a href="/order/orders">주문</a>
+    <a href="/order/deliveries">배송</a>
+    <a href="/order/reports/daily">집계</a>
+    <a href="/order/orders/new">주문 생성</a>
+</nav>
+<table>
+    <thead>
+    <tr><th>ID</th><th>상품</th><th>수량</th><th>금액</th><th>상태</th><th>주문일시</th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="o : ${orders}">
+        <td><a th:href="@{'/order/orders/' + ${o.id}}" th:text="${o.id}">1</a></td>
+        <td th:text="${o.productName}">상품</td>
+        <td th:text="${o.quantity}">1</td>
+        <td th:text="${o.totalPrice}">0</td>
+        <td th:text="${o.status}">ORDERED</td>
+        <td th:text="${o.orderedAt}">-</td>
+    </tr>
+    </tbody>
+</table>
+</body>
+</html>

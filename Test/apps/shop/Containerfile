@@ -1,0 +1,44 @@
+# shop-app — 상품/재고 도메인 + Scouter Java Agent
+# 빌드 컨텍스트는 Test/ 루트다 (vendor/scouter/agent.java 를 함께 복사해야 하므로).
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /build
+
+# 의존성 레이어를 소스와 분리해 캐시가 살아있게 한다.
+COPY apps/shop/pom.xml ./pom.xml
+RUN mvn -B dependency:go-offline
+
+COPY apps/shop/src ./src
+RUN mvn -B clean package -DskipTests
+
+# **JRE 가 아니라 JDK 다.**
+# Scouter 의 스레드 덤프/힙 히스토그램은 attach API(`jdk.attach` 모듈)를 쓰는데
+# temurin JRE 이미지에는 그 모듈이 없다(모듈 50개, jdk.attach 없음).
+# 그래서 덤프 파일이 size=0 으로 만들어지고 내용 조회가 빈 응답이었다 (F-25).
+FROM eclipse-temurin:17-jdk
+WORKDIR /app
+
+COPY --from=build /build/target/shop-app-1.0.0.jar /app/app.jar
+
+# agent.java 는 Java 8 바이트코드 빌드라 JDK 17 에서 동작한다.
+# agent.java21plus 는 Java 21 전용이므로 쓰지 않는다.
+COPY vendor/scouter/agent.java/scouter.agent.jar /scouter/scouter.agent.jar
+COPY agent/shop.conf /scouter/conf/shop.conf
+
+RUN mkdir -p /data /scouter/logs
+
+EXPOSE 8081
+
+# --add-opens / --add-exports / allowAttachSelf 는 Scouter 릴리스 노트가 Java 11+ 환경에
+# 요구하는 옵션이다 (스크립트 플러그인 로딩, 스레드 덤프).
+# Metaspace 상한을 못 박는다.
+# 에이전트의 PermGen 태스크는 이름에 METASPACE 가 든 MemoryPoolMXBean 을 찾아
+# PermUsed 를 올리지만, **PermPercent 는 usage.getMax() != -1 일 때만** 올린다.
+# 자바 기본값은 상한 없음(-1)이라 이 옵션이 없으면 PermPercent 가 영원히 안 온다 (F-43).
+ENTRYPOINT ["java", \
+    "-XX:MaxMetaspaceSize=256m", \
+    "-javaagent:/scouter/scouter.agent.jar", \
+    "-Dscouter.config=/scouter/conf/shop.conf", \
+    "-Djdk.attach.allowAttachSelf=true", \
+    "--add-opens=java.base/java.lang=ALL-UNNAMED", \
+    "--add-exports=java.base/sun.net=ALL-UNNAMED", \
+    "-jar", "/app/app.jar"]

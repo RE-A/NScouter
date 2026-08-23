@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { onXLogData, onXLogError } from '../api/scouterApi';
+import { subscribe } from '../api/subscribe';
 import { XLogDataStore } from '../store/XLogDataStore';
 import { xlogPackToSXLog } from '../types/xlog';
 import type { XLogChartConfig } from '../types/xlog';
@@ -18,17 +19,16 @@ export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
   const [streamError, setStreamError] = useState<string | null>(null);
 
   useEffect(() => {
-    let unlistenData: (() => void) | null = null;
-    let unlistenError: (() => void) | null = null;
-
-    onXLogData(xlogPack => {
-      const sxlog = xlogPackToSXLog(xlogPack);
-      storeRef.current.add(sxlog);
-    }).then(fn => { unlistenData = fn; });
-
-    onXLogError(msg => {
-      setStreamError(msg);
-    }).then(fn => { unlistenError = fn; });
+    // 해지 함수가 Promise 로 오므로 직접 담아 두면 안 된다 — 정리가 먼저 돌면
+    // 리스너가 살아남아 XLog 가 저장소에 두 번 들어간다. `subscribe` 참고.
+    const off = subscribe(
+      onXLogData(xlogPack => {
+        storeRef.current.add(xlogPackToSXLog(xlogPack));
+      }),
+      onXLogError(msg => {
+        setStreamError(msg);
+      }),
+    );
 
     // 주기적으로 시간 윈도우 밖 데이터 정리
     const pruneInterval = setInterval(() => {
@@ -36,8 +36,7 @@ export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
     }, 5000);
 
     return () => {
-      unlistenData?.();
-      unlistenError?.();
+      off();
       clearInterval(pruneInterval);
     };
   }, [config.timeRangeMs]);

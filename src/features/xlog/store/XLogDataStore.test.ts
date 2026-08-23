@@ -8,6 +8,7 @@ function makeSXLog(endTime: number, elapsed: number = 100): SXLog {
   return {
     txid: String(endTime),
     gxid: '0',
+    caller: '0',
     endTime,
     elapsed,
     objHash: 1001,
@@ -104,5 +105,34 @@ describe('XLogDataStore', () => {
     // 전체 시간 범위를 크게 잡아 시간 필터는 통과
     store.prune(COUNT * 10 + 1000, COUNT * 10 + 1000);
     expect(store.size).toBeLessThanOrEqual(100_000);
+  });
+
+  // "비어 있음"이 고장인지 데이터가 없는 건지 구분하려면
+  // 마지막으로 실제 수신한 시각이 필요하다.
+  it('lastReceivedAt: 아무것도 안 받았으면 null', () => {
+    expect(store.lastReceivedAt).toBeNull();
+  });
+
+  it('lastReceivedAt: add 하면 수신 시각이 기록된다', () => {
+    store.add(makeSXLog(1000), 12_345);
+    expect(store.lastReceivedAt).toBe(12_345);
+  });
+
+  it('lastReceivedAt: addBatch 도 기록된다', () => {
+    store.addBatch([makeSXLog(1000)], 22_222);
+    expect(store.lastReceivedAt).toBe(22_222);
+  });
+
+  it('lastReceivedAt: 빈 배치는 시각을 갱신하지 않는다', () => {
+    store.addBatch([makeSXLog(1000)], 100);
+    store.addBatch([], 999);
+    expect(store.lastReceivedAt).toBe(100);
+  });
+
+  it('lastReceivedAt: prune 은 수신 시각을 건드리지 않는다', () => {
+    store.add(makeSXLog(1000), 500);
+    store.prune(1_000_000, 1);
+    expect(store.size).toBe(0);
+    expect(store.lastReceivedAt).toBe(500);
   });
 });

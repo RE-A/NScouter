@@ -5,8 +5,10 @@
 
 use std::io;
 use super::codec::ScouterReader;
+use super::pack::MapPack;
+use super::value::ScouterValue;
 
-fn serialize_i64_as_string<S>(val: &i64, s: S) -> Result<S::Ok, S::Error>
+pub(crate) fn serialize_i64_as_string<S>(val: &i64, s: S) -> Result<S::Ok, S::Error>
 where S: serde::Serializer {
     s.serialize_str(&val.to_string())
 }
@@ -97,6 +99,28 @@ pub struct SocketProfileStep {
     pub error: i32,
 }
 
+// ─── ThreadCall Step ─────────────────────────────────────────
+
+/// ThreadCallPossibleStep (Type 14)
+///
+/// "여기서 다른 스레드로 넘어갔을 수 있다" 는 표시다. 실제로 넘어갔으면
+/// `threaded` 가 1이고 `txid` 가 **그 스레드의 트랜잭션**을 가리킨다 —
+/// 그 txid 로 프로파일을 열면 이어지는 작업이 보인다 (ASIS XLogThreadProfileView).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ThreadCallProfileStep {
+    #[serde(flatten)]
+    pub base: StepBase,
+    /// 넘어간 스레드의 트랜잭션 ID. 0 이면 없다
+    #[serde(serialize_with = "serialize_i64_as_string")]
+    #[serde(deserialize_with = "deserialize_i64_from_string")]
+    pub txid: i64,
+    /// 이름 hash (text_type::APICALL 로 조회)
+    pub hash: i32,
+    pub elapsed: i32,
+    /// **실제로 스레드가 떴는가.** 아니면 txid 를 따라가도 빈 프로파일이다
+    pub threaded: bool,
+}
+
 // ─── Profile Step enum ───────────────────────────────────────
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -107,7 +131,18 @@ pub enum ProfileStep {
     ApiCall(ApiCallProfileStep),
     Message(MessageProfileStep),
     Socket(SocketProfileStep),
-    Unknown { step_type: u8 },
+    ThreadCall(ThreadCallProfileStep),
+    /// 본문은 **정확히 소비했지만** 화면에 노출하지 않는 Step.
+    ///
+    /// `base` 를 함께 들고 있어야 한다 — 버리면 제대로 읽힌 Step 이
+    /// index=-1 로 보여서 **파싱이 깨진 것과 구별되지 않는다.**
+    /// 실제로 그 때문에 프로파일 테스트가 간헐적으로 오진을 냈다.
+    ///
+    /// StepControl(99) 처럼 base 자체가 없는 종류는 None 이다.
+    Unknown {
+        step_type: u8,
+        base: Option<StepBase>,
+    },
 }
 
 // ─── XLogProfilePack ─────────────────────────────────────────
@@ -144,102 +179,96 @@ pub fn parse_profile_steps(blob: Vec<u8>) -> Vec<ProfileStep> {
 }
 
 /// 단일 Step 파싱
+///
+/// **필드 순서·타입 근거는 ASIS `scouter.lang.step.*` 의 `read(DataInputX)` 다.**
+/// 상속 체인을 그대로 펼쳐야 한다 (예: SqlStep3 = SqlStep + xtype + updated).
+/// 한 Step 이라도 바이트 수를 틀리면 **이후 Step 전부가 쓰레기**가 된다.
+///
+/// 실측 검증: `live_xlog_profile_steps`
 fn read_step(r: &mut ScouterReader) -> io::Result<ProfileStep> {
     let step_type = r.read_unsigned_byte()?;
 
-    // StepSingle 계열 공통 기반 (StepSummary / StepControl은 포함 안 됨)
-    // ASIS: StepSingle.read() = readDecimal×4
+    // StepControl 은 StepSummary 상속이라 StepSingle base 가 없다.
+    // ASIS: message(text) → code(decimal) 순서다.
+    if step_type == 99 {
+        let _message = r.read_text()?;
+        let _code = r.read_decimal()?;
+        return Ok(ProfileStep::Unknown { step_type, base: None });
+    }
+
     let base = read_step_base(r)?;
 
     match step_type {
-        // ─ MethodStep (Type 1) ──────────────────────────────────────
+        // ─ MethodStep (1) : hash, elapsed, cputime ─────────────────
         1 => {
-            let hash = r.read_decimal()? as i32;
-            Ok(ProfileStep::Method(MethodProfileStep {
-                base,
-                hash,
-                elapsed: 0,
-                cputime: 0,
-            }))
-        }
-        // ─ MethodStep2 (Type 10) ────────────────────────────────────
-        10 => {
             let hash = r.read_decimal()? as i32;
             let elapsed = r.read_decimal()? as i32;
             let cputime = r.read_decimal()? as i32;
             Ok(ProfileStep::Method(MethodProfileStep { base, hash, elapsed, cputime }))
         }
-        // ─ SqlStep (Type 2) ─────────────────────────────────────────
-        2 => {
+        // ─ MethodStep2 (10) : MethodStep + error ───────────────────
+        10 => {
             let hash = r.read_decimal()? as i32;
-            let param = r.read_text()?;
             let elapsed = r.read_decimal()? as i32;
-            let error = r.read_decimal()? as i32;
-            Ok(ProfileStep::Sql(SqlProfileStep { base, hash, param, elapsed, error, updated: 0 }))
+            let cputime = r.read_decimal()? as i32;
+            let _error = r.read_decimal()?;
+            Ok(ProfileStep::Method(MethodProfileStep { base, hash, elapsed, cputime }))
         }
-        // ─ SqlStep2 (Type 8) ────────────────────────────────────────
-        8 => {
+        // ─ SqlStep(2) / SqlStep2(8) / SqlStep3(16) ─────────────────
+        // SqlStep  : hash, elapsed, cputime, param, error
+        // SqlStep2 : + xtype(byte)
+        // SqlStep3 : + updated(decimal)
+        2 | 8 | 16 => {
             let hash = r.read_decimal()? as i32;
-            let param = r.read_text()?;
             let elapsed = r.read_decimal()? as i32;
+            let _cputime = r.read_decimal()?;
+            let param = r.read_text()?;
             let error = r.read_decimal()? as i32;
-            let updated = r.read_decimal()? as i32;
+            if step_type == 8 || step_type == 16 {
+                let _xtype = r.read_byte()?;
+            }
+            let updated = if step_type == 16 { r.read_decimal()? as i32 } else { 0 };
             Ok(ProfileStep::Sql(SqlProfileStep { base, hash, param, elapsed, error, updated }))
         }
-        // ─ SqlStep3 (Type 16) ───────────────────────────────────────
-        16 => {
-            let hash = r.read_decimal()? as i32;
-            let param = r.read_text()?;
-            let elapsed = r.read_decimal()? as i32;
-            let error = r.read_decimal()? as i32;
-            let updated = r.read_decimal()? as i32;
-            let _sql_crud = r.read_text()?; // 무시 (SqlStep3 확장 필드)
-            Ok(ProfileStep::Sql(SqlProfileStep { base, hash, param, elapsed, error, updated }))
-        }
-        // ─ MessageStep (Type 3) ─────────────────────────────────────
+        // ─ MessageStep (3) : message ───────────────────────────────
         3 => {
             let message = r.read_text()?;
             Ok(ProfileStep::Message(MessageProfileStep { base, message, hash: 0 }))
         }
-        // ─ HashedMessageStep (Type 9) ───────────────────────────────
+        // ─ HashedMessageStep (9) : hash, time, value ───────────────
         9 => {
             let hash = r.read_decimal()? as i32;
             let _time = r.read_decimal()?;
             let _value = r.read_decimal()?;
             Ok(ProfileStep::Message(MessageProfileStep { base, message: String::new(), hash }))
         }
-        // ─ ParameterizedMessageStep (Type 17) ───────────────────────
+        // ─ ParameterizedMessageStep (17) : hash, elapsed, level, param ─
         17 => {
             let hash = r.read_decimal()? as i32;
             let _elapsed = r.read_decimal()?;
+            let _level = r.read_decimal()?;
             let param_string = r.read_text()?;
             Ok(ProfileStep::Message(MessageProfileStep { base, message: param_string, hash }))
         }
-        // ─ ApiCallStep (Type 6) ─────────────────────────────────────
-        6 => {
+        // ─ ApiCallStep(6) / ApiCallStep2(15) ───────────────────────
+        // txid 가 **맨 앞**이고 readDecimal(가변)이다. readLong 이 아니다.
+        // opt==1 일 때만 address 가 따라온다.
+        6 | 15 => {
+            let txid = r.read_decimal()?;
             let hash = r.read_decimal()? as i32;
             let elapsed = r.read_decimal()? as i32;
+            let _cputime = r.read_decimal()?;
             let error = r.read_decimal()? as i32;
-            let txid = r.read_long()?;
+            let opt = r.read_byte()?;
+            let address = if opt == 1 { r.read_text()? } else { String::new() };
+            if step_type == 15 {
+                let _async_flag = r.read_byte()?;
+            }
             Ok(ProfileStep::ApiCall(ApiCallProfileStep {
-                base,
-                hash,
-                elapsed,
-                error,
-                txid,
-                address: String::new(),
+                base, hash, elapsed, error, txid, address,
             }))
         }
-        // ─ ApiCallStep2 (Type 15) ───────────────────────────────────
-        15 => {
-            let hash = r.read_decimal()? as i32;
-            let elapsed = r.read_decimal()? as i32;
-            let error = r.read_decimal()? as i32;
-            let txid = r.read_long()?;
-            let address = r.read_text()?;
-            Ok(ProfileStep::ApiCall(ApiCallProfileStep { base, hash, elapsed, error, txid, address }))
-        }
-        // ─ SocketStep (Type 5) ──────────────────────────────────────
+        // ─ SocketStep (5) : ipaddr, port, elapsed, error ───────────
         5 => {
             let ipaddr_bytes = r.read_blob()?;
             let ipaddr = bytes_to_ip(&ipaddr_bytes);
@@ -248,32 +277,63 @@ fn read_step(r: &mut ScouterReader) -> io::Result<ProfileStep> {
             let error = r.read_decimal()? as i32;
             Ok(ProfileStep::Socket(SocketProfileStep { base, ipaddr, port, elapsed, error }))
         }
-        // ─ DispatchStep (Type 13) / ThreadSubmitStep (Type 7) ───────
-        // hash, elapsed, error, txid (long)
-        13 | 7 => {
+        // ─ DispatchStep (13) : ApiCallStep 과 동일 구조 ────────────
+        13 => {
+            let _txid = r.read_decimal()?;
             let _hash = r.read_decimal()?;
             let _elapsed = r.read_decimal()?;
+            let _cputime = r.read_decimal()?;
             let _error = r.read_decimal()?;
-            let _txid = r.read_long()?;
-            Ok(ProfileStep::Unknown { step_type })
+            let opt = r.read_byte()?;
+            if opt == 1 {
+                let _address = r.read_text()?;
+            }
+            Ok(ProfileStep::Unknown { step_type, base: Some(base) })
         }
-        // ─ ThreadCallPossibleStep (Type 14) ─────────────────────────
-        14 => {
+        // ─ ThreadSubmitStep (7) : txid, hash, elapsed, cputime, error ─
+        7 => {
+            let _txid = r.read_decimal()?;
             let _hash = r.read_decimal()?;
             let _elapsed = r.read_decimal()?;
-            let _txid = r.read_long()?;
-            Ok(ProfileStep::Unknown { step_type })
+            let _cputime = r.read_decimal()?;
+            let _error = r.read_decimal()?;
+            Ok(ProfileStep::Unknown { step_type, base: Some(base) })
         }
-        // ─ StepControl (Type 99) ────────────────────────────────────
-        // StepControl은 StepSingle을 상속하지 않음 → base 읽기 불필요
-        // 하지만 이미 read_step_base()를 호출한 상태이므로 추가 필드만 처리
-        99 => {
-            let _code = r.read_text()?;
-            let _message = r.read_text()?;
-            Ok(ProfileStep::Unknown { step_type })
+        // ─ ThreadCallPossibleStep (14) : txid, hash, elapsed, threaded ─
+        14 => {
+            let txid = r.read_decimal()?;
+            let hash = r.read_decimal()? as i32;
+            let elapsed = r.read_decimal()? as i32;
+            let threaded = r.read_byte()? != 0;
+            Ok(ProfileStep::ThreadCall(ThreadCallProfileStep {
+                base,
+                txid,
+                hash,
+                elapsed,
+                threaded,
+            }))
         }
-        // ─ 기타 미구현 Step 타입 ─────────────────────────────────────
-        _ => Ok(ProfileStep::Unknown { step_type }),
+        // ─ DumpStep (12) ───────────────────────────────────────────
+        12 => {
+            let n = r.read_decimal()? as usize; // stacks: int[]
+            for _ in 0..n {
+                let _ = r.read_int()?;
+            }
+            let _thread_id = r.read_long()?;
+            let _thread_name = r.read_text()?;
+            let _thread_state = r.read_text()?;
+            let _lock_owner_id = r.read_long()?;
+            let _lock_name = r.read_text()?;
+            let _lock_owner_name = r.read_text()?;
+            Ok(ProfileStep::Unknown { step_type, base: Some(base) })
+        }
+        // ─ 미구현 타입 ─────────────────────────────────────────────
+        // 본문 길이를 모르므로 **여기서 멈춰야 한다.**
+        // 그냥 Unknown 을 돌려주면 다음 Step 부터 전부 쓰레기가 된다.
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("미구현 Step 타입 {step_type} — 본문 길이를 몰라 이후 파싱 불가"),
+        )),
     }
 }
 
@@ -291,5 +351,104 @@ fn bytes_to_ip(bytes: &[u8]) -> String {
         format!("{}.{}.{}.{}", bytes[0], bytes[1], bytes[2], bytes[3])
     } else {
         String::new()
+    }
+}
+
+// ─── 전체 프로파일 요청 ───────────────────────────────────────
+
+/// `TRANX_PROFILE_FULL` 파라미터.
+///
+/// `TRANX_PROFILE` 과의 차이 (콜렉터 2.21.3 XLogService 바이트코드 확인):
+///
+/// | | 읽는 키 | max | 응답 |
+/// |---|---|---|---|
+/// | `TRANX_PROFILE` | date · txid · gxid · xlogType · **max** | 요청값 | XLogProfilePack |
+/// | `TRANX_PROFILE_FULL` | date · txid · gxid · xlogType | **-1 고정** | `[3][blob]` 청크 스트림 |
+///
+/// `gxid`/`xlogType` 을 비워 보내면 콜렉터가 txid 로 XLog 를 찾아 채운다.
+/// 그래서 date·txid 만 준다 (ASIS XLogProxy.getFullProfile 과 동일).
+pub fn build_full_profile_param(date: &str, txid: i64) -> MapPack {
+    let mut param = MapPack::new();
+    param.put("date", ScouterValue::Text(date.to_string()));
+    param.put("txid", ScouterValue::Decimal(txid));
+    param
+}
+
+#[cfg(test)]
+mod full_profile_tests {
+    use super::*;
+
+    #[test]
+    fn full_profile_param_has_date_and_txid() {
+        let p = build_full_profile_param("20260817", -735646748055516174);
+        assert_eq!(p.get_text("date"), Some("20260817"));
+        assert_eq!(p.get_decimal("txid"), Some(-735646748055516174));
+        // max 를 보내면 안 된다 — FULL 은 서버가 -1 로 고정한다.
+        assert!(p.entries.get("max").is_none());
+    }
+}
+
+#[cfg(test)]
+mod thread_call_tests {
+    use super::*;
+    use super::super::codec::ScouterWriter;
+
+    /// StepSingle base + ThreadCallPossibleStep 본문
+    fn thread_call_blob(txid: i64, hash: i32, elapsed: i32, threaded: i8) -> Vec<u8> {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(14);
+        // base: parent, index, start_time, start_cpu
+        w.write_decimal(-1);
+        w.write_decimal(0);
+        w.write_decimal(120);
+        w.write_decimal(0);
+        // 본문
+        w.write_decimal(txid);
+        w.write_decimal(hash as i64);
+        w.write_decimal(elapsed as i64);
+        w.write_byte(threaded);
+        w.into_bytes()
+    }
+
+    #[test]
+    fn thread_call_step_keeps_txid() {
+        // 이 txid 가 있어야 그 스레드의 프로파일을 열 수 있다 (ThreadProfile).
+        // 예전에는 본문만 소비하고 값을 버려서 화면에서 아무것도 못 했다.
+        let steps = parse_profile_steps(thread_call_blob(4516550232655921395, 777, 42, 1));
+
+        assert_eq!(steps.len(), 1);
+        match &steps[0] {
+            ProfileStep::ThreadCall(t) => {
+                assert_eq!(t.txid, 4516550232655921395);
+                assert_eq!(t.hash, 777);
+                assert_eq!(t.elapsed, 42);
+                assert!(t.threaded, "threaded=1 이면 실제로 스레드가 떴다는 뜻이다");
+                assert_eq!(t.base.start_time, 120);
+            }
+            other => panic!("ThreadCall 이 아니다: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn not_threaded_is_marked() {
+        // threaded=0 이면 **스레드가 뜨지 않았다.** 링크를 걸면 빈 프로파일로 간다.
+        let steps = parse_profile_steps(thread_call_blob(0, 1, 0, 0));
+        match &steps[0] {
+            ProfileStep::ThreadCall(t) => {
+                assert!(!t.threaded);
+                assert_eq!(t.txid, 0);
+            }
+            other => panic!("ThreadCall 이 아니다: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn thread_call_does_not_break_following_steps() {
+        // 본문 길이를 하나라도 틀리면 **이후 스텝 전부가 쓰레기**가 된다.
+        let mut blob = thread_call_blob(9, 1, 2, 1);
+        blob.extend(thread_call_blob(10, 2, 3, 0));
+
+        let steps = parse_profile_steps(blob);
+        assert_eq!(steps.len(), 2, "두 번째 스텝을 못 읽었다");
     }
 }

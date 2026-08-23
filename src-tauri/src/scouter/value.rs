@@ -126,6 +126,40 @@ impl ScouterValue {
         }
     }
 
+    /// 숫자로 읽는다. **타입을 가리지 않는다.**
+    ///
+    /// `as_decimal()` 은 `Decimal` 만 받아 Float 이 오면 조용히 `None` → 0이 된다.
+    /// 실제로 겪었다: 서비스 그룹의 `elapsed` 가 Float 으로 와서 응답시간이
+    /// 전부 0ms 로 표시됐다 (F-44). 같은 필드도 서버 판단에 따라 타입이 갈리므로
+    /// **숫자를 원할 때는 이쪽을 쓴다.**
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            Self::Decimal(v) => Some(*v as f64),
+            Self::Float(v) => Some(*v as f64),
+            Self::Double(v) => Some(*v),
+            Self::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+            _ => None,
+        }
+    }
+
+    /// 화면에 낼 문자열.
+    ///
+    /// **`Null` 은 빈 문자열이다** — "null" 이라고 찍으면 그런 값이 설정된 것처럼 보인다.
+    /// 컨테이너(Blob/List/Map)는 표 한 칸에 들어갈 모양이 아니므로 크기만 남긴다.
+    pub fn to_display(&self) -> String {
+        match self {
+            Self::Null => String::new(),
+            Self::Text(s) => s.clone(),
+            Self::Boolean(b) => b.to_string(),
+            Self::Decimal(d) => d.to_string(),
+            Self::Float(f) => f.to_string(),
+            Self::Double(d) => d.to_string(),
+            Self::Blob(b) => format!("<{}바이트>", b.len()),
+            Self::List(items) => format!("<목록 {}개>", items.len()),
+            Self::Map(m) => format!("<맵 {}개>", m.len()),
+        }
+    }
+
     pub fn as_list(&self) -> Option<&[ScouterValue]> {
         match self {
             Self::List(v) => Some(v.as_slice()),

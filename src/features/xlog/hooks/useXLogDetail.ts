@@ -2,7 +2,8 @@
 // XLog 상세 프로파일 조회 훅
 
 import { useCallback, useState } from 'react';
-import { getXLogProfile } from '../api/scouterApi';
+import { toDateString } from '../utils/xlogDate';
+import { getXLogFullProfile } from '../api/scouterApi';
 import type { SXLog } from '../types/xlog';
 import type { XLogProfilePack } from '../types/profile';
 import { collectStepHashes } from '../types/profile';
@@ -26,18 +27,6 @@ const INITIAL_STATE: XLogDetailState = {
   xlog: null,
 };
 
-/**
- * endTime을 "yyyyMMdd" 형식으로 변환
- * Scouter 서버는 날짜별로 XLog를 저장하므로 필수
- */
-function toDateString(endTimeMs: number): string {
-  const d = new Date(endTimeMs);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}${mm}${dd}`;
-}
-
 export function useXLogDetail() {
   const [state, setState] = useState<XLogDetailState>(INITIAL_STATE);
   const { resolve } = useTextResolver();
@@ -47,22 +36,30 @@ export function useXLogDetail() {
 
     try {
       const date = toDateString(xlog.endTime);
-      const profile = await getXLogProfile(xlog.txid, date, xlog.objHash);
+      // 상한 없는 경로를 쓴다. `TRANX_PROFILE` 은 잘릴 수 있고, 잘렸다는 표시도 없다.
+      const profile = await getXLogFullProfile(xlog.txid, date, xlog.objHash);
 
       // Step 내 hash 수집 → 텍스트 일괄 해석
       const hashes = collectStepHashes(profile.steps);
-      const [methodTexts, sqlTexts, apicallTexts, errorTexts] = await Promise.all([
-        resolve('method', hashes.method),
-        resolve('sql', hashes.sql),
-        resolve('apicall', hashes.apicall),
-        resolve('error', hashes.error),
-      ]);
+      const [methodTexts, sqlTexts, apicallTexts, errorTexts, hmsgTexts, serviceTexts] =
+        await Promise.all([
+          resolve('method', hashes.method),
+          resolve('sql', hashes.sql),
+          resolve('apicall', hashes.apicall),
+          resolve('error', hashes.error),
+          // HashedMessageStep 전용 타입 (ASIS TextTypes.HASH_MSG)
+          resolve('hmsg', hashes.hmsg),
+          // XLog 자체의 서비스명. 이걸 안 부르면 화면에 해시가 그대로 남는다.
+          resolve('service', xlog.service ? [xlog.service] : []),
+        ]);
 
       const texts: Record<number, string> = {
         ...methodTexts,
         ...sqlTexts,
         ...apicallTexts,
         ...errorTexts,
+        ...hmsgTexts,
+        ...serviceTexts,
       };
 
       setState({ isLoading: false, error: null, profile, texts, xlog });

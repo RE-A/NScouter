@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>주문 집계 - order-app</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        table { border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: .5rem 1rem; text-align: left; }
+        th { background: #f4f4f4; }
+        nav a { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+<h1>주문 상태별 집계</h1>
+<nav>
+    <a href="/order/orders">주문</a>
+    <a href="/order/deliveries">배송</a>
+    <a href="/order/reports/daily">집계</a>
+</nav>
+<table>
+    <thead>
+    <tr><th>상태</th><th>건수</th><th>총액</th><th>평균 수량</th></tr>
+    </thead>
+    <tbody>
+    <tr th:each="r : ${rows}">
+        <td th:text="${r.status}">ORDERED</td>
+        <td th:text="${r.count}">0</td>
+        <td th:text="${r.totalPrice}">0</td>
+        <td th:text="${r.avgQuantity}">0</td>
+    </tr>
+    </tbody>
+</table>
+</body>
+</html>

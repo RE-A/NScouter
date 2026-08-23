@@ -1,0 +1,8 @@
+# 테스트용 PostgreSQL
+# 초기화 SQL을 볼륨 마운트가 아니라 이미지에 굽는다.
+# Windows 호스트 경로를 podman(WSL)에 마운트할 때 생기는 경로 변환 문제를 피하기 위함.
+FROM postgres:17-alpine
+
+COPY postgres/init/01-create-databases.sql /docker-entrypoint-initdb.d/01-create-databases.sql
+
+EXPOSE 5432

@@ -246,11 +246,13 @@ fn handle_client(stream: TcpStream) {
         // 3. 요청별 응답 생성
         let response = match cmd.as_str() {
             CMD_LOGIN => make_login_response(),
-            CMD_GET_OBJECT_LIST_REAL_TIME => make_object_list_response(),
+            CMD_OBJECT_LIST_REAL_TIME => make_object_list_response(),
             CMD_TRANX_REAL_TIME_GROUP | CMD_TRANX_REAL_TIME_GROUP_LATEST => {
                 make_xlog_stream_response()
             }
             CMD_GET_TEXT_100 => make_get_text_response(&param),
+            // 테스트 전용 — 실제 콜렉터에는 없는 명령이다 (O-5 재현)
+            "MOCK_UNKNOWN_PACK" => make_unknown_pack_response(),
             _ => {
                 let mut w = ScouterWriter::new();
                 w.write_unsigned_byte(FLAG_NO_NEXT);
@@ -281,14 +283,42 @@ fn make_login_response() -> Vec<u8> {
 
 /// 오브젝트 목록 응답: 1개의 mock 오브젝트
 fn make_object_list_response() -> Vec<u8> {
-    let mut obj = MapPack::new();
-    obj.put("objHash", ScouterValue::Decimal(1001));
-    obj.put("objName", ScouterValue::Text("mock-app".to_string()));
-    obj.put("objType", ScouterValue::Text("javaee".to_string()));
-
     let mut w = ScouterWriter::new();
     w.write_unsigned_byte(FLAG_HAS_NEXT);
-    obj.write(&mut w);
+    w.write_unsigned_byte(PACK_OBJECT);
+    write_object_pack_body(&mut w, "tomcat", 1001, "/mock-host/mock-app");
+    w.write_unsigned_byte(FLAG_NO_NEXT);
+    w.into_bytes()
+}
+
+/// ObjectPack 본문. **필드 순서와 길이 종류가 실제와 같아야 한다** — 그래야
+/// 이 mock 이 회귀를 잡는다.
+///
+/// 이전에는 MapPack(`objHash`/`objName`/`objType` 키)으로 응답했다. 실제 콜렉터는
+/// PackType 80 의 ObjectPack 을 보내므로, mock 은 통과하는데 실서버에서 깨지는
+/// 상태였다 — F-4 회귀를 잡지 못했다 (O-2).
+///
+/// ASIS: `scouter.lang.pack.ObjectPack.write(DataOutputX)`
+fn write_object_pack_body(w: &mut ScouterWriter, obj_type: &str, obj_hash: i32, obj_name: &str) {
+    w.write_text(obj_type);
+    w.write_decimal(obj_hash as i64);
+    w.write_text(obj_name);
+    w.write_text("127.0.0.1");
+    w.write_text("2.21.3");
+    w.write_boolean(true);
+    w.write_decimal(0); // wakeup
+    ScouterValue::Map(HashMap::new()).write_to(w); // tags
+}
+
+/// O-5 재현용: 파서가 모르는 PackType 을 보낸다.
+///
+/// 이 프로토콜은 팩 길이를 앞에 두지 않아 **모르는 팩은 건너뛸 수 없다.**
+/// 조용히 넘어가면 이후 스트림 전체가 어긋나므로 에러여야 한다.
+fn make_unknown_pack_response() -> Vec<u8> {
+    let mut w = ScouterWriter::new();
+    w.write_unsigned_byte(FLAG_HAS_NEXT);
+    w.write_unsigned_byte(0xEE); // 정의되지 않은 타입
+    w.write_text("본문이 있지만 길이를 알 수 없다");
     w.write_unsigned_byte(FLAG_NO_NEXT);
     w.into_bytes()
 }

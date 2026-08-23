@@ -1,0 +1,40 @@
+server:
+  port: 8081
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: shop-app
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:shopdb}
+    username: ${DB_USER:scouter}
+    password: ${DB_PASSWORD:scouter}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # **Scouter 의 datasource 카운터(ConnActive/ConnIdle/ConnMax)는 JMX 로 읽는다.**
+      # HikariCP 기본값이 false 라 MBean 이 없으면 에이전트가 풀을 못 찾고,
+      # 커넥션 풀 카운터가 통째로 0건이 된다 (증상: 서브오브젝트 tomcat_ds 미등록).
+      register-mbeans: true
+      maximum-pool-size: 10
+      # DB 기동 대기. 컨테이너 순서가 어긋나도 앱이 곧바로 죽지 않게 한다.
+      initialization-fail-timeout: 60000
+      connection-timeout: 10000
+
+  jpa:
+    # 방언은 Hibernate 가 드라이버로 자동 판별한다 (PostgreSQLDialect).
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+
+  thymeleaf:
+    cache: false
+
+logging:
+  level:
+    root: INFO
+    com.nscouter.test.shop: INFO

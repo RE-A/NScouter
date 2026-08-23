@@ -1,0 +1,36 @@
+# order-app — 주문/배송 도메인, shop-app 호출 + Scouter Java Agent
+# 빌드 컨텍스트는 Test/ 루트다 (vendor/scouter/agent.java 를 함께 복사해야 하므로).
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /build
+
+COPY apps/order/pom.xml ./pom.xml
+RUN mvn -B dependency:go-offline
+
+COPY apps/order/src ./src
+RUN mvn -B clean package -DskipTests
+
+# **JRE 가 아니라 JDK 다.** 이유는 apps/shop/Containerfile 참조 (jdk.attach 모듈).
+FROM eclipse-temurin:17-jdk
+WORKDIR /app
+
+COPY --from=build /build/target/order-app-1.0.0.jar /app/app.jar
+
+COPY vendor/scouter/agent.java/scouter.agent.jar /scouter/scouter.agent.jar
+COPY agent/order.conf /scouter/conf/order.conf
+
+RUN mkdir -p /data /scouter/logs
+
+EXPOSE 8082
+
+# Metaspace 상한을 못 박는다.
+# 에이전트의 PermGen 태스크는 이름에 METASPACE 가 든 MemoryPoolMXBean 을 찾아
+# PermUsed 를 올리지만, **PermPercent 는 usage.getMax() != -1 일 때만** 올린다.
+# 자바 기본값은 상한 없음(-1)이라 이 옵션이 없으면 PermPercent 가 영원히 안 온다 (F-43).
+ENTRYPOINT ["java", \
+    "-XX:MaxMetaspaceSize=256m", \
+    "-javaagent:/scouter/scouter.agent.jar", \
+    "-Dscouter.config=/scouter/conf/order.conf", \
+    "-Djdk.attach.allowAttachSelf=true", \
+    "--add-opens=java.base/java.lang=ALL-UNNAMED", \
+    "--add-exports=java.base/sun.net=ALL-UNNAMED", \
+    "-jar", "/app/app.jar"]

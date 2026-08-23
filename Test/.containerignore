@@ -1,0 +1,8 @@
+PLAN.md
+README.md
+NSCOUTER-ISSUES.md
+scripts/
+**/target/
+**/*.db
+**/*.db-shm
+**/*.db-wal
