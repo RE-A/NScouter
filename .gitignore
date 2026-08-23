@@ -46,3 +46,5 @@ ASIS/
 # vendor/ 는 65MB 다. scripts/fetch-scouter.ps1 로 받는다 (Test/README.md)
 Test/vendor/
 Test/apps/*/target/
+__pycache__/
+*.pyc
