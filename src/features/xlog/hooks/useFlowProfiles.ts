@@ -21,6 +21,8 @@ export interface FlowProfilesState {
   profiles: Map<string, ProfileStep[]>;
   /** sql / apicall hash → 텍스트 */
   texts: Record<number, string>;
+  /** 프로파일을 못 받은 트랜잭션 수. 그만큼 잎이 빠져 있다 */
+  failed: number;
 }
 
 const EMPTY: FlowProfilesState = {
@@ -28,6 +30,7 @@ const EMPTY: FlowProfilesState = {
   error: null,
   profiles: new Map(),
   texts: {},
+  failed: 0,
 };
 
 export function useFlowProfiles(rows: readonly SXLog[], enabled: boolean): FlowProfilesState {
@@ -48,17 +51,36 @@ export function useFlowProfiles(rows: readonly SXLog[], enabled: boolean): FlowP
 
     (async () => {
       try {
-        const packs = await Promise.all(
+        // 한 건이 실패했다고 전부 버리면 **멀쩡히 받은 나머지까지 화면에서 사라진다.**
+        // 샘플링에서 빠졌거나 보관 기간이 지난 프로파일은 흔하다.
+        const results = await Promise.allSettled(
           rows.map(r => getXLogFullProfile(r.txid, yyyymmdd(r.endTime), r.objHash)),
         );
         if (!alive) return;
 
         const profiles = new Map<string, ProfileStep[]>();
         const all: ProfileStep[] = [];
+        let failed = 0;
+        let firstReason = '';
         rows.forEach((r, i) => {
-          profiles.set(r.txid, packs[i].steps);
-          all.push(...packs[i].steps);
+          const res = results[i];
+          if (res.status !== 'fulfilled') {
+            failed += 1;
+            if (!firstReason) {
+              firstReason =
+                res.reason instanceof Error ? res.reason.message : String(res.reason);
+            }
+            return;
+          }
+          profiles.set(r.txid, res.value.steps);
+          all.push(...res.value.steps);
         });
+
+        // 하나도 못 받았으면 그릴 잎이 없다 — 그때는 이유를 말한다.
+        if (profiles.size === 0) {
+          setState({ ...EMPTY, error: firstReason || '프로파일을 받지 못했습니다' });
+          return;
+        }
 
         const hashes = collectStepHashes(all);
         const [sqlTexts, apiTexts] = await Promise.all([
@@ -67,7 +89,13 @@ export function useFlowProfiles(rows: readonly SXLog[], enabled: boolean): FlowP
         ]);
         if (!alive) return;
 
-        setState({ loading: false, error: null, profiles, texts: { ...sqlTexts, ...apiTexts } });
+        setState({
+          loading: false,
+          error: null,
+          profiles,
+          texts: { ...sqlTexts, ...apiTexts },
+          failed,
+        });
       } catch (err) {
         if (!alive) return;
         setState({ ...EMPTY, error: err instanceof Error ? err.message : String(err) });
