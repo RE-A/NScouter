@@ -11,9 +11,12 @@ import { searchProfiles, type ProfileHit, type SearchTarget } from '../api/scout
  * 한 번에 보낼 건수.
  *
  * 크면 진행률이 뚝뚝 끊기고 취소가 늦게 듣는다. 작으면 IPC 왕복이 늘어난다.
- * 25건이면 로컬 콜렉터에서 대략 0.3초 — 사람이 "멈췄다"고 느끼기 전이다.
+ *
+ * 백엔드가 묶음 하나를 워커 8개로 나눠 받으므로(SEARCH_WORKERS) **묶음이 작으면
+ * 워커가 놀고 IPC 왕복만 남는다.** 100건이면 워커당 12~13건,
+ * 로컬 콜렉터에서 대략 0.1초 — 진행률도 끊기지 않고 취소도 그 안에 듣는다.
  */
-const BATCH = 25;
+const BATCH = 100;
 
 export interface SearchProgress {
   /** 훑은 건수 */

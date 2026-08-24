@@ -5212,3 +5212,207 @@ fn live_flow_threadcall_links_child_xlog() {
         "ThreadCall 의 txid 가 부모 gxid 그룹에 없다 — 흐름 트리는 잎으로만 그릴 수 있다"
     );
 }
+
+/// 프로파일 검색이 왜 느린가 — 건당 비용과 병렬 이득 측정.
+///
+/// 검색은 **트랜잭션 하나당 요청 하나**다. 그리고 F-1 때문에 요청마다
+/// 소켓을 새로 연다. 그래서 대상이 2,000건이면 왕복도 2,000번이다.
+/// 여기서 재는 것: 순차 처리량, 병렬 처리량, 그리고 소켓 여는 비용의 몫.
+#[test]
+#[ignore]
+fn probe_search_throughput() {
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::profile::parse_profile_steps;
+    use nscouter_lib::scouter::profile::build_full_profile_param;
+    use std::time::Instant;
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+
+    let param = build_past_xlog_param(
+        &hashes,
+        &date,
+        now - 10 * 60 * 1000,
+        now,
+        400,
+        &PastCursor::default(),
+    );
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+    let mut txids = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            txids.push(x.txid);
+        }
+    }
+    let n = txids.len().min(400);
+    let sample: Vec<i64> = txids.into_iter().take(n).collect();
+    println!("표본 {n}건");
+
+    // ── 1) 소켓만 여닫는 비용 ────────────────────────────────
+    let t = Instant::now();
+    for _ in 0..n {
+        let _ = std::net::TcpStream::connect((HOST, PORT)).expect("연결 실패");
+    }
+    let connect_only = t.elapsed();
+    println!(
+        "소켓만 {n}회: {:?} (건당 {:.1}ms)",
+        connect_only,
+        connect_only.as_secs_f64() * 1000.0 / n as f64
+    );
+
+    // ── 2) 순차 프로파일 조회 ────────────────────────────────
+    let t = Instant::now();
+    let mut ok = 0usize;
+    let mut steps_total = 0usize;
+    for txid in &sample {
+        if conn.send_request(CMD_TRANX_PROFILE_FULL, session, &build_full_profile_param(&date, *txid)).is_err() {
+            continue;
+        }
+        if let Ok(blob) = conn.read_blob_stream() {
+            steps_total += parse_profile_steps(blob).len();
+            ok += 1;
+        }
+    }
+    let seq = t.elapsed();
+    println!(
+        "순차 {ok}건: {:?} (건당 {:.1}ms, 스텝 {steps_total}개)",
+        seq,
+        seq.as_secs_f64() * 1000.0 / ok.max(1) as f64
+    );
+
+    // ── 3) 병렬 조회 (스레드마다 자기 연결, 세션은 공유) ─────
+    for workers in [4usize, 8, 16] {
+        let t = Instant::now();
+        let chunks: Vec<Vec<i64>> = (0..workers)
+            .map(|w| sample.iter().skip(w).step_by(workers).copied().collect())
+            .collect();
+
+        let done: usize = std::thread::scope(|s| {
+            let handles: Vec<_> = chunks
+                .into_iter()
+                .map(|part| {
+                    let date = date.clone();
+                    s.spawn(move || {
+                        let mut c = match ScouterConnection::connect(HOST, PORT) {
+                            Ok(c) => c,
+                            Err(_) => return 0usize,
+                        };
+                        // 세션은 소켓과 무관하게 재사용된다 (F-1)
+                        c.session = session;
+                        let mut cnt = 0usize;
+                        for txid in part {
+                            if c.send_request(
+                                CMD_TRANX_PROFILE_FULL,
+                                session,
+                                &build_full_profile_param(&date, txid),
+                            )
+                            .is_err()
+                            {
+                                continue;
+                            }
+                            if c.read_blob_stream().is_ok() {
+                                cnt += 1;
+                            }
+                        }
+                        cnt
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap_or(0)).sum()
+        });
+
+        let par = t.elapsed();
+        println!(
+            "병렬 {workers}: {done}건 {:?} (건당 {:.1}ms, 순차 대비 {:.1}배)",
+            par,
+            par.as_secs_f64() * 1000.0 / done.max(1) as f64,
+            seq.as_secs_f64() / par.as_secs_f64()
+        );
+    }
+}
+
+/// 병렬 프로파일 조회가 **순차와 같은 결과**를 주는가, 그리고 실제로 빠른가.
+///
+/// 빨라지기만 하고 결과가 달라지면 검색이 거짓말을 한다.
+/// 그래서 속도보다 **같은 txid 에 같은 스텝 수**가 먼저다.
+#[test]
+#[ignore]
+fn live_search_parallel_matches_sequential() {
+    use nscouter_lib::commands::{fetch_profiles_parallel, SearchTarget};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use std::time::Instant;
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+
+    let param = build_past_xlog_param(
+        &hashes,
+        &date,
+        now - 10 * 60 * 1000,
+        now,
+        200,
+        &PastCursor::default(),
+    );
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+    let mut targets = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            targets.push(SearchTarget {
+                txid: x.txid.to_string(),
+                obj_hash: x.obj_hash,
+                date: date.clone(),
+            });
+        }
+    }
+    let targets: Vec<SearchTarget> = targets.into_iter().take(80).collect();
+    assert!(!targets.is_empty(), "대상 트랜잭션이 없다");
+
+    // 순차 (워커 1개 = 예전 동작)
+    let t = Instant::now();
+    let seq = fetch_profiles_parallel(HOST, PORT, session, &targets, 1);
+    let seq_ms = t.elapsed();
+
+    // 병렬
+    let t = Instant::now();
+    let par = fetch_profiles_parallel(HOST, PORT, session, &targets, 8);
+    let par_ms = t.elapsed();
+
+    assert_eq!(seq.len(), targets.len(), "순차 결과 수가 대상 수와 다르다");
+    assert_eq!(par.len(), targets.len(), "병렬 결과 수가 대상 수와 다르다");
+
+    // **순서가 유지돼야 한다** — 결과를 txid 와 다시 짝지을 때 어긋나면 엉뚱한 적중이 된다
+    let mut compared = 0usize;
+    for (i, t) in targets.iter().enumerate() {
+        match (&seq[i], &par[i]) {
+            (Some(a), Some(b)) => {
+                assert_eq!(a.len(), b.len(), "txid={} 스텝 수가 다르다", t.txid);
+                compared += 1;
+            }
+            (None, None) => {}
+            // 한쪽만 실패하는 건 순간적인 조회 실패일 수 있어 세지 않는다
+            _ => {}
+        }
+    }
+    assert!(compared > 0, "양쪽 다 성공한 프로파일이 하나도 없다");
+
+    println!(
+        "{}건 · 순차 {:?} · 병렬8 {:?} ({:.1}배) · 비교 {compared}건",
+        targets.len(),
+        seq_ms,
+        par_ms,
+        seq_ms.as_secs_f64() / par_ms.as_secs_f64().max(0.000_001)
+    );
+    assert!(par_ms < seq_ms, "병렬이 순차보다 느리다 — 병렬화가 동작하지 않는다");
+}

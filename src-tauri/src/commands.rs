@@ -901,7 +901,7 @@ pub async fn get_xlog_profile(
 // ─── search_profiles ─────────────────────────────────────────
 
 /// 검색 대상 한 건.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct SearchTarget {
     /// i64 를 JS 숫자로 넘기면 정밀도가 깨진다
     pub txid: String,
@@ -940,44 +940,64 @@ pub async fn search_profiles(
     targets: Vec<SearchTarget>,
     query: String,
 ) -> Result<SearchBatch, String> {
-    use crate::scouter::profile_search::{collect_hashes, search_steps, StepTexts};
+    use crate::scouter::profile_search::{collect_hashes, search_steps, StepHashes, StepTexts};
 
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
         return Ok(SearchBatch { hits: Vec::new(), failed: 0 });
     }
 
-    let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
-    let mut cache = state.text_cache.lock().await;
+    // 접속 정보만 잠깐 빌린다. **훑는 동안 커넥션을 쥐고 있지 않는다** —
+    // 예전에는 검색이 끝날 때까지 상세 열기가 뒤에서 기다렸다.
+    let session = {
+        let guard = state.connection.lock().await;
+        guard.as_ref().ok_or("연결되지 않음")?.session
+    };
+    let host = state.conn_host.lock().await.clone();
+    let port = *state.conn_port.lock().await;
 
-    let mut hits = Vec::new();
-    let mut failed = 0usize;
+    // 1) 프로파일은 워커 여러 개로 나눠 받는다. 여기가 검색 시간의 거의 전부다.
+    let fetch_targets = targets.clone();
+    let fetched = tokio::task::spawn_blocking(move || {
+        fetch_profiles_parallel(&host, port, session, &fetch_targets, SEARCH_WORKERS)
+    })
+    .await
+    .map_err(|e| format!("검색 작업 실패: {e}"))?;
 
-    for t in &targets {
-        let Ok(txid_i64) = t.txid.parse::<i64>() else {
-            failed += 1;
-            continue;
-        };
+    let failed = fetched.iter().filter(|f| f.is_none()).count();
 
-        // **한 건이 실패해도 묶음 전체를 버리지 않는다.** 지워진 트랜잭션이 섞이는 건
-        // 정상이고, 그때마다 검색이 중단되면 쓸 수가 없다.
-        let steps = match fetch_profile_steps(conn, txid_i64, &t.date, t.obj_hash) {
-            Ok(v) => v,
-            Err(_) => {
-                failed += 1;
-                continue;
-            }
-        };
+    // 2) 사전은 **한 번에 모아** 푼다. 프로파일마다 묻던 것을 묶으면 왕복이 크게 준다.
+    //    종류를 섞으면 에러 없이 빈 결과가 온다 (F-15).
+    let mut want = StepHashes::default();
+    for steps in fetched.iter().flatten() {
+        let h = collect_hashes(steps);
+        want.method.extend(h.method);
+        want.sql.extend(h.sql);
+        want.apicall.extend(h.apicall);
+        want.error.extend(h.error);
+        want.hmsg.extend(h.hmsg);
+    }
+    for list in [
+        &mut want.method,
+        &mut want.sql,
+        &mut want.apicall,
+        &mut want.error,
+        &mut want.hmsg,
+    ] {
+        list.sort_unstable();
+        list.dedup();
+    }
 
-        // 사전을 먼저 채운다. 종류를 섞으면 에러 없이 빈 결과가 온다 (F-15).
-        let h = collect_hashes(&steps);
+    {
+        let mut conn_guard = state.connection.lock().await;
+        let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
+        let mut cache = state.text_cache.lock().await;
         for (key, list) in [
-            (text_type::METHOD, &h.method),
-            (text_type::SQL, &h.sql),
-            (text_type::APICALL, &h.apicall),
-            (text_type::ERROR, &h.error),
-            (text_type::HASH_MSG, &h.hmsg),
+            (text_type::METHOD, &want.method),
+            (text_type::SQL, &want.sql),
+            (text_type::APICALL, &want.apicall),
+            (text_type::ERROR, &want.error),
+            (text_type::HASH_MSG, &want.hmsg),
         ] {
             let missing = cache.missing(key, list);
             if !missing.is_empty() {
@@ -985,15 +1005,22 @@ pub async fn search_profiles(
                 let _ = fetch_texts(conn, &mut cache, key, &missing);
             }
         }
+    }
 
-        let mf = |x: i32| cache.get(text_type::METHOD, x).map(|s| s.to_string());
-        let sf = |x: i32| cache.get(text_type::SQL, x).map(|s| s.to_string());
-        let af = |x: i32| cache.get(text_type::APICALL, x).map(|s| s.to_string());
-        let ef = |x: i32| cache.get(text_type::ERROR, x).map(|s| s.to_string());
-        let hf = |x: i32| cache.get(text_type::HASH_MSG, x).map(|s| s.to_string());
-        let texts = StepTexts { method: &mf, sql: &sf, apicall: &af, error: &ef, hmsg: &hf };
+    // 3) 맞춰 보는 데는 네트워크가 필요 없다. 사전만 읽으면 된다.
+    let cache = state.text_cache.lock().await;
+    let mf = |x: i32| cache.get(text_type::METHOD, x).map(|s| s.to_string());
+    let sf = |x: i32| cache.get(text_type::SQL, x).map(|s| s.to_string());
+    let af = |x: i32| cache.get(text_type::APICALL, x).map(|s| s.to_string());
+    let ef = |x: i32| cache.get(text_type::ERROR, x).map(|s| s.to_string());
+    let hf = |x: i32| cache.get(text_type::HASH_MSG, x).map(|s| s.to_string());
+    let texts = StepTexts { method: &mf, sql: &sf, apicall: &af, error: &ef, hmsg: &hf };
 
-        let found = search_steps(&steps, &texts, &needle);
+    // 순서는 targets 그대로다 — 화면이 목록 순서로 결과를 쌓는다.
+    let mut hits = Vec::new();
+    for (t, steps) in targets.iter().zip(fetched.iter()) {
+        let Some(steps) = steps else { continue };
+        let found = search_steps(steps, &texts, &needle);
         if let Some(first) = found.first() {
             hits.push(ProfileHit {
                 txid: t.txid.clone(),
@@ -1010,6 +1037,72 @@ pub async fn search_profiles(
         failed
     );
     Ok(SearchBatch { hits, failed })
+}
+
+/// 검색이 동시에 여는 커넥션 수.
+///
+/// 요청마다 소켓을 새로 여는 구조(F-1)라 **동시에 보내면 그만큼 빨라진다.**
+/// 실측(`probe_search_throughput`): 순차 4.0ms/건, 워커 8에서 1.0ms/건(3.9배),
+/// 워커 16에서 0.8ms/건(5.3배). 16이 조금 더 빠르지만 그만큼 콜렉터의
+/// 동시 연결을 쓴다 — 운영 서버를 생각해 8로 둔다.
+pub const SEARCH_WORKERS: usize = 8;
+
+/// 프로파일을 워커 여러 개로 나눠 받는다. **결과는 `targets` 순서 그대로**다.
+///
+/// 순서가 어긋나면 엉뚱한 트랜잭션이 적중으로 표시되므로 자리를 들고 다닌다.
+/// 세션은 소켓과 무관하게 재사용되므로(F-1) 워커마다 다시 로그인하지 않는다.
+///
+/// 한 건이 실패해도 그 자리만 `None` 이다 — 지워진 트랜잭션이 섞이는 건 정상이고,
+/// 그때마다 검색이 멈추면 쓸 수가 없다.
+pub fn fetch_profiles_parallel(
+    host: &str,
+    port: u16,
+    session: i64,
+    targets: &[SearchTarget],
+    workers: usize,
+) -> Vec<Option<Vec<crate::scouter::profile::ProfileStep>>> {
+    let mut out: Vec<Option<Vec<crate::scouter::profile::ProfileStep>>> =
+        targets.iter().map(|_| None).collect();
+    if targets.is_empty() {
+        return out;
+    }
+    let workers = workers.clamp(1, targets.len());
+
+    let collected: Vec<(usize, Option<Vec<crate::scouter::profile::ProfileStep>>)> =
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..workers)
+                .map(|w| {
+                    // 라운드로빈으로 나눈다 — 무거운 트랜잭션이 앞쪽에 몰려 있어도
+                    // 한 워커만 오래 붙잡히지 않는다.
+                    let part: Vec<(usize, &SearchTarget)> =
+                        targets.iter().enumerate().skip(w).step_by(workers).collect();
+                    scope.spawn(move || {
+                        let mut conn = match ScouterConnection::connect(host, port) {
+                            Ok(c) => c,
+                            // 연결 자체가 안 되면 이 몫은 전부 실패로 남는다
+                            Err(_) => {
+                                return part.into_iter().map(|(i, _)| (i, None)).collect::<Vec<_>>()
+                            }
+                        };
+                        conn.session = session;
+                        part.into_iter()
+                            .map(|(i, t)| {
+                                let steps = t.txid.parse::<i64>().ok().and_then(|txid| {
+                                    fetch_profile_steps(&mut conn, txid, &t.date, t.obj_hash).ok()
+                                });
+                                (i, steps)
+                            })
+                            .collect()
+                    })
+                })
+                .collect();
+            handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+        });
+
+    for (i, steps) in collected {
+        out[i] = steps;
+    }
+    out
 }
 
 /// 프로파일 스텝만 꺼낸다 (검색용).
