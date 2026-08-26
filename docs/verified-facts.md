@@ -617,6 +617,32 @@ ASIS 는 프로파일 텍스트에서 `thread:...<Hexa32>` 패턴을 정규식�
 - 구현: `scouter/profile.rs` `ThreadCallProfileStep`, 화면은 `ProfileStepList` 의 링크
 - 재현: `cargo test --test live_collector live_thread_call_steps -- --ignored`
 
+### F-50. 서비스 계층 예외는 **어느 스텝에도 없다** — XLog 의 `error` 를 따로 풀어야 한다
+
+컨트롤러/서비스에서 터진 예외는 실패한 SQL·API 스텝을 남기지 않는다.
+에러 해시는 **XLogPack 의 `error` 에만** 있다.
+
+실측(최근 12초, 에러 트랜잭션 12건 중 표본 10건):
+
+```
+txid=3863402092026204322 error=0xdb873d22 스텝에 없음
+  사전=jakarta.servlet.ServletException: … java.lang.IllegalStateException: 의도적
+txid=8995924711974186604 error=0x67a9f531 스텝에 없음
+  사전=jakarta.servlet.ServletException: … java.lang.NullPointerException: …
+```
+
+**10건 전부 스텝에 없었다.** 사전에는 멀쩡히 들어 있다 — 조회를 안 했을 뿐이다.
+
+그래서 프로파일 스텝에서만 에러 해시를 모으면 이런 트랜잭션은 화면에
+`[0xdb873d22]` 만 남는다. 빨간 점으로 잡혀 열어 봤는데 무엇이 실패했는지
+알 수 없는 상태가 된다.
+
+반대로 `Read timed out` 처럼 **ApiCall·SQL 스텝이 들고 있는** 에러는 스텝 수집만으로도 풀린다.
+그래서 어떤 에러는 보이고 어떤 에러는 안 보이는, 헷갈리는 모양이 된다.
+
+- 구현: `src/features/xlog/hooks/useXLogDetail.ts` — 스텝 해시에 `xlog.error` 를 더한다
+- 재현: `cargo test --test live_collector live_service_error_not_on_steps -- --ignored --nocapture`
+
 ### F-49. 에이전트가 리터럴을 빼내면 `@{n}` 이 남는다 — **문자열은 따옴표가 문장 쪽에 남는다**
 
 `profile_sql_escape_enabled=true` 인 에이전트는 SQL 의 리터럴을 빼내 파라미터로 따로 보낸다

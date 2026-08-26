@@ -41,12 +41,20 @@ export function useXLogDetail() {
 
       // Step 내 hash 수집 → 텍스트 일괄 해석
       const hashes = collectStepHashes(profile.steps);
+
+      // **XLog 자체의 에러 해시도 넣는다.**
+      // 스텝에서만 모으면 실패한 SQL·API 가 없는 트랜잭션(서비스 계층에서 난 예외)은
+      // 화면에 `[0x1a2b3c]` 만 남는다 — "에러라는데 에러가 안 보인다" 가 이것이다.
+      const errorHashes =
+        xlog.error !== 0 && !hashes.error.includes(xlog.error)
+          ? [...hashes.error, xlog.error]
+          : hashes.error;
       const [methodTexts, sqlTexts, apicallTexts, errorTexts, hmsgTexts, serviceTexts] =
         await Promise.all([
           resolve('method', hashes.method),
           resolve('sql', hashes.sql),
           resolve('apicall', hashes.apicall),
-          resolve('error', hashes.error),
+          resolve('error', errorHashes),
           // HashedMessageStep 전용 타입 (ASIS TextTypes.HASH_MSG)
           resolve('hmsg', hashes.hmsg),
           // XLog 자체의 서비스명. 이걸 안 부르면 화면에 해시가 그대로 남는다.

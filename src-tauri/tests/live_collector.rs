@@ -5563,3 +5563,94 @@ fn live_sql_literal_escape() {
         "literal-sql 쿼리를 못 찾았다 — shop-app 이 떠 있고 profile_sql_escape_enabled 가 켜져 있는지 볼 것"
     );
 }
+
+/// 에러 해시가 **프로파일 스텝에는 없는** 트랜잭션이 실제로 있는가 (B-2).
+///
+/// 서비스 계층에서 난 예외는 실패한 SQL·API 스텝이 없다. 그래서 화면이 스텝에서만
+/// 에러 해시를 모으면 그 트랜잭션은 "에러라는데 에러가 안 보이는" 상태가 된다.
+/// XLog 자체의 `error` 를 따로 풀어야 한다는 근거다.
+#[test]
+#[ignore]
+fn live_service_error_not_on_steps() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
+    use nscouter_lib::scouter::protocol::text_type;
+
+    // 서비스 계층에서 터지는 예외를 만든다 (실패한 스텝이 생기지 않는다)
+    for _ in 0..4 {
+        let _ = http_get("127.0.0.1", 8081, "/shop/lab/error?type=npe");
+    }
+    std::thread::sleep(std::time::Duration::from_secs(5));
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+
+    let param =
+        build_past_xlog_param(&hashes, &date, now - 12 * 1000, now, 400, &PastCursor::default());
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+
+    let mut errored = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            if x.error != 0 {
+                errored.push((x.txid, x.error));
+            }
+        }
+    }
+    assert!(!errored.is_empty(), "에러 트랜잭션이 없다 — 에러 엔드포인트가 도는지 확인할 것");
+    println!("에러 트랜잭션 {}건", errored.len());
+
+    let mut cache = TextCache::new();
+    let mut only_on_xlog = 0usize;
+
+    for (txid, err_hash) in errored.iter().take(10) {
+        let mut c = login();
+        let cs = c.session;
+        if c
+            .send_request(CMD_TRANX_PROFILE_FULL, cs, &build_full_profile_param(&date, *txid))
+            .is_err()
+        {
+            continue;
+        }
+        let steps = match c.read_blob_stream() {
+            Ok(b) => parse_profile_steps(b),
+            Err(_) => continue,
+        };
+
+        // 스텝이 그 에러를 들고 있나
+        let on_step = steps.iter().any(|s| match s {
+            ProfileStep::Sql(x) => x.error == *err_hash,
+            ProfileStep::ApiCall(x) => x.error == *err_hash,
+            _ => false,
+        });
+        if on_step {
+            continue;
+        }
+        only_on_xlog += 1;
+
+        let missing = cache.missing(text_type::ERROR, &[*err_hash]);
+        if !missing.is_empty() {
+            let _ = fetch_texts(&mut c, &mut cache, text_type::ERROR, &missing);
+        }
+        if only_on_xlog <= 3 {
+            println!(
+                "   txid={txid} error=0x{:x} 스텝에 없음 · 사전={:?}",
+                err_hash,
+                cache.get(text_type::ERROR, *err_hash).map(|s| s.lines().next().unwrap_or("").to_string())
+            );
+        }
+    }
+
+    assert!(
+        only_on_xlog > 0,
+        "에러가 전부 스텝에도 있었다 — 이 경우라면 스텝만 풀어도 화면에 보인다"
+    );
+    println!("스텝에 없는 에러 {only_on_xlog}건 — XLog 의 error 를 따로 풀어야 한다");
+}
