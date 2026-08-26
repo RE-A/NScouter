@@ -5,6 +5,7 @@
 
 import { memo, useState } from 'react';
 import type { ProfileSearchState } from '../hooks/useProfileSearch';
+import { t } from '../../../i18n';
 
 interface XLogSearchBarProps {
   /** 훑을 대상 수. 0 이면 검색할 수 없다 */
@@ -28,7 +29,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-1">
-      <span className="text-micro text-fg-dim">프로파일 검색</span>
+      <span className="text-micro text-fg-dim">{t('프로파일 검색')}</span>
 
       <input
         type="text"
@@ -36,7 +37,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
         spellCheck={false}
         disabled={disabled}
         placeholder={disabled ? '먼저 차트에서 구간을 드래그하세요' : 'SQL·예외·URL 일부'}
-        title="선택한 구간의 트랜잭션 프로파일 안에서 찾습니다"
+        title={t('선택한 구간의 트랜잭션 프로파일 안에서 찾습니다')}
         onChange={e => setDraft(e.target.value)}
         onKeyDown={e => {
           if (e.key === 'Enter' && canRun) onRun(draft);
@@ -70,7 +71,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
       {state.progress && (
         <span className="tnum font-mono text-micro text-fg-dim">
           {state.progress.done.toLocaleString()} / {state.progress.total.toLocaleString()}
-          {state.running ? ' 훑는 중…' : ' 완료'} · 적중 {state.hits.length.toLocaleString()}건
+          {state.running ? t(' 훑는 중…') : t(' 완료')} · 적중 {state.hits.length.toLocaleString()}건
           {/* 못 읽은 건을 조용히 빼면 "안 걸렸다"와 구별되지 않는다 */}
           {state.progress.failed > 0 && (
             <span className="text-warn"> · 못 읽음 {state.progress.failed.toLocaleString()}</span>

@@ -3,12 +3,13 @@
 import React, { useState } from 'react';
 import { setLogLevel, type LogLevel } from '../api/scouterApi';
 import { T, F } from '../../../styles/tokens';
+import { t } from '../../../i18n';
 
 const LEVELS: { value: LogLevel; label: string }[] = [
-  { value: 'error', label: 'ERROR (일반)' },
+  { value: 'error', label: t('ERROR (일반)') },
   { value: 'warn',  label: 'WARN' },
   { value: 'info',  label: 'INFO' },
-  { value: 'debug', label: 'DEBUG (개발)' },
+  { value: 'debug', label: t('DEBUG (개발)') },
   { value: 'trace', label: 'TRACE' },
 ];
 

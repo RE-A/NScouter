@@ -8,6 +8,7 @@ import { memo, useMemo, useState } from 'react';
 import type { ProfileStep } from '../types/profile';
 import { sortSummary, summarizeSteps, type SummarySort } from './profileSummary';
 import { durationTone } from './durationTone';
+import { t } from '../../../i18n';
 
 interface ProfileSummaryTableProps {
   steps: ProfileStep[];
@@ -49,7 +50,7 @@ export const ProfileSummaryTable = memo(function ProfileSummaryTable({
   const sorted = useMemo(() => sortSummary(rows, by), [rows, by]);
 
   if (sorted.length === 0) {
-    return <p className="px-2 py-6 text-center text-body text-fg-faint">요약할 스텝이 없습니다</p>;
+    return <p className="px-2 py-6 text-center text-body text-fg-faint">{t('요약할 스텝이 없습니다')}</p>;
   }
 
   return (
@@ -73,10 +74,10 @@ export const ProfileSummaryTable = memo(function ProfileSummaryTable({
       {/* 열 제목은 한 번만. 값이 숫자라 단위는 제목이 진다 */}
       <div className="grid grid-cols-[28px_minmax(0,1fr)_40px_56px_56px] gap-x-2 border-b border-line px-2 pb-0.5 text-micro text-fg-dim">
         <span />
-        <span>내용</span>
-        <span className="text-right">횟수</span>
-        <span className="text-right">합계</span>
-        <span className="text-right">평균</span>
+        <span>{t('내용')}</span>
+        <span className="text-right">{t('횟수')}</span>
+        <span className="text-right">{t('합계')}</span>
+        <span className="text-right">{t('평균')}</span>
       </div>
 
       <ol className="divide-y divide-line/60">

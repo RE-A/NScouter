@@ -34,6 +34,12 @@ pub struct AppConfig {
     /// 밀도를 위해 작게 잡은 화면이라 오래 보면 읽기 힘들다는 이야기가 있어 둔다.
     #[serde(default = "default_font_scale")]
     pub ui_font_scale: f32,
+    /// 화면 언어. `"ko"` 또는 `"en"`.
+    ///
+    /// Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같다.
+    /// 바뀌는 건 우리가 붙인 설명과 레이블이다.
+    #[serde(default = "default_lang")]
+    pub ui_language: String,
 }
 
 /// serde 기본값용. **`Default` 파생만으로는 false 가 된다** —
@@ -45,6 +51,11 @@ fn default_true() -> bool {
 /// 같은 이유로 파생 기본값(0.0)을 쓰면 글자가 사라진다.
 fn default_font_scale() -> f32 {
     1.0
+}
+
+/// 빈 문자열이 기본값이 되면 언어를 못 정한다.
+fn default_lang() -> String {
+    "ko".to_string()
 }
 
 /// **파생 Default 를 쓰면 안 된다.** bool 의 파생 기본값은 false 라
@@ -60,6 +71,7 @@ impl Default for AppConfig {
             last_pass: None,
             sql_bind_inline: true,
             ui_font_scale: 1.0,
+            ui_language: "ko".to_string(),
         }
     }
 }
@@ -117,6 +129,14 @@ mod bind_default_tests {
         let old = r#"{"auto_connect":false}"#;
         let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
         assert_eq!(cfg.ui_font_scale, 1.0);
+    }
+
+    #[test]
+    fn 언어는_없으면_한국어다() {
+        assert_eq!(AppConfig::default().ui_language, "ko");
+        let old = r#"{"auto_connect":false}"#;
+        let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
+        assert_eq!(cfg.ui_language, "ko");
     }
 
     #[test]

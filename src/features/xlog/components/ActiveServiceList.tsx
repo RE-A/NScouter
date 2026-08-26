@@ -8,6 +8,7 @@ import { getTypeActiveServices } from '../api/scouterApi';
 import type { ActiveService } from '../types/object';
 import { durationTone } from './durationTone';
 import { ThreadDetailDialog } from './ThreadDetailDialog';
+import { t } from '../../../i18n';
 
 interface ActiveServiceListProps {
   objType: string;
@@ -65,7 +66,7 @@ export const ActiveServiceList = memo(function ActiveServiceList({
           액티브 서비스 목록
         </span>
         <span className="text-micro text-fg-faint">
-          {open ? `${rows.length}건 · 닫기` : '열기'}
+          {open ? `${rows.length}${t('건')} · ${t('닫기')}` : t('열기')}
         </span>
       </button>
 

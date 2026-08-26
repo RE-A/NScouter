@@ -15,6 +15,7 @@ import { durationBar, durationTone } from './durationTone';
 import { ErrorDetail } from './ErrorDetail';
 import { bindSql } from './sqlBind';
 import { useViewOptions } from '../hooks/useViewOptions';
+import { t } from '../../../i18n';
 
 interface ProfileStepListProps {
   steps: ProfileStep[];
@@ -56,7 +57,7 @@ export const ProfileStepList = memo(function ProfileStepList({
   const options = useViewOptions();
   const visible = steps.filter(s => s.kind !== 'Unknown');
   if (visible.length === 0) {
-    return <p className="px-2 py-6 text-center text-body text-fg-faint">스텝이 없습니다</p>;
+    return <p className="px-2 py-6 text-center text-body text-fg-faint">{t('스텝이 없습니다')}</p>;
   }
 
   const parents = steps.map(s => (s.kind === 'Unknown' ? -1 : s.parent));
@@ -185,7 +186,7 @@ function StepRow({
         {threadTxid && onOpenThread ? (
           <button
             onClick={() => onOpenThread(threadTxid)}
-            title={`이 스레드로 이어진 작업을 엽니다 — ${label}`}
+            title={`${t('이 스레드로 이어진 작업을 엽니다')} — ${label}`}
             className="block max-w-full truncate text-left text-small text-accent underline decoration-dotted underline-offset-2 hover:bg-hover"
           >
             {label}
@@ -314,14 +315,14 @@ function SqlBody({
           }}
           className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
         >
-          {expanded ? '접기' : `펼치기 (${shown.length.toLocaleString()}자)`}
+          {expanded ? t('접기') : `${t('펼치기')} (${shown.length.toLocaleString()}${t('자')})`}
         </button>
       )}
 
       {/* 채우지 않는 설정이면 값은 따로 보여준다 — 안 보여주면 정보가 사라진다 */}
       {!inline && params !== '' && (
         <code className="mt-0.5 block break-all font-mono text-micro text-fg-dim" title={params}>
-          <span className="text-fg-faint">바인딩</span> {params}
+          <span className="text-fg-faint">{t('바인딩')}</span> {params}
         </code>
       )}
 

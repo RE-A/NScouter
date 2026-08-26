@@ -16,6 +16,7 @@ import { formatTime } from '../utils/colorPalette';
 import { findStepHits } from './stepSearch';
 import { yyyymmdd } from '../types/timeRange';
 import type { SXLog } from '../types/xlog';
+import { t } from '../../../i18n';
 
 /** 같은 프로파일을 보는 두 가지 방법 */
 type ProfileMode = 'list' | 'summary';
@@ -137,7 +138,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
         </div>
         <button
           onClick={onClose}
-          aria-label="상세 닫기"
+          aria-label={t('상세 닫기')}
           className="shrink-0 rounded px-1 text-fg-dim hover:text-fg"
         >
           ✕
@@ -145,7 +146,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
       </header>
 
       {isLoading && (
-        <p className="px-3 py-6 text-center text-body text-fg-dim">프로파일을 불러오는 중</p>
+        <p className="px-3 py-6 text-center text-body text-fg-dim">{t('프로파일을 불러오는 중')}</p>
       )}
 
       {error && (
@@ -159,8 +160,8 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
           {/* 핵심 수치 — 나머지보다 확실히 크게. 여기부터 읽게 만든다 */}
           <div className="grid grid-cols-3 gap-px border-b border-line bg-line">
             <Metric label="Elapsed" value={xlog.elapsed} unit="ms" emphasis />
-            <Metric label="SQL" value={xlog.sqlTime} unit="ms" sub={`${xlog.sqlCount}건`} />
-            <Metric label="API" value={xlog.apiCallTime} unit="ms" sub={`${xlog.apiCallCount}건`} />
+            <Metric label="SQL" value={xlog.sqlTime} unit="ms" sub={`${xlog.sqlCount}${t('건')}`} />
+            <Metric label="API" value={xlog.apiCallTime} unit="ms" sub={`${xlog.apiCallCount}${t('건')}`} />
           </div>
 
           {errorText && (
@@ -177,7 +178,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
               영영 나타나지 않는다. 판단 기준은 트레이스에 속한 **노드 수**다. */}
           {(trace.loading || trace.error || trace.rows.length > 1) && (
             <Section
-              title="호출 흐름"
+              title={t('호출 흐름')}
               aside={
                 !trace.loading && !trace.error ? (
                   <div className="flex overflow-hidden rounded border border-line-strong">
@@ -188,8 +189,8 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                         aria-pressed={flowMode === m}
                         title={
                           m === 'apps'
-                            ? '앱 사이의 호출만'
-                            : 'SQL·외부 API 까지 (프로파일을 추가로 조회한다)'
+                            ? t('앱 사이의 호출만')
+                            : t('SQL·외부 API 까지 (프로파일을 추가로 조회한다)')
                         }
                         className={`px-1.5 py-0.5 text-micro transition-colors ${
                           flowMode === m
@@ -197,7 +198,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                             : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
                         }`}
                       >
-                        {m === 'apps' ? '앱' : '상세'}
+                        {m === 'apps' ? '앱' : t('상세')}
                       </button>
                     ))}
                   </div>
@@ -205,7 +206,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
               }
             >
               {trace.loading && (
-                <p className="px-3 py-3 text-center text-body text-fg-dim">연관 트랜잭션 조회 중</p>
+                <p className="px-3 py-3 text-center text-body text-fg-dim">{t('연관 트랜잭션 조회 중')}</p>
               )}
               {trace.error && (
                 <p className="mx-3 my-2 rounded border-l-2 border-danger bg-danger/10 px-2 py-1.5 text-small text-danger">
@@ -228,11 +229,11 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                   {/* 잎이 많아 금방 빽빽해진다. 무엇을 볼지 고르게 한다 (ASIS 와 같은 두 토글) */}
                   <div className="flex items-center gap-3 px-3 pb-1">
                     <Toggle checked={showSql} onChange={setShowSql} label="SQL" />
-                    <Toggle checked={showApiCall} onChange={setShowApiCall} label="API 호출" />
+                    <Toggle checked={showApiCall} onChange={setShowApiCall} label={t('API 호출')} />
                   </div>
 
                   {flowProfiles.loading && (
-                    <p className="px-3 py-3 text-center text-body text-fg-dim">프로파일 조회 중</p>
+                    <p className="px-3 py-3 text-center text-body text-fg-dim">{t('프로파일 조회 중')}</p>
                   )}
                   {flowProfiles.error && (
                     <p className="mx-3 my-2 rounded border-l-2 border-danger bg-danger/10 px-2 py-1.5 text-small text-danger">
@@ -264,7 +265,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
           {/* 목록은 "언제 무엇이", 요약은 "무엇이 몇 번"에 답한다.
               2ms 쿼리가 50번 도는 N+1 은 목록으로는 절대 안 보인다. */}
           <Section
-            title="프로파일"
+            title={t('프로파일')}
             aside={
               profile && profile.steps.length > 0 ? (
                 <div className="flex items-center gap-2">
@@ -277,7 +278,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                           setHitIdx(i => (i - 1 + stepHits.length) % stepHits.length)
                         }
                         disabled={stepHits.length < 2}
-                        title="이전 적중"
+                        title={t('이전 적중')}
                         className="rounded px-1 text-micro text-fg-dim hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:text-fg-faint"
                       >
                         ‹
@@ -288,7 +289,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                       <button
                         onClick={() => setHitIdx(i => (i + 1) % stepHits.length)}
                         disabled={stepHits.length < 2}
-                        title="다음 적중"
+                        title={t('다음 적중')}
                         className="rounded px-1 text-micro text-fg-dim hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:text-fg-faint"
                       >
                         ›
@@ -307,7 +308,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                           : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
                       }`}
                     >
-                      {m === 'list' ? '목록' : '요약'}
+                      {m === 'list' ? '목록' : t('요약')}
                     </button>
                     ))}
                   </div>
@@ -328,11 +329,11 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                 <ProfileSummaryTable steps={profile.steps} texts={texts} />
               )
             ) : (
-              <p className="px-2 py-4 text-center text-body text-fg-faint">프로파일이 없습니다</p>
+              <p className="px-2 py-4 text-center text-body text-fg-faint">{t('프로파일이 없습니다')}</p>
             )}
           </Section>
 
-          <Section title="속성">
+          <Section title={t('속성')}>
             <dl className="px-3 py-1.5">
               <Attr label="CPU" value={`${xlog.cpu}ms`} />
               <Attr label="Heap" value={`${xlog.allocKBytes}KB`} />

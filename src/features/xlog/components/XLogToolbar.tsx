@@ -10,6 +10,7 @@ import {
   fromLocalInput,
   toLocalInput,
 } from '../types/timeRange';
+import { t } from '../../../i18n';
 
 interface XLogToolbarProps {
   config: XLogChartConfig;
@@ -77,7 +78,7 @@ export function XLogToolbar({
               mode === m ? 'bg-accent text-white' : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
             }`}
           >
-            {m === 'live' ? '실시간' : '과거'}
+            {m === 'live' ? '실시간' : t('과거')}
           </button>
         ))}
       </div>
@@ -106,7 +107,7 @@ export function XLogToolbar({
           <button
             onClick={() => onPastRangeChange({ ...draft })}
             disabled={!check.ok}
-            title={check.reason ?? '이 구간을 조회합니다'}
+            title={check.reason ?? t('이 구간을 조회합니다')}
             className={`rounded border px-2 py-0.5 text-micro ${
               check.ok
                 ? 'border-accent text-accent hover:bg-hover'
@@ -122,16 +123,17 @@ export function XLogToolbar({
               {new Date(pastRange.stime).toLocaleTimeString('ko-KR', { hour12: false })}~
               {new Date(pastRange.etime).toLocaleTimeString('ko-KR', { hour12: false })}
               {/* 보이지 않는 단축키는 없는 것과 같다 */}
-              <span className="ml-2 text-fg-faint">휠=확대 · Shift+휠=이동</span>
+              <span className="ml-2 text-fg-faint">{t('휠=확대 · Shift+휠=이동')}</span>
             </span>
           )}
           <span className="h-4 w-px bg-line" aria-hidden />
         </>
       )}
 
-      <Field label="Y축">
+      <Field label={t('Y축')}>
         <select
           className={CONTROL}
+          title={t('점의 높이를 무엇으로 볼지. 응답시간·CPU·SQL 시간·SQL 건수 등')}
           value={config.yAxisMode}
           onChange={e => onConfigChange({ yAxisMode: e.target.value as YAxisMode })}
         >
@@ -143,22 +145,26 @@ export function XLogToolbar({
         </select>
       </Field>
 
-      <Field label="범위">
+      <Field label={t('범위')}>
         <select
           className={CONTROL}
+          title={t('가로축이 담는 시간. 좁힐수록 점이 덜 겹친다')}
           value={config.timeRangeMs}
           onChange={e => onConfigChange({ timeRangeMs: Number(e.target.value) })}
         >
-          <option value={60_000}>1분</option>
-          <option value={300_000}>5분</option>
-          <option value={600_000}>10분</option>
-          <option value={1_800_000}>30분</option>
+          <option value={60_000}>{t('1분')}</option>
+          <option value={300_000}>{t('5분')}</option>
+          <option value={600_000}>{t('10분')}</option>
+          <option value={1_800_000}>{t('30분')}</option>
         </select>
       </Field>
 
       <span className="h-4 w-px bg-line" aria-hidden />
 
-      <label className="flex cursor-pointer items-center gap-1.5 text-body text-fg-muted hover:text-fg">
+      <label
+        className="flex cursor-pointer items-center gap-1.5 text-body text-fg-muted hover:text-fg"
+        title={t('실패한 트랜잭션만 남긴다')}
+      >
         <input
           type="checkbox"
           checked={filter.errorOnly}
@@ -169,7 +175,7 @@ export function XLogToolbar({
 
       {/* 응답시간은 초로 받는다 — Y축이 Elapsed(sec) 라 눈으로 본 값을 그대로 옮기게 된다.
           내부는 ms 다. 0.2 같은 소수도 받으므로 예전 ms 입력이 하던 일을 잃지 않는다. */}
-      <Field label="응답">
+      <Field label={t('응답')}>
         <Direction
           exclude={filter.elapsedExclude}
           onChange={v => onFilterChange({ elapsedExclude: v })}
@@ -183,19 +189,19 @@ export function XLogToolbar({
           min={0}
           step={0.1}
           placeholder="0"
-          title="0 이나 빈 칸이면 조건 없음"
+          title={t('0 이나 빈 칸이면 조건 없음')}
           onChange={e => {
             const sec = Number(e.target.value);
             onFilterChange({ elapsedMs: Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 0 });
           }}
         />
-        <span className="text-micro text-fg-faint">초</span>
+        <span className="text-micro text-fg-faint">{t('초')}</span>
       </Field>
 
       <TextCond
-        label="서비스"
+        label={t('서비스')}
         value={filter.service}
-        placeholder="URL 일부"
+        placeholder={t('URL 일부')}
         onChange={v => onFilterChange({ service: v })}
       />
       <TextCond
@@ -232,7 +238,7 @@ function Direction({
       type="button"
       onClick={() => onChange(!exclude)}
       aria-pressed={exclude}
-      title={exclude ? '제외 조건 — 눌러서 포함으로' : '포함 조건 — 눌러서 제외로'}
+      title={exclude ? '제외 조건 — 눌러서 포함으로' : t('포함 조건 — 눌러서 제외로')}
       className={`rounded border px-1.5 py-0.5 text-micro transition-colors ${
         exclude
           ? 'border-warn/60 bg-warn/10 text-warn'
@@ -277,8 +283,8 @@ function TextCond({
         <button
           type="button"
           onClick={() => onChange({ ...value, text: '' })}
-          aria-label={`${label} 조건 지우기`}
-          title={`${label} 조건 지우기`}
+          aria-label={`${label} ${t('조건 지우기')}`}
+          title={`${label} ${t('조건 지우기')}`}
           className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-micro text-fg-faint hover:bg-hover hover:text-fg"
         >
           ✕

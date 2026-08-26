@@ -9,6 +9,7 @@
 import { memo } from 'react';
 import { flattenFlow, type FlowNode } from '../trace/flowTree';
 import { durationTone } from './durationTone';
+import { t } from '../../../i18n';
 
 interface FlowTreeViewProps {
   roots: FlowNode[];
@@ -32,7 +33,7 @@ export const FlowTreeView = memo(function FlowTreeView({
   const rows = flattenFlow(roots);
 
   if (rows.length === 0) {
-    return <p className="px-2 py-4 text-center text-body text-fg-faint">흐름이 없습니다</p>;
+    return <p className="px-2 py-4 text-center text-body text-fg-faint">{t('흐름이 없습니다')}</p>;
   }
 
   return (

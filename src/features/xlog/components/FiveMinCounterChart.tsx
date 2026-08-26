@@ -11,6 +11,7 @@ import { getTodayCounter, type CounterSeries } from '../api/scouterApi';
 import { counterMeta, type CounterName } from '../types/counter';
 import { hasAnyValue, seriesMax, trimAll, type TrimmedSeries } from './fiveMinSeries';
 import { CANVAS, SERIES } from '../../../styles/tokens';
+import { t } from '../../../i18n';
 
 const POLL_MS = 60_000;
 
@@ -76,17 +77,17 @@ export const FiveMinCounterChart = memo(function FiveMinCounterChart({
     <div className="overflow-hidden rounded border border-line bg-surface">
       <div className="truncate px-2 pt-1 text-micro text-fg-muted" title={meta.disp}>
         {meta.disp} ({meta.unit}){' '}
-        {load.kind === 'ok' && points > 0 ? `· ${trimmed.length}개 오브젝트 · 5분 집계` : ''}
+        {load.kind === 'ok' && points > 0 ? `· ${trimmed.length}${t('개 오브젝트')} · ${t('5분 집계')}` : ''}
       </div>
 
       {load.kind === 'error' && (
         <p className="px-2 py-4 text-small text-danger">{load.message}</p>
       )}
       {load.kind === 'loading' && (
-        <p className="px-2 py-4 text-small text-fg-faint">조회 중…</p>
+        <p className="px-2 py-4 text-small text-fg-faint">{t('조회 중…')}</p>
       )}
       {load.kind === 'ok' && points === 0 && (
-        <p className="px-2 py-4 text-small text-fg-faint">오늘 집계가 없습니다.</p>
+        <p className="px-2 py-4 text-small text-fg-faint">{t('오늘 집계가 없습니다.')}</p>
       )}
 
       <canvas

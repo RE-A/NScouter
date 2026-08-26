@@ -8,6 +8,7 @@ import {
   FONT_SCALES,
 } from '../xlog/hooks/useViewOptions';
 import { T, F } from '../../styles/tokens';
+import { t, toLang, type Lang } from '../../i18n';
 
 interface SettingsDialogProps {
   onClose: () => void;
@@ -20,6 +21,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   const [bindInline, setBindInline] = useState(true);
   /** 글자 크기 배율 */
   const [fontScale, setFontScale] = useState(1);
+  /** 화면 언어 */
+  const [lang, setLangValue] = useState<Lang>('ko');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -30,6 +33,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setDataDir(cfg.data_dir ?? '');
       setBindInline(cfg.sql_bind_inline ?? true);
       setFontScale(clampFontScale(cfg.ui_font_scale ?? 1));
+      setLangValue(toLang(cfg.ui_language));
     }).catch(() => {});
   }, []);
 
@@ -43,6 +47,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         data_dir: dataDir.trim() || null,
         sql_bind_inline: bindInline,
         ui_font_scale: fontScale,
+        ui_language: lang,
       };
       await saveConfig(next);
       setConfig(next);
@@ -56,7 +61,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     } finally {
       setSaving(false);
     }
-  }, [config, dataDir, bindInline, fontScale]);
+  }, [config, dataDir, bindInline, fontScale, lang]);
 
   // ESC 닫기
   useEffect(() => {
@@ -70,7 +75,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       <div style={modalStyle}>
         {/* 헤더 */}
         <div style={modalHeaderStyle}>
-          <span style={modalTitleStyle}>설정</span>
+          <span style={modalTitleStyle}>{t('설정')}</span>
           <button onClick={onClose} style={closeBtnStyle}>✕</button>
         </div>
 
@@ -78,23 +83,54 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         <div style={modalBodyStyle}>
           {/* 데이터 디렉토리 */}
           <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>데이터 디렉토리</div>
+            <div style={sectionTitleStyle}>{t('데이터 디렉토리')}</div>
             <div style={sectionDescStyle}>
               로그 파일과 설정 파일이 저장될 경로입니다.<br />
-              비워두면 <code style={codeStyle}>실행파일 경로/</code> 가 사용됩니다.
+              비워두면 <code style={codeStyle}>{t('실행파일 경로/')}</code> 가 사용됩니다.
             </div>
             <input
               style={inputStyle}
               value={dataDir}
               onChange={e => setDataDir(e.target.value)}
-              placeholder="비워두면 실행파일 경로 사용"
+              placeholder={t('비워두면 실행파일 경로 사용')}
               spellCheck={false}
             />
           </div>
 
+          {/* 언어 */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>{t('언어')}</div>
+            <div style={sectionDescStyle}>
+              {t(
+                t('Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같습니다. 바뀌는 것은 설명과 레이블입니다.'),
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              {(['ko', 'en'] as Lang[]).map(v => {
+                const on = v === lang;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setLangValue(v)}
+                    aria-pressed={on}
+                    style={{
+                      ...scaleBtnStyle,
+                      fontSize: F.base,
+                      borderColor: on ? T.accent : T.border,
+                      color: on ? T.text : T.textDim,
+                      background: on ? T.bgHover : 'transparent',
+                    }}
+                  >
+                    {v === 'ko' ? '한국어' : 'English'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* 글자 크기 */}
           <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>글자 크기</div>
+            <div style={sectionTitleStyle}>{t('글자 크기')}</div>
             <div style={sectionDescStyle}>
               화면 전체에 적용됩니다. 표·차트 눈금·프로파일 본문이 같은 비율로 커집니다.
             </div>
@@ -124,14 +160,14 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
 
           {/* SQL 표시 */}
           <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>SQL 바인딩 파라미터</div>
+            <div style={sectionTitleStyle}>{t('SQL 바인딩 파라미터')}</div>
             <div style={sectionDescStyle}>
               프로파일의 SQL 은 값 대신 <code style={codeStyle}>?</code> 로 옵니다.
               값을 문장에 채워 넣으면 그대로 복사해 DB 에 붙일 수 있습니다.
             </div>
             {([
-              ['inline', '문장에 채워서 보기', '예) where id=126'],
-              ['separate', '값을 따로 보기', '예) where id=? · 바인딩 126'],
+              ['inline', t('문장에 채워서 보기'), t('예) where id=126')],
+              ['separate', t('값을 따로 보기'), t('예) where id=? · 바인딩 126')],
             ] as const).map(([mode, label, hint]) => {
               const on = mode === 'inline' ? bindInline : !bindInline;
               return (
@@ -151,9 +187,9 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
 
           {/* 현재 경로 정보 */}
           <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>현재 저장 경로</div>
+            <div style={sectionTitleStyle}>{t('현재 저장 경로')}</div>
             <div style={pathRowStyle}>
-              <span style={pathLabelStyle}>설정 파일</span>
+              <span style={pathLabelStyle}>{t('설정 파일')}</span>
               <span style={pathValueStyle}>
                 {dataDir.trim()
                   ? `${dataDir.trim()}\\config.json`
@@ -161,7 +197,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
               </span>
             </div>
             <div style={pathRowStyle}>
-              <span style={pathLabelStyle}>로그 파일</span>
+              <span style={pathLabelStyle}>{t('로그 파일')}</span>
               <span style={pathValueStyle}>
                 {dataDir.trim()
                   ? `${dataDir.trim()}\\logs\\nscouter.log`
@@ -176,17 +212,17 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
           {/* 마지막 접속 정보 (읽기 전용) */}
           {(config.last_host || config.last_port || config.last_user) && (
             <div style={sectionStyle}>
-              <div style={sectionTitleStyle}>마지막 접속 정보</div>
+              <div style={sectionTitleStyle}>{t('마지막 접속 정보')}</div>
               <div style={pathRowStyle}>
-                <span style={pathLabelStyle}>호스트</span>
+                <span style={pathLabelStyle}>{t('호스트')}</span>
                 <span style={pathValueStyle}>{config.last_host ?? '-'}</span>
               </div>
               <div style={pathRowStyle}>
-                <span style={pathLabelStyle}>포트</span>
+                <span style={pathLabelStyle}>{t('포트')}</span>
                 <span style={pathValueStyle}>{config.last_port ?? '-'}</span>
               </div>
               <div style={pathRowStyle}>
-                <span style={pathLabelStyle}>사용자</span>
+                <span style={pathLabelStyle}>{t('사용자')}</span>
                 <span style={pathValueStyle}>{config.last_user ?? '-'}</span>
               </div>
             </div>
@@ -197,11 +233,11 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
 
         {/* 푸터 */}
         <div style={modalFooterStyle}>
-          {saved && <span style={{ color: T.success, fontSize: F.body }}>저장 완료</span>}
+          {saved && <span style={{ color: T.success, fontSize: F.body }}>{t('저장 완료')}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={onClose} style={cancelBtnStyle}>취소</button>
+            <button onClick={onClose} style={cancelBtnStyle}>{t('취소')}</button>
             <button onClick={handleSave} disabled={saving} style={saveBtnStyle}>
-              {saving ? '저장 중...' : '저장'}
+              {saving ? '저장 중...' : t('저장')}
             </button>
           </div>
         </div>

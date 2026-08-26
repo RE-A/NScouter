@@ -12,6 +12,7 @@ import { yyyymmdd } from '../types/timeRange';
 import { useTextResolver } from '../hooks/useTextResolver';
 import { ipFromInt, sortSummary, withAverage, type SummarySortKey } from './summaryRows';
 import { durationTone } from './durationTone';
+import { t } from '../../../i18n';
 
 interface SummaryPanelProps {
   objType: string;
@@ -143,14 +144,14 @@ export const SummaryPanel = memo(function SummaryPanel({
   return (
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">요약</h2>
+        <h2 className="text-body font-medium text-fg">{t('요약')}</h2>
         <span className="text-micro text-fg-faint">{objType} · 구간 누적</span>
         <div className="flex-1" />
         <button
           onClick={() => setOpen(o => !o)}
           className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
-          {open ? '닫기' : '열기'}
+          {open ? '닫기' : t('열기')}
         </button>
       </header>
 
@@ -210,7 +211,7 @@ export const SummaryPanel = memo(function SummaryPanel({
             </button>
           </div>
 
-          {loading && <p className="px-3 py-6 text-center text-small text-fg-faint">조회 중…</p>}
+          {loading && <p className="px-3 py-6 text-center text-small text-fg-faint">{t('조회 중…')}</p>}
           {error && <p className="px-3 py-6 text-center text-small text-danger">{error}</p>}
 
           {!loading && !error && (kind === 'error' ? errorRows.length === 0 : rows.length === 0) && (
@@ -234,12 +235,12 @@ export const SummaryPanel = memo(function SummaryPanel({
               <div
                 className={`${COLS} border-b border-line py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
               >
-                <span>이름</span>
-                <span className="text-right">횟수</span>
+                <span>{t('이름')}</span>
+                <span className="text-right">{t('횟수')}</span>
                 {/* 단위가 없으면 5,275,590 이 초인지 밀리초인지 읽는 사람이 못 정한다 */}
-                <span className="text-right">합계(ms)</span>
-                <span className="text-right">평균(ms)</span>
-                <span className="text-right">에러</span>
+                <span className="text-right">{t('합계(ms)')}</span>
+                <span className="text-right">{t('평균(ms)')}</span>
+                <span className="text-right">{t('에러')}</span>
               </div>
               {/* textVersion 은 값이 아니라 **사전이 채워졌다는 신호**다 */}
               <ol className="divide-y divide-line/40" data-text-version={textVersion}>
@@ -277,7 +278,7 @@ export const SummaryPanel = memo(function SummaryPanel({
               <p className="px-3 py-2 text-micro text-fg-faint">
                 최근 {RANGES.find(r => r.ms === rangeMs)?.label ?? ''} 누적 ·{' '}
                 {rows.length.toLocaleString()}행 · 호출 합계 {totalCalls.toLocaleString()}
-                {rows.length > VISIBLE && ` · 상위 ${VISIBLE}개만 표시`} · 평균은 합계÷횟수
+                {rows.length > VISIBLE && ` · ${t('상위')} ${VISIBLE}${t('개만 표시')}`} · {t('평균은 합계÷횟수')}
               </p>
             </>
           )}
@@ -314,9 +315,9 @@ function ErrorTable({
       <div
         className={`${ERR_COLS} border-b border-line py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <span>예외 / 서비스</span>
-        <span>메시지</span>
-        <span className="text-right">횟수</span>
+        <span>{t('예외 / 서비스')}</span>
+        <span>{t('메시지')}</span>
+        <span className="text-right">{t('횟수')}</span>
         <span />
       </div>
       <ol className="divide-y divide-line/40">
@@ -361,7 +362,7 @@ function ErrorTable({
                 {/* 요약에서 실제 트랜잭션으로 바로 넘어가는 통로. 이게 이 탭의 핵심이다 */}
                 <button
                   onClick={() => onOpenTxid(r.txid, txidDate(r.txid))}
-                  title="이 에러가 난 트랜잭션을 연다"
+                  title={t('이 에러가 난 트랜잭션을 연다')}
                   className="rounded px-1.5 py-0.5 text-micro text-accent hover:bg-hover"
                 >
                   열기

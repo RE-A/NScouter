@@ -10,6 +10,7 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { getServiceGroup, type ServiceGroupRow } from '../api/scouterApi';
 import { GROUP_WINDOW_SEC, sortGroups, toStats, type GroupStat } from './serviceGroup';
 import { durationTone } from './durationTone';
+import { t } from '../../../i18n';
 
 interface ServiceGroupPanelProps {
   /** 이 오브젝트들의 요청만 묶는다. **objType 으로는 못 묻는다** (F-44) */
@@ -58,7 +59,7 @@ export const ServiceGroupPanel = memo(function ServiceGroupPanel({
   return (
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">서비스 그룹</h2>
+        <h2 className="text-body font-medium text-fg">{t('서비스 그룹')}</h2>
         <span className="text-micro text-fg-faint">최근 {GROUP_WINDOW_SEC}초</span>
         <div className="flex-1" />
         {open && stats.length > 0 && (
@@ -70,7 +71,7 @@ export const ServiceGroupPanel = memo(function ServiceGroupPanel({
           onClick={() => setOpen(o => !o)}
           className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
-          {open ? '닫기' : '열기'}
+          {open ? '닫기' : t('열기')}
         </button>
       </header>
 
@@ -83,7 +84,7 @@ export const ServiceGroupPanel = memo(function ServiceGroupPanel({
             </p>
           )}
           {!error && !loadedOnce && (
-            <p className="px-3 py-6 text-center text-small text-fg-faint">조회 중…</p>
+            <p className="px-3 py-6 text-center text-small text-fg-faint">{t('조회 중…')}</p>
           )}
           {!error && stats.length > 0 && <GroupTable stats={stats} />}
         </div>
@@ -100,11 +101,11 @@ function GroupTable({ stats }: { stats: GroupStat[] }) {
   return (
     <div className="py-1">
       <div className={`${COLS} pb-1 text-micro text-fg-faint`}>
-        <span>그룹</span>
+        <span>{t('그룹')}</span>
         <span className="text-right">TPS</span>
-        <span className="text-right">응답(ms)</span>
-        <span className="text-right">에러</span>
-        <span className="text-right">비중</span>
+        <span className="text-right">{t('응답(ms)')}</span>
+        <span className="text-right">{t('에러')}</span>
+        <span className="text-right">{t('비중')}</span>
       </div>
       <ul className="divide-y divide-line/40">
         {stats.map(g => (

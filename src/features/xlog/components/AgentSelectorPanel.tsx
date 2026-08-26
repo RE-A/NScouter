@@ -7,6 +7,7 @@ import { agentRowState } from './agentFilter';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { isJavaeeObjectType } from '../types/counter';
+import { t } from '../../../i18n';
 
 interface AgentSelectorPanelProps {
   isConnected: boolean;
@@ -89,20 +90,20 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         {filtering ? (
           <button
             onClick={handleClearFilter}
-            title="필터 해제 — 전부 표시"
+            title={t('필터 해제 — 전부 표시')}
             className="rounded px-1.5 py-0.5 text-micro text-accent hover:bg-hover"
           >
             <span className="tnum font-mono">{selectedHashes.size}</span>개만 · 전체로
           </button>
         ) : (
-          <span className="px-1.5 text-micro text-fg-faint">전체</span>
+          <span className="px-1.5 text-micro text-fg-faint">{t('전체')}</span>
         )}
       </div>
 
       {/* 목록 */}
       <div className="flex-1 divide-y divide-line/40 overflow-y-auto">
-        {!isConnected && <Empty>연결되지 않음</Empty>}
-        {isConnected && agents.length === 0 && !loading && <Empty>에이전트 없음</Empty>}
+        {!isConnected && <Empty>{t('연결되지 않음')}</Empty>}
+        {isConnected && agents.length === 0 && !loading && <Empty>{t('에이전트 없음')}</Empty>}
         {agents.map(agent => {
           const state = agentRowState(selectedHashes, agent.obj_hash);
           const shortName = agent.obj_name.split('/').pop() ?? agent.obj_name;
@@ -146,80 +147,80 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
             {
               // 어떤 오브젝트든 신원은 있다. **막지 않는다** — 목록에 떠 있는데
               // 정체를 못 묻는 오브젝트가 있으면 그게 제일 답답하다.
-              label: '속성',
+              label: t('속성'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'properties' }),
             },
             {
-              label: '실행 중인 트랜잭션',
+              label: t('실행 중인 트랜잭션'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'active' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
-              label: '스레드 목록',
+              label: t('스레드 목록'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'threads' }),
               // 호스트 에이전트는 JVM 이 아니라 머신을 본다 — 스레드가 없다.
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
-              label: '힙 히스토그램',
+              label: t('힙 히스토그램'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'heap' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
-              label: '스레드 덤프',
+              label: t('스레드 덤프'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'dump' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
-              label: '소켓',
+              label: t('소켓'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'sockets' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
-              label: '로드된 클래스',
+              label: t('로드된 클래스'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'classes' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
-              label: '환경변수',
+              label: t('환경변수'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'env' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
               // 켜고 끄기는 «에이전트 작업»에 있다. **읽는 쪽을 조회 묶음에 둔다** —
               // 모아 놓고 볼 데가 없으면 샘플링을 켤 이유가 없다.
-              label: '모인 스택',
+              label: t('모인 스택'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'stack' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 조회됩니다',
+                : t('JVM 에이전트에서만 조회됩니다'),
             },
             {
               // 호스트 에이전트도 답한다 (실측 41개). JVM 전용이 아니라서 막지 않는다.
-              label: '설정',
+              label: t('설정'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'config' }),
             },
             {
               // 위쪽은 전부 조회다. 이것만 **에이전트를 건드린다** — 그래서 끝에 둔다.
-              label: '에이전트 작업…',
+              label: t('에이전트 작업…'),
               onSelect: () => setInspect({ agent: menu.agent, kind: 'actions' }),
               disabled: isJavaeeObjectType(menu.agent.obj_type)
                 ? undefined
-                : 'JVM 에이전트에서만 실행됩니다',
+                : t('JVM 에이전트에서만 실행됩니다'),
             },
           ]}
         />

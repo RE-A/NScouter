@@ -57,6 +57,7 @@ import {
   isTotalCapable,
 } from './features/xlog/types/counter';
 import { T, F, FONT_UI } from './styles/tokens';
+import { t, useT } from './i18n';
 
 /** 기존 지역 팔레트 `C` 를 토큰으로 대체. 값은 styles/tokens.css 하나에만 있다. */
 const C = {
@@ -100,6 +101,9 @@ const ALL_CHART_COUNTERS: CounterName[] = [
 ];
 
 export default function App() {
+  // 언어가 바뀌면 화면 전체를 다시 그린다. t() 는 모듈 함수라 **구독하지 않으면**
+  // 설정에서 언어를 바꿔도 이미 그려진 글자가 그대로 남는다.
+  const { lang } = useT();
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -337,7 +341,9 @@ export default function App() {
   const hasSelected = selectedXLogs.length > 0;
 
   return (
-    <div style={appStyle}>
+    // key 로 갈아끼우는 이유: memo 로 막아 둔 자식(차트 등)까지 확실히 새 언어로 그린다.
+    // 언어 바꾸기는 드문 일이라 이 정도 비용은 값이 싸다.
+    <div style={appStyle} key={lang}>
       {/* ── 헤더 ── */}
       {/* 헤더 3구역: 정체(로고+서버) | 탐색(탭) | 상태·설정
           이전에는 9개 요소가 같은 무게로 나열돼 눈이 갈 곳을 못 정했다. */}
@@ -358,7 +364,7 @@ export default function App() {
         </div>
 
         {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다 */}
-        <nav className="flex items-center gap-0.5" aria-label="화면 전환">
+        <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
           {(['xlog', 'counter', 'alert'] as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
@@ -395,8 +401,8 @@ export default function App() {
           <LogLevelSelector />
           <button
             onClick={() => setShowSettings(true)}
-            title="설정"
-            aria-label="설정"
+            title={t('설정')}
+            aria-label={t('설정')}
             className="rounded px-1.5 py-1 text-fg-dim hover:text-fg"
           >
             ⚙
@@ -438,7 +444,7 @@ export default function App() {
 
             <Divider
               orientation="vertical"
-              label="서비스 목록 너비"
+              label={t('서비스 목록 너비')}
               onDrag={d =>
                 setServicesW(w =>
                   clampPane(w + d, PANE.servicesMin, sideRoom(wsSize.w, hasDetail ? detailW : 0, hasDetail ? 2 : 1)),
@@ -467,13 +473,13 @@ export default function App() {
                   선택할 때마다 차트 높이가 튄다. 비어 있을 때는 비어 있다고 말한다. */}
               <Divider
                 orientation="horizontal"
-                label="트랜잭션 목록 높이"
+                label={t('트랜잭션 목록 높이')}
                 onDrag={d =>
                   setTableH(h => clampPane(h - d, PANE.tableMinH, tableRoom(wsSize.h)))
                 }
               />
               <Pane
-                title="트랜잭션"
+                title={t('트랜잭션')}
                 className="shrink-0"
                 style={{ height: tableH }}
                 aside={
@@ -490,8 +496,8 @@ export default function App() {
                       </span>
                       <button
                         onClick={handleClearSelection}
-                        title="선택 해제"
-                        aria-label="선택 해제"
+                        title={t('선택 해제')}
+                        aria-label={t('선택 해제')}
                         className="rounded px-1 text-micro text-fg-faint hover:text-fg"
                       >
                         ✕
@@ -527,7 +533,7 @@ export default function App() {
               <>
                 <Divider
                   orientation="vertical"
-                  label="상세 패널 너비"
+                  label={t('상세 패널 너비')}
                   onDrag={d =>
                     setDetailW(w =>
                       clampPane(w - d, PANE.detailMin, sideRoom(wsSize.w, servicesW, 2)),
@@ -581,24 +587,24 @@ export default function App() {
               {/* Family 를 섞으면 CPU 와 TPS 가 같은 줄에 놓여 읽히지 않는다.
                   요청은 한 번에 보내지만(실측 확인) 화면은 나눈다. */}
               <CounterSection
-                title="애플리케이션"
-                subtitle={`${counterHashes.javaee.length}개 오브젝트 · javaee`}
+                title={t('애플리케이션')}
+                subtitle={`${counterHashes.javaee.length}${t('개 오브젝트')} · javaee`}
                 counters={JAVAEE_CHARTS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
                 empty={counterHashes.javaee.length === 0 ? '자바 에이전트가 없습니다.' : null}
                 // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
-                footnote={`${JAVAEE_UNCOLLECTED_LABEL} 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.`}
+                footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
               />
               <CounterSection
-                title="호스트"
-                subtitle={`${counterHashes.host.length}개 오브젝트 · host`}
+                title={t('호스트')}
+                subtitle={`${counterHashes.host.length}${t('개 오브젝트')} · host`}
                 counters={HOST_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
                 empty={
                   counterHashes.host.length === 0
-                    ? '호스트 에이전트가 없습니다. scouter.host 를 콜렉터에 붙이면 CPU·메모리·네트워크가 표시됩니다.'
+                    ? t('호스트 에이전트가 없습니다. scouter.host 를 콜렉터에 붙이면 CPU·메모리·네트워크가 표시됩니다.')
                     : null
                 }
               />
@@ -610,21 +616,21 @@ export default function App() {
                 agentMap={agentMap}
               />
               <CounterSection
-                title="커넥션 풀"
-                subtitle={`${counterHashes.datasource.length}개 풀 · datasource`}
+                title={t('커넥션 풀')}
+                subtitle={`${counterHashes.datasource.length}${t('개 풀')} · datasource`}
                 counters={DATASOURCE_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
                 empty={
                   counterHashes.datasource.length === 0
                     ? // 두 관문이 모두 닫혀 있으면 0건이다. 어느 쪽인지 말해 주지 않으면 고장으로 읽힌다 (F-41).
-                      '커넥션 풀이 수집되지 않았습니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.'
+                      t('커넥션 풀이 수집되지 않았습니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')
                     : null
                 }
               />
             </div>
           ) : (
-            <EmptyState text="연결 후 사용 가능합니다." />
+            <EmptyState text={t('연결 후 사용 가능합니다.')} />
           )}
         </div>
       )}
@@ -666,7 +672,7 @@ function FiveMinSection({
   return (
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">호스트 · 5분 집계</h2>
+        <h2 className="text-body font-medium text-fg">{t('호스트 · 5분 집계')}</h2>
         <span className="text-micro text-fg-faint">{objType} · 실시간 팩에 없는 카운터</span>
       </header>
       <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
@@ -736,7 +742,7 @@ function CounterSection({
                   total === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
                 }`}
               >
-                {v ? '합계' : '개별'}
+                {v ? '합계' : t('개별')}
               </button>
             ))}
           </div>
@@ -821,8 +827,8 @@ function XLogTable({
       <div
         className={`${XLOG_COLS} shrink-0 items-center border-b border-line px-3 py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <span>시간</span>
-        <span>서버</span>
+        <span>{t('시간')}</span>
+        <span>{t('서버')}</span>
         <span>URL</span>
         <span>IP</span>
         <span className="text-right">Elapsed</span>
@@ -938,16 +944,16 @@ function AlertFullView({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div style={tabPageHeaderStyle}>
-        <span>알림</span>
+        <span>{t('알림')}</span>
         {alerts.length > 0 && (
           <button onClick={onClear} style={{ ...closeBtnStyle, marginLeft: 8, fontSize: F.small, color: T.textFaint }}>Clear</button>
         )}
       </div>
       <div style={{ ...colHeaderStyle, flexShrink: 0 }}>
-        <span style={{ width: 74 }}>시간</span>
-        <span style={{ width: 60 }}>레벨</span>
-        <span style={{ width: 110 }}>에이전트</span>
-        <span style={{ flex: 1 }}>제목 / 메시지</span>
+        <span style={{ width: 74 }}>{t('시간')}</span>
+        <span style={{ width: 60 }}>{t('레벨')}</span>
+        <span style={{ width: 110 }}>{t('에이전트')}</span>
+        <span style={{ flex: 1 }}>{t('제목 / 메시지')}</span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {alerts.length === 0 && (

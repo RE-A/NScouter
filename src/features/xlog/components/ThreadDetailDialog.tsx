@@ -7,6 +7,7 @@ import { memo, useEffect, useState } from 'react';
 import { getThreadDetail, type ThreadDetail } from '../api/scouterApi';
 import { detailRows } from './threadDetail';
 import { durationTone } from './durationTone';
+import { t } from '../../../i18n';
 
 interface ThreadDetailDialogProps {
   objHash: number;
@@ -68,7 +69,7 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
         className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl"
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
-          <h2 className="text-base font-medium text-fg">실행 중인 트랜잭션</h2>
+          <h2 className="text-base font-medium text-fg">{t('실행 중인 트랜잭션')}</h2>
           <span className="min-w-0 truncate text-micro text-fg-dim" title={service}>
             {service}
           </span>
@@ -88,7 +89,7 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {load.kind === 'loading' && <Note>조회 중…</Note>}
+          {load.kind === 'loading' && <Note>{t('조회 중…')}</Note>}
           {load.kind === 'error' && (
             <p className="px-4 py-6 text-center text-small text-danger">{load.message}</p>
           )}
@@ -97,7 +98,7 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
             <Note>
               이미 끝난 트랜잭션입니다.
               <br />
-              <span className="text-micro">여는 사이에 완료되면 상세가 남지 않습니다.</span>
+              <span className="text-micro">{t('여는 사이에 완료되면 상세가 남지 않습니다.')}</span>
             </Note>
           )}
 
@@ -107,7 +108,7 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
               {(d.sql || d.subcall) && (
                 <section className="border-b border-line px-4 py-2">
                   <h3 className="mb-1 text-micro tracking-wide text-fg-dim uppercase">
-                    {d.sql ? '실행 중인 SQL' : '호출 중인 외부 API'}
+                    {d.sql ? '실행 중인 SQL' : t('호출 중인 외부 API')}
                   </h3>
                   <pre className="font-mono text-micro leading-relaxed whitespace-pre-wrap text-fg">
                     {d.sql || d.subcall}
@@ -145,7 +146,7 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
                     {d.stack_trace}
                   </pre>
                 ) : (
-                  <p className="py-2 text-small text-fg-faint">스택이 오지 않았습니다.</p>
+                  <p className="py-2 text-small text-fg-faint">{t('스택이 오지 않았습니다.')}</p>
                 )}
               </section>
             </>

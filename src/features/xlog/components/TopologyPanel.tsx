@@ -12,6 +12,7 @@ import type { InteractionRow } from '../types/interaction';
 import { useTextResolver } from '../hooks/useTextResolver';
 import { buildGraph, edgeWidth, EXTERNAL_HASH, type Graph, type NodeLayer } from './topologyGraph';
 import { CANVAS } from '../../../styles/tokens';
+import { t } from '../../../i18n';
 
 interface TopologyPanelProps {
   objType: string;
@@ -29,9 +30,9 @@ const NODE_H = 34;
 const GAP_Y = 14;
 
 const LAYER_LABEL: Record<NodeLayer, string> = {
-  inbound: '외부 유입',
-  agent: '애플리케이션',
-  resource: '의존 자원',
+  inbound: t('외부 유입'),
+  agent: t('애플리케이션'),
+  resource: t('의존 자원'),
 };
 
 export const TopologyPanel = memo(function TopologyPanel({
@@ -83,7 +84,7 @@ export const TopologyPanel = memo(function TopologyPanel({
     if (!canvas || !open) return;
 
     const label = (hash: number): string => {
-      if (hash === EXTERNAL_HASH) return '외부';
+      if (hash === EXTERNAL_HASH) return t('외부');
       const agent = agentMap.get(hash);
       if (agent) return agent.split('/').pop() ?? agent;
       return getCached('object', hash) ?? `0x${(hash >>> 0).toString(16)}`;
@@ -101,7 +102,7 @@ export const TopologyPanel = memo(function TopologyPanel({
   return (
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">토폴로지</h2>
+        <h2 className="text-body font-medium text-fg">{t('토폴로지')}</h2>
         <span className="text-micro text-fg-faint">{objType} · 호출 관계</span>
         <div className="flex-1" />
         {open && rows.length > 0 && (
@@ -114,7 +115,7 @@ export const TopologyPanel = memo(function TopologyPanel({
           onClick={() => setOpen(o => !o)}
           className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
-          {open ? '닫기' : '열기'}
+          {open ? '닫기' : t('열기')}
         </button>
       </header>
 
@@ -136,7 +137,7 @@ export const TopologyPanel = memo(function TopologyPanel({
           )}
 
           {!error && !loadedOnce && loading && (
-            <p className="px-3 py-6 text-center text-small text-fg-faint">조회 중…</p>
+            <p className="px-3 py-6 text-center text-small text-fg-faint">{t('조회 중…')}</p>
           )}
 
           <canvas

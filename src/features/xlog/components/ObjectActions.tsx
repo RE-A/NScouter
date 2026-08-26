@@ -15,6 +15,7 @@ import {
   triggerDump,
   type DumpKind,
 } from '../api/scouterApi';
+import { t } from '../../../i18n';
 
 interface ObjectActionsProps {
   objHash: number;
@@ -26,10 +27,10 @@ interface ObjectActionsProps {
 const STACK_DURATION_MS = 5 * 60 * 1000;
 
 const DUMPS: { kind: DumpKind; label: string; desc: string }[] = [
-  { kind: 'threaddump', label: '스레드 덤프', desc: '지금 스택 전체를 파일로' },
-  { kind: 'activeservice', label: '액티브 서비스', desc: '실행 중인 트랜잭션을 파일로' },
-  { kind: 'threadlist', label: '스레드 목록', desc: '스레드 상태 표를 파일로' },
-  { kind: 'heaphisto', label: '힙 히스토그램', desc: '클래스별 점유를 파일로' },
+  { kind: 'threaddump', label: t('스레드 덤프'), desc: t('지금 스택 전체를 파일로') },
+  { kind: 'activeservice', label: t('액티브 서비스'), desc: t('실행 중인 트랜잭션을 파일로') },
+  { kind: 'threadlist', label: t('스레드 목록'), desc: t('스레드 상태 표를 파일로') },
+  { kind: 'heaphisto', label: t('힙 히스토그램'), desc: t('클래스별 점유를 파일로') },
 ];
 
 export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
@@ -71,7 +72,7 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
       )}
 
       <Group
-        title="덤프 만들기"
+        title={t('덤프 만들기')}
         hint="에이전트 디스크에 파일이 생깁니다. 만든 뒤 '스레드 덤프' 화면에서 볼 수 있습니다."
       >
         {DUMPS.map(d => (
@@ -91,9 +92,9 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
         ))}
       </Group>
 
-      <Group title="스택 샘플링" hint="켜 두면 5분 동안 스택을 주기적으로 모읍니다.">
+      <Group title={t('스택 샘플링')} hint={t('켜 두면 5분 동안 스택을 주기적으로 모읍니다.')}>
         <Action
-          label="켜기 (5분)"
+          label={t('켜기 (5분)')}
           desc="샘플링 시작"
           busy={busy === 'stack-on'}
           onRun={() =>
@@ -105,7 +106,7 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
           }
         />
         <Action
-          label="끄기"
+          label={t('끄기')}
           desc="샘플링 중지"
           busy={busy === 'stack-off'}
           onRun={() =>
@@ -115,8 +116,8 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
       </Group>
 
       <Group
-        title="되돌릴 수 없는 작업"
-        hint="한 번 더 눌러야 실행됩니다. 운영 중인 JVM 이면 영향이 바로 나타납니다."
+        title={t('되돌릴 수 없는 작업')}
+        hint={t('한 번 더 눌러야 실행됩니다. 운영 중인 JVM 이면 영향이 바로 나타납니다.')}
       >
         <Action
           danger
@@ -137,7 +138,7 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
         />
         <Action
           danger
-          label="힙 덤프"
+          label={t('힙 덤프')}
           desc="힙 크기만 한 파일이 디스크에 생깁니다"
           busy={busy === 'heapdump'}
           confirming={confirming === 'heapdump'}
@@ -146,7 +147,7 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
           onRun={() => run('heapdump', () => objectHeapDump(objHash), '힙 덤프를 요청했습니다')}
         />
         <Action
-          label="텍스트 캐시 비우기"
+          label={t('텍스트 캐시 비우기')}
           desc="해시가 이름으로 안 풀릴 때"
           busy={busy === 'reset'}
           onRun={() =>

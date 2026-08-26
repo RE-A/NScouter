@@ -7,6 +7,7 @@
 
 import { memo, useEffect, useState } from 'react';
 import { saveAgentConfig } from '../api/scouterApi';
+import { t } from '../../../i18n';
 
 interface ConfigEditorProps {
   objHash: number;
@@ -54,7 +55,7 @@ export const ConfigEditor = memo(function ConfigEditor({
       {/* **경고를 접어 두지 않는다.** 무엇이 일어나는지 모르고 누르면 안 되는 버튼이다. */}
       <p className="mx-4 mt-2 rounded border-l-2 border-warn bg-warn/10 px-2 py-1.5 text-micro text-warn">
         저장하면 <span className="font-mono">{objName}</span> 의 설정 파일이 이 내용으로{' '}
-        <strong>통째로 바뀌고</strong> 에이전트가 설정을 다시 읽습니다. 지우고 저장한 줄은
+        <strong>{t('통째로 바뀌고')}</strong> 에이전트가 설정을 다시 읽습니다. 지우고 저장한 줄은
         기본값으로 돌아갑니다.
       </p>
 
@@ -73,13 +74,13 @@ export const ConfigEditor = memo(function ConfigEditor({
 
       <footer className="flex shrink-0 items-center gap-2 border-t border-line px-4 py-2">
         <span className="text-micro text-fg-faint">
-          {dirty ? `${draft.length.toLocaleString()}자 · 수정됨` : '수정 없음'}
+          {dirty ? `${draft.length.toLocaleString()}${t('자')} · ${t('수정됨')}` : t('수정 없음')}
         </span>
         <div className="flex-1" />
 
         {confirming ? (
           <>
-            <span className="text-micro text-warn">정말 덮어쓸까요?</span>
+            <span className="text-micro text-warn">{t('정말 덮어쓸까요?')}</span>
             <button
               onClick={() => setConfirming(false)}
               disabled={busy}
@@ -92,7 +93,7 @@ export const ConfigEditor = memo(function ConfigEditor({
               disabled={busy}
               className="rounded border border-danger px-2 py-0.5 text-micro text-danger hover:bg-danger/10 disabled:opacity-50"
             >
-              {busy ? '저장 중…' : '덮어쓰기'}
+              {busy ? '저장 중…' : t('덮어쓰기')}
             </button>
           </>
         ) : (
@@ -106,7 +107,7 @@ export const ConfigEditor = memo(function ConfigEditor({
             <button
               onClick={() => setConfirming(true)}
               disabled={!dirty}
-              title={dirty ? undefined : '바뀐 내용이 없습니다'}
+              title={dirty ? undefined : t('바뀐 내용이 없습니다')}
               className="rounded border border-line-strong px-2 py-0.5 text-micro text-accent hover:bg-hover disabled:cursor-not-allowed disabled:text-fg-faint"
             >
               저장…

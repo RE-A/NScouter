@@ -12,6 +12,7 @@ import {
   getConfig,
   saveConfig,
 } from '../api/scouterApi';
+import { t } from '../../../i18n';
 
 interface ConnectionDialogProps {
   onConnected: (serverId: string, objHashes: number[]) => void;
@@ -136,7 +137,7 @@ export function ConnectionDialog({
         disabled={loading}
         className="rounded px-2 py-1 text-micro text-fg-dim hover:text-fg disabled:opacity-50"
       >
-        {loading ? '…' : '연결 해제'}
+        {loading ? '…' : t('연결 해제')}
       </button>
     );
   }
@@ -172,7 +173,7 @@ export function ConnectionDialog({
         onChange={e => setPass(e.target.value)}
         placeholder="Password"
       />
-      <label style={autoLabelStyle} title="비밀번호가 config.json 에 평문으로 저장됩니다">
+      <label style={autoLabelStyle} title={t('비밀번호가 config.json 에 평문으로 저장됩니다')}>
         <input
           type="checkbox"
           checked={autoConnect}
@@ -181,14 +182,14 @@ export function ConnectionDialog({
         자동 연결
       </label>
       <button type="submit" disabled={loading} style={btnStyle}>
-        {loading ? '연결 중...' : '연결'}
+        {loading ? '연결 중...' : t('연결')}
       </button>
       <button
         type="button"
         onClick={handleDemo}
         disabled={loading}
         style={{ ...btnStyle, background: T.success }}
-        title="실제 Collector 없이 합성 데이터로 차트 테스트"
+        title={t('실제 Collector 없이 합성 데이터로 차트 테스트')}
       >
         Demo
       </button>

@@ -17,6 +17,7 @@ import {
 } from './activeSpeed';
 import { sparklinePoints, toPolyline } from './sparkline';
 import { ActiveServiceList } from './ActiveServiceList';
+import { t } from '../../../i18n';
 
 interface ActiveServicePanelProps {
   objType: string;
@@ -56,7 +57,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
   return (
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">액티브 서비스</h2>
+        <h2 className="text-body font-medium text-fg">{t('액티브 서비스')}</h2>
         <span className="text-micro text-fg-faint">{objType} · 지금 이 순간</span>
       </header>
 
@@ -70,7 +71,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
         {/* 타입 전체 */}
         <div className="rounded border border-line bg-surface p-3">
           <div className="flex items-baseline justify-between">
-            <span className="text-micro tracking-wide text-fg-dim uppercase">전체</span>
+            <span className="text-micro tracking-wide text-fg-dim uppercase">{t('전체')}</span>
             <span className="tnum font-mono text-micro text-fg-dim">
               TPS <span className="text-fg-muted">{(group?.tps ?? 0).toFixed(1)}</span>
             </span>
@@ -80,7 +81,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
             <span className={`text-title ${TONE[group ? worstStep(group) : 0]}`}>
               {group ? speedTotal(group) : 0}
             </span>
-            <span className="ml-1 text-micro text-fg-faint">건</span>
+            <span className="ml-1 text-micro text-fg-faint">{t('건')}</span>
           </div>
 
           <SpeedBar speed={group} />
@@ -102,9 +103,9 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
         {/* 오브젝트별 — 어느 서버에 몰렸는지.
             막대는 **오브젝트를 통틀어 하나의 자**로 잰다 (ASIS EQView). */}
         <div className="rounded border border-line bg-surface p-3">
-          <span className="text-micro tracking-wide text-fg-dim uppercase">오브젝트별</span>
+          <span className="text-micro tracking-wide text-fg-dim uppercase">{t('오브젝트별')}</span>
           {stats.perObject.length === 0 ? (
-            <p className="mt-2 text-small text-fg-faint">받은 값이 없습니다</p>
+            <p className="mt-2 text-small text-fg-faint">{t('받은 값이 없습니다')}</p>
           ) : (
             <>
               <ul className="mt-1.5 space-y-1.5">
@@ -130,20 +131,20 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
 
         {/* 오늘 누적 — 5분 단위라 따로 느리게 받는다 */}
         <div className="rounded border border-line bg-surface p-3">
-          <span className="text-micro tracking-wide text-fg-dim uppercase">오늘</span>
+          <span className="text-micro tracking-wide text-fg-dim uppercase">{t('오늘')}</span>
 
           <div className="mt-1 flex items-baseline gap-4">
             <div>
               <div className="tnum font-mono text-title text-fg">
                 {Math.round(todayCalls).toLocaleString()}
               </div>
-              <div className="text-micro text-fg-faint">서비스 호출</div>
+              <div className="text-micro text-fg-faint">{t('서비스 호출')}</div>
             </div>
             <div>
               <div className="tnum font-mono text-base text-fg-muted">
                 {stats.visitors === null ? '—' : stats.visitors.toLocaleString()}
               </div>
-              <div className="text-micro text-fg-faint">방문자</div>
+              <div className="text-micro text-fg-faint">{t('방문자')}</div>
             </div>
           </div>
 
@@ -189,7 +190,7 @@ function SpeedBar({
             key={s.step}
             className={STEP[s.step].cls}
             style={{ width: `${s.pct}%` }}
-            title={`${STEP[s.step].label} ${s.count}건`}
+            title={`${STEP[s.step].label} ${s.count}${t('건')}`}
           />
         ))}
       </div>

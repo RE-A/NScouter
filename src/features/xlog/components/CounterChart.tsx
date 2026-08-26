@@ -10,6 +10,7 @@ import { deriveStreamStatus } from '../utils/streamStatus';
 import { sampleX, totalLineVisible } from './counterGeometry';
 import { aggregate, totalMode } from './counterTotal';
 import { CANVAS, SERIES } from '../../../styles/tokens';
+import { t } from '../../../i18n';
 
 /** 카운터 폴링이 2초라 넉넉히 잡는다 */
 const STALE_AFTER_MS = 8_000;
@@ -216,10 +217,10 @@ export const CounterChart = memo(function CounterChart({
         {meta.disp} ({meta.unit}){' '}
         {agentCount > 0
           ? totalOne
-            ? `· ${mode === 'avg' ? '평균' : '합계'} · ${agentCount}개 에이전트`
+            ? `· ${mode === 'avg' ? t('평균') : t('합계')} · ${agentCount}${t('개 에이전트')}`
             : // 구역이 합계인데 이 카운터만 개별이면 **말해 줘야 한다.**
               // 조용히 두면 옆 차트와 같은 자로 읽는다.
-              `· ${agentCount}개 에이전트${total && !capable ? ' · 합계 없음' : ''}`
+              `· ${agentCount}${t('개 에이전트')}${total && !capable ? ` · ${t('합계 없음')}` : ''}`
           : ''}
       </div>
       <canvas
@@ -287,7 +288,7 @@ function drawLines(
   // 기준선을 못 그린 쌍 카운터는 상한을 숫자로라도 알려준다 —
   // "열린 것 36" 만으로는 여유가 있는지 없는지 알 수 없다.
   if (!withTotal && total !== null) {
-    const label = `상한 ${Math.round(total).toLocaleString()}`;
+    const label = `${t('상한')} ${Math.round(total).toLocaleString()}`;
     ctx.fillText(label, w - ctx.measureText(label).width - 4, 12);
   }
 }

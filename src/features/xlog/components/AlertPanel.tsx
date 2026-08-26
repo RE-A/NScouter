@@ -6,6 +6,7 @@ import type { AlertPack } from '../types/alert';
 import { alertLevelColor, alertLevelLabel } from '../types/alert';
 import { formatTime } from '../utils/colorPalette';
 import { T, F } from '../../../styles/tokens';
+import { t } from '../../../i18n';
 
 interface AlertPanelProps {
   /** **앱이 쥐고 있는 하나의 버퍼**를 받는다. 여기서 따로 모으면 탭과 어긋난다 */
@@ -53,7 +54,7 @@ export const AlertPanel = memo(function AlertPanel({
   return (
     <div ref={panelRef} style={wrapStyle}>
       {/* 배지 버튼 */}
-      <button onClick={handleToggle} style={badgeBtnStyle(open)} title="알림">
+      <button onClick={handleToggle} style={badgeBtnStyle(open)} title={t('알림')}>
         <span style={bellStyle}>🔔</span>
         {unread > 0 && (
           <span style={countStyle}>{unread > 99 ? '99+' : unread}</span>
@@ -68,7 +69,7 @@ export const AlertPanel = memo(function AlertPanel({
             <button onClick={onClear} style={clearBtnStyle}>Clear</button>
           </div>
           {alerts.length === 0 ? (
-            <div style={emptyStyle}>알림 없음</div>
+            <div style={emptyStyle}>{t('알림 없음')}</div>
           ) : (
             <div style={listStyle}>
               {alerts.map((a, i) => (

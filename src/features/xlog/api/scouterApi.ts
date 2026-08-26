@@ -525,6 +525,8 @@ export interface AppConfig {
   sql_bind_inline?: boolean;
   /** 글자 크기 배율. 없으면 1 */
   ui_font_scale?: number;
+  /** 화면 언어 'ko' | 'en'. 없으면 'ko' */
+  ui_language?: string;
 }
 
 export async function getConfig(): Promise<AppConfig> {

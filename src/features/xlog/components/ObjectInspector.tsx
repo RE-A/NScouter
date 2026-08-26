@@ -39,6 +39,8 @@ import { ThreadDetailDialog } from './ThreadDetailDialog';
 import { ConfigEditor } from './ConfigEditor';
 import { buildPropertyRows, type PropertyRow } from './objectProperties';
 import { getAgentColor } from '../utils/colorPalette';
+// 이 파일에는 시각을 담은 지역 변수 t 가 있어 별명을 쓴다
+import { t as tr } from '../../../i18n';
 
 export type InspectKind =
   | 'active'
@@ -190,7 +192,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
           .then(list => {
             const me = list.find(o => o.obj_hash === objHash);
             if (!me) {
-              setError('목록에서 이 오브젝트를 찾지 못했습니다. 방금 내려갔을 수 있습니다.');
+              setError(tr('목록에서 이 오브젝트를 찾지 못했습니다. 방금 내려갔을 수 있습니다.'));
               return;
             }
             setProps(buildPropertyRows(me, getAgentColor(objHash)));
@@ -275,7 +277,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
           <input
             value={filter}
             onChange={e => setFilter(e.target.value)}
-            placeholder="검색"
+            placeholder={tr('검색')}
             className="w-40 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
           />
           {kind === 'config' && (
@@ -283,7 +285,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
               {/* 원문에는 걸리지 않는 조건이다. 켜 두면 눌러도 아무 일이 없는 스위치가 된다 */}
               {configMode === 'table' && (
                 <label
-                  title="기본값 그대로인 항목은 볼 이유가 없다"
+                  title={tr('기본값 그대로인 항목은 볼 이유가 없다')}
                   className="flex items-center gap-1 text-micro text-fg-dim"
                 >
                   <input
@@ -308,7 +310,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
                           : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
                       }`}
                     >
-                      {m === 'table' ? '항목' : '원문'}
+                      {m === 'table' ? '항목' : tr('원문')}
                     </button>
                   ))}
                 </div>
@@ -317,7 +319,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
               {!editingConfig && configMode === 'text' && config?.text && (
                 <button
                   onClick={() => setEditingConfig(true)}
-                  title="설정 파일을 통째로 바꿉니다"
+                  title={tr('설정 파일을 통째로 바꿉니다')}
                   className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
                 >
                   편집
@@ -351,25 +353,25 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
             <button
               onClick={createDump}
               disabled={busy}
-              title="대상 JVM 의 스레드 덤프를 지금 떠서 에이전트에 파일로 남깁니다"
+              title={tr('대상 JVM 의 스레드 덤프를 지금 떠서 에이전트에 파일로 남깁니다')}
               className={`rounded border border-line-strong px-2 py-0.5 text-micro ${
                 busy ? 'cursor-not-allowed text-fg-faint' : 'text-accent hover:bg-hover'
               }`}
             >
-              {busy ? '뜨는 중…' : '지금 덤프 뜨기'}
+              {busy ? '뜨는 중…' : tr('지금 덤프 뜨기')}
             </button>
           )}
           {/* 스냅샷이라 자동 갱신하지 않는다 — 다시 보려면 눌러야 한다 */}
           <button
             onClick={load}
-            title="다시 조회"
+            title={tr('다시 조회')}
             className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
           >
             새로고침
           </button>
           <button
             onClick={onClose}
-            aria-label="닫기"
+            aria-label={tr('닫기')}
             className="rounded px-1.5 text-fg-dim hover:text-fg"
           >
             ✕
@@ -393,7 +395,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
 
         <div className={`min-h-0 flex-1 overflow-auto ${kind === 'config' && editingConfig ? 'hidden' : ''}`}>
           {kind === 'actions' && <ObjectActions objHash={objHash} />}
-          {kind !== 'actions' && loading && <Note>조회 중…</Note>}
+          {kind !== 'actions' && loading && <Note>{tr('조회 중…')}</Note>}
           {kind !== 'actions' && error && <Note tone="danger">{error}</Note>}
           {!loading && !error && kind === 'active' && (
             <ActiveTable
@@ -493,7 +495,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
             <span className="text-micro text-fg-dim">
               <span className="tnum font-mono text-fg-muted">{classes.page}</span>
               <span className="text-fg-faint">/{classes.total_page}</span> 페이지
-              {q && <span className="text-fg-faint"> · 검색은 이 페이지 안에서만</span>}
+              {q && <span className="text-fg-faint"> {tr('· 검색은 이 페이지 안에서만')}</span>}
             </span>
             <div className="flex-1" />
             <PageBtn disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
@@ -567,7 +569,7 @@ function ThreadTable({
   /** 값은 안 쓰고, 텍스트 캐시가 채워졌을 때 다시 그리기 위한 신호다 */
   textVersion?: number;
 }) {
-  if (rows.length === 0) return <Note>스레드가 없습니다.</Note>;
+  if (rows.length === 0) return <Note>{tr('스레드가 없습니다.')}</Note>;
 
   // 일하는 스레드를 위로. 스레드 목록을 여는 이유가 "지금 뭐가 도는가" 다.
   const sorted = [...rows].sort((a, b) => {
@@ -581,8 +583,8 @@ function ThreadTable({
         className={`${THREAD_COLS} sticky top-0 border-b border-line bg-raised py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
         <span className="text-right">ID</span>
-        <span>이름</span>
-        <span>상태</span>
+        <span>{tr('이름')}</span>
+        <span>{tr('상태')}</span>
         <span className="text-right">CPU</span>
         <span className="text-right">Elapsed</span>
       </div>
@@ -680,7 +682,7 @@ function StackTimeTable({
             className="grid w-full grid-cols-[110px_minmax(0,1fr)] items-baseline gap-x-3 px-4 py-1 text-left hover:bg-hover disabled:opacity-50"
           >
             <span className="font-mono text-micro text-fg">{stackTimeLabel(t)}</span>
-            <span className="text-micro text-fg-faint">열기</span>
+            <span className="text-micro text-fg-faint">{tr('열기')}</span>
           </button>
         </li>
       ))}
@@ -689,7 +691,7 @@ function StackTimeTable({
 }
 
 function PropertyTable({ rows }: { rows: PropertyRow[] }) {
-  if (rows.length === 0) return <Note>항목이 없습니다.</Note>;
+  if (rows.length === 0) return <Note>{tr('항목이 없습니다.')}</Note>;
   return (
     <dl className="divide-y divide-line/40">
       {rows.map(r => (
@@ -699,7 +701,7 @@ function PropertyTable({ rows }: { rows: PropertyRow[] }) {
         >
           <dt
             className={`truncate font-mono text-micro ${r.fromTags ? 'text-fg-faint' : 'text-fg-muted'}`}
-            title={r.fromTags ? `${r.key} (에이전트 tag)` : r.key}
+            title={r.fromTags ? `${r.key} (${tr('에이전트 tag')})` : r.key}
           >
             {r.key}
           </dt>
@@ -719,7 +721,7 @@ function PropertyTable({ rows }: { rows: PropertyRow[] }) {
 }
 
 function EnvTable({ rows }: { rows: EnvEntry[] }) {
-  if (rows.length === 0) return <Note>항목이 없습니다.</Note>;
+  if (rows.length === 0) return <Note>{tr('항목이 없습니다.')}</Note>;
   return (
     <dl className="divide-y divide-line/40">
       {rows.map(e => (
@@ -764,9 +766,9 @@ function HeapTable({ rows }: { rows: HeapHistoRow[] }) {
         className={`${HEAP_COLS} sticky top-0 border-b border-line bg-raised py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
         <span className="text-right">#</span>
-        <span>클래스</span>
-        <span className="text-right">인스턴스</span>
-        <span className="text-right">바이트</span>
+        <span>{tr('클래스')}</span>
+        <span className="text-right">{tr('인스턴스')}</span>
+        <span className="text-right">{tr('바이트')}</span>
       </div>
       <ol className="divide-y divide-line/40">
         {shown.map(r => (
@@ -802,7 +804,7 @@ function DumpFileTable({
   busy: boolean;
 }) {
   if (rows.length === 0) {
-    return <Note>저장된 덤프가 없습니다. 위의 &ldquo;지금 덤프 뜨기&rdquo;를 누르세요.</Note>;
+    return <Note>{tr('저장된 덤프가 없습니다. 위의 &ldquo;지금 덤프 뜨기&rdquo;를 누르세요.')}</Note>;
   }
   return (
     <ol className="divide-y divide-line/40">
@@ -841,7 +843,7 @@ function ActiveTable({
 }) {
   if (rows.length === 0) {
     // 부하가 없으면 0건이 정상이다. 고장으로 읽히지 않게 말해 준다.
-    return <Note>지금 실행 중인 트랜잭션이 없습니다.</Note>;
+    return <Note>{tr('지금 실행 중인 트랜잭션이 없습니다.')}</Note>;
   }
 
   // 오래 붙들고 있는 것부터. 이 화면을 여는 이유가 "뭐가 안 끝나나" 다.
@@ -852,9 +854,9 @@ function ActiveTable({
       <div
         className={`${ACTIVE_COLS} sticky top-0 border-b border-line bg-raised py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <span>서비스</span>
-        <span>스레드</span>
-        <span>상태</span>
+        <span>{tr('서비스')}</span>
+        <span>{tr('스레드')}</span>
+        <span>{tr('상태')}</span>
         <span className="text-right">Elapsed</span>
       </div>
       <ol className="divide-y divide-line/40">
@@ -909,7 +911,7 @@ function SocketTable({
   serviceName: (hash: number) => string | undefined;
   textVersion?: number;
 }) {
-  if (rows.length === 0) return <Note>열린 소켓이 없습니다.</Note>;
+  if (rows.length === 0) return <Note>{tr('열린 소켓이 없습니다.')}</Note>;
 
   // 같은 상대로 많이 열린 것부터. 커넥션 풀이 새는지 보려고 여는 화면이다.
   const sorted = [...rows].sort((a, b) => b.count - a.count);
@@ -919,10 +921,10 @@ function SocketTable({
       <div
         className={`${SOCKET_COLS} sticky top-0 border-b border-line bg-raised py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <span>상대 주소</span>
+        <span>{tr('상대 주소')}</span>
         <span className="text-right">Port</span>
-        <span className="text-right">개수</span>
-        <span>트랜잭션</span>
+        <span className="text-right">{tr('개수')}</span>
+        <span>{tr('트랜잭션')}</span>
       </div>
       <ol className="divide-y divide-line/40">
         {sorted.map(s => (
@@ -945,14 +947,14 @@ function SocketTable({
 const CLASS_COLS = 'grid grid-cols-[minmax(0,1fr)_minmax(0,240px)] items-baseline gap-x-4 px-4';
 
 function ClassTable({ rows }: { rows: LoadedClass[] }) {
-  if (rows.length === 0) return <Note>클래스가 없습니다.</Note>;
+  if (rows.length === 0) return <Note>{tr('클래스가 없습니다.')}</Note>;
   return (
     <div>
       <div
         className={`${CLASS_COLS} sticky top-0 border-b border-line bg-raised py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <span>클래스</span>
-        <span>출처</span>
+        <span>{tr('클래스')}</span>
+        <span>{tr('출처')}</span>
       </div>
       <ol className="divide-y divide-line/40">
         {rows.map(c => (
@@ -993,12 +995,12 @@ function ConfigPane({
   changedOnly: boolean;
   query: string;
 }) {
-  if (!data) return <Note>설정을 불러오지 못했습니다.</Note>;
+  if (!data) return <Note>{tr('설정을 불러오지 못했습니다.')}</Note>;
 
   if (mode === 'text') {
     // 설정 파일이 없어도 에이전트는 기본값으로 돈다. 원문만 비는 게 정상일 수 있다.
     if (!data.text) {
-      return <Note>설정 파일이 없습니다. 에이전트가 기본값으로 동작 중입니다.</Note>;
+      return <Note>{tr('설정 파일이 없습니다. 에이전트가 기본값으로 동작 중입니다.')}</Note>;
     }
     return (
       <pre className="px-4 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-fg">
@@ -1015,14 +1017,14 @@ function ConfigPane({
       <div
         className={`${CONFIG_COLS} sticky top-0 border-b border-line bg-raised py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <span>키</span>
-        <span>값</span>
+        <span>{tr('키')}</span>
+        <span>{tr('값')}</span>
       </div>
       {rows.length === 0 ? (
         <Note>
           {changedOnly && changed === 0
-            ? '기본값과 다른 설정이 없습니다.'
-            : '조건에 맞는 항목이 없습니다.'}
+            ? tr('기본값과 다른 설정이 없습니다.')
+            : tr('조건에 맞는 항목이 없습니다.')}
         </Note>
       ) : (
         <ol className="divide-y divide-line/40">
@@ -1038,12 +1040,12 @@ function ConfigPane({
               </span>
               <span className="min-w-0">
                 <span className="block font-mono text-micro break-all text-fg">
-                  {e.value || <span className="text-fg-faint">(비어 있음)</span>}
+                  {e.value || <span className="text-fg-faint">{tr('(비어 있음)')}</span>}
                 </span>
                 {/* 바뀐 항목에서만 기본값을 보여준다 — 같은 값을 두 번 쓰면 표가 안 읽힌다 */}
                 {e.changed && (
                   <span className="block font-mono text-micro break-all text-fg-faint">
-                    기본 {e.default || '(비어 있음)'}
+                    기본 {e.default || tr('(비어 있음)')}
                   </span>
                 )}
               </span>
