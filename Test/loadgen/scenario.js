@@ -61,6 +61,10 @@ function jitter() {
     });
 }
 
+function literalSql() {
+    http.get(`${SHOP}/shop/lab/literal-sql`, { tags: { scenario: 'literal-sql' } });
+}
+
 function heavySql() {
     http.get(`${SHOP}/shop/lab/heavy-sql?limit=${rnd(10, 50)}`, { tags: { scenario: 'heavy-sql' } });
 }
@@ -91,7 +95,8 @@ function errorCall() {
 
 // 누적 가중치 — 합계 100
 const MIX = [
-    [30, shopBrowse],
+    [25, shopBrowse],
+    [5, literalSql],
     [10, shopStocks],
     [10, orderList],
     [20, orderCreate],

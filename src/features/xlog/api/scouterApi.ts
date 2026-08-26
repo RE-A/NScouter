@@ -523,6 +523,8 @@ export interface AppConfig {
    * 끄면 자리표시자(`?`)를 그대로 두고 값을 아래에 따로 적는다.
    */
   sql_bind_inline?: boolean;
+  /** 글자 크기 배율. 없으면 1 */
+  ui_font_scale?: number;
 }
 
 export async function getConfig(): Promise<AppConfig> {

@@ -3,6 +3,17 @@
 // 프로파일의 SQL 은 `select ... where id=?` 처럼 자리표시자만 온다.
 // 값은 별도 필드(`param`)에 **쉼표로 이어 붙은 한 줄**로 온다 (실측 확인).
 //
+// 자리표시자는 두 가지다.
+//
+//   ?       PreparedStatement 의 바인딩. 값은 **나온 순서대로** 대응한다.
+//   @{n}    에이전트가 리터럴을 빼낸 자리(profile_sql_escape_enabled).
+//           n 은 1부터의 번호이고 값 목록의 **n 번째**다 — 순서가 아니라 번호다.
+//
+// `@{n}` 은 문자열이면 문장 쪽에 따옴표가 남는다: `where c = '@{1}'` · 값 `'fruit'`.
+// 값이 따옴표를 들고 오므로 **따옴표째** 갈아끼워야 한다. 안쪽만 바꾸면 `''fruit''` 다.
+// 숫자는 맨몸이다: `where id > @{2}` · 값 `100`.
+// 실측: `probe_literal_sql_escape` (F-49)
+//
 // **따옴표·주석 안의 `?` 를 건드리면 안 된다.** 하나를 잘못 세면 그 뒤가 전부 한 칸씩
 // 밀려 **말은 되지만 틀린 SQL** 이 만들어진다. 그걸 복사해 DB 에 붙이면 사고다.
 //
@@ -53,15 +64,33 @@ export function splitParams(params: string): string[] {
  *
  * 문자열 리터럴(`'...'`, `''` 이스케이프), 따옴표 식별자(`"..."`),
  * 줄 주석(`--`), 블록 주석(`/* *\/`) 안은 건드리지 않는다.
+ * 단 `'@{n}'` 은 통째로 자리표시자다 — 문자열처럼 생겼지만 값이 들어갈 자리다.
  *
  * 값은 **온 그대로** 넣는다. 문자열 값은 따옴표가 붙어 오므로(ASIS 도 그렇게 다룬다)
  * 벗겨 내면 실행할 수 없는 문장이 된다.
  */
+/** `@{12}` 를 만나면 12 를, 아니면 null 을 준다. `at` 은 `@` 의 위치다 */
+function readIndexed(sql: string, at: number): { index: number; end: number } | null {
+  if (sql[at] !== '@' || sql[at + 1] !== '{') return null;
+  let i = at + 2;
+  let digits = '';
+  while (i < sql.length && sql[i] >= '0' && sql[i] <= '9') {
+    digits += sql[i];
+    i++;
+  }
+  if (digits === '' || sql[i] !== '}') return null;
+  return { index: Number(digits), end: i };
+}
+
 export function bindSql(sql: string, params: string): BoundSql {
   const values = splitParams(params);
+  // 번호로 집는 자리표시자가 있어 **쓴 값을 따로 표시해야 한다.**
+  // 남은 값을 '뒤에서부터' 자르는 식으로는 @{2} 만 쓰인 경우를 못 맞춘다.
+  const used = new Array<boolean>(values.length).fill(false);
   let out = '';
   let bound = 0;
   let placeholders = 0;
+  let seq = 0; // `?` 가 훑어 가는 자리
 
   let inSingle = false;
   let inDouble = false;
@@ -103,7 +132,23 @@ export function bindSql(sql: string, params: string): BoundSql {
       continue;
     }
 
+    // '@{n}' — 문자열처럼 생겼지만 통째로 자리표시자다. 값이 따옴표를 들고 온다.
     if (ch === "'") {
+      const found = readIndexed(sql, i + 1);
+      if (found && sql[found.end + 1] === "'") {
+        placeholders++;
+        const v = values[found.index - 1];
+        if (v !== undefined) {
+          out += v;
+          used[found.index - 1] = true;
+          bound++;
+        } else {
+          // 값이 없으면 **원문 그대로** 둔다. 빈칸으로 채우면 조용히 틀린 문장이 된다.
+          out += sql.slice(i, found.end + 2);
+        }
+        i = found.end + 1;
+        continue;
+      }
       inSingle = true;
       out += ch;
       continue;
@@ -125,10 +170,29 @@ export function bindSql(sql: string, params: string): BoundSql {
       continue;
     }
 
+    if (ch === '@') {
+      const found = readIndexed(sql, i);
+      if (found) {
+        placeholders++;
+        const v = values[found.index - 1];
+        if (v !== undefined) {
+          out += v;
+          used[found.index - 1] = true;
+          bound++;
+        } else {
+          out += sql.slice(i, found.end + 1);
+        }
+        i = found.end;
+        continue;
+      }
+    }
+
     if (ch === '?') {
       placeholders++;
-      if (bound < values.length) {
-        out += values[bound];
+      if (seq < values.length) {
+        out += values[seq];
+        used[seq] = true;
+        seq++;
         bound++;
       } else {
         // 값이 모자라면 **그대로 둔다.** 빈칸으로 채우면 문법이 깨진 채 그럴듯해진다.
@@ -140,5 +204,5 @@ export function bindSql(sql: string, params: string): BoundSql {
     out += ch;
   }
 
-  return { text: out, bound, placeholders, leftover: values.slice(bound) };
+  return { text: out, bound, placeholders, leftover: values.filter((_, i) => !used[i]) };
 }

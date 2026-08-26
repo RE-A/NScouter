@@ -111,3 +111,62 @@ describe('bindSql', () => {
     expect(bindSql(sql, '1').text).toBe(sql);
   });
 });
+
+// ── @{n} 형태 (에이전트의 리터럴 치환) ─────────────────────────
+//
+// profile_sql_escape_enabled 를 켠 에이전트는 리터럴을 빼내고 자리에 번호를 남긴다.
+// 실측(probe_literal_sql_escape):
+//   sql   = … where p.category = '@{1}' and p.id > @{2} and @{3} = @{4}
+//   param = "'fruit',100,1,1"
+// **문자열은 따옴표가 문장 쪽에 남고 값이 따옴표를 들고 온다.** 그래서 '@{1}' 은
+// 따옴표째 갈아끼워야 하고, 안쪽만 바꾸면 ''fruit'' 가 된다.
+
+describe('bindSql — @{n}', () => {
+  it("문자열 자리는 따옴표째 값으로 바뀐다", () => {
+    const r = bindSql("select * from p where c = '@{1}'", "'fruit'");
+    expect(r.text).toBe("select * from p where c = 'fruit'");
+    expect(r.bound).toBe(1);
+    expect(r.leftover).toEqual([]);
+  });
+
+  it('숫자 자리는 맨몸으로 바뀐다', () => {
+    const r = bindSql('select * from p where id > @{2}', "'fruit',100");
+    expect(r.text).toBe('select * from p where id > 100');
+    expect(r.bound).toBe(1);
+    // 1번 값은 쓰이지 않았다 — 버리지 않는다
+    expect(r.leftover).toEqual(["'fruit'"]);
+  });
+
+  it('실측 문장을 그대로 채운다', () => {
+    const sql =
+      "/*literal-sql*/ select count(*) from product p where p.category = '@{1}' and p.id > @{2} and @{3} = @{4}";
+    const r = bindSql(sql, "'fruit',100,1,1");
+    expect(r.text).toBe(
+      "/*literal-sql*/ select count(*) from product p where p.category = 'fruit' and p.id > 100 and 1 = 1",
+    );
+    expect(r.placeholders).toBe(4);
+    expect(r.bound).toBe(4);
+    expect(r.leftover).toEqual([]);
+  });
+
+  it('같은 번호가 여러 번 나오면 같은 값을 쓴다', () => {
+    const r = bindSql('select @{1}, @{1} from dual', '7');
+    expect(r.text).toBe('select 7, 7 from dual');
+    expect(r.bound).toBe(2);
+  });
+
+  it('값이 없는 번호는 그대로 둔다', () => {
+    // 빈칸으로 채우면 문법이 깨진 채 그럴듯해진다
+    const r = bindSql('select * from p where id = @{5}', "'fruit',100");
+    expect(r.text).toBe('select * from p where id = @{5}');
+    expect(r.bound).toBe(0);
+    expect(r.leftover).toEqual(["'fruit'", '100']);
+  });
+
+  it('주석과 문자열 안의 @{n} 은 건드리지 않는다', () => {
+    const r = bindSql("select /* @{1} */ 'a@{1}b' from dual", "'x'");
+    expect(r.text).toBe("select /* @{1} */ 'a@{1}b' from dual");
+    expect(r.bound).toBe(0);
+    expect(r.leftover).toEqual(["'x'"]);
+  });
+});

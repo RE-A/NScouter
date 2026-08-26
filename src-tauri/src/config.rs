@@ -29,12 +29,22 @@ pub struct AppConfig {
     /// 그대로 복사해 DB 에 붙일 수도 없다. 값을 따로 보고 싶은 사람을 위해 끌 수 있게 둔다.
     #[serde(default = "default_true")]
     pub sql_bind_inline: bool,
+    /// 글자 크기 배율. 1.0 이 기본이고 화면에서 0.8~1.6 사이로 고른다.
+    ///
+    /// 밀도를 위해 작게 잡은 화면이라 오래 보면 읽기 힘들다는 이야기가 있어 둔다.
+    #[serde(default = "default_font_scale")]
+    pub ui_font_scale: f32,
 }
 
 /// serde 기본값용. **`Default` 파생만으로는 false 가 된다** —
 /// 설정 파일에 항목이 없는 기존 사용자에게 기능이 꺼진 채로 보인다.
 fn default_true() -> bool {
     true
+}
+
+/// 같은 이유로 파생 기본값(0.0)을 쓰면 글자가 사라진다.
+fn default_font_scale() -> f32 {
+    1.0
 }
 
 /// **파생 Default 를 쓰면 안 된다.** bool 의 파생 기본값은 false 라
@@ -49,6 +59,7 @@ impl Default for AppConfig {
             auto_connect: false,
             last_pass: None,
             sql_bind_inline: true,
+            ui_font_scale: 1.0,
         }
     }
 }
@@ -97,5 +108,21 @@ mod bind_default_tests {
         let saved = r#"{"sql_bind_inline":false}"#;
         let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");
         assert!(!cfg.sql_bind_inline);
+    }
+
+    #[test]
+    fn 글자_배율은_없으면_1이다() {
+        // 파생 기본값(0.0)이 들어가면 **글자가 사라진다.**
+        assert_eq!(AppConfig::default().ui_font_scale, 1.0);
+        let old = r#"{"auto_connect":false}"#;
+        let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
+        assert_eq!(cfg.ui_font_scale, 1.0);
+    }
+
+    #[test]
+    fn 저장된_글자_배율은_유지된다() {
+        let saved = r#"{"ui_font_scale":1.3}"#;
+        let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");
+        assert_eq!(cfg.ui_font_scale, 1.3);
     }
 }

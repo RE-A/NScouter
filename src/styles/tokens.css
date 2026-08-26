@@ -51,12 +51,14 @@
   --row-neutral: #2a2a3a;
 
   /* ── 타이포 스케일 ──────────────────────────────── */
-  /* 통합 전 9종(9~20px) → 5단계 */
-  --fs-micro: 10px;  /* 축 눈금, 범례 */
-  --fs-small: 11px;  /* 레이블, 보조 */
-  --fs-body: 12px;   /* 기본 */
-  --fs-base: 13px;   /* 값, 입력 */
-  --fs-title: 15px;  /* 패널 제목 */
+  /* 통합 전 9종(9~20px) → 5단계
+     설정의 글자 크기가 --fs-scale 을 흔든다. 한 곳에서 곱해야 **단계 사이 비율이 유지된다** */
+  --fs-scale: 1;
+  --fs-micro: calc(10px * var(--fs-scale));  /* 축 눈금, 범례 */
+  --fs-small: calc(11px * var(--fs-scale));  /* 레이블, 보조 */
+  --fs-body: calc(12px * var(--fs-scale));   /* 기본 */
+  --fs-base: calc(13px * var(--fs-scale));   /* 값, 입력 */
+  --fs-title: calc(15px * var(--fs-scale));  /* 패널 제목 */
 
   /* ── 간격 ───────────────────────────────────────── */
   --sp-1: 4px;

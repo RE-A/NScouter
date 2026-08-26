@@ -236,8 +236,9 @@ export const SummaryPanel = memo(function SummaryPanel({
               >
                 <span>이름</span>
                 <span className="text-right">횟수</span>
-                <span className="text-right">합계</span>
-                <span className="text-right">평균</span>
+                {/* 단위가 없으면 5,275,590 이 초인지 밀리초인지 읽는 사람이 못 정한다 */}
+                <span className="text-right">합계(ms)</span>
+                <span className="text-right">평균(ms)</span>
                 <span className="text-right">에러</span>
               </div>
               {/* textVersion 은 값이 아니라 **사전이 채워졌다는 신호**다 */}
@@ -271,9 +272,12 @@ export const SummaryPanel = memo(function SummaryPanel({
                   </li>
                 ))}
               </ol>
+              {/* 무엇을 언제 것으로 모은 값인지 표 옆에 적는다.
+                  구간 버튼은 위에 있지만 표만 캡처해 옮기는 일이 잦다. */}
               <p className="px-3 py-2 text-micro text-fg-faint">
+                최근 {RANGES.find(r => r.ms === rangeMs)?.label ?? ''} 누적 ·{' '}
                 {rows.length.toLocaleString()}행 · 호출 합계 {totalCalls.toLocaleString()}
-                {rows.length > VISIBLE && ` · 상위 ${VISIBLE}개만 표시`}
+                {rows.length > VISIBLE && ` · 상위 ${VISIBLE}개만 표시`} · 평균은 합계÷횟수
               </p>
             </>
           )}

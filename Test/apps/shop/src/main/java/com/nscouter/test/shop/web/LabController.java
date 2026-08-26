@@ -72,4 +72,10 @@ public class LabController {
     public Map<String, Object> heavySql(@RequestParam(defaultValue = "30") int limit) {
         return Map.of("sum", labService.heavySql(Math.min(Math.max(limit, 1), 50)));
     }
+
+    /** 리터럴이 박힌 SQL — 프로파일에 '@{n}' 형태로 온다 (B-1 재현). */
+    @GetMapping("/literal-sql")
+    public Map<String, Object> literalSql() {
+        return Map.of("count", labService.literalSql());
+    }
 }

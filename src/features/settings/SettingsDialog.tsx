@@ -2,7 +2,11 @@
 
 import React, { memo, useCallback, useEffect, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
-import { applyConfigToViewOptions } from '../xlog/hooks/useViewOptions';
+import {
+  applyConfigToViewOptions,
+  clampFontScale,
+  FONT_SCALES,
+} from '../xlog/hooks/useViewOptions';
 import { T, F } from '../../styles/tokens';
 
 interface SettingsDialogProps {
@@ -14,6 +18,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   const [dataDir, setDataDir] = useState('');
   /** SQL 바인딩 값을 문장에 채울지. 기본은 채우기 */
   const [bindInline, setBindInline] = useState(true);
+  /** 글자 크기 배율 */
+  const [fontScale, setFontScale] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -23,6 +29,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setConfig(cfg);
       setDataDir(cfg.data_dir ?? '');
       setBindInline(cfg.sql_bind_inline ?? true);
+      setFontScale(clampFontScale(cfg.ui_font_scale ?? 1));
     }).catch(() => {});
   }, []);
 
@@ -35,6 +42,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         ...config,
         data_dir: dataDir.trim() || null,
         sql_bind_inline: bindInline,
+        ui_font_scale: fontScale,
       };
       await saveConfig(next);
       setConfig(next);
@@ -48,7 +56,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     } finally {
       setSaving(false);
     }
-  }, [config, dataDir, bindInline]);
+  }, [config, dataDir, bindInline, fontScale]);
 
   // ESC 닫기
   useEffect(() => {
@@ -82,6 +90,36 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
               placeholder="비워두면 실행파일 경로 사용"
               spellCheck={false}
             />
+          </div>
+
+          {/* 글자 크기 */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>글자 크기</div>
+            <div style={sectionDescStyle}>
+              화면 전체에 적용됩니다. 표·차트 눈금·프로파일 본문이 같은 비율로 커집니다.
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              {FONT_SCALES.map(v => {
+                const on = Math.abs(v - fontScale) < 0.001;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setFontScale(v)}
+                    aria-pressed={on}
+                    style={{
+                      ...scaleBtnStyle,
+                      // 고른 배율이 어떤 크기인지 **버튼 글자 자체로** 보여준다
+                      fontSize: Math.round(13 * v),
+                      borderColor: on ? T.accent : T.border,
+                      color: on ? T.text : T.textDim,
+                      background: on ? T.bgHover : 'transparent',
+                    }}
+                  >
+                    {v === 1 ? '보통' : `×${v}`}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* SQL 표시 */}
@@ -318,6 +356,14 @@ const cancelBtnStyle: React.CSSProperties = {
   padding: '5px 16px',
   cursor: 'pointer',
   fontFamily: 'inherit',
+};
+
+const scaleBtnStyle: React.CSSProperties = {
+  padding: '4px 12px',
+  borderRadius: 4,
+  border: `1px solid ${T.border}`,
+  cursor: 'pointer',
+  lineHeight: 1.2,
 };
 
 const saveBtnStyle: React.CSSProperties = {

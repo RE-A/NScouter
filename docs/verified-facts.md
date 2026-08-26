@@ -617,6 +617,38 @@ ASIS 는 프로파일 텍스트에서 `thread:...<Hexa32>` 패턴을 정규식�
 - 구현: `scouter/profile.rs` `ThreadCallProfileStep`, 화면은 `ProfileStepList` 의 링크
 - 재현: `cargo test --test live_collector live_thread_call_steps -- --ignored`
 
+### F-49. 에이전트가 리터럴을 빼내면 `@{n}` 이 남는다 — **문자열은 따옴표가 문장 쪽에 남는다**
+
+`profile_sql_escape_enabled=true` 인 에이전트는 SQL 의 리터럴을 빼내 파라미터로 따로 보낸다
+(`EscapeLiteralSQL`). 실측:
+
+```
+sql   = /*literal-sql*/ select count(*) from product p
+        where p.category = '@{1}' and p.id > @{2} and @{3} = @{4}
+param = "'fruit',100,1,1"
+```
+
+| 리터럴 | 문장에 남는 것 | 값 |
+|---|---|---|
+| 문자열 | `'@{n}'` — **따옴표가 문장 쪽** | `'fruit'` — 따옴표를 들고 온다 |
+| 숫자 | `@{n}` | `100` |
+
+**따옴표째 갈아끼워야 한다.** 안쪽만 바꾸면 `''fruit''` 가 된다.
+`n` 은 1부터의 번호이고 값 목록의 **n 번째**다 — `?` 처럼 순서대로가 아니다
+(`… and @{3} = @{4}` 처럼 건너뛰거나 되풀이될 수 있다).
+
+**`Statement` 경로에서만 나온다.** `TraceSQL.start(Object)` → `escapeLiteral` 이고,
+PreparedStatement 로 보내면 값이 애초에 문장에 없어 치환할 것도 없다.
+그래서 JPA/Hibernate 만 쓰는 앱에서는 이 형태를 볼 수 없다 —
+재현하려면 앱이 `Statement.executeQuery(리터럴이 박힌 SQL)` 을 불러야 한다
+(`Test/apps/shop` 의 `/shop/lab/literal-sql`).
+
+**조회할 때 창을 좁혀야 한다.** 넓은 구간을 `pageCount` 로 자르면 **앞쪽(오래된) 것만**
+와서 방금 만든 트랜잭션이 안 잡힌다. 400건 요청에 10분 창이면 실제로는 약 16초치다.
+
+- 구현: `src/features/xlog/components/sqlBind.ts`
+- 재현: `cargo test --test live_collector live_sql_literal_escape -- --ignored --nocapture`
+
 ### F-48. 흐름 보기에 필요한 스텝은 **ThreadCall 하나뿐이다** — Dispatch·ThreadSubmit·Span 은 이 환경에 없다
 
 ASIS `XLogFlowView.stepToElement` 는 스텝 7종을 다룬다(ApiCall·SpanCall·Dispatch·

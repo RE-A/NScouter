@@ -9,6 +9,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -19,10 +24,14 @@ public class LabService {
 
     private final ProductRepository productRepository;
     private final StockRepository stockRepository;
+    private final DataSource dataSource;
 
-    public LabService(ProductRepository productRepository, StockRepository stockRepository) {
+    public LabService(ProductRepository productRepository,
+                      StockRepository stockRepository,
+                      DataSource dataSource) {
         this.productRepository = productRepository;
         this.stockRepository = stockRepository;
+        this.dataSource = dataSource;
     }
 
     /**
@@ -57,5 +66,29 @@ public class LabService {
             }
         }
         return sum;
+    }
+
+    /**
+     * 값을 문장에 박은 SQL 을 **PreparedStatement 가 아니라 Statement** 로 실행한다.
+     *
+     * 에이전트의 리터럴 치환(profile_sql_escape_enabled)은 Statement 경로에서만 돈다
+     * (TraceSQL.start(Object) → escapeLiteral). PreparedStatement 로 보내면
+     * 값이 그대로 남아 `@{n}` 이 생기지 않는다 — 그래서 여기서는 일부러 Statement 다.
+     *
+     * 켜져 있으면 프로파일에는 문자열이 '@{n}', 숫자가 @{n} 으로 오고
+     * 값은 파라미터로 따로 온다. 운영 환경에서 그렇게 오는 SQL 을 재현한다 (B-1).
+     */
+    public int literalSql() {
+        String sql = "/*literal-sql*/ select count(*) from product p"
+                + " where p.category = 'fruit' and p.id > 100 and 1 = 1";
+        try (Connection conn = dataSource.getConnection();
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            int count = rs.next() ? rs.getInt(1) : 0;
+            log.debug("literalSql 완료: {}", count);
+            return count;
+        } catch (SQLException e) {
+            throw new IllegalStateException("literal-sql 실패", e);
+        }
     }
 }

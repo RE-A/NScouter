@@ -5416,3 +5416,150 @@ fn live_search_parallel_matches_sequential() {
     );
     assert!(par_ms < seq_ms, "병렬이 순차보다 느리다 — 병렬화가 동작하지 않는다");
 }
+
+/// 테스트 앱의 엔드포인트를 직접 호출한다 (부하 생성기를 기다리지 않으려고).
+fn http_get(host: &str, port: u16, path: &str) -> std::io::Result<()> {
+    use std::io::{Read, Write};
+    let mut sock = std::net::TcpStream::connect((host, port))?;
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
+    write!(sock, "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")?;
+    let mut body = String::new();
+    let _ = sock.read_to_string(&mut body);
+    Ok(())
+}
+
+/// 에이전트가 리터럴을 빼낸 SQL(`@{n}`)이 실제로 그 모양으로 오는가 (B-1 / F-49).
+///
+/// 화면에서 값을 채우려면 **문자열은 따옴표가 문장 쪽에 남고 값이 따옴표를 들고 온다**는
+/// 걸 알아야 한다. 그 전제가 깨지면 `bindSql` 이 `''fruit''` 같은 문장을 만든다.
+///
+/// 이 테스트는 엔드포인트를 직접 부르고 **최근 12초**만 조회한다.
+/// 넓은 창을 pageCount 로 자르면 앞쪽(오래된) 구간만 와서 방금 부른 건 안 잡힌다.
+#[test]
+#[ignore]
+fn live_sql_literal_escape() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
+    use nscouter_lib::scouter::protocol::text_type;
+
+    // 먼저 만들어 놓는다. 부하 생성기에도 섞여 있지만 5% 라 기다릴 이유가 없다.
+    for _ in 0..4 {
+        let _ = http_get("127.0.0.1", 8081, "/shop/lab/literal-sql");
+    }
+    std::thread::sleep(std::time::Duration::from_secs(5));
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+
+    // **좁은 창**이어야 한다. 10분을 400건으로 받으면 앞쪽 16초치만 오고
+    // 방금 부른 트랜잭션은 그 안에 없다 (실제로 그렇게 헛짚었다).
+    let param = build_past_xlog_param(
+        &hashes,
+        &date,
+        now - 12 * 1000,
+        now,
+        400,
+        &PastCursor::default(),
+    );
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+    let mut rows = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            rows.push((x.txid, x.service, x.sql_count));
+        }
+    }
+    let mut cache = TextCache::new();
+
+    // 서비스 이름으로 골라야 한다. sqlCount 로 거르면 **에이전트가 그 SQL 을 못 센 경우**
+    // 대상에서 통째로 빠진다 — 실제로 그렇게 헛짚었다.
+    let svc: Vec<i32> = rows.iter().map(|r| r.1).collect();
+    let missing_svc = cache.missing(text_type::SERVICE, &svc);
+    if !missing_svc.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &missing_svc);
+    }
+    let txids: Vec<i64> = rows
+        .iter()
+        .filter(|(_, service, _)| {
+            cache.get(text_type::SERVICE, *service).map(|s| s.contains("literal-sql")).unwrap_or(false)
+        })
+        .map(|(txid, _, _)| *txid)
+        .collect();
+    println!(
+        "전체 {}건 중 literal-sql 트랜잭션 {}건 (sqlCount: {:?})",
+        rows.len(),
+        txids.len(),
+        rows.iter()
+            .filter(|(t, _, _)| txids.contains(t))
+            .map(|(_, _, c)| *c)
+            .take(5)
+            .collect::<Vec<_>>()
+    );
+    let mut found = 0usize;
+    for txid in txids.iter() {
+        if found >= 3 {
+            break;
+        }
+        let mut c = login();
+        let cs = c.session;
+        if c
+            .send_request(CMD_TRANX_PROFILE_FULL, cs, &build_full_profile_param(&date, *txid))
+            .is_err()
+        {
+            continue;
+        }
+        let blob = match c.read_blob_stream() {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let steps = parse_profile_steps(blob);
+        let sql_hashes: Vec<i32> = steps
+            .iter()
+            .filter_map(|s| match s {
+                ProfileStep::Sql(x) if x.hash != 0 => Some(x.hash),
+                _ => None,
+            })
+            .collect();
+        if sql_hashes.is_empty() {
+            continue;
+        }
+        let missing = cache.missing(text_type::SQL, &sql_hashes);
+        if !missing.is_empty() {
+            let _ = fetch_texts(&mut c, &mut cache, text_type::SQL, &missing);
+        }
+
+        for st in &steps {
+            if let ProfileStep::Sql(x) = st {
+                let sql = cache.get(text_type::SQL, x.hash).unwrap_or("<사전 미해석>");
+                if !sql.contains("literal-sql") {
+                    continue;
+                }
+                found += 1;
+                println!("--- txid={txid}");
+                println!("    sql   = {sql}");
+                println!("    param = {:?}", x.param);
+
+                // 문자열 자리: 따옴표가 **문장 쪽**에 남는다
+                assert!(
+                    sql.contains("= '@{1}'"),
+                    "문자열 리터럴이 '@{{1}}' 로 오지 않았다: {sql}"
+                );
+                // 숫자 자리: 맨몸
+                assert!(sql.contains("> @{2}"), "숫자 리터럴이 @{{2}} 로 오지 않았다: {sql}");
+                // 값은 쉼표로 이어 오고 문자열은 따옴표를 들고 온다
+                assert_eq!(x.param, "'fruit',100,1,1", "파라미터 모양이 달라졌다");
+            }
+        }
+    }
+
+    assert!(
+        found > 0,
+        "literal-sql 쿼리를 못 찾았다 — shop-app 이 떠 있고 profile_sql_escape_enabled 가 켜져 있는지 볼 것"
+    );
+}
