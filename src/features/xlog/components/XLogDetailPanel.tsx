@@ -198,7 +198,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                             : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
                         }`}
                       >
-                        {m === 'apps' ? '앱' : t('상세')}
+                        {m === 'apps' ? t('앱') : t('상세')}
                       </button>
                     ))}
                   </div>
@@ -245,7 +245,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                       {/* 빠진 게 있으면 말해 준다. 말없이 덜 그리면 **없는 호출로 읽힌다** */}
                       {flowProfiles.failed > 0 && (
                         <p className="mx-3 mb-1 rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-micro text-warn">
-                          프로파일 {flowProfiles.failed}건을 못 받아 그만큼 잎이 빠져 있습니다
+                          {t('프로파일')} {flowProfiles.failed}{t('건을 못 받아 그만큼 잎이 빠져 있습니다')}
                         </p>
                       )}
                       <FlowTreeView
@@ -308,7 +308,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                           : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
                       }`}
                     >
-                      {m === 'list' ? '목록' : t('요약')}
+                      {m === 'list' ? t('목록') : t('요약')}
                     </button>
                     ))}
                   </div>

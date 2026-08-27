@@ -330,12 +330,12 @@ function SqlBody({
           SQL 이 잘렸거나 파라미터를 잘못 자른 신호다. */}
       {bound && bound.bound < bound.placeholders && (
         <span className="mt-0.5 block text-micro text-warn">
-          자리 {bound.placeholders}개 중 {bound.bound}개만 채웠습니다
+          {t('자리')} {bound.placeholders}{t('개 중')} {bound.bound}{t('개만 채웠습니다')}
         </span>
       )}
       {bound && bound.leftover.length > 0 && (
         <span className="mt-0.5 block text-micro text-warn" title={bound.leftover.join(', ')}>
-          쓰이지 않은 값 {bound.leftover.length}개: {bound.leftover.join(', ')}
+          {t('쓰이지 않은 값')} {bound.leftover.length}{t('개:')} {bound.leftover.join(', ')}
         </span>
       )}
     </div>

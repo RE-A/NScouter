@@ -8,6 +8,7 @@ import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
 import { needsRefetch, panRange, zoomRange } from '../types/timeRange';
 import { T, F } from '../../../styles/tokens';
+import { t } from '../../../i18n';
 
 interface XLogChartProps {
   config: XLogChartConfig;
@@ -154,16 +155,16 @@ export const XLogChart = memo(function XLogChart({
             <span className="text-danger">{past.error}</span>
           ) : (
             <span className="text-fg-muted">
-              불러오는 중… <span className="tnum font-mono text-fg">
+              {t('불러오는 중…')} <span className="tnum font-mono text-fg">
                 {(past.progress?.loaded ?? 0).toLocaleString()}
-              </span>건
+              </span>{t('건')}
             </span>
           )}
         </div>
       )}
       {isPast && !past.loading && past.progress?.truncated && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-warn/50 bg-overlay px-3 py-1 text-body text-warn shadow-lg">
-          너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요
+          {t('너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요')}
         </div>
       )}
 

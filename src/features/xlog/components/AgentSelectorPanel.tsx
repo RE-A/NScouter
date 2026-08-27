@@ -77,7 +77,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
           {isConnected ? (
             <>
               <span className="tnum font-mono text-fg-muted">{aliveCount}</span>
-              <span className="text-fg-faint">/{agents.length}</span> 활성
+              <span className="text-fg-faint">/{agents.length}</span> {t('활성')}
             </>
           ) : (
             '—'
@@ -93,7 +93,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
             title={t('필터 해제 — 전부 표시')}
             className="rounded px-1.5 py-0.5 text-micro text-accent hover:bg-hover"
           >
-            <span className="tnum font-mono">{selectedHashes.size}</span>개만 · 전체로
+            <span className="tnum font-mono">{selectedHashes.size}</span>
+            {t('개만 · 전체로')}
           </button>
         ) : (
           <span className="px-1.5 text-micro text-fg-faint">{t('전체')}</span>

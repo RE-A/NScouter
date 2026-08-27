@@ -65,7 +65,7 @@ export const AlertPanel = memo(function AlertPanel({
       {open && (
         <div style={dropdownStyle}>
           <div style={dropHeaderStyle}>
-            <span>알림 ({alerts.length})</span>
+            <span>{t('알림 (')}{alerts.length})</span>
             <button onClick={onClear} style={clearBtnStyle}>Clear</button>
           </div>
           {alerts.length === 0 ? (

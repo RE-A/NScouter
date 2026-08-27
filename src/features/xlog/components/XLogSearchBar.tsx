@@ -36,7 +36,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
         value={draft}
         spellCheck={false}
         disabled={disabled}
-        placeholder={disabled ? '먼저 차트에서 구간을 드래그하세요' : 'SQL·예외·URL 일부'}
+        placeholder={disabled ? t('먼저 차트에서 구간을 드래그하세요') : t('SQL·예외·URL 일부')}
         title={t('선택한 구간의 트랜잭션 프로파일 안에서 찾습니다')}
         onChange={e => setDraft(e.target.value)}
         onKeyDown={e => {
@@ -51,7 +51,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
           onClick={onCancel}
           className="rounded border border-line-strong px-2 py-0.5 text-micro text-warn hover:bg-hover"
         >
-          중단
+          {t('중단')}
         </button>
       ) : (
         <button
@@ -59,22 +59,22 @@ export const XLogSearchBar = memo(function XLogSearchBar({
           disabled={!canRun}
           className="rounded border border-line-strong px-2 py-0.5 text-micro text-accent hover:bg-hover disabled:cursor-not-allowed disabled:text-fg-faint"
         >
-          검색
+          {t('검색')}
         </button>
       )}
 
       {/* 무엇을 훑는지 늘 보인다 — 비용이 곧 범위라 숫자를 숨기면 안 된다 */}
       {!disabled && !state.progress && (
-        <span className="text-micro text-fg-faint">선택 {targetCount.toLocaleString()}건 대상</span>
+        <span className="text-micro text-fg-faint">{t('선택')} {targetCount.toLocaleString()}{t('건 대상')}</span>
       )}
 
       {state.progress && (
         <span className="tnum font-mono text-micro text-fg-dim">
           {state.progress.done.toLocaleString()} / {state.progress.total.toLocaleString()}
-          {state.running ? t(' 훑는 중…') : t(' 완료')} · 적중 {state.hits.length.toLocaleString()}건
+          {state.running ? t(' 훑는 중…') : t(' 완료')} · {t('적중')} {state.hits.length.toLocaleString()}{t('건')}
           {/* 못 읽은 건을 조용히 빼면 "안 걸렸다"와 구별되지 않는다 */}
           {state.progress.failed > 0 && (
-            <span className="text-warn"> · 못 읽음 {state.progress.failed.toLocaleString()}</span>
+            <span className="text-warn"> · {t('못 읽음')} {state.progress.failed.toLocaleString()}</span>
           )}
         </span>
       )}
@@ -86,7 +86,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
           onClick={onClear}
           className="rounded px-1.5 py-0.5 text-micro text-fg-faint hover:bg-hover hover:text-fg"
         >
-          검색 해제
+          {t('검색 해제')}
         </button>
       )}
     </div>

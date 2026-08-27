@@ -30,9 +30,9 @@ const NODE_H = 34;
 const GAP_Y = 14;
 
 const LAYER_LABEL: Record<NodeLayer, string> = {
-  inbound: t('외부 유입'),
-  agent: t('애플리케이션'),
-  resource: t('의존 자원'),
+  inbound: '외부 유입',
+  agent: '애플리케이션',
+  resource: '의존 자원',
 };
 
 export const TopologyPanel = memo(function TopologyPanel({
@@ -103,19 +103,19 @@ export const TopologyPanel = memo(function TopologyPanel({
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
         <h2 className="text-body font-medium text-fg">{t('토폴로지')}</h2>
-        <span className="text-micro text-fg-faint">{objType} · 호출 관계</span>
+        <span className="text-micro text-fg-faint">{objType} · {t('호출 관계')}</span>
         <div className="flex-1" />
         {open && rows.length > 0 && (
           <span className="text-micro text-fg-dim">
-            호출 {total.toLocaleString()}
-            {errors > 0 && <span className="text-danger"> · 에러 {errors.toLocaleString()}</span>}
+            {t('호출')} {total.toLocaleString()}
+            {errors > 0 && <span className="text-danger"> · {t('에러')} {errors.toLocaleString()}</span>}
           </span>
         )}
         <button
           onClick={() => setOpen(o => !o)}
           className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
-          {open ? '닫기' : t('열기')}
+          {open ? t('닫기') : t('열기')}
         </button>
       </header>
 
@@ -127,11 +127,11 @@ export const TopologyPanel = memo(function TopologyPanel({
               여기서 그 사실을 말해 주지 않으면 고장으로 읽힌다 (F-40). */}
           {!error && loadedOnce && rows.length === 0 && (
             <p className="px-3 py-6 text-center text-small text-fg-faint">
-              호출 관계가 수집되지 않았습니다.
+              {t('호출 관계가 수집되지 않았습니다.')}
               <br />
               <span className="text-micro">
-                에이전트 설정 <code className="text-fg-dim">counter_interaction_enabled</code> 가
-                기본으로 꺼져 있습니다 — 켜면 30초 뒤부터 쌓입니다.
+                {t('에이전트 설정')} <code className="text-fg-dim">counter_interaction_enabled</code> {t('가')}
+                {t('기본으로 꺼져 있습니다 — 켜면 30초 뒤부터 쌓입니다.')}
               </span>
             </p>
           )}
@@ -201,7 +201,7 @@ function drawTopology(
     ctx.fillStyle = CANVAS.textDim;
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(LAYER_LABEL[layer], colX[layer], 16);
+    ctx.fillText(t(LAYER_LABEL[layer]), colX[layer], 16);
   }
 
   // 간선 먼저 — 노드가 위에 와야 글씨가 안 가린다

@@ -78,7 +78,7 @@ export function XLogToolbar({
               mode === m ? 'bg-accent text-white' : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
             }`}
           >
-            {m === 'live' ? '실시간' : t('과거')}
+            {m === 'live' ? t('실시간') : t('과거')}
           </button>
         ))}
       </div>
@@ -114,7 +114,7 @@ export function XLogToolbar({
                 : 'cursor-not-allowed border-line text-fg-faint'
             }`}
           >
-            조회
+            {t('조회')}
           </button>
           {/* 막힌 이유를 말해 주지 않으면 버튼이 왜 안 눌리는지 알 수 없다 */}
           {!check.ok && <span className="text-micro text-warn">{check.reason}</span>}
@@ -170,7 +170,7 @@ export function XLogToolbar({
           checked={filter.errorOnly}
           onChange={e => onFilterChange({ errorOnly: e.target.checked })}
         />
-        에러만
+        {t('에러만')}
       </label>
 
       {/* 응답시간은 초로 받는다 — Y축이 Elapsed(sec) 라 눈으로 본 값을 그대로 옮기게 된다.
@@ -179,8 +179,8 @@ export function XLogToolbar({
         <Direction
           exclude={filter.elapsedExclude}
           onChange={v => onFilterChange({ elapsedExclude: v })}
-          onLabel="이상"
-          offLabel="미만"
+          onLabel={t('이상')}
+          offLabel={t('미만')}
         />
         <input
           type="number"
@@ -238,7 +238,7 @@ function Direction({
       type="button"
       onClick={() => onChange(!exclude)}
       aria-pressed={exclude}
-      title={exclude ? '제외 조건 — 눌러서 포함으로' : t('포함 조건 — 눌러서 제외로')}
+      title={exclude ? t('제외 조건 — 눌러서 포함으로') : t('포함 조건 — 눌러서 제외로')}
       className={`rounded border px-1.5 py-0.5 text-micro transition-colors ${
         exclude
           ? 'border-warn/60 bg-warn/10 text-warn'
@@ -266,8 +266,8 @@ function TextCond({
       <Direction
         exclude={value.exclude}
         onChange={v => onChange({ ...value, exclude: v })}
-        onLabel="포함"
-        offLabel="제외"
+        onLabel={t('포함')}
+        offLabel={t('제외')}
       />
       <input
         type="text"

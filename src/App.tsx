@@ -58,6 +58,7 @@ import {
 } from './features/xlog/types/counter';
 import { T, F, FONT_UI } from './styles/tokens';
 import { t, useT } from './i18n';
+import { useViewOptions } from './features/xlog/hooks/useViewOptions';
 
 /** 기존 지역 팔레트 `C` 를 토큰으로 대체. 값은 styles/tokens.css 하나에만 있다. */
 const C = {
@@ -104,6 +105,10 @@ export default function App() {
   // 언어가 바뀌면 화면 전체를 다시 그린다. t() 는 모듈 함수라 **구독하지 않으면**
   // 설정에서 언어를 바꿔도 이미 그려진 글자가 그대로 남는다.
   const { lang } = useT();
+  // **여기서 한 번은 불러야 한다.** 표시 설정(언어·글자 크기)은 이걸 처음 쓰는
+  // 컴포넌트가 마운트될 때 config.json 을 읽는데, 그게 상세 패널이라
+  // 앱을 켜고 아무것도 안 열면 저장해 둔 설정이 적용되지 않았다.
+  useViewOptions();
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -358,7 +363,9 @@ export default function App() {
                 className={`size-1.5 rounded-full ${isConnected ? 'bg-ok' : 'bg-fg-faint'}`}
                 aria-hidden
               />
-              {serverId}
+              {/* 데모 서버 이름은 백엔드가 준 한국어 문구다. 진짜 서버 이름은 사전에 없어
+                  그대로 나온다 — t() 를 통과시켜도 안전하다. */}
+              {t(serverId)}
             </span>
           )}
         </div>
@@ -489,9 +496,9 @@ export default function App() {
                         <span className="tnum font-mono text-fg-muted">
                           {selectedXLogs.length}
                         </span>
-                        건
+                        {t('건')}
                         {selectedXLogs.length > XLOG_TABLE_LIMIT && (
-                          <span className="text-fg-faint"> · 느린 순 {XLOG_TABLE_LIMIT}건</span>
+                          <span className="text-fg-faint"> · {t('느린 순')} {XLOG_TABLE_LIMIT}{t('건')}</span>
                         )}
                       </span>
                       <button
@@ -592,7 +599,7 @@ export default function App() {
                 counters={JAVAEE_CHARTS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
-                empty={counterHashes.javaee.length === 0 ? '자바 에이전트가 없습니다.' : null}
+                empty={counterHashes.javaee.length === 0 ? t('자바 에이전트가 없습니다.') : null}
                 // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
                 footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
               />
@@ -673,7 +680,7 @@ function FiveMinSection({
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
         <h2 className="text-body font-medium text-fg">{t('호스트 · 5분 집계')}</h2>
-        <span className="text-micro text-fg-faint">{objType} · 실시간 팩에 없는 카운터</span>
+        <span className="text-micro text-fg-faint">{objType} · {t('실시간 팩에 없는 카운터')}</span>
       </header>
       <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
         {HOST_FIVE_MIN_COUNTERS.map(c => (
@@ -689,8 +696,8 @@ function FiveMinSection({
       </div>
       {/* 없는 것을 없다고 말해 두지 않으면, 볼 때마다 같은 조사를 다시 하게 된다. */}
       <p className="mt-1 px-1 text-micro text-fg-faint">
-        {HOST_UNCOLLECTED_COUNTERS.map(c => counterMeta(c).disp).join(' · ')} 는 에이전트
-        2.21.3 이 값을 계산만 하고 어떤 팩에도 싣지 않아 받을 수 없습니다.
+        {HOST_UNCOLLECTED_COUNTERS.map(c => counterMeta(c).disp).join(' · ')} {t('는 에이전트')}
+        2.21.3 {t('이 값을 계산만 하고 어떤 팩에도 싣지 않아 받을 수 없습니다.')}
       </p>
     </section>
   );
@@ -742,7 +749,7 @@ function CounterSection({
                   total === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
                 }`}
               >
-                {v ? '합계' : t('개별')}
+                {v ? t('합계') : t('개별')}
               </button>
             ))}
           </div>
@@ -839,14 +846,14 @@ function XLogTable({
             "없음" 만 쓰면 고장인지 사용법을 모르는 건지 구분이 안 된다. */}
         {xlogs.length === 0 && (
           <p className="px-3 py-6 text-center text-small text-fg-faint">
-            차트에서 영역을 드래그하면 그 구간의 트랜잭션이 여기에 나옵니다.
+            {t('차트에서 영역을 드래그하면 그 구간의 트랜잭션이 여기에 나옵니다.')}
           </p>
         )}
         {/* **"검색 결과 없음"과 "선택이 없음"은 다른 말이다.** 같은 문구를 쓰면
             드래그를 다시 하라는 안내가 뜨는데 정작 문제는 검색어다. */}
         {xlogs.length > 0 && shown.length === 0 && searchHits !== null && (
           <p className="px-3 py-6 text-center text-small text-fg-faint">
-            선택한 {xlogs.length.toLocaleString()}건의 프로파일에서 찾지 못했습니다.
+            {t('선택한')} {xlogs.length.toLocaleString()}{t('건의 프로파일에서 찾지 못했습니다.')}
           </p>
         )}
         {shown.map((x, i) => {

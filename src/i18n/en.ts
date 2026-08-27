@@ -167,6 +167,7 @@ export const EN: Record<string, string> = {
     'Test the chart with synthetic data, without a collector',
 
   '언어': 'Language',
+  'DEMO (합성 데이터)': 'DEMO (synthetic data)',
   'Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같습니다. 바뀌는 것은 설명과 레이블입니다.':
     'Scouter terms (TPS, XLog, Elapsed) are English in both languages. What changes is the labels and explanations we added.',
 
@@ -252,6 +253,178 @@ export const EN: Record<string, string> = {
   '이 스레드로 이어진 작업을 엽니다': 'Opens the work that continued on this thread',
   ' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.':
     ' cannot be received — agent 2.21.3 has no collection code for it.',
+
+
+  // ── 3차: 값과 섞인 조각 · 나머지 화면 ─────────────────
+  // 숫자가 가운데 박힌 문구는 조각으로 이어 붙인다. 조각 하나가 곧 키다.
+  '1시간': '1 hour',
+  '6시간': '6 hours',
+  '24시간': '24 hours',
+  '1초 미만': 'under 1s',
+  '1~3초': '1–3s',
+  '3초 이상': 'over 3s',
+  '실시간': 'Live',
+  '조회': 'Load',
+  '중단': 'Stop',
+  '검색 해제': 'Clear search',
+  '적중': 'hits',
+  '못 읽음': 'unread',
+  '선택': 'Selected',
+  '선택한': 'the selected',
+  '건 대상': ' transactions',
+  '먼저 차트에서 구간을 드래그하세요': 'Drag a range on the chart first',
+  'SQL·예외·URL 일부': 'part of SQL, exception or URL',
+  '차트에서 영역을 드래그하면 그 구간의 트랜잭션이 여기에 나옵니다.':
+    'Drag a range on the chart and its transactions appear here.',
+  '건의 프로파일에서 찾지 못했습니다.': ' selected profiles had no match.',
+  '너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요':
+    'Too many to draw — narrow the range',
+  '불러오는 중…': 'Loading…',
+  '느린': 'slowest',
+  '느린 순': 'slowest first',
+  '건만 표시 · 전체': ' shown · total',
+  '이미 끝난 트랜잭션입니다.': 'This transaction has already finished.',
+
+  // 필터 방향
+  '포함': 'Include',
+  '제외': 'Exclude',
+  '이상': '≥',
+  '미만': '<',
+  '에러만': 'Errors only',
+  '제외 조건 — 눌러서 포함으로': 'Exclude — click to include',
+
+  // 요약 · 정렬
+  '시간을 어디서 썼나': 'where the time went',
+  '무엇이 많이 불렸나': 'what was called most',
+  '한 번이 비싼 것': 'expensive per call',
+  '어디서 실패하나': 'where it fails',
+  '무엇이 반복되나': 'what repeats',
+  '호출자 IP': 'Caller IP',
+  '구간 누적': 'range total',
+  '최근': 'last',
+  '누적 ·': 'total ·',
+  '행 · 호출 합계': ' rows · calls',
+  '종 · 발생 합계': ' kinds · occurrences',
+  '이 구간에 쌓인 요약이 없습니다.': 'No summary was collected for this range.',
+
+  // 액티브 서비스
+  '액티브 서비스 목록': 'Active service list',
+  '지금 이 순간': 'right now',
+  '지금 돌고 있는 트랜잭션이 없습니다': 'No transactions are running',
+  '의 목록이 완전하지 않습니다': ' has an incomplete list',
+  '눈금': 'grid',
+  '실행 중인 SQL': 'Running SQL',
+  '스택 트레이스': 'Stack trace',
+  '스택 트레이스 보기': 'Show stack trace',
+  '바인드:': 'Bind:',
+
+  // 에이전트 목록
+  '활성': 'live',
+  '개만 · 전체로': ' only · show all',
+  '자바 에이전트가 없습니다.': 'No Java agents.',
+  '실시간 팩에 없는 카운터': 'counters absent from the realtime pack',
+  '는 에이전트': ' — agent',
+  '이 값을 계산만 하고 어떤 팩에도 싣지 않아 받을 수 없습니다.':
+    ' computes these but never puts them in any pack, so they cannot be received.',
+
+  // 알림
+  '알림 (': 'Alerts (',
+
+  // 설정 편집기
+  '저장하면': 'Saving replaces',
+  '의 설정 파일이 이 내용으로': ' configuration file with this content and',
+  '에이전트가 설정을 다시 읽습니다. 지우고 저장한 줄은':
+    ' the agent reloads it. Lines you delete and save',
+  '기본값으로 돌아갑니다.': ' return to their defaults.',
+  '아니요': 'No',
+  '편집': 'Edit',
+  '편집 취소': 'Cancel edit',
+  '저장…': 'Save…',
+  '저장 중…': 'Saving…',
+  '바뀐 것만': 'Changed only',
+  '기본': 'default',
+  '개 · 기본값과 다른 항목': ' entries · differing from defaults',
+  '에이전트 설정': 'Agent configuration',
+  '에이전트 작업': 'Agent actions',
+
+  // 오브젝트 인스펙터
+  '← 목록': '← Back',
+  '목록': 'List',
+  '새로고침': 'Refresh',
+  '이전': 'Prev',
+  '다음': 'Next',
+  '페이지': ' pages',
+  '뜨는 중…': 'Working…',
+  '항목': 'entries',
+  '개': '',
+  '개 중': ' of',
+  '개:': ':',
+  '개만 채웠습니다': ' filled',
+  '자리': 'slots',
+  '쓰이지 않은 값': 'Unused values',
+  '개 클래스 · 합계': ' classes · total',
+  '개만 표시 (검색으로 좁히세요)': ' shown (narrow with search)',
+  '모인 스택이 없습니다.': 'No stacks collected.',
+  '«에이전트 작업 → 스택 샘플링»을 켜면 10초 간격으로 쌓입니다.':
+    'Turn on «Agent actions → Stack sampling» and they pile up every 10 seconds.',
+  '히스토그램이 비었습니다. 앱 컨테이너가 JRE 면': 'The histogram is empty. If the app container is a JRE,',
+  '가 없어 빈 결과가': ' is missing and the result comes back empty',
+  '옵니다.': '.',
+  '가': '',
+  '줄': ' lines',
+  '스택': 'stack',
+
+  // 에이전트 작업 결과
+  '실행': 'Run',
+  '실행 중…': 'Running…',
+  '실행할까요?': ' — run it?',
+  '샘플링 시작': 'start sampling',
+  '샘플링 중지': 'stop sampling',
+  '스택 샘플링을 켰습니다 (5분)': 'Stack sampling is on (5 min)',
+  '스택 샘플링을 껐습니다': 'Stack sampling is off',
+  '그 순간 응답이 멈춥니다': 'responses stop at that moment',
+  'GC 를 요청했습니다. 콜렉터가 결과를 알려주지 않으므로 Heap 카운터로 확인하세요':
+    'GC requested. The collector does not report the result — check the Heap counter.',
+  '힙 크기만 한 파일이 디스크에 생깁니다': 'A file the size of the heap is written to disk',
+  '힙 덤프를 요청했습니다': 'Heap dump requested',
+  '해시가 이름으로 안 풀릴 때': 'when hashes do not resolve to names',
+  '캐시를 비웠습니다. 다음 전송부터 이름이 다시 올라옵니다':
+    'Cache cleared. Names come back with the next transmission.',
+  '을 만들었습니다': ' created',
+  '에이전트 디스크에 파일이 생깁니다. 만든 뒤 해당 화면에서 볼 수 있습니다.':
+    'A file is written on the agent. Open the matching screen afterwards to read it.',
+
+  // 서비스 그룹 · 토폴로지
+  '개 그룹': ' groups',
+  '초 동안 들어온 요청이 없습니다.': ' seconds saw no requests.',
+  '호출': 'calls',
+  '호출 관계': 'call graph',
+  '호출 관계가 수집되지 않았습니다.': 'No call graph was collected.',
+  '기본으로 꺼져 있습니다 — 켜면 30초 뒤부터 쌓입니다.':
+    'is off by default — turn it on and data starts arriving after 30 seconds.',
+  '앱': 'App',
+
+  // 5분 집계
+  '집계는 오지만 구간 내 값이 모두 0입니다.': 'Rollups arrive but every value in the range is 0.',
+
+  // 흐름
+  '건을 못 받아 그만큼 잎이 빠져 있습니다': ' profiles could not be fetched — that many leaves are missing',
+
+
+  // ── 4차: 설정 창 · 접속 폼 ────────────────────────────
+  '로그 파일과 설정 파일이 저장될 경로입니다.': 'Where the log and config files are stored.',
+  '비워두면': 'Leave it empty and',
+  '가 사용됩니다.': ' is used.',
+  '(실행파일 경로)': '(executable folder)',
+  '화면 전체에 적용됩니다. 표·차트 눈금·프로파일 본문이 같은 비율로 커집니다.':
+    'Applies to the whole screen — tables, chart ticks and profile text grow by the same ratio.',
+  '프로파일의 SQL 은 값 대신': 'Profile SQL arrives with',
+  '로 옵니다. 값을 문장에 채워 넣으면 그대로 복사해 DB 에 붙일 수 있습니다.':
+    ' instead of values. Filling them in lets you copy the statement straight into a database.',
+  '※ 경로 변경은 앱 재시작 후 적용됩니다.': '※ A path change takes effect after restarting the app.',
+  '보통': 'Normal',
+  '자동 연결': 'Auto connect',
+  '연결 중…': 'Connecting…',
 
   // ── 레이아웃 ──────────────────────────────────────────
   '서비스 목록 너비': 'Service list width',

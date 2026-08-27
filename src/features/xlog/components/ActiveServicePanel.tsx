@@ -58,7 +58,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
         <h2 className="text-body font-medium text-fg">{t('액티브 서비스')}</h2>
-        <span className="text-micro text-fg-faint">{objType} · 지금 이 순간</span>
+        <span className="text-micro text-fg-faint">{objType} · {t('지금 이 순간')}</span>
       </header>
 
       {stats.error && (
@@ -91,7 +91,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
             {([1, 2, 3] as SpeedStep[]).map(s => (
               <span key={s} className="flex items-center gap-1 text-micro text-fg-dim">
                 <span className={`h-1.5 w-1.5 rounded-full ${STEP[s].cls}`} />
-                {STEP[s].label}
+                {t(STEP[s].label)}
                 <span className="tnum font-mono text-fg-muted">
                   {group ? group[`act${s}` as 'act1' | 'act2' | 'act3'] : 0}
                 </span>
@@ -124,7 +124,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
                 ))}
               </ul>
               {/* 자를 적어 두지 않으면 "막대가 반쯤 찼다"가 몇 건인지 알 수 없다 */}
-              <div className="mt-1.5 text-right text-micro text-fg-faint">눈금 {eqScale}건</div>
+              <div className="mt-1.5 text-right text-micro text-fg-faint">{t('눈금')} {eqScale}{t('건')}</div>
             </>
           )}
         </div>
@@ -190,7 +190,7 @@ function SpeedBar({
             key={s.step}
             className={STEP[s.step].cls}
             style={{ width: `${s.pct}%` }}
-            title={`${STEP[s.step].label} ${s.count}${t('건')}`}
+            title={`${t(STEP[s.step].label)} ${s.count}${t('건')}`}
           />
         ))}
       </div>

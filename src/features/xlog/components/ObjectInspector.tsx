@@ -269,7 +269,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
         className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl"
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
-          <h2 className="text-base font-medium text-fg">{TITLE[kind]}</h2>
+          <h2 className="text-base font-medium text-fg">{tr(TITLE[kind])}</h2>
           <span className="min-w-0 truncate text-micro text-fg-dim" title={objName}>
             {objName}
           </span>
@@ -294,7 +294,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
                     onChange={e => setChangedOnly(e.target.checked)}
                     className="accent-[var(--color-accent)]"
                   />
-                  바뀐 것만
+                  {tr('바뀐 것만')}
                 </label>
               )}
               {!editingConfig && (
@@ -310,7 +310,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
                           : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
                       }`}
                     >
-                      {m === 'table' ? '항목' : tr('원문')}
+                      {m === 'table' ? tr('항목') : tr('원문')}
                     </button>
                   ))}
                 </div>
@@ -322,7 +322,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
                   title={tr('설정 파일을 통째로 바꿉니다')}
                   className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
                 >
-                  편집
+                  {tr('편집')}
                 </button>
               )}
             </>
@@ -336,7 +336,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
                 onClick={() => setStackText(null)}
                 className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
               >
-                ← 목록
+                {tr('← 목록')}
               </button>
             </>
           )}
@@ -345,7 +345,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
               onClick={() => setDumpText(null)}
               className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
             >
-              ← 목록
+              {tr('← 목록')}
             </button>
           )}
           {kind === 'dump' && !dumpText && (
@@ -358,7 +358,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
                 busy ? 'cursor-not-allowed text-fg-faint' : 'text-accent hover:bg-hover'
               }`}
             >
-              {busy ? '뜨는 중…' : tr('지금 덤프 뜨기')}
+              {busy ? tr('뜨는 중…') : tr('지금 덤프 뜨기')}
             </button>
           )}
           {/* 스냅샷이라 자동 갱신하지 않는다 — 다시 보려면 눌러야 한다 */}
@@ -367,7 +367,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
             title={tr('다시 조회')}
             className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
           >
-            새로고침
+            {tr('새로고침')}
           </button>
           <button
             onClick={onClose}
@@ -494,18 +494,18 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
           <footer className="flex shrink-0 items-center gap-2 border-t border-line px-4 py-1.5">
             <span className="text-micro text-fg-dim">
               <span className="tnum font-mono text-fg-muted">{classes.page}</span>
-              <span className="text-fg-faint">/{classes.total_page}</span> 페이지
+              <span className="text-fg-faint">/{classes.total_page}</span> {tr('페이지')}
               {q && <span className="text-fg-faint"> {tr('· 검색은 이 페이지 안에서만')}</span>}
             </span>
             <div className="flex-1" />
             <PageBtn disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
-              이전
+              {tr('이전')}
             </PageBtn>
             <PageBtn
               disabled={page >= classes.total_page}
               onClick={() => setPage(p => Math.min(classes.total_page, p + 1))}
             >
-              다음
+              {tr('다음')}
             </PageBtn>
           </footer>
         )}
@@ -664,10 +664,10 @@ function StackTimeTable({
   if (times.length === 0) {
     return (
       <Note>
-        모인 스택이 없습니다.
+        {tr('모인 스택이 없습니다.')}
         <br />
         <span className="text-micro">
-          «에이전트 작업 → 스택 샘플링»을 켜면 10초 간격으로 쌓입니다.
+          {tr('«에이전트 작업 → 스택 샘플링»을 켜면 10초 간격으로 쌓입니다.')}
         </span>
       </Note>
     );
@@ -749,8 +749,8 @@ function HeapTable({ rows }: { rows: HeapHistoRow[] }) {
   if (rows.length === 0) {
     return (
       <Note>
-        히스토그램이 비었습니다. 앱 컨테이너가 JRE 면 <code>jdk.attach</code> 가 없어 빈 결과가
-        옵니다.
+        {tr('히스토그램이 비었습니다. 앱 컨테이너가 JRE 면')} <code>jdk.attach</code> {tr('가 없어 빈 결과가')}
+        {tr('옵니다.')}
       </Note>
     );
   }
@@ -787,8 +787,8 @@ function HeapTable({ rows }: { rows: HeapHistoRow[] }) {
         ))}
       </ol>
       <p className="px-4 py-2 text-micro text-fg-faint">
-        {rows.length.toLocaleString()}개 클래스 · 합계 {total.toLocaleString()} B
-        {rows.length > HEAP_VISIBLE && ` · 상위 ${HEAP_VISIBLE}개만 표시 (검색으로 좁히세요)`}
+        {rows.length.toLocaleString()}{tr('개 클래스 · 합계')} {total.toLocaleString()} B
+        {rows.length > HEAP_VISIBLE && ` · ${tr('상위')} ${HEAP_VISIBLE}${tr('개만 표시 (검색으로 좁히세요)')}`}
       </p>
     </div>
   );
@@ -865,7 +865,7 @@ function ActiveTable({
             key={`${a.id}-${a.txid ?? a.service}`}
             // txid 가 없으면 상세를 물을 수 없다. 눌러도 빈 창이면 고장으로 읽힌다.
             onClick={a.txid ? () => onPick(a) : undefined}
-            title={a.txid ? '스택 트레이스 보기' : undefined}
+            title={a.txid ? tr('스택 트레이스 보기') : undefined}
             className={`${ACTIVE_COLS} py-1 text-body ${a.txid ? 'cursor-pointer hover:bg-hover/60' : ''}`}
           >
             <span className="min-w-0">
@@ -1045,7 +1045,7 @@ function ConfigPane({
                 {/* 바뀐 항목에서만 기본값을 보여준다 — 같은 값을 두 번 쓰면 표가 안 읽힌다 */}
                 {e.changed && (
                   <span className="block font-mono text-micro break-all text-fg-faint">
-                    기본 {e.default || tr('(비어 있음)')}
+                    {tr('기본')} {e.default || tr('(비어 있음)')}
                   </span>
                 )}
               </span>
@@ -1054,7 +1054,7 @@ function ConfigPane({
         </ol>
       )}
       <p className="px-4 py-2 text-micro text-fg-faint">
-        전체 {data.entries.length.toLocaleString()}개 · 기본값과 다른 항목 {changed}개
+        {tr('전체')} {data.entries.length.toLocaleString()}{tr('개 · 기본값과 다른 항목')} {changed}{tr('개')}
       </p>
     </div>
   );

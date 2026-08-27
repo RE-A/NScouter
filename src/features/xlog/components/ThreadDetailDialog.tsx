@@ -96,7 +96,7 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
           {/* **끝난 것은 오류가 아니다.** 에러로 띄우면 고장으로 읽힌다. */}
           {load.kind === 'gone' && (
             <Note>
-              이미 끝난 트랜잭션입니다.
+              {t('이미 끝난 트랜잭션입니다.')}
               <br />
               <span className="text-micro">{t('여는 사이에 완료되면 상세가 남지 않습니다.')}</span>
             </Note>
@@ -108,14 +108,14 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
               {(d.sql || d.subcall) && (
                 <section className="border-b border-line px-4 py-2">
                   <h3 className="mb-1 text-micro tracking-wide text-fg-dim uppercase">
-                    {d.sql ? '실행 중인 SQL' : t('호출 중인 외부 API')}
+                    {d.sql ? t('실행 중인 SQL') : t('호출 중인 외부 API')}
                   </h3>
                   <pre className="font-mono text-micro leading-relaxed whitespace-pre-wrap text-fg">
                     {d.sql || d.subcall}
                   </pre>
                   {d.sql_bind_var && (
                     <pre className="mt-1 font-mono text-micro whitespace-pre-wrap text-fg-dim">
-                      바인드: {d.sql_bind_var}
+                      {t('바인드:')} {d.sql_bind_var}
                     </pre>
                   )}
                 </section>
@@ -139,7 +139,7 @@ export const ThreadDetailDialog = memo(function ThreadDetailDialog({
 
               <section className="px-4 py-2">
                 <h3 className="mb-1 text-micro tracking-wide text-fg-dim uppercase">
-                  스택 트레이스
+                  {t('스택 트레이스')}
                 </h3>
                 {d.stack_trace ? (
                   <pre className="font-mono text-micro leading-relaxed whitespace-pre-wrap text-fg">

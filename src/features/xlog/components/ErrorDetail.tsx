@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { summarizeError } from './errorText';
+import { t } from '../../../i18n';
 
 interface ErrorDetailProps {
   text: string;
@@ -32,7 +33,7 @@ export function ErrorDetail({ text, compact }: ErrorDetailProps) {
             aria-expanded={open}
             className="shrink-0 rounded border border-line px-1.5 text-micro text-fg-dim hover:text-fg"
           >
-            {open ? '접기' : `스택 ${restLines}줄`}
+            {open ? t('접기') : `${t('스택')} ${restLines}${t('줄')}`}
           </button>
         )}
       </div>

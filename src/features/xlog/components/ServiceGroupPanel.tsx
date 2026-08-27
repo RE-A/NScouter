@@ -60,18 +60,18 @@ export const ServiceGroupPanel = memo(function ServiceGroupPanel({
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
         <h2 className="text-body font-medium text-fg">{t('서비스 그룹')}</h2>
-        <span className="text-micro text-fg-faint">최근 {GROUP_WINDOW_SEC}초</span>
+        <span className="text-micro text-fg-faint">{t('최근')} {GROUP_WINDOW_SEC}{t('초')}</span>
         <div className="flex-1" />
         {open && stats.length > 0 && (
           <span className="tnum font-mono text-micro text-fg-dim">
-            {totalTps.toFixed(1)} tps · {stats.length}개 그룹
+            {totalTps.toFixed(1)} tps · {stats.length}{t('개 그룹')}
           </span>
         )}
         <button
           onClick={() => setOpen(o => !o)}
           className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
-          {open ? '닫기' : t('열기')}
+          {open ? t('닫기') : t('열기')}
         </button>
       </header>
 
@@ -80,7 +80,7 @@ export const ServiceGroupPanel = memo(function ServiceGroupPanel({
           {error && <p className="px-3 py-6 text-center text-small text-danger">{error}</p>}
           {!error && loadedOnce && stats.length === 0 && (
             <p className="px-3 py-6 text-center text-small text-fg-faint">
-              최근 {GROUP_WINDOW_SEC}초 동안 들어온 요청이 없습니다.
+              {t('최근')} {GROUP_WINDOW_SEC}{t('초 동안 들어온 요청이 없습니다.')}
             </p>
           )}
           {!error && !loadedOnce && (

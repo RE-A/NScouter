@@ -27,10 +27,10 @@ interface ObjectActionsProps {
 const STACK_DURATION_MS = 5 * 60 * 1000;
 
 const DUMPS: { kind: DumpKind; label: string; desc: string }[] = [
-  { kind: 'threaddump', label: t('스레드 덤프'), desc: t('지금 스택 전체를 파일로') },
-  { kind: 'activeservice', label: t('액티브 서비스'), desc: t('실행 중인 트랜잭션을 파일로') },
-  { kind: 'threadlist', label: t('스레드 목록'), desc: t('스레드 상태 표를 파일로') },
-  { kind: 'heaphisto', label: t('힙 히스토그램'), desc: t('클래스별 점유를 파일로') },
+  { kind: 'threaddump', label: '스레드 덤프', desc: '지금 스택 전체를 파일로' },
+  { kind: 'activeservice', label: '액티브 서비스', desc: '실행 중인 트랜잭션을 파일로' },
+  { kind: 'threadlist', label: '스레드 목록', desc: '스레드 상태 표를 파일로' },
+  { kind: 'heaphisto', label: '힙 히스토그램', desc: '클래스별 점유를 파일로' },
 ];
 
 export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
@@ -73,19 +73,19 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
 
       <Group
         title={t('덤프 만들기')}
-        hint="에이전트 디스크에 파일이 생깁니다. 만든 뒤 '스레드 덤프' 화면에서 볼 수 있습니다."
+        hint={t('에이전트 디스크에 파일이 생깁니다. 만든 뒤 해당 화면에서 볼 수 있습니다.')}
       >
         {DUMPS.map(d => (
           <Action
             key={d.kind}
-            label={d.label}
-            desc={d.desc}
+            label={t(d.label)}
+            desc={t(d.desc)}
             busy={busy === d.kind}
             onRun={() =>
               run(d.kind, async () => {
                 const name = await triggerDump(objHash, d.kind);
                 onDumpCreated?.(name);
-                return `${name} 을 만들었습니다`;
+                return `${name}${t('을 만들었습니다')}`;
               }, '')
             }
           />
@@ -95,22 +95,22 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
       <Group title={t('스택 샘플링')} hint={t('켜 두면 5분 동안 스택을 주기적으로 모읍니다.')}>
         <Action
           label={t('켜기 (5분)')}
-          desc="샘플링 시작"
+          desc={t('샘플링 시작')}
           busy={busy === 'stack-on'}
           onRun={() =>
             run(
               'stack-on',
               () => objectStackSampling(objHash, STACK_DURATION_MS),
-              '스택 샘플링을 켰습니다 (5분)',
+              t('스택 샘플링을 켰습니다 (5분)'),
             )
           }
         />
         <Action
           label={t('끄기')}
-          desc="샘플링 중지"
+          desc={t('샘플링 중지')}
           busy={busy === 'stack-off'}
           onRun={() =>
-            run('stack-off', () => objectStackSampling(objHash), '스택 샘플링을 껐습니다')
+            run('stack-off', () => objectStackSampling(objHash), t('스택 샘플링을 껐습니다'))
           }
         />
       </Group>
@@ -122,7 +122,7 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
         <Action
           danger
           label="Full GC"
-          desc="그 순간 응답이 멈춥니다"
+          desc={t('그 순간 응답이 멈춥니다')}
           busy={busy === 'gc'}
           confirming={confirming === 'gc'}
           onAsk={() => setConfirming('gc')}
@@ -132,29 +132,29 @@ export function ObjectActions({ objHash, onDumpCreated }: ObjectActionsProps) {
               'gc',
               () => objectSystemGc(objHash),
               // 콜렉터가 성공 여부를 주지 않는다 (F-35). 한 것처럼 말하지 않는다.
-              'GC 를 요청했습니다. 콜렉터가 결과를 알려주지 않으므로 Heap 카운터로 확인하세요',
+              t('GC 를 요청했습니다. 콜렉터가 결과를 알려주지 않으므로 Heap 카운터로 확인하세요'),
             )
           }
         />
         <Action
           danger
           label={t('힙 덤프')}
-          desc="힙 크기만 한 파일이 디스크에 생깁니다"
+          desc={t('힙 크기만 한 파일이 디스크에 생깁니다')}
           busy={busy === 'heapdump'}
           confirming={confirming === 'heapdump'}
           onAsk={() => setConfirming('heapdump')}
           onCancel={() => setConfirming(null)}
-          onRun={() => run('heapdump', () => objectHeapDump(objHash), '힙 덤프를 요청했습니다')}
+          onRun={() => run('heapdump', () => objectHeapDump(objHash), t('힙 덤프를 요청했습니다'))}
         />
         <Action
           label={t('텍스트 캐시 비우기')}
-          desc="해시가 이름으로 안 풀릴 때"
+          desc={t('해시가 이름으로 안 풀릴 때')}
           busy={busy === 'reset'}
           onRun={() =>
             run(
               'reset',
               () => objectResetCache(objHash),
-              '캐시를 비웠습니다. 다음 전송부터 이름이 다시 올라옵니다',
+              t('캐시를 비웠습니다. 다음 전송부터 이름이 다시 올라옵니다'),
             )
           }
         />
@@ -205,18 +205,18 @@ function Action({
   if (confirming) {
     return (
       <div className="flex items-center gap-2 rounded border border-danger bg-danger/10 px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-small text-danger">{label} 실행할까요?</span>
+        <span className="min-w-0 flex-1 truncate text-small text-danger">{label} {t('실행할까요?')}</span>
         <button
           onClick={onRun}
           className="rounded bg-danger px-2 py-0.5 text-micro text-white hover:opacity-90"
         >
-          실행
+          {t('실행')}
         </button>
         <button
           onClick={onCancel}
           className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
-          취소
+          {t('취소')}
         </button>
       </div>
     );
@@ -233,7 +233,7 @@ function Action({
       ].join(' ')}
     >
       <span className={`block text-small ${danger ? 'text-danger' : 'text-fg'}`}>
-        {busy ? '실행 중…' : label}
+        {busy ? t('실행 중…') : label}
       </span>
       <span className="block text-micro text-fg-faint">{desc}</span>
     </button>

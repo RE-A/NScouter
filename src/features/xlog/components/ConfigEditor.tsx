@@ -54,9 +54,9 @@ export const ConfigEditor = memo(function ConfigEditor({
     <div className="flex min-h-[60vh] flex-1 flex-col">
       {/* **경고를 접어 두지 않는다.** 무엇이 일어나는지 모르고 누르면 안 되는 버튼이다. */}
       <p className="mx-4 mt-2 rounded border-l-2 border-warn bg-warn/10 px-2 py-1.5 text-micro text-warn">
-        저장하면 <span className="font-mono">{objName}</span> 의 설정 파일이 이 내용으로{' '}
-        <strong>{t('통째로 바뀌고')}</strong> 에이전트가 설정을 다시 읽습니다. 지우고 저장한 줄은
-        기본값으로 돌아갑니다.
+        {t('저장하면')} <span className="font-mono">{objName}</span> {t('의 설정 파일이 이 내용으로')}{' '}
+        <strong>{t('통째로 바뀌고')}</strong> {t('에이전트가 설정을 다시 읽습니다. 지우고 저장한 줄은')}
+        {t('기본값으로 돌아갑니다.')}
       </p>
 
       {error && (
@@ -86,14 +86,14 @@ export const ConfigEditor = memo(function ConfigEditor({
               disabled={busy}
               className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
             >
-              아니요
+              {t('아니요')}
             </button>
             <button
               onClick={save}
               disabled={busy}
               className="rounded border border-danger px-2 py-0.5 text-micro text-danger hover:bg-danger/10 disabled:opacity-50"
             >
-              {busy ? '저장 중…' : t('덮어쓰기')}
+              {busy ? t('저장 중…') : t('덮어쓰기')}
             </button>
           </>
         ) : (
@@ -102,7 +102,7 @@ export const ConfigEditor = memo(function ConfigEditor({
               onClick={onCancel}
               className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
             >
-              편집 취소
+              {t('편집 취소')}
             </button>
             <button
               onClick={() => setConfirming(true)}
@@ -110,7 +110,7 @@ export const ConfigEditor = memo(function ConfigEditor({
               title={dirty ? undefined : t('바뀐 내용이 없습니다')}
               className="rounded border border-line-strong px-2 py-0.5 text-micro text-accent hover:bg-hover disabled:cursor-not-allowed disabled:text-fg-faint"
             >
-              저장…
+              {t('저장…')}
             </button>
           </>
         )}

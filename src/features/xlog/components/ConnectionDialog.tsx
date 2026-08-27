@@ -179,10 +179,10 @@ export function ConnectionDialog({
           checked={autoConnect}
           onChange={e => { void handleAutoConnectChange(e.target.checked); }}
         />
-        자동 연결
+        {t('자동 연결')}
       </label>
       <button type="submit" disabled={loading} style={btnStyle}>
-        {loading ? '연결 중...' : t('연결')}
+        {loading ? t('연결 중…') : t('연결')}
       </button>
       <button
         type="button"

@@ -63,7 +63,7 @@ export const ActiveServiceList = memo(function ActiveServiceList({
         className="flex w-full items-baseline justify-between px-3 py-2 text-left hover:bg-hover/60"
       >
         <span className="text-micro tracking-wide text-fg-dim uppercase">
-          액티브 서비스 목록
+          {t('액티브 서비스 목록')}
         </span>
         <span className="text-micro text-fg-faint">
           {open ? `${rows.length}${t('건')} · ${t('닫기')}` : t('열기')}
@@ -82,13 +82,13 @@ export const ActiveServiceList = memo(function ActiveServiceList({
           {incomplete.length > 0 && (
             <p className="mx-3 mb-2 rounded border-l-2 border-warn bg-warn/10 px-2 py-1.5 text-micro text-warn">
               {incomplete.map(h => agentMap.get(h) ?? `0x${(h >>> 0).toString(16)}`).join(', ')}
-              {' '}의 목록이 완전하지 않습니다
+              {' '}{t('의 목록이 완전하지 않습니다')}
             </p>
           )}
 
           {rows.length === 0 ? (
             <p className="px-3 pb-3 text-small text-fg-faint">
-              지금 돌고 있는 트랜잭션이 없습니다
+              {t('지금 돌고 있는 트랜잭션이 없습니다')}
             </p>
           ) : (
             <ol className="divide-y divide-line/60 border-t border-line">
@@ -98,7 +98,7 @@ export const ActiveServiceList = memo(function ActiveServiceList({
                   // **txid 가 없으면 상세를 물을 수 없다.** 누를 수 있게 해 두고 빈 창을
                   // 띄우면 고장으로 읽힌다 — 애초에 커서를 바꾸지 않는다.
                   onClick={r.txid ? () => setPicked(r) : undefined}
-                  title={r.txid ? '스택 트레이스 보기' : undefined}
+                  title={r.txid ? t('스택 트레이스 보기') : undefined}
                   className={`grid grid-cols-[minmax(0,1fr)_minmax(0,90px)_70px] items-baseline gap-x-2 px-3 py-1 hover:bg-hover/60 ${
                     r.txid ? 'cursor-pointer' : ''
                   }`}
@@ -136,7 +136,7 @@ export const ActiveServiceList = memo(function ActiveServiceList({
 
           {rows.length > MAX_ROWS && (
             <p className="px-3 py-1.5 text-micro text-fg-faint">
-              느린 {MAX_ROWS}건만 표시 · 전체 {rows.length}건
+              {t('느린')} {MAX_ROWS}{t('건만 표시 · 전체')} {rows.length}{t('건')}
             </p>
           )}
         </>

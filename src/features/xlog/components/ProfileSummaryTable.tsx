@@ -60,13 +60,13 @@ export const ProfileSummaryTable = memo(function ProfileSummaryTable({
           <button
             key={s.by}
             onClick={() => setBy(s.by)}
-            title={s.hint}
+            title={t(s.hint)}
             aria-pressed={by === s.by}
             className={`rounded px-1.5 py-0.5 text-micro transition-colors ${
               by === s.by ? 'bg-accent text-white' : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
             }`}
           >
-            {s.label}
+            {t(s.label)}
           </button>
         ))}
       </div>

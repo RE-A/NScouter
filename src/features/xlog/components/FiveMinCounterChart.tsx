@@ -99,7 +99,7 @@ export const FiveMinCounterChart = memo(function FiveMinCounterChart({
           이 한 줄이 없으면 바닥에 붙은 선을 보고 수집이 죽은 줄 안다. */}
       {load.kind === 'ok' && points > 0 && !collected && (
         <p className="px-2 pb-1 text-micro text-fg-faint">
-          집계는 오지만 구간 내 값이 모두 0입니다.
+          {t('집계는 오지만 구간 내 값이 모두 0입니다.')}
         </p>
       )}
     </div>

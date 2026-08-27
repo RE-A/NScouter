@@ -37,3 +37,23 @@ describe('영어 사전', () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe('모듈 상수', () => {
+  it('t() 를 임포트 시점에 부르지 않는다', () => {
+    // 모듈 최상위 상수는 **임포트 때 한 번** 평가된다. 그때는 config.json 을 읽기 전이라
+    // 언어가 늘 한국어다 — 영어로 바꿔도 그 문구만 한국어로 남는다.
+    // 실제로 로그 레벨·요약 탭·토폴로지 층 이름이 그렇게 굳어 있었다.
+    const bad: string[] = [];
+    for (const f of tsxFiles('src')) {
+      const lines = readFileSync(f, 'utf-8').split('\n');
+      let inTopLiteral = false;
+      for (const line of lines) {
+        // 최상위에서 여러 줄로 여는 상수만 본다: `const X = {` / `const X: T[] = [`
+        if (/^(export )?const [A-Za-z_$][\w$]*(: [^=]+)? = [[{]$/.test(line)) inTopLiteral = true;
+        else if (/^[}\]]/.test(line)) inTopLiteral = false;
+        else if (inTopLiteral && /\b(?:t|tr)\('/.test(line)) bad.push(`${f}: ${line.trim()}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+});

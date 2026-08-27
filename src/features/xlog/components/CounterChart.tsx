@@ -184,7 +184,7 @@ export const CounterChart = memo(function CounterChart({
         ctx.fillRect(8, h - 16, 10, 2);
         ctx.fillStyle = CANVAS.textMuted;
         ctx.font = '9px monospace';
-        ctx.fillText(mode === 'avg' ? '평균' : '합계', 22, h - 8);
+        ctx.fillText(mode === 'avg' ? t('평균') : t('합계'), 22, h - 8);
       } else {
         agents.forEach((a, i) => {
           const color = PALETTE[i % PALETTE.length];

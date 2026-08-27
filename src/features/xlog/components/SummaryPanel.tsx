@@ -145,13 +145,13 @@ export const SummaryPanel = memo(function SummaryPanel({
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
         <h2 className="text-body font-medium text-fg">{t('요약')}</h2>
-        <span className="text-micro text-fg-faint">{objType} · 구간 누적</span>
+        <span className="text-micro text-fg-faint">{objType} · {t('구간 누적')}</span>
         <div className="flex-1" />
         <button
           onClick={() => setOpen(o => !o)}
           className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
-          {open ? '닫기' : t('열기')}
+          {open ? t('닫기') : t('열기')}
         </button>
       </header>
 
@@ -166,7 +166,7 @@ export const SummaryPanel = memo(function SummaryPanel({
                   aria-pressed={kind === k.kind}
                   className={`${TAB} ${kind === k.kind ? TAB_ON : TAB_OFF}`}
                 >
-                  {k.label}
+                  {t(k.label)}
                 </button>
               ))}
             </div>
@@ -181,7 +181,7 @@ export const SummaryPanel = memo(function SummaryPanel({
                   aria-pressed={rangeMs === r.ms}
                   className={`${TAB} ${rangeMs === r.ms ? TAB_ON : TAB_OFF}`}
                 >
-                  {r.label}
+                  {t(r.label)}
                 </button>
               ))}
             </div>
@@ -193,11 +193,11 @@ export const SummaryPanel = memo(function SummaryPanel({
                 <button
                   key={s.by}
                   onClick={() => setBy(s.by)}
-                  title={s.hint}
+                  title={t(s.hint)}
                   aria-pressed={by === s.by}
                   className={`${TAB} ${by === s.by ? TAB_ON : TAB_OFF}`}
                 >
-                  {s.label}
+                  {t(s.label)}
                 </button>
               ))}
             </div>
@@ -207,7 +207,7 @@ export const SummaryPanel = memo(function SummaryPanel({
               onClick={load}
               className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
             >
-              새로고침
+              {t('새로고침')}
             </button>
           </div>
 
@@ -217,7 +217,7 @@ export const SummaryPanel = memo(function SummaryPanel({
           {!loading && !error && (kind === 'error' ? errorRows.length === 0 : rows.length === 0) && (
             // 요약은 5분 단위로 쌓인다. 방금 띄운 환경이면 정말 없을 수 있다.
             <p className="px-3 py-6 text-center text-small text-fg-faint">
-              이 구간에 쌓인 요약이 없습니다.
+              {t('이 구간에 쌓인 요약이 없습니다.')}
             </p>
           )}
 
@@ -238,8 +238,13 @@ export const SummaryPanel = memo(function SummaryPanel({
                 <span>{t('이름')}</span>
                 <span className="text-right">{t('횟수')}</span>
                 {/* 단위가 없으면 5,275,590 이 초인지 밀리초인지 읽는 사람이 못 정한다 */}
-                <span className="text-right">{t('합계(ms)')}</span>
-                <span className="text-right">{t('평균(ms)')}</span>
+                {/* 머리글이 uppercase 라 그냥 두면 ms 가 MS 로 보인다. 단위는 소문자다 */}
+                <span className="text-right">
+                  {t('합계')}<span className="normal-case">(ms)</span>
+                </span>
+                <span className="text-right">
+                  {t('평균')}<span className="normal-case">(ms)</span>
+                </span>
                 <span className="text-right">{t('에러')}</span>
               </div>
               {/* textVersion 은 값이 아니라 **사전이 채워졌다는 신호**다 */}
@@ -276,8 +281,8 @@ export const SummaryPanel = memo(function SummaryPanel({
               {/* 무엇을 언제 것으로 모은 값인지 표 옆에 적는다.
                   구간 버튼은 위에 있지만 표만 캡처해 옮기는 일이 잦다. */}
               <p className="px-3 py-2 text-micro text-fg-faint">
-                최근 {RANGES.find(r => r.ms === rangeMs)?.label ?? ''} 누적 ·{' '}
-                {rows.length.toLocaleString()}행 · 호출 합계 {totalCalls.toLocaleString()}
+                {t('최근')} {RANGES.find(r => r.ms === rangeMs)?.label ?? ''} {t('누적 ·')}{' '}
+                {rows.length.toLocaleString()}{t('행 · 호출 합계')} {totalCalls.toLocaleString()}
                 {rows.length > VISIBLE && ` · ${t('상위')} ${VISIBLE}${t('개만 표시')}`} · {t('평균은 합계÷횟수')}
               </p>
             </>
@@ -365,7 +370,7 @@ function ErrorTable({
                   title={t('이 에러가 난 트랜잭션을 연다')}
                   className="rounded px-1.5 py-0.5 text-micro text-accent hover:bg-hover"
                 >
-                  열기
+                  {t('열기')}
                 </button>
               </span>
             </li>
@@ -373,7 +378,7 @@ function ErrorTable({
         })}
       </ol>
       <p className="px-3 py-2 text-micro text-fg-faint">
-        {rows.length.toLocaleString()}종 · 발생 합계{' '}
+        {rows.length.toLocaleString()}{t('종 · 발생 합계')}{' '}
         {rows.reduce((s, r) => s + r.count, 0).toLocaleString()}
       </p>
     </div>

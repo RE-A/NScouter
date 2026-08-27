@@ -85,8 +85,9 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
           <div style={sectionStyle}>
             <div style={sectionTitleStyle}>{t('데이터 디렉토리')}</div>
             <div style={sectionDescStyle}>
-              로그 파일과 설정 파일이 저장될 경로입니다.<br />
-              비워두면 <code style={codeStyle}>{t('실행파일 경로/')}</code> 가 사용됩니다.
+              {t('로그 파일과 설정 파일이 저장될 경로입니다.')}<br />
+              {t('비워두면')} <code style={codeStyle}>{t('실행파일 경로/')}</code>{' '}
+              {t('가 사용됩니다.')}
             </div>
             <input
               style={inputStyle}
@@ -132,7 +133,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
           <div style={sectionStyle}>
             <div style={sectionTitleStyle}>{t('글자 크기')}</div>
             <div style={sectionDescStyle}>
-              화면 전체에 적용됩니다. 표·차트 눈금·프로파일 본문이 같은 비율로 커집니다.
+              {t('화면 전체에 적용됩니다. 표·차트 눈금·프로파일 본문이 같은 비율로 커집니다.')}
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               {FONT_SCALES.map(v => {
@@ -151,7 +152,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                       background: on ? T.bgHover : 'transparent',
                     }}
                   >
-                    {v === 1 ? '보통' : `×${v}`}
+                    {v === 1 ? t('보통') : `×${v}`}
                   </button>
                 );
               })}
@@ -162,8 +163,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
           <div style={sectionStyle}>
             <div style={sectionTitleStyle}>{t('SQL 바인딩 파라미터')}</div>
             <div style={sectionDescStyle}>
-              프로파일의 SQL 은 값 대신 <code style={codeStyle}>?</code> 로 옵니다.
-              값을 문장에 채워 넣으면 그대로 복사해 DB 에 붙일 수 있습니다.
+              {t('프로파일의 SQL 은 값 대신')} <code style={codeStyle}>?</code>{' '}
+              {t('로 옵니다. 값을 문장에 채워 넣으면 그대로 복사해 DB 에 붙일 수 있습니다.')}
             </div>
             {([
               ['inline', t('문장에 채워서 보기'), t('예) where id=126')],
@@ -193,7 +194,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
               <span style={pathValueStyle}>
                 {dataDir.trim()
                   ? `${dataDir.trim()}\\config.json`
-                  : '(실행파일 경로)\\config.json'}
+                  : `${t('(실행파일 경로)')}\\config.json`}
               </span>
             </div>
             <div style={pathRowStyle}>
@@ -201,11 +202,11 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
               <span style={pathValueStyle}>
                 {dataDir.trim()
                   ? `${dataDir.trim()}\\logs\\nscouter.log`
-                  : '(실행파일 경로)\\logs\\nscouter.log'}
+                  : `${t('(실행파일 경로)')}\\logs\\nscouter.log`}
               </span>
             </div>
             <div style={{ ...sectionDescStyle, marginTop: 8, color: T.warn }}>
-              ※ 경로 변경은 앱 재시작 후 적용됩니다.
+              {t('※ 경로 변경은 앱 재시작 후 적용됩니다.')}
             </div>
           </div>
 
@@ -237,7 +238,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button onClick={onClose} style={cancelBtnStyle}>{t('취소')}</button>
             <button onClick={handleSave} disabled={saving} style={saveBtnStyle}>
-              {saving ? '저장 중...' : t('저장')}
+              {saving ? t('저장 중…') : t('저장')}
             </button>
           </div>
         </div>
@@ -264,6 +265,9 @@ const modalStyle: React.CSSProperties = {
   borderRadius: 8,
   width: 500,
   maxWidth: '90vw',
+  // **높이를 창 안에 가둔다.** 글자 크기를 키우면 내용이 길어져 저장 버튼이
+  // 창 밖으로 밀려났다 — 설정을 바꾸고도 저장할 수가 없었다.
+  maxHeight: '90vh',
   display: 'flex',
   flexDirection: 'column',
   boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
@@ -296,6 +300,8 @@ const closeBtnStyle: React.CSSProperties = {
 };
 
 const modalBodyStyle: React.CSSProperties = {
+  // 넘치는 건 본문이 스크롤한다. 머리말과 버튼 줄은 늘 보인다.
+  overflowY: 'auto',
   padding: '16px 18px',
   display: 'flex',
   flexDirection: 'column',
