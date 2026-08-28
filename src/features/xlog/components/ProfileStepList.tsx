@@ -273,6 +273,7 @@ function SqlBody({
   );
 
   const shown = bound ? bound.text : sql;
+  const mismatched = bound !== null && (bound.bound < bound.placeholders || bound.leftover.length > 0);
 
   useLayoutEffect(() => {
     // 펼친 뒤에는 넘치지 않으므로 재지 않는다 — 재면 «접기» 버튼이 사라진다.
@@ -319,8 +320,11 @@ function SqlBody({
         </button>
       )}
 
-      {/* 채우지 않는 설정이면 값은 따로 보여준다 — 안 보여주면 정보가 사라진다 */}
-      {!inline && params !== '' && (
+      {/* 채우지 않는 설정이면 값은 따로 보여준다 — 안 보여주면 정보가 사라진다.
+          **채웠더라도 아귀가 안 맞으면 원본을 같이 보여준다.** 자리와 값의 수가 다르면
+          어느 값이 어디로 갔는지가 곧 의심 대상인데, 채운 문장만 보여 주면 확인할
+          방법이 없다 — 온 값 그대로가 유일한 근거다. */}
+      {params !== '' && (!inline || mismatched) && (
         <code className="mt-0.5 block break-all font-mono text-micro text-fg-dim" title={params}>
           <span className="text-fg-faint">{t('바인딩')}</span> {params}
         </code>
@@ -329,7 +333,10 @@ function SqlBody({
       {/* **채우다 만 것을 조용히 두면 안 된다.** 값이 모자라거나 남은 건
           SQL 이 잘렸거나 파라미터를 잘못 자른 신호다. */}
       {bound && bound.bound < bound.placeholders && (
-        <span className="mt-0.5 block text-micro text-warn">
+        <span
+          className="mt-0.5 block text-micro text-warn"
+          title={t('에이전트는 setXxx 로 넘어온 값만 기록합니다. 프로시저의 OUT 파라미터처럼 넣은 값이 없는 자리는 ? 로 남습니다.')}
+        >
           {t('자리')} {bound.placeholders}{t('개 중')} {bound.bound}{t('개만 채웠습니다')}
         </span>
       )}

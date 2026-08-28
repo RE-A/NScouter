@@ -5564,6 +5564,151 @@ fn live_sql_literal_escape() {
     );
 }
 
+/// 리터럴과 바인딩이 **한 문장에 같이** 있을 때 값이 어떤 순서로 오는가 (F-51).
+///
+/// 이게 이 파일에서 가장 값비싼 사실이다. 에이전트는
+/// `escapeLiteral(sql, step)` 로 리터럴 값을 `step.param` 에 먼저 넣고,
+/// 그다음 `ctx.sql.toString(step.param)` 으로 PreparedStatement 바인딩 값을 **뒤에** 잇는다.
+/// 그래서 값 한 줄은 «리터럴 먼저, 바인딩 나중» 이고,
+/// 화면이 `?` 를 0번부터 채우면 리터럴 값이 `?` 자리에 다시 들어간다 —
+/// 실환경에서 «파라미터가 안 나온다» 로 보이던 것이 이것이다.
+///
+/// 순서가 뒤집히면 `bindSql` 이 조용히 틀린 문장을 만들어 내므로 여기서 못을 박는다.
+#[test]
+#[ignore]
+fn live_sql_mixed_literal_and_bind() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
+    use nscouter_lib::scouter::protocol::text_type;
+
+    for _ in 0..4 {
+        let _ = http_get("127.0.0.1", 8081, "/shop/lab/mixed-sql?minId=10&name=zzz");
+    }
+    std::thread::sleep(std::time::Duration::from_secs(5));
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+
+    let param = build_past_xlog_param(
+        &hashes,
+        &date,
+        now - 12 * 1000,
+        now,
+        400,
+        &PastCursor::default(),
+    );
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+    let mut rows = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            rows.push((x.txid, x.service));
+        }
+    }
+    let mut cache = TextCache::new();
+    let svc: Vec<i32> = rows.iter().map(|r| r.1).collect();
+    let missing_svc = cache.missing(text_type::SERVICE, &svc);
+    if !missing_svc.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &missing_svc);
+    }
+    let txids: Vec<i64> = rows
+        .iter()
+        .filter(|(_, service)| {
+            cache.get(text_type::SERVICE, *service).map(|s| s.contains("mixed-sql")).unwrap_or(false)
+        })
+        .map(|(txid, _)| *txid)
+        .collect();
+    println!("전체 {}건 중 mixed-sql 트랜잭션 {}건", rows.len(), txids.len());
+
+    let mut found = 0usize;
+    for txid in txids.iter() {
+        if found >= 2 {
+            break;
+        }
+        let mut c = login();
+        let cs = c.session;
+        if c
+            .send_request(CMD_TRANX_PROFILE_FULL, cs, &build_full_profile_param(&date, *txid))
+            .is_err()
+        {
+            continue;
+        }
+        let blob = match c.read_blob_stream() {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let steps = parse_profile_steps(blob);
+        let sql_hashes: Vec<i32> = steps
+            .iter()
+            .filter_map(|s| match s {
+                ProfileStep::Sql(x) if x.hash != 0 => Some(x.hash),
+                _ => None,
+            })
+            .collect();
+        if sql_hashes.is_empty() {
+            continue;
+        }
+        let missing = cache.missing(text_type::SQL, &sql_hashes);
+        if !missing.is_empty() {
+            let _ = fetch_texts(&mut c, &mut cache, text_type::SQL, &missing);
+        }
+
+        for st in &steps {
+            if let ProfileStep::Sql(x) = st {
+                let sql = cache.get(text_type::SQL, x.hash).unwrap_or("<사전 미해석>");
+                if !sql.contains("mixed-sql") {
+                    continue;
+                }
+                found += 1;
+                println!("--- txid={txid}");
+                println!("    sql   = {sql}");
+                println!("    param = {:?}", x.param);
+
+                // 한 문장에 두 종류가 같이 있다
+                assert!(sql.contains("= '@{1}'"), "리터럴이 @{{n}} 으로 오지 않았다: {sql}");
+                assert!(sql.contains("between @{2} and @{3}"), "숫자 리터럴이 어긋났다: {sql}");
+                assert!(sql.contains("> ?"), "바인딩 자리가 ? 로 오지 않았다: {sql}");
+
+                // **리터럴 먼저, 바인딩 나중.** 순서가 이 테스트의 전부다.
+                //
+                // 실측:
+                //   sql   = ... category = '@{1}' and price between @{2} and @{3}
+                //           and id > ? and name <> ? order by id limit @{4}
+                //   param = 'book',100,90000,5,10,'zzz'
+                //
+                // `limit 5` 의 5 까지 리터럴로 빠져 @{4} 가 된다 — 리터럴은 **4개**다.
+                // 그래서 `?` 는 값 목록 0번이 아니라 **4번**부터 가져와야 한다.
+                //
+                // **값 한 줄을 통째로 비교하지 않는다.** 부하 생성기도 이 엔드포인트를
+                // 부르는데 `minId` 가 매번 다르다 — 통째로 비교하면 남의 트랜잭션을
+                // 집었을 때 «순서가 틀렸다» 로 잘못 보고한다. 확인할 것은 순서지 값이 아니다.
+                let values: Vec<&str> = x.param.split(',').collect();
+                assert_eq!(values.len(), 6, "값 개수가 달라졌다: {:?}", x.param);
+                assert_eq!(
+                    &values[0..4],
+                    ["'book'", "100", "90000", "5"],
+                    "앞 4개가 리터럴이 아니다: {:?}",
+                    x.param
+                );
+                assert!(
+                    values[4].parse::<i64>().is_ok(),
+                    "첫 바인딩 값(minId)이 리터럴 다음 자리에 없다: {:?}",
+                    x.param
+                );
+                assert_eq!(values[5], "'zzz'", "둘째 바인딩 값이 어긋났다: {:?}", x.param);
+            }
+        }
+    }
+
+    assert!(found > 0, "mixed-sql 쿼리를 못 찾았다 — shop-app 이 떠 있는지 볼 것");
+}
+
 /// 에러 해시가 **프로파일 스텝에는 없는** 트랜잭션이 실제로 있는가 (B-2).
 ///
 /// 서비스 계층에서 난 예외는 실패한 SQL·API 스텝이 없다. 그래서 화면이 스텝에서만

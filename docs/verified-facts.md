@@ -617,6 +617,67 @@ ASIS 는 프로파일 텍스트에서 `thread:...<Hexa32>` 패턴을 정규식�
 - 구현: `scouter/profile.rs` `ThreadCallProfileStep`, 화면은 `ProfileStepList` 의 링크
 - 재현: `cargo test --test live_collector live_thread_call_steps -- --ignored`
 
+### F-51. 리터럴과 바인딩이 섞이면 값은 **리터럴 먼저, 바인딩 나중**으로 이어 온다
+
+손으로 쓴 SQL 은 코드값을 문장에 박고 사용자 입력만 `?` 로 넘기는 일이 흔하다.
+이때 한 스텝의 `param` 한 줄에 **두 출처의 값이 순서대로 이어 붙는다.**
+
+`TraceSQL.start(Object)` (바이트코드):
+
+```java
+sql = ctx.sql.getSql();
+sql = escapeLiteral(sql, step);            // step.param = 리터럴 CSV
+step.param = ctx.sql.toString(step.param); // 리터럴 CSV + "," + 바인딩 값들
+```
+
+`SqlParameter.toString(String prefix)` 가 prefix 를 먼저 쓰고 그 뒤에 자기 값들을 붙인다.
+
+실측 (`/shop/lab/mixed-sql`):
+
+```
+sql   = /*mixed-sql*/ select p.id, p.name, p.price from product p
+        where p.category = '@{1}' and p.price between @{2} and @{3}
+        and p.id > ? and p.name <> ? order by p.id limit @{4}
+param = "'book',100,90000,5,10,'zzz'"
+         └───────── 리터럴 4개 ─────┘ └─ 바인딩 2개 ─┘
+```
+
+`limit 5` 의 `5` 까지 리터럴로 빠져 `@{4}` 가 된다 — **문장에 보이는 `@{n}` 의 최댓값이
+곧 리터럴 개수**이고, `?` 는 값 목록의 0번이 아니라 **그다음**부터 가져와야 한다.
+
+0번부터 세면 `?` 자리에 리터럴 값이 다시 들어가고(`p.id > 'book'`) 진짜 바인딩 값은
+«쓰이지 않은 값» 으로 밀려난다. **실환경에서 «파라미터가 안 나온다» 로 보이던 것이 이것이다.**
+
+- 구현: `src/features/xlog/components/sqlBind.ts` (`scanSlots` 로 한 번 훑어 최댓값을 먼저 구한다)
+- 재현: `cargo test --test live_collector live_sql_mixed_literal_and_bind -- --ignored --nocapture`
+
+### F-52. 파라미터 값은 **20자에서 잘린다**. 프로시저 OUT 파라미터는 아예 안 온다
+
+`TraceSQL.set(SqlParameter, int, String)` 은 값을 `MAX_STRING` 에서 자르고 따옴표를 씌운다.
+`MAX_STRING` = `trace_sql_parameter_max_length`, **기본 20** (최대 500).
+`_trace_sql_parameter_max_count` 는 기본 128.
+
+```java
+if (v.length() > MAX_STRING) v = v.substring(0, MAX_STRING);
+p.put(i, "'" + v + "'");
+```
+
+그래서 긴 문자열은 **잘린 채 따옴표가 닫혀** 온다 — 문장은 멀쩡해 보이는데 값이 다르다.
+채운 SQL 을 그대로 복사해 DB 에 붙이면 결과가 달라질 수 있다.
+
+기록되는 값은 `setXxx` 로 넘어온 것뿐이다. `SqlParameter.toString()` 은 **비어 있는 자리를
+건너뛰고 자리표시자도 남기지 않는다** — 값 목록이 그만큼 짧아질 뿐이다.
+
+| 상황 | 결과 |
+|---|---|
+| `registerOutParameter` (프로시저 OUT) | 값 없음. 뒤쪽에 몰려 있으면 그 자리들이 `?` 로 남는다 |
+| OUT 파라미터가 **중간**에 있으면 | 그 뒤 값이 통째로 한 칸씩 당겨진다 — **위치 정보가 전선에서 사라져 복원할 수 없다** |
+
+실환경 사례: `{ CALL SP_USER_CHK(?, … 12개) }` — IN 7개만 기록되고 OUT 5개는 `?` 로 남았다.
+클라이언트가 채울 수 있는 값이 애초에 없다. 그래서 «자리 12개 중 7개» 경고에
+설명을 붙이고, 어긋난 경우에는 **온 값 한 줄을 그대로 같이 보여준다**
+(`ProfileStepList.tsx` 의 `mismatched`).
+
 ### F-50. 서비스 계층 예외는 **어느 스텝에도 없다** — XLog 의 `error` 를 따로 풀어야 한다
 
 컨트롤러/서비스에서 터진 예외는 실패한 SQL·API 스텝을 남기지 않는다.
@@ -663,11 +724,13 @@ param = "'fruit',100,1,1"
 `n` 은 1부터의 번호이고 값 목록의 **n 번째**다 — `?` 처럼 순서대로가 아니다
 (`… and @{3} = @{4}` 처럼 건너뛰거나 되풀이될 수 있다).
 
-**`Statement` 경로에서만 나온다.** `TraceSQL.start(Object)` → `escapeLiteral` 이고,
-PreparedStatement 로 보내면 값이 애초에 문장에 없어 치환할 것도 없다.
-그래서 JPA/Hibernate 만 쓰는 앱에서는 이 형태를 볼 수 없다 —
-재현하려면 앱이 `Statement.executeQuery(리터럴이 박힌 SQL)` 을 불러야 한다
-(`Test/apps/shop` 의 `/shop/lab/literal-sql`).
+**PreparedStatement 경로에서도 나온다** (앞서 «Statement 경로에서만» 이라고 적었던 것은
+틀렸다). `TraceSQL.start(Object)` — 인자로 SQL 을 받지 않는, 즉 PreparedStatement 쪽 —
+안에서 `escapeLiteral` 을 부른다. JPA 가 만든 SQL 에서 이 형태를 못 본 것은 경로 때문이 아니라
+**값이 전부 `?` 라 빼낼 리터럴이 없어서**다. 손으로 쓴 네이티브 쿼리에 리터럴이 있으면
+PreparedStatement 여도 `@{n}` 이 된다 (F-51 참조).
+
+재현: `Test/apps/shop` 의 `/shop/lab/literal-sql`(Statement) · `/shop/lab/mixed-sql`(PreparedStatement).
 
 **조회할 때 창을 좁혀야 한다.** 넓은 구간을 `pageCount` 로 자르면 **앞쪽(오래된) 것만**
 와서 방금 만든 트랜잭션이 안 잡힌다. 400건 요청에 10분 창이면 실제로는 약 16초치다.

@@ -61,6 +61,13 @@ function jitter() {
     });
 }
 
+// 리터럴과 바인딩이 한 문장에 섞인다 — `@{n}` 과 `?` 가 같이 오는 유일한 시나리오
+function mixedSql() {
+    http.get(`${SHOP}/shop/lab/mixed-sql?minId=${rnd(1, 80)}&name=zzz`, {
+        tags: { scenario: 'mixed-sql' },
+    });
+}
+
 function inClause() {
     http.get(`${SHOP}/shop/lab/in-clause`, { tags: { scenario: 'in-clause' } });
 }
@@ -109,15 +116,16 @@ function errorCall() {
 
 // 누적 가중치 — 합계 100
 const MIX = [
-    [15, shopBrowse],
-    [5, literalSql],
+    [14, shopBrowse],
+    [4, literalSql],
     [3, inClause],
+    [4, mixedSql],
     [8, dashboard],
     [7, pipeline],
-    [10, shopStocks],
+    [9, shopStocks],
     [7, orderList],
     [15, orderCreate],
-    [10, jitter],
+    [9, jitter],
     [5, heavySql],
     [5, orderReport],
     [5, asyncCall],

@@ -170,3 +170,67 @@ describe('bindSql — @{n}', () => {
     expect(r.leftover).toEqual(["'x'"]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `@{n}` 과 `?` 가 **한 문장에 같이** 있는 경우 (F-51)
+//
+// 에이전트는 두 값을 한 줄에 이어 붙인다 — 리터럴이 **앞**, 바인딩이 **뒤**다.
+//   TraceSQL.start(Object):
+//     escapeLiteral(sql, step)          → step.param = 리터럴 CSV
+//     step.param = ctx.sql.toString(step.param)  → 리터럴 CSV + "," + 바인딩 값들
+//
+// 그래서 `?` 는 값 목록의 **0번이 아니라 리터럴 개수 다음**부터 가져와야 한다.
+// 0번부터 세면 `?` 자리에 리터럴 값이 다시 들어가 **말은 되지만 틀린 SQL** 이 된다.
+
+describe('bindSql — @{n} 과 ? 가 섞인 문장', () => {
+  it('? 는 리터럴 값 다음부터 가져온다', () => {
+    const r = bindSql(
+      "select * from t where a = '@{1}' and b > @{2} and c = ? and d = ?",
+      "'fruit',100,'x',7",
+    );
+    expect(r.text).toBe("select * from t where a = 'fruit' and b > 100 and c = 'x' and d = 7");
+    expect(r.placeholders).toBe(4);
+    expect(r.bound).toBe(4);
+    expect(r.leftover).toEqual([]);
+  });
+
+  it('리터럴이 하나여도 ? 는 그 뒤부터다', () => {
+    const r = bindSql("select * from t where s = '@{1}' and id = ?", "'PENDING',42");
+    expect(r.text).toBe("select * from t where s = 'PENDING' and id = 42");
+    expect(r.bound).toBe(2);
+    expect(r.leftover).toEqual([]);
+  });
+
+  it('번호가 건너뛰어도 가장 큰 번호 다음부터 센다', () => {
+    // @{1} 만 문장에 남고 @{2} 가 없어도 값은 2개가 온다 — 큰 번호를 기준으로 삼는다
+    const r = bindSql("select * from t where a = '@{2}' and b = ?", "'skipped','used',9");
+    expect(r.text).toBe("select * from t where a = 'used' and b = 9");
+    expect(r.bound).toBe(2);
+    expect(r.leftover).toEqual(["'skipped'"]);
+  });
+
+  it('실측 문장을 그대로 채운다 (live_sql_mixed_literal_and_bind)', () => {
+    // 콜렉터에서 받은 그대로다.
+    //   `limit 5` 의 5 까지 리터럴로 빠져 @{4} 가 된다 — 리터럴이 **4개**라
+    //   첫 바인딩 값은 목록의 4번(10)이다.
+    const sql =
+      '/*mixed-sql*/ select p.id, p.name, p.price from product p' +
+      " where p.category = '@{1}' and p.price between @{2} and @{3}" +
+      ' and p.id > ? and p.name <> ? order by p.id limit @{4}';
+    const r = bindSql(sql, "'book',100,90000,5,10,'zzz'");
+    expect(r.text).toBe(
+      '/*mixed-sql*/ select p.id, p.name, p.price from product p' +
+        " where p.category = 'book' and p.price between 100 and 90000" +
+        " and p.id > 10 and p.name <> 'zzz' order by p.id limit 5",
+    );
+    expect(r.placeholders).toBe(6);
+    expect(r.bound).toBe(6);
+    expect(r.leftover).toEqual([]);
+  });
+
+  it('@{n} 이 없으면 ? 는 예전처럼 0번부터다', () => {
+    const r = bindSql('select * from t where a = ? and b = ?', "'x',7");
+    expect(r.text).toBe("select * from t where a = 'x' and b = 7");
+    expect(r.bound).toBe(2);
+  });
+});

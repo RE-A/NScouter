@@ -4,6 +4,7 @@ import com.nscouter.test.shop.domain.Product;
 import com.nscouter.test.shop.domain.Stock;
 import com.nscouter.test.shop.repository.ProductRepository;
 import com.nscouter.test.shop.repository.StockRepository;
+import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -25,13 +26,16 @@ public class LabService {
     private final ProductRepository productRepository;
     private final StockRepository stockRepository;
     private final DataSource dataSource;
+    private final EntityManager entityManager;
 
     public LabService(ProductRepository productRepository,
                       StockRepository stockRepository,
-                      DataSource dataSource) {
+                      DataSource dataSource,
+                      EntityManager entityManager) {
         this.productRepository = productRepository;
         this.stockRepository = stockRepository;
         this.dataSource = dataSource;
+        this.entityManager = entityManager;
     }
 
     /**
@@ -71,9 +75,9 @@ public class LabService {
     /**
      * 값을 문장에 박은 SQL 을 **PreparedStatement 가 아니라 Statement** 로 실행한다.
      *
-     * 에이전트의 리터럴 치환(profile_sql_escape_enabled)은 Statement 경로에서만 돈다
-     * (TraceSQL.start(Object) → escapeLiteral). PreparedStatement 로 보내면
-     * 값이 그대로 남아 `@{n}` 이 생기지 않는다 — 그래서 여기서는 일부러 Statement 다.
+     * PreparedStatement 로 보내도 리터럴 치환은 돌지만, JPA 가 만드는 SQL 은 값이
+     * 전부 `?` 라서 바꿀 리터럴이 없다. 값이 문장에 박힌 모양을 확실히 만들려고
+     * 여기서는 Statement 를 쓴다. (섞인 경우는 `mixedSql()` 을 보라.)
      *
      * 켜져 있으면 프로파일에는 문자열이 '@{n}', 숫자가 @{n} 으로 오고
      * 값은 파라미터로 따로 온다. 운영 환경에서 그렇게 오는 SQL 을 재현한다 (B-1).
@@ -90,6 +94,30 @@ public class LabService {
         } catch (SQLException e) {
             throw new IllegalStateException("literal-sql 실패", e);
         }
+    }
+
+    /**
+     * **리터럴과 바인딩이 한 문장에 같이** 있는 SQL (F-51 재현).
+     *
+     * 손으로 쓴 SQL 은 이 모양이 흔하다 — 코드값은 문장에 박고, 사용자 입력만 `?` 로 넘긴다.
+     * 에이전트는 리터럴을 `@{n}` 으로 바꾸고 그 값들을 파라미터 앞쪽에 놓은 뒤,
+     * PreparedStatement 바인딩 값을 **그 뒤에** 이어 붙인다
+     * (TraceSQL.start(Object): escapeLiteral → ctx.sql.toString(step.param)).
+     *
+     * 그래서 클라이언트가 `?` 를 값 목록 0번부터 채우면 리터럴 값이 다시 들어가고
+     * 진짜 바인딩 값은 «쓰이지 않은 값» 으로 밀려난다. 그게 실환경에서
+     * «파라미터가 안 나온다» 로 보이던 증상이라 여기서 재현한다.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Object[]> mixedSql(int minId, String name) {
+        return entityManager.createNativeQuery(
+                        "/*mixed-sql*/ select p.id, p.name, p.price from product p"
+                                + " where p.category = 'book' and p.price between 100 and 90000"
+                                + " and p.id > ? and p.name <> ?"
+                                + " order by p.id limit 5")
+                .setParameter(1, minId)
+                .setParameter(2, name)
+                .getResultList();
     }
 
     /**

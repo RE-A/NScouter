@@ -364,6 +364,8 @@ export const EN: Record<string, string> = {
   '개 중': ' of',
   '개:': ':',
   '개만 채웠습니다': ' filled',
+  '에이전트는 setXxx 로 넘어온 값만 기록합니다. 프로시저의 OUT 파라미터처럼 넣은 값이 없는 자리는 ? 로 남습니다.':
+    'The agent records only values passed through setXxx. Slots with no input value — a procedure OUT parameter, for instance — stay as ?.',
   '자리': 'slots',
   '쓰이지 않은 값': 'Unused values',
   '개 클래스 · 합계': ' classes · total',

@@ -157,6 +157,7 @@ elapsed       : min 0 / p50 8 / p90 122 / p99 1824 / max 6052 ms
 | `GET /shop/lab/heavy-sql?limit=30` | N+1 쿼리 |
 | `GET /shop/lab/literal-sql` | 값이 문장에 박힌 SQL (Statement) — 프로파일에 `'@{1}'` 형태로 온다 |
 | `GET /shop/lab/in-clause` | 리터럴이 여럿인 SQL — `@{1}` … `@{11}` |
+| `GET /shop/lab/mixed-sql?minId=10&name=zzz` | **리터럴과 바인딩이 한 문장에** — `@{n}` 과 `?` 가 같이 온다 (F-51) |
 | `GET /shop/lab/dashboard?categories=3` | **한 요청에 SQL 여러 개 + order-app 호출 + INSERT/커밋** |
 
 ### order-app 엔드포인트

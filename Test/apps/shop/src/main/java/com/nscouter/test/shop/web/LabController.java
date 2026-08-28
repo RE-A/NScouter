@@ -83,6 +83,18 @@ public class LabController {
     }
 
     /**
+     * 리터럴과 바인딩이 섞인 SQL — `@{n}` 과 `?` 가 한 문장에 같이 온다 (F-51).
+     *
+     * 값 한 줄이 «리터럴 먼저, 바인딩 나중» 으로 이어 붙어 오기 때문에,
+     * `?` 를 0번부터 채우면 리터럴 값이 `?` 자리에 다시 들어간다. 그 착시를 잡는 재료다.
+     */
+    @GetMapping("/mixed-sql")
+    public Map<String, Object> mixedSql(@RequestParam(defaultValue = "10") int minId,
+                                        @RequestParam(defaultValue = "no-such-name") String name) {
+        return Map.of("rows", labService.mixedSql(minId, name).size());
+    }
+
+    /**
      * 리터럴이 **많은** SQL. IN 절에 값이 줄줄이 들어간다.
      *
      * 실환경에서 본 SQL 은 `@{1}` 부터 `@{11}` 까지 있었다. 자리 하나짜리로는
