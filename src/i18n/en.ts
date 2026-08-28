@@ -364,6 +364,9 @@ export const EN: Record<string, string> = {
   '개 중': ' of',
   '개:': ':',
   '개만 채웠습니다': ' filled',
+  '에이전트가 SQL 문장을 받지 못했습니다': 'The agent did not capture the SQL statement',
+  '자동 생성 키를 쓰는 INSERT 는 에이전트가 문장을 얻지 못합니다. 드라이버가 문장 없이 PreparedStatement 를 만들기 때문이고, 콜렉터까지 문장이 오지 않아 화면에서 복원할 수 없습니다.':
+    'For an INSERT that returns generated keys, the driver builds the PreparedStatement without the statement text, so the agent never sees it. The text never reaches the collector and cannot be recovered here.',
   '에이전트는 setXxx 로 넘어온 값만 기록합니다. 프로시저의 OUT 파라미터처럼 넣은 값이 없는 자리는 ? 로 남습니다.':
     'The agent records only values passed through setXxx. Slots with no input value — a procedure OUT parameter, for instance — stay as ?.',
   '자리': 'slots',

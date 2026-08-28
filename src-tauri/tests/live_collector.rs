@@ -5564,6 +5564,138 @@ fn live_sql_literal_escape() {
     );
 }
 
+/// 어떤 SQL 이 사전에서 «unknown» 으로 나오는가 — 서비스별로 세어 본다.
+///
+/// 에이전트가 텍스트로 «unknown» 을 그대로 보낸다는 것까지는 확인했다
+/// (`TraceSQL0.start(stmt, param, xtype)` 에서 `param == null` 이면 그렇게 된다).
+/// 남은 질문은 **어떤 SQL 이 그 길로 빠지는가** 다. 짐작하지 말고 표본을 세어
+/// 알려진 것과 unknown 을 나란히 찍는다.
+#[test]
+#[ignore]
+fn probe_unknown_sql_text() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
+    use nscouter_lib::scouter::protocol::text_type;
+    use std::collections::BTreeMap;
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+    let param =
+        build_past_xlog_param(&hashes, &date, now - 20 * 1000, now, 400, &PastCursor::default());
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+    let mut rows = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            rows.push((x.txid, x.service));
+        }
+    }
+    let mut cache = TextCache::new();
+    let svc: Vec<i32> = rows.iter().map(|r| r.1).collect();
+    let missing_svc = cache.missing(text_type::SERVICE, &svc);
+    if !missing_svc.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &missing_svc);
+    }
+
+    // 서비스 → (unknown 수, 정상 수)
+    let mut tally: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    // unknown 이 나온 서비스에서 **같이 나온** 정상 SQL. 무엇과 짝을 이루는지 본다.
+    let mut companions: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    let mut updated_of_unknown: Vec<i32> = Vec::new();
+    let mut updated_of_known: Vec<i32> = Vec::new();
+
+    let mut scanned = 0usize;
+    for (txid, service) in rows.iter() {
+        if scanned >= 60 {
+            break;
+        }
+        let name = cache.get(text_type::SERVICE, *service).unwrap_or("?").to_string();
+        let mut c = login();
+        let cs = c.session;
+        if c
+            .send_request(CMD_TRANX_PROFILE_FULL, cs, &build_full_profile_param(&date, *txid))
+            .is_err()
+        {
+            continue;
+        }
+        let blob = match c.read_blob_stream() {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let steps = parse_profile_steps(blob);
+        let sql_hashes: Vec<i32> = steps
+            .iter()
+            .filter_map(|s| match s {
+                ProfileStep::Sql(x) => Some(x.hash),
+                _ => None,
+            })
+            .collect();
+        if sql_hashes.is_empty() {
+            continue;
+        }
+        scanned += 1;
+        let missing = cache.missing(text_type::SQL, &sql_hashes);
+        if !missing.is_empty() {
+            let _ = fetch_texts(&mut c, &mut cache, text_type::SQL, &missing);
+        }
+        let e = tally.entry(name.clone()).or_insert((0, 0));
+        let mut saw_unknown = false;
+        for h in &sql_hashes {
+            match cache.get(text_type::SQL, *h) {
+                Some("unknown") => {
+                    e.0 += 1;
+                    saw_unknown = true;
+                }
+                _ => e.1 += 1,
+            }
+        }
+        if saw_unknown {
+            let list = companions.entry(name.clone()).or_default();
+            for h in &sql_hashes {
+                if let Some(t) = cache.get(text_type::SQL, *h) {
+                    if t != "unknown" && list.len() < 4 && !list.iter().any(|s| s == t) {
+                        list.push(t.chars().take(90).collect());
+                    }
+                }
+            }
+            // **unknown 이 쓰기 쿼리인지 본다.** SqlStep3.updated 는 영향받은 행 수다.
+            // INSERT 면 1 이고 SELECT 면 0 이다 — 짐작 대신 이걸로 가른다.
+            for st in &steps {
+                if let ProfileStep::Sql(x) = st {
+                    if cache.get(text_type::SQL, x.hash) == Some("unknown") {
+                        updated_of_unknown.push(x.updated);
+                    } else {
+                        updated_of_known.push(x.updated);
+                    }
+                }
+            }
+        }
+    }
+
+    println!("== 서비스별 SQL 스텝 (표본 {scanned} 트랜잭션) ==");
+    for (name, (unk, ok)) in &tally {
+        println!("  unknown {unk:>3} · 정상 {ok:>3}   {name}");
+    }
+    println!("== unknown 이 나온 서비스에서 같이 잡힌 정상 SQL ==");
+    for (name, list) in &companions {
+        println!("  {name}");
+        for t in list {
+            println!("      {t}");
+        }
+    }
+    println!("== 영향받은 행 수(updated) ==");
+    println!("  unknown 스텝 : {updated_of_unknown:?}");
+    println!("  같은 트랜잭션의 정상 스텝 : {updated_of_known:?}");
+    assert!(scanned > 0, "SQL 이 있는 트랜잭션을 못 찾았다");
+}
+
 /// 리터럴과 바인딩이 **한 문장에 같이** 있을 때 값이 어떤 순서로 오는가 (F-51).
 ///
 /// 이게 이 파일에서 가장 값비싼 사실이다. 에이전트는

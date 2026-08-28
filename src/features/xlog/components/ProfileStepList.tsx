@@ -247,6 +247,15 @@ function StepRow({
  *   2. **긴 문장을 접을지.** 한 줄짜리 SELECT 도 컬럼을 다 적으면 수백 자다 —
  *      안 접으면 스텝 하나가 화면을 다 먹는다.
  */
+/**
+ * 에이전트가 SQL 문장을 못 얻었을 때 **텍스트 자리에 그대로 넣어 보내는 말**.
+ *
+ * 실제 문장이 아니다. 그대로 뿌리면 «unknown 이라는 쿼리를 실행했다» 로 읽힌다.
+ * 실측(F-53): `TraceSQL0.start(stmt, param, xtype)` 에서 `param == null` 이면
+ * `sql = "unknown"` 을 그대로 `sendSqlText` 로 보낸다.
+ */
+const AGENT_UNKNOWN_SQL = 'unknown';
+
 function SqlBody({
   sql,
   params,
@@ -290,6 +299,20 @@ function SqlBody({
     ro.observe(el);
     return () => ro.disconnect();
   }, [shown, expanded]);
+
+  // **문장이 아닌 것을 문장처럼 보여주지 않는다.** 에이전트가 SQL 을 못 얻으면
+  // 텍스트 자리에 `unknown` 이라는 말을 넣어 보낸다 — 그대로 뿌리면 그런 쿼리를
+  // 실행한 것으로 읽힌다. 무엇이 없는지, 왜 없는지 말해 주는 편이 낫다.
+  if (sql === AGENT_UNKNOWN_SQL) {
+    return (
+      <p
+        className="mt-0.5 text-micro text-warn"
+        title={t('자동 생성 키를 쓰는 INSERT 는 에이전트가 문장을 얻지 못합니다. 드라이버가 문장 없이 PreparedStatement 를 만들기 때문이고, 콜렉터까지 문장이 오지 않아 화면에서 복원할 수 없습니다.')}
+      >
+        {t('에이전트가 SQL 문장을 받지 못했습니다')}
+      </p>
+    );
+  }
 
   return (
     <div className="mt-0.5">

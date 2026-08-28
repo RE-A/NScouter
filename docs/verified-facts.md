@@ -651,6 +651,66 @@ param = "'book',100,90000,5,10,'zzz'"
 - 구현: `src/features/xlog/components/sqlBind.ts` (`scanSlots` 로 한 번 훑어 최댓값을 먼저 구한다)
 - 재현: `cargo test --test live_collector live_sql_mixed_literal_and_bind -- --ignored --nocapture`
 
+### F-53. `unknown` 은 사전 조회 실패가 아니다 — **에이전트가 그 말을 텍스트로 보낸다**
+
+프로파일에 SQL 본문 대신 `unknown` 이 뜬다. 해시를 찍어 보면 사전에 멀쩡히 들어 있고,
+**들어 있는 값이 문자열 `"unknown"`** 이다. 클라이언트가 복원할 수 있는 것이 없다.
+
+```
+hash=-1389975609 (0xad26a7c7) text=Some("unknown") param=""
+```
+
+`scouter.jdbc.jar` 의 `TraceSQL0.start(stmt, SqlParameter param, xtype)`:
+
+```java
+String sql = "unknown";
+if (param != null) {                          // ← param 이 null 이면 통째로 건너뛴다
+    sql = param.getSql();
+    sql = TraceSQL.escapeLiteral(sql, step);
+    step.param = param.toString(step.param);
+}
+step.hash = DataProxy.sendSqlText(sql);       // "unknown" 을 그대로 보낸다
+```
+
+`param` 은 PreparedStatement 에 심어 둔 `_param_` 필드다. **그게 왜 null 인가:**
+
+`PsInitMV` 는 SQL 을 `Connection.prepareStatement` 가 아니라
+**PreparedStatement 생성자의 첫 `String` 인자**에서 얻는다
+(`sqlIdx = AsmUtil.getStringIdx(access, desc)`). 그리고 `visitInsn` 첫 줄이
+`if (sqlIdx < 0) return;` 이라 **String 인자가 없는 생성자에는 `stmtInit` 조차 심지 않는다**
+— `_param_` 이 만들어지지 않는다.
+
+pgjdbc 42.7.11 (실측):
+
+```
+prepareStatement(sql, RETURN_GENERATED_KEYS)
+  → prepareStatement(sql, (String[]) null)
+      → borrowReturningQuery(sql, columnNames)
+      → new PgPreparedStatement(conn, CachedQuery, int, int, int)   ← String 인자가 없다
+```
+
+Hibernate 는 `GenerationType.IDENTITY` 인 INSERT 에서 이 경로를 쓴다.
+
+**실측으로 갈린다** (표본 60 트랜잭션):
+
+```
+unknown 스텝의 updated      : [1,1,1,1,2,1,2,1,2,1,2,1,1,2,...]   ← 전부 쓰기
+같은 트랜잭션의 정상 스텝    : [-1,-1,-1,-1,-1,-1,...]            ← 전부 읽기
+```
+
+| 쿼리 | 결과 |
+|---|---|
+| SELECT · 네이티브 UPDATE (`/order/api/pipeline`) | 문장이 온다 |
+| IDENTITY INSERT (`orders` · `delivery` · `audit_log`) | **`unknown`** |
+
+«쓰기라서» 가 아니라 **«자동 생성 키를 돌려받는 INSERT 라서»** 다 — 평범한 UPDATE 는 멀쩡하다.
+
+화면은 이 말을 문장인 척 뿌리지 않는다. `unknown` 을 그대로 보여주면 «unknown 이라는
+쿼리를 실행했다» 로 읽힌다 — 무엇이 없고 왜 없는지 적는다
+(`ProfileStepList.tsx` 의 `AGENT_UNKNOWN_SQL`).
+
+- 재현: `cargo test --test live_collector probe_unknown_sql_text -- --ignored --nocapture`
+
 ### F-52. 파라미터 값은 **20자에서 잘린다**. 프로시저 OUT 파라미터는 아예 안 온다
 
 `TraceSQL.set(SqlParameter, int, String)` 은 값을 `MAX_STRING` 에서 자르고 따옴표를 씌운다.

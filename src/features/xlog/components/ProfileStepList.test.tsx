@@ -68,6 +68,21 @@ describe('ProfileStepList — SQL 값 채우기', () => {
     expect(screen.getByText(/바인딩/)).toBeTruthy();
   });
 
+  it('에이전트가 못 얻은 SQL 은 문장인 척하지 않는다', () => {
+    // F-53: 자동 생성 키를 쓰는 INSERT 는 에이전트가 텍스트 자리에 «unknown» 을
+    // 그대로 넣어 보낸다. 그대로 뿌리면 그런 쿼리를 실행한 것으로 읽힌다.
+    render(
+      <ProfileStepList
+        steps={[sqlStep(55, '')]}
+        texts={{ 55: 'unknown' }}
+        totalElapsed={7}
+      />,
+    );
+    expect(screen.getByText(/에이전트가 SQL 문장을 받지 못했습니다/)).toBeTruthy();
+    // 「unknown」 이라는 말 자체는 본문으로 나오지 않는다
+    expect(screen.queryByText('unknown')).toBeNull();
+  });
+
   it('값이 남으면 버리지 않고 알려준다', () => {
     render(
       <ProfileStepList
