@@ -7,8 +7,29 @@ import {
   clampFontScale,
   FONT_SCALES,
 } from '../xlog/hooks/useViewOptions';
-import { T, F } from '../../styles/tokens';
+import { T, F, FONT_MONO } from '../../styles/tokens';
 import { t, toLang, type Lang } from '../../i18n';
+import { SHORTCUT_HELP, type ShortcutAction } from '../xlog/hooks/shortcuts';
+
+/**
+ * 단축키가 무엇을 하는지.
+ *
+ * **조합 목록은 여기 두지 않는다.** 판정하는 코드(`shortcuts.ts`)가 그대로 주므로
+ * 키를 고쳐도 이 창이 거짓말을 하지 않는다. 여기 있는 건 «무슨 뜻인가» 뿐이다.
+ */
+export const SHORTCUT_LABEL: Record<ShortcutAction, string> = {
+  'close-detail': '보고 있는 상세 닫기',
+  'focus-search': '프로파일 검색으로 이동',
+  'tab-xlog': 'XLog 탭',
+  'tab-counter': 'Counter 탭',
+  'tab-alert': 'Alert 탭',
+  'close-detail-tab': '상세 탭 닫기',
+  'cycle-detail-next': '다음 상세 탭',
+  'cycle-detail-prev': '이전 상세 탭',
+  'open-settings': '설정 열기',
+  'toggle-mode': '실시간 ↔ 과거',
+  reload: '다시 조회 (과거 구간)',
+};
 
 interface SettingsDialogProps {
   onClose: () => void;
@@ -184,6 +205,22 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                 </label>
               );
             })}
+          </div>
+
+          {/* 단축키 — **적어 두지 않으면 없는 기능이다.** 목록은 판정 코드가 그대로 준다 */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>{t('단축키')}</div>
+            <div style={sectionDescStyle}>
+              {t('입력칸에 글자를 치는 중에는 동작하지 않습니다. Esc 는 그 칸에서 빠져나옵니다.')}
+            </div>
+            <div style={{ marginTop: 8 }}>
+              {SHORTCUT_HELP.map(row => (
+                <div key={row.keys} style={pathRowStyle}>
+                  <span style={{ ...pathLabelStyle, fontFamily: FONT_MONO }}>{row.keys}</span>
+                  <span style={pathValueStyle}>{t(SHORTCUT_LABEL[row.action])}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* 현재 경로 정보 */}

@@ -8,6 +8,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EN } from './en';
+import { SHORTCUT_LABEL } from '../features/settings/SettingsDialog';
+import { SHORTCUT_HELP } from '../features/xlog/hooks/shortcuts';
 
 function tsxFiles(dir: string): string[] {
   const out: string[] = [];
@@ -55,5 +57,22 @@ describe('모듈 상수', () => {
       }
     }
     expect(bad).toEqual([]);
+  });
+});
+
+describe('간접 호출', () => {
+  it('단축키 설명이 사전에 있다', () => {
+    // **위의 스캔이 못 잡는 자리다.** `t(SHORTCUT_LABEL[action])` 처럼 변수를 넘기면
+    // 소스에 문구가 리터럴로 안 남아 빠짐을 눈치채지 못한다 —
+    // 영어 화면에서 그 줄만 한국어로 남는다. 여기서 직접 본다.
+    const missing = Object.values(SHORTCUT_LABEL).filter(v => !(v in EN)).sort();
+    expect(missing).toEqual([]);
+  });
+
+  it('모든 단축키 동작에 설명이 붙어 있다', () => {
+    // 동작을 새로 넣고 설명을 안 붙이면 설정 창에 빈칸이 뜬다.
+    for (const row of SHORTCUT_HELP) {
+      expect(SHORTCUT_LABEL[row.action], `${row.keys} 에 설명이 없다`).toBeTruthy();
+    }
   });
 });

@@ -32,11 +32,16 @@ import {
   getXLogDetail,
   startCounterStream,
   startAlertStream,
+  getConfig,
+  saveUiState,
 } from './features/xlog/api/scouterApi';
 import { subscribe } from './features/xlog/api/subscribe';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
 import { useAlertStream } from './features/xlog/hooks/useAlertStream';
-import { useXLogDetail } from './features/xlog/hooks/useXLogDetail';
+import { useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
+import { DetailTabBar } from './features/xlog/components/DetailTabBar';
+import { useShortcuts } from './features/xlog/hooks/useShortcuts';
+import { toLayout, fromLayout, toChartConfig, fromChartConfig } from './features/xlog/hooks/uiState';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
 import type { AgentObject, SXLog, XLogChartConfig, XLogFilterState } from './features/xlog/types/xlog';
 import { DEFAULT_CHART_CONFIG, DEFAULT_FILTER, xlogPackToSXLog } from './features/xlog/types/xlog';
@@ -70,6 +75,15 @@ const C = {
 };
 
 type TabId = 'xlog' | 'counter' | 'alert';
+
+/** 열린 탭이 하나도 없을 때 상세 패널에 줄 빈 상태 */
+const EMPTY_DETAIL = {
+  isLoading: false,
+  error: null,
+  profile: null,
+  texts: {},
+  xlog: null,
+} as const;
 
 /**
  * 애플리케이션 카운터 — counters.xml 의 javaee Family 19개 전부.
@@ -147,7 +161,10 @@ export default function App() {
   // 온 알림이 탭에는 없어서 배지에 2가 떠도 목록은 비어 있다 (실제로 겪었다).
   const alertStream = useAlertStream(isConnected);
 
-  const { state: detailState, fetchDetail, clearDetail } = useXLogDetail();
+  // 상세는 **여러 개** 열어 둘 수 있다. 느린 트랜잭션은 정상인 것과 나란히 놓고 봐야 안다.
+  const detail = useXLogDetailTabs();
+  const detailState = detail.active ?? EMPTY_DETAIL;
+  const clearDetail = detail.closeAll;
   const { getCached, resolve } = useTextResolver();
   // resolve 는 전역 캐시만 갱신하므로 목록을 다시 그리려면 별도 신호가 필요하다.
   const [textVersion, setTextVersion] = useState(0);
@@ -161,6 +178,49 @@ export default function App() {
   const [servicesW, setServicesW] = useState<number>(PANE.servicesDefaultW);
   const [detailW, setDetailW] = useState<number>(PANE.detailDefaultW);
   const [tableH, setTableH] = useState<number>(PANE.tableDefaultH);
+
+  /**
+   * 저장해 둔 배치·차트 설정을 한 번 읽어 온다.
+   *
+   * **다 읽기 전에는 저장하지 않는다.** 켜자마자 화면의 기본값이 파일을 덮으면
+   * 어제 맞춰 둔 것이 사라진다 — 그러고 나면 되돌릴 방법이 없다.
+   */
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getConfig()
+      .then(cfg => {
+        if (cancelled) return;
+        const l = toLayout(cfg.ui_layout);
+        setServicesW(l.servicesW);
+        setDetailW(l.detailW);
+        setTableH(l.tableH);
+        setActiveTab(l.activeTab);
+        setConfig(toChartConfig(cfg.xlog_chart));
+      })
+      // 못 읽어도 기본값으로 뜬다. 다만 그 기본값으로 파일을 덮지는 않는다 —
+      // 읽기가 실패한 이유가 «잠깐 못 읽었다» 일 수도 있다.
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setHydrated(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  /**
+   * 바뀐 것을 파일에 남긴다.
+   *
+   * **끄는 순간이 아니라 바뀔 때마다** 남긴다 — 앱이 죽으면 «끌 때» 는 오지 않는다.
+   * 다만 패널을 끄는 동안 마우스가 움직일 때마다 쓰면 안 되므로 잠깐 모아서 쓴다.
+   */
+  useEffect(() => {
+    if (!hydrated) return;
+    const id = setTimeout(() => {
+      saveUiState(
+        fromLayout({ servicesW, detailW, tableH, activeTab }),
+        fromChartConfig(config),
+      ).catch(() => {});
+    }, 600);
+    return () => clearTimeout(id);
+  }, [hydrated, servicesW, detailW, tableH, activeTab, config]);
 
   useEffect(() => {
     const el = xlogWsRef.current;
@@ -247,9 +307,7 @@ export default function App() {
     setAgentMap(new Map(agents.map(a => [a.obj_hash, a.obj_name])));
   }, []);
   // 분할 배치라 패널이 겹치지 않는다 — z 순서를 조정할 일이 없다.
-  const openDetail = useCallback((xlog: SXLog) => {
-    fetchDetail(xlog);
-  }, [fetchDetail]);
+  const openDetail = detail.open;
 
   /**
    * txid 만 알고 있을 때 그 트랜잭션을 연다 (프로파일의 스레드 링크).
@@ -257,11 +315,15 @@ export default function App() {
    * 상세 패널은 SXLog 를 필요로 하므로 먼저 XLog 를 찾아온다.
    * 스레드 트랜잭션도 XLog 를 남기므로 조회된다.
    */
+  // **`detail` 전체를 의존성에 넣으면 안 된다.** 훅이 매 렌더 새 객체를 돌려주므로
+  // 이 콜백이 계속 새로 만들어지고, memo 로 막아 둔 상세 패널이 매번 다시 그려진다.
+  // 안정적인 `open` 하나만 잡는다.
+  const openDetailTab = detail.open;
   const openByTxid = useCallback((txid: string, date: string) => {
     getXLogDetail(txid, date)
-      .then(pack => fetchDetail(xlogPackToSXLog(pack)))
+      .then(pack => openDetailTab(xlogPackToSXLog(pack)))
       .catch(() => {});
-  }, [fetchDetail]);
+  }, [openDetailTab]);
 
   /**
    * 요약 화면에서 트랜잭션을 연다.
@@ -341,8 +403,37 @@ export default function App() {
 
   const [showSettings, setShowSettings] = useState(false);
 
+  /** Ctrl+F 로 옮겨 갈 자리 */
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  /** F5 — 값이 바뀌면 차트가 같은 구간을 다시 받는다 */
+  const [refreshSignal, setRefreshSignal] = useState(0);
+
+  useShortcuts({
+    // Esc 는 **지금 보는 탭 하나만** 닫는다. 전부 닫으면 되돌릴 방법이 없다.
+    'close-detail': detail.closeActive,
+    'close-detail-tab': detail.closeActive,
+    'cycle-detail-next': () => detail.cycle(1),
+    'cycle-detail-prev': () => detail.cycle(-1),
+    'focus-search': () => {
+      // 검색은 XLog 탭에만 있다. 다른 탭에서 눌렀으면 데려온다.
+      setActiveTab('xlog');
+      // 탭이 바뀐 뒤에 그려지므로 한 틱 넘긴다.
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+    },
+    'tab-xlog': () => setActiveTab('xlog'),
+    'tab-counter': () => setActiveTab('counter'),
+    'tab-alert': () => setActiveTab('alert'),
+    'open-settings': () => setShowSettings(true),
+    'toggle-mode': () => setXLogMode(m => (m === 'live' ? 'past' : 'live')),
+    // 실시간은 계속 흘러오므로 다시 받을 것이 없다. 과거 구간에서만 뜻이 있다.
+    reload: () => setRefreshSignal(n => n + 1),
+  });
+
   const isStreaming = isConnected;
-  const hasDetail = !!(detailState.xlog || detailState.isLoading);
+  const hasDetail = detail.tabs.length > 0;
   const hasSelected = selectedXLogs.length > 0;
 
   return (
@@ -469,6 +560,7 @@ export default function App() {
                     connected={isConnected}
                     clearSignal={clearSignal}
                     pastRange={pastRange}
+                    refreshSignal={refreshSignal}
                     pastObjHashes={counterHashes.javaee}
                     onPastRangeChange={setPastRange}
                   />
@@ -515,6 +607,7 @@ export default function App() {
               >
                 <div className="flex h-full flex-col">
                   <XLogSearchBar
+                    inputRef={searchInputRef}
                     targetCount={selectedXLogs.length}
                     state={search.state}
                     onRun={runSearch}
@@ -548,11 +641,22 @@ export default function App() {
                   }
                 />
                 <Pane title="XLog Detail" className="shrink-0" style={{ width: detailW }}>
+                  {/* 탭이 하나뿐이면 머리를 두지 않는다 — 고를 것이 없는 탭 줄은 자리만 먹는다 */}
+                  {detail.tabs.length > 1 && (
+                    <DetailTabBar
+                      tabs={detail.tabs}
+                      activeKey={detail.activeKey}
+                      onSelect={detail.activate}
+                      onClose={detail.close}
+                      onCloseAll={detail.closeAll}
+                    />
+                  )}
                   <XLogDetailPanel
+                    key={detail.activeKey ?? ''}
                     state={detailState}
-                    onClose={clearDetail}
+                    onClose={detail.closeActive}
                     agentMap={agentMap}
-                    onSelectTrace={fetchDetail}
+                    onSelectTrace={detail.open}
                     onOpenTxid={openByTxid}
                     searchQuery={search.state.query}
                   />

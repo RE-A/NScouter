@@ -1727,6 +1727,24 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String>
     Ok(state.config.lock().await.clone())
 }
 
+/// 화면 배치와 차트 설정만 갈아 끼운다.
+///
+/// **설정 전체를 덮어쓰지 않는 이유:** 이 저장은 패널을 끌 때마다 일어난다.
+/// 화면에서 `get_config` → 고쳐서 → `save_config` 로 하면, 그 사이에 설정 창이
+/// 저장한 값(예: 방금 바꾼 언어)을 오래된 사본이 되돌린다. 병합을 여기서 한다.
+#[tauri::command]
+pub async fn save_ui_state(
+    layout: crate::config::UiLayout,
+    chart: crate::config::XLogChartPrefs,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let path = state.config_path.clone();
+    let mut cfg = state.config.lock().await;
+    cfg.ui_layout = layout;
+    cfg.xlog_chart = chart;
+    cfg.save(&path)
+}
+
 /// 앱 설정 저장 (config.json에 기록)
 #[tauri::command]
 pub async fn save_config(

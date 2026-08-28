@@ -105,6 +105,7 @@ pub fn run() {
             start_mock_stream,
             get_config,
             save_config,
+            save_ui_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

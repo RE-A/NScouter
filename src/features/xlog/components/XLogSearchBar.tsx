@@ -4,10 +4,13 @@
 // 화면 전체를 훑으면 수천 건이고 수십 초가 걸린다.
 
 import { memo, useState } from 'react';
+import type React from 'react';
 import type { ProfileSearchState } from '../hooks/useProfileSearch';
 import { t } from '../../../i18n';
 
 interface XLogSearchBarProps {
+  /** Ctrl+F 가 여기로 포커스를 옮긴다 */
+  inputRef?: React.Ref<HTMLInputElement>;
   /** 훑을 대상 수. 0 이면 검색할 수 없다 */
   targetCount: number;
   state: ProfileSearchState;
@@ -22,6 +25,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
   onRun,
   onCancel,
   onClear,
+  inputRef,
 }: XLogSearchBarProps) {
   const [draft, setDraft] = useState('');
   const disabled = targetCount === 0;
@@ -32,6 +36,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
       <span className="text-micro text-fg-dim">{t('프로파일 검색')}</span>
 
       <input
+        ref={inputRef}
         type="text"
         value={draft}
         spellCheck={false}

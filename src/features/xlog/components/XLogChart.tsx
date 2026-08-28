@@ -39,6 +39,13 @@ interface XLogChartProps {
    * 드래그는 **트랜잭션 선택 그대로**다. 확대·이동은 휠이 맡는다.
    */
   onPastRangeChange?: (r: PastRange) => void;
+  /**
+   * 값이 바뀌면 **같은 구간을 다시 받아 온다** (F5).
+   *
+   * 구간을 새 객체로 바꾸는 방식은 쓸 수 없다 — 재조회 판정이 stime/etime 값으로
+   * 돌아서 같은 구간이면 아무 일도 일어나지 않는다.
+   */
+  refreshSignal?: number;
 }
 
 export const XLogChart = memo(function XLogChart({
@@ -50,6 +57,7 @@ export const XLogChart = memo(function XLogChart({
   pastRange = null,
   pastObjHashes = [],
   onPastRangeChange,
+  refreshSignal = 0,
 }: XLogChartProps) {
   const { store: liveStore, streamError, clearError } = useXLogStream(config);
 
@@ -69,6 +77,14 @@ export const XLogChart = memo(function XLogChart({
   }, [pastRange, fetchRange]);
 
   const past = usePastXLog(fetchRange, pastObjHashes);
+
+  // **처음 마운트될 때는 다시 받지 않는다.** 이미 위에서 받고 있다.
+  const pastReload = past.reload;
+  const firstRefresh = React.useRef(true);
+  React.useEffect(() => {
+    if (firstRefresh.current) { firstRefresh.current = false; return; }
+    if (isPast) pastReload();
+  }, [refreshSignal, isPast, pastReload]);
   const store = isPast ? past.store : liveStore;
 
   // 과거는 고정 구간, 실시간은 흐르는 창.

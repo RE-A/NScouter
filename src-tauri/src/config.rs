@@ -40,6 +40,71 @@ pub struct AppConfig {
     /// 바뀌는 건 우리가 붙인 설명과 레이블이다.
     #[serde(default = "default_lang")]
     pub ui_language: String,
+    /// 끌어서 정한 패널 크기와 마지막에 보던 탭.
+    ///
+    /// **매번 다시 맞추는 게 가장 번거로운 부분이라 남긴다.**
+    #[serde(default)]
+    pub ui_layout: UiLayout,
+    /// XLog 스캐터 차트 설정(Y축·시간 범위·무시 구간).
+    #[serde(default)]
+    pub xlog_chart: XLogChartPrefs,
+}
+
+/// 끌어서 정한 패널 크기. 픽셀이다.
+///
+/// **화면 밖으로 나갈 값이 들어와도 앱이 죽으면 안 된다.** 설정 파일은 사람이 여는 곳이고,
+/// 모니터를 바꾸면 어제 맞는 값이 오늘 안 맞는다 — 실제 배치는 화면에서 다시 가둔다
+/// (`clampPane`). 여기서는 저장만 한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UiLayout {
+    /// 좌측 서비스 목록 폭
+    pub services_w: f32,
+    /// 우측 상세 패널 폭
+    pub detail_w: f32,
+    /// 아래 트랜잭션 표 높이
+    pub table_h: f32,
+    /// 마지막에 보던 탭. `"xlog"` · `"counter"` · `"alert"`
+    pub active_tab: String,
+}
+
+impl Default for UiLayout {
+    fn default() -> Self {
+        // 0 을 기본값으로 두면 패널이 사라진 채로 뜬다. 화면 쪽 기본값과 같은 수를 쓴다
+        // (`src/components/paneSizing.ts` 의 PANE).
+        Self { services_w: 200.0, detail_w: 420.0, table_h: 240.0, active_tab: "xlog".to_string() }
+    }
+}
+
+/// XLog 스캐터 차트 설정.
+///
+/// 색은 넣지 않는다 — 팔레트는 `colorPalette.ts` 한 곳에만 있어야 하고,
+/// 설정 파일에 두 벌이 되면 테마를 바꿔도 저장해 둔 색이 이긴다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XLogChartPrefs {
+    /// `"elapsed"` · `"cpu"` · `"memory"`
+    pub y_axis_mode: String,
+    /// 보는 시간 폭(ms)
+    pub time_range_ms: i64,
+    /// Y축 최대값(초)
+    pub y_max: f32,
+    /// 무시 구간을 칠할지
+    pub show_ignore_area: bool,
+    /// 그 아래는 무시로 보는 응답시간(ms)
+    pub ignore_threshold_ms: i64,
+}
+
+impl Default for XLogChartPrefs {
+    fn default() -> Self {
+        Self {
+            y_axis_mode: "elapsed".to_string(),
+            time_range_ms: 300_000,
+            y_max: 9.0,
+            show_ignore_area: false,
+            ignore_threshold_ms: 0,
+        }
+    }
 }
 
 /// serde 기본값용. **`Default` 파생만으로는 false 가 된다** —
@@ -72,6 +137,8 @@ impl Default for AppConfig {
             sql_bind_inline: true,
             ui_font_scale: 1.0,
             ui_language: "ko".to_string(),
+            ui_layout: UiLayout::default(),
+            xlog_chart: XLogChartPrefs::default(),
         }
     }
 }
@@ -129,6 +196,48 @@ mod bind_default_tests {
         let old = r#"{"auto_connect":false}"#;
         let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
         assert_eq!(cfg.ui_font_scale, 1.0);
+    }
+
+    #[test]
+    fn 배치가_없는_예전_설정도_읽힌다() {
+        // **이 항목이 생기기 전에 저장된 config.json 이 그대로 남아 있다.**
+        // 0 이 들어가면 패널이 사라진 채로 뜬다 — 화면 쪽 기본값과 같은 수여야 한다.
+        let old = r#"{"auto_connect":false,"ui_language":"en"}"#;
+        let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
+        assert_eq!(cfg.ui_layout.services_w, 200.0);
+        assert_eq!(cfg.ui_layout.detail_w, 420.0);
+        assert_eq!(cfg.ui_layout.table_h, 240.0);
+        assert_eq!(cfg.ui_layout.active_tab, "xlog");
+        assert_eq!(cfg.xlog_chart.y_axis_mode, "elapsed");
+        assert_eq!(cfg.xlog_chart.time_range_ms, 300_000);
+        assert_eq!(cfg.xlog_chart.y_max, 9.0);
+        // 다른 항목이 밀려나지 않았다
+        assert_eq!(cfg.ui_language, "en");
+    }
+
+    #[test]
+    fn 배치가_일부만_있어도_나머지는_기본값이다() {
+        // 항목을 하나씩 늘려 갈 때 예전 파일이 반쪽으로 읽히면 안 된다.
+        let saved = r#"{"ui_layout":{"detail_w":800.0}}"#;
+        let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");
+        assert_eq!(cfg.ui_layout.detail_w, 800.0);
+        assert_eq!(cfg.ui_layout.services_w, 200.0);
+        assert_eq!(cfg.ui_layout.active_tab, "xlog");
+    }
+
+    #[test]
+    fn 저장하면_그대로_다시_읽힌다() {
+        let mut cfg = AppConfig::default();
+        cfg.ui_layout.detail_w = 640.0;
+        cfg.ui_layout.active_tab = "counter".to_string();
+        cfg.xlog_chart.y_max = 30.0;
+        cfg.xlog_chart.show_ignore_area = true;
+        let json = serde_json::to_string(&cfg).expect("직렬화 실패");
+        let back: AppConfig = serde_json::from_str(&json).expect("파싱 실패");
+        assert_eq!(back.ui_layout.detail_w, 640.0);
+        assert_eq!(back.ui_layout.active_tab, "counter");
+        assert_eq!(back.xlog_chart.y_max, 30.0);
+        assert!(back.xlog_chart.show_ignore_area);
     }
 
     #[test]

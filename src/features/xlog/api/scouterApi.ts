@@ -527,6 +527,31 @@ export interface AppConfig {
   ui_font_scale?: number;
   /** 화면 언어 'ko' | 'en'. 없으면 'ko' */
   ui_language?: string;
+  /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
+  ui_layout?: UiLayout;
+  /** XLog 스캐터 차트 설정 */
+  xlog_chart?: XLogChartPrefs;
+}
+
+/** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
+export interface UiLayout {
+  services_w: number;
+  detail_w: number;
+  table_h: number;
+  /** 'xlog' | 'counter' | 'alert' */
+  active_tab: string;
+}
+
+/**
+ * 색은 넣지 않는다 — 팔레트는 `colorPalette.ts` 한 곳에만 있어야 한다.
+ * 설정 파일에 두 벌이 되면 테마를 바꿔도 저장해 둔 색이 이긴다.
+ */
+export interface XLogChartPrefs {
+  y_axis_mode: string;
+  time_range_ms: number;
+  y_max: number;
+  show_ignore_area: boolean;
+  ignore_threshold_ms: number;
 }
 
 export async function getConfig(): Promise<AppConfig> {
@@ -535,4 +560,15 @@ export async function getConfig(): Promise<AppConfig> {
 
 export async function saveConfig(newConfig: AppConfig): Promise<void> {
   return invoke<void>('save_config', { newConfig });
+}
+
+/**
+ * 배치와 차트 설정만 갈아 끼운다.
+ *
+ * **설정 전체를 덮어쓰지 않는다.** 이 저장은 패널을 끌 때마다 일어나므로,
+ * 화면에서 읽어 고쳐 쓰면 그 사이에 설정 창이 바꾼 값(언어 등)을 되돌린다.
+ * 병합은 Rust 가 한다.
+ */
+export async function saveUiState(layout: UiLayout, chart: XLogChartPrefs): Promise<void> {
+  return invoke<void>('save_ui_state', { layout, chart });
 }
