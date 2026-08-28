@@ -1,9 +1,10 @@
 // src/features/xlog/components/AgentSelectorPanel.tsx
 
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getObjectList } from '../api/scouterApi';
 import type { AgentObject } from '../types/xlog';
 import { agentRowState } from './agentFilter';
+import { groupAgents, shortName } from './agentTree';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { isJavaeeObjectType } from '../types/counter';
@@ -24,6 +25,10 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
 }: AgentSelectorPanelProps) {
   const [agents, setAgents] = useState<AgentObject[]>([]);
   const [loading, setLoading] = useState(false);
+  /** 목록 안 검색어 */
+  const [query, setQuery] = useState('');
+  /** 접어 둔 묶음 이름들 */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     if (!isConnected) { setAgents([]); return; }
@@ -56,6 +61,20 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
 
   const filtering = selectedHashes.size > 0;
   const aliveCount = agents.filter(a => a.alive).length;
+
+  const groups = useMemo(() => groupAgents(agents, query), [agents, query]);
+  const shown = groups.reduce((n, g) => n + g.agents.length, 0);
+  /** 검색 중에는 접힘을 무시한다 — 찾은 걸 숨기면 검색이 아니다 */
+  const searching = query.trim() !== '';
+
+  const toggleGroup = useCallback((type: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }, []);
 
   /** 우클릭한 에이전트와 메뉴 위치 */
   const [menu, setMenu] = useState<{ agent: AgentObject; x: number; y: number } | null>(null);
@@ -101,14 +120,71 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         )}
       </div>
 
+      {/* 찾기 — 오브젝트가 백 개를 넘으면 눈으로 훑는 건 방법이 못 된다 */}
+      {isConnected && agents.length > 0 && (
+        <div className="shrink-0 border-b border-line px-2 py-1.5">
+          <div className="flex items-center gap-1">
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={t('이름 · 타입 찾기')}
+              className="min-w-0 flex-1 rounded border border-line bg-input px-1.5 py-0.5 text-small text-fg placeholder:text-fg-faint focus:border-accent focus:outline-none"
+            />
+            {searching && (
+              <button
+                onClick={() => setQuery('')}
+                title={t('검색어 지우기')}
+                aria-label={t('검색어 지우기')}
+                className="flex size-5 shrink-0 items-center justify-center rounded text-fg-dim hover:bg-hover hover:text-fg"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {searching && (
+            <p className="mt-1 text-micro text-fg-faint">
+              <span className="tnum font-mono">{shown}</span>
+              {t('건 찾음')} · <span className="tnum font-mono">{agents.length}</span>
+              {t('건 중')}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 목록 */}
-      <div className="flex-1 divide-y divide-line/40 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
         {!isConnected && <Empty>{t('연결되지 않음')}</Empty>}
         {isConnected && agents.length === 0 && !loading && <Empty>{t('에이전트 없음')}</Empty>}
-        {agents.map(agent => {
-          const state = agentRowState(selectedHashes, agent.obj_hash);
-          const shortName = agent.obj_name.split('/').pop() ?? agent.obj_name;
+        {isConnected && agents.length > 0 && groups.length === 0 && (
+          <Empty>{t('조건에 맞는 항목이 없습니다.')}</Empty>
+        )}
+        {groups.map(group => {
+          const open = searching || !collapsed.has(group.type);
           return (
+            <div key={group.type}>
+              {/* 묶음 머리 — 접혀 있어도 **살아 있는 수**는 보여야 한다 */}
+              <button
+                onClick={() => toggleGroup(group.type)}
+                aria-expanded={open}
+                className="flex w-full items-center gap-1.5 border-b border-line/60 bg-surface/60 px-2 py-1 text-left hover:bg-hover/50"
+              >
+                <span className={`shrink-0 text-micro text-fg-dim ${open ? '' : '-rotate-90'}`}>
+                  ▾
+                </span>
+                <span className="min-w-0 flex-1 truncate text-micro font-medium text-fg-muted">
+                  {group.type}
+                </span>
+                <span className="tnum shrink-0 font-mono text-micro text-fg-faint">
+                  {group.aliveCount}/{group.agents.length}
+                </span>
+              </button>
+
+              {open && (
+                <div className="divide-y divide-line/40">
+                  {group.agents.map(agent => {
+                    const state = agentRowState(selectedHashes, agent.obj_hash);
+                    const name = shortName(agent.obj_name);
+                    return (
             <div
               key={agent.obj_hash}
               onClick={() => handleToggle(agent.obj_hash)}
@@ -130,10 +206,14 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 aria-hidden
               />
               <span className="min-w-0 flex-1 truncate text-fg">
-                {shortName || `[${agent.obj_hash}]`}
+                {name || `[${agent.obj_hash}]`}
               </span>
-              {/* 채운 배지는 행마다 반복되면 기둥이 된다. 글자만 남긴다. */}
-              <span className="shrink-0 text-micro text-fg-faint">{agent.obj_type}</span>
+              {/* 타입은 묶음 머리에 있다. 행마다 되풀이하면 같은 말이 두 번이다. */}
+            </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}

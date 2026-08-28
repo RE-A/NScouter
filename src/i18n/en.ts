@@ -167,6 +167,10 @@ export const EN: Record<string, string> = {
     'Test the chart with synthetic data, without a collector',
 
   '언어': 'Language',
+  '이름 · 타입 찾기': 'find by name or type',
+  '검색어 지우기': 'clear search',
+  '건 찾음': ' found',
+  '건 중': ' of',
   'DEMO (합성 데이터)': 'DEMO (synthetic data)',
   'Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같습니다. 바뀌는 것은 설명과 레이블입니다.':
     'Scouter terms (TPS, XLog, Elapsed) are English in both languages. What changes is the labels and explanations we added.',
