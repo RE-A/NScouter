@@ -91,4 +91,27 @@ public class LabService {
             throw new IllegalStateException("literal-sql 실패", e);
         }
     }
+
+    /**
+     * 리터럴이 여러 개인 SQL. 에이전트가 치환하면 `@{1}` … `@{11}` 이 된다.
+     *
+     * 실환경에서 본 문장이 이 모양이었다 — 문자열과 숫자가 섞이고, 뒤쪽에
+     * `where 1 = 1` 처럼 **번호만 차지하는 자리**도 있다.
+     */
+    public int inClauseSql() {
+        String sql = "/*in-clause*/ select count(*) from product p"
+                + " where p.category in ('fruit', 'grain', 'dairy', 'meat')"
+                + " and p.price between 100 and 90000"
+                + " and p.id > 0 and 1 = 1"
+                + " and p.name <> 'no-such-name'";
+        try (Connection conn = dataSource.getConnection();
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            int count = rs.next() ? rs.getInt(1) : 0;
+            log.debug("inClauseSql 완료: {}", count);
+            return count;
+        } catch (SQLException e) {
+            throw new IllegalStateException("in-clause 실패", e);
+        }
+    }
 }

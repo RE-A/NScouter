@@ -63,6 +63,7 @@ services:
     environment:
       DB_HOST: postgres
       DB_NAME: shopdb
+      ORDER_BASE_URL: http://order-app:8082
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
     ports:

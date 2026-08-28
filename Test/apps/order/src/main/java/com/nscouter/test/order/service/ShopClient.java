@@ -38,6 +38,16 @@ public class ShopClient {
         return body;
     }
 
+    /** shop-app 대시보드. 그 안에서 다시 order-app 을 부르므로 흐름이 3단이 된다. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> dashboard(int categories) {
+        Map<String, Object> body = restClient.get()
+                .uri("/shop/lab/dashboard?categories={n}", categories)
+                .retrieve()
+                .body(Map.class);
+        return body == null ? Map.of() : body;
+    }
+
     /** 읽기 타임아웃(3초)을 넘기는 호출. 타임아웃 에러 XLog 를 만든다. */
     public Map<String, Object> callSlow(long ms) {
         return restClient.get()

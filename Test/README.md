@@ -155,6 +155,9 @@ elapsed       : min 0 / p50 8 / p90 122 / p99 1824 / max 6052 ms
 | `GET /shop/lab/error?type=http500\|npe\|illegal` | 에러 발생 |
 | `GET /shop/lab/async` | 별도 스레드 처리 |
 | `GET /shop/lab/heavy-sql?limit=30` | N+1 쿼리 |
+| `GET /shop/lab/literal-sql` | 값이 문장에 박힌 SQL (Statement) — 프로파일에 `'@{1}'` 형태로 온다 |
+| `GET /shop/lab/in-clause` | 리터럴이 여럿인 SQL — `@{1}` … `@{11}` |
+| `GET /shop/lab/dashboard?categories=3` | **한 요청에 SQL 여러 개 + order-app 호출 + INSERT/커밋** |
 
 ### order-app 엔드포인트
 
@@ -167,8 +170,39 @@ elapsed       : min 0 / p50 8 / p90 122 / p99 1824 / max 6052 ms
 | `GET /order/deliveries` | 배송 목록 |
 | `GET /order/reports/daily` | 상태별 집계 |
 | `GET /order/lab/timeout?ms=6000` | shop 호출 타임아웃 (읽기 3초) |
+| `GET /order/api/summary` | 상태별 집계 (JSON) — shop-app 대시보드가 부른다 |
+| `GET /order/api/pipeline?categories=3` | **3단 체인**: order → shop(대시보드) → order(요약) |
 
 주문 생성 폼 파라미터는 `productId`, `quantity` 다.
+
+### 흐름이 두꺼운 요청 두 가지
+
+화면(프로파일 요약·흐름 트리·프로파일 검색)을 확인하려면 **요청 하나가 여러 일을 해야** 한다.
+select 한두 개로 끝나는 요청만 있으면 요약 표는 두 줄이고 흐름 트리는 늘 같은 모양이다.
+
+`GET /shop/lab/dashboard` 한 건이 만드는 것 (실측):
+
+```
+ELAPSED 952ms · SQL 66ms / 129건 · API 1건
+  SQL  select … from stock … where product_id=?          ×120   ← 의도한 N+1
+  SQL  select category, count(*), avg(price) … group by  ×2     ← 집계
+  SQL  select … from product p join stock s … (subquery) ×1     ← 조인+서브쿼리
+  SQL  select … from product … where category=?          ×3
+  M    COMMIT / setAutoCommit(false→true)                       ← 쓰기 트랜잭션
+  API  order-app 호출
+```
+
+`GET /order/api/pipeline` 은 앱을 **두 번 오간다**:
+
+```
+/order/api/pipeline<GET>   449ms  order-app
+  → /shop/lab/dashboard<GET>  78ms  shop-app
+      → /order/api/summary<GET>  54ms  order-app
+```
+
+- 재현: `cargo test --test live_collector live_three_level_chain -- --ignored --nocapture`
+- shop → order 방향은 `ORDER_BASE_URL` 로 붙는다 (compose.yml). 이 방향이 없으면
+  흐름 트리가 늘 2단에서 끝난다.
 
 ---
 

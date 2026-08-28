@@ -1,5 +1,6 @@
 package com.nscouter.test.shop.web;
 
+import com.nscouter.test.shop.service.DashboardService;
 import com.nscouter.test.shop.service.LabService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,9 +22,11 @@ import java.util.concurrent.ThreadLocalRandom;
 public class LabController {
 
     private final LabService labService;
+    private final DashboardService dashboardService;
 
-    public LabController(LabService labService) {
+    public LabController(LabService labService, DashboardService dashboardService) {
         this.labService = labService;
+        this.dashboardService = dashboardService;
     }
 
     /** 인위적 지연 — 스캐터 상단에 점을 찍는다. */
@@ -77,5 +80,27 @@ public class LabController {
     @GetMapping("/literal-sql")
     public Map<String, Object> literalSql() {
         return Map.of("count", labService.literalSql());
+    }
+
+    /**
+     * 리터럴이 **많은** SQL. IN 절에 값이 줄줄이 들어간다.
+     *
+     * 실환경에서 본 SQL 은 `@{1}` 부터 `@{11}` 까지 있었다. 자리 하나짜리로는
+     * 번호가 건너뛰거나 되풀이될 때를 확인할 수 없어 여기서 그 모양을 만든다.
+     */
+    @GetMapping("/in-clause")
+    public Map<String, Object> inClause() {
+        return Map.of("count", labService.inClauseSql());
+    }
+
+    /**
+     * 한 요청에 SQL 여러 개 + 다른 앱 호출 + 쓰기.
+     *
+     * 프로파일 요약·흐름 트리·프로파일 검색이 볼 거리가 있으려면
+     * 요청 하나가 이 정도는 해야 한다.
+     */
+    @GetMapping("/dashboard")
+    public Map<String, Object> dashboard(@RequestParam(defaultValue = "3") int categories) {
+        return dashboardService.build(Math.min(Math.max(categories, 1), 8));
     }
 }

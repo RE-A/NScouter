@@ -38,3 +38,9 @@ logging:
   level:
     root: INFO
     com.nscouter.test.shop: INFO
+
+# order-app 호출 (shop → order). 이 방향이 있어야 흐름이 3단으로 자란다.
+order:
+  base-url: ${ORDER_BASE_URL:http://order-app:8082}
+  connect-timeout-ms: 2000
+  read-timeout-ms: 3000

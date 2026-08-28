@@ -61,6 +61,20 @@ function jitter() {
     });
 }
 
+function inClause() {
+    http.get(`${SHOP}/shop/lab/in-clause`, { tags: { scenario: 'in-clause' } });
+}
+
+function dashboard() {
+    // 한 요청에 SQL 여러 개 + order-app 호출 + 쓰기까지 들어간다
+    http.get(`${SHOP}/shop/lab/dashboard?categories=3`, { tags: { scenario: 'dashboard' } });
+}
+
+function pipeline() {
+    // order → shop → order 로 3단. 흐름 트리가 깊어지는 유일한 시나리오다
+    http.get(`${ORDER}/order/api/pipeline?categories=3`, { tags: { scenario: 'pipeline' } });
+}
+
 function literalSql() {
     http.get(`${SHOP}/shop/lab/literal-sql`, { tags: { scenario: 'literal-sql' } });
 }
@@ -95,11 +109,14 @@ function errorCall() {
 
 // 누적 가중치 — 합계 100
 const MIX = [
-    [25, shopBrowse],
+    [15, shopBrowse],
     [5, literalSql],
+    [3, inClause],
+    [8, dashboard],
+    [7, pipeline],
     [10, shopStocks],
-    [10, orderList],
-    [20, orderCreate],
+    [7, orderList],
+    [15, orderCreate],
     [10, jitter],
     [5, heavySql],
     [5, orderReport],

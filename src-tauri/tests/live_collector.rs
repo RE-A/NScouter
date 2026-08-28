@@ -5654,3 +5654,151 @@ fn live_service_error_not_on_steps() {
     );
     println!("스텝에 없는 에러 {only_on_xlog}건 — XLog 의 error 를 따로 풀어야 한다");
 }
+
+/// 테스트 환경이 **3단 체인**과 양방향 apicall 을 만들어 주는가.
+///
+/// 흐름 트리·토폴로지를 확인하려면 앱을 두 번 오가는 요청이 있어야 한다.
+/// order → shop → order 가 그것이고, 그 각 구간이 ApiCall 스텝으로 잡혀야
+/// 화면이 앱을 이어 그린다.
+///
+/// 이건 클라이언트가 아니라 **테스트 환경**을 지키는 테스트다.
+#[test]
+#[ignore]
+fn live_three_level_chain() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
+    use nscouter_lib::scouter::protocol::text_type;
+    use std::collections::HashMap;
+
+    // 직접 불러 놓는다. 부하 생성기를 기다리면 좁은 조회 창 안에 안 들어온다.
+    for _ in 0..2 {
+        let _ = http_get("127.0.0.1", 8081, "/shop/lab/dashboard?categories=2");
+        let _ = http_get("127.0.0.1", 8082, "/order/api/pipeline?categories=2");
+    }
+    std::thread::sleep(std::time::Duration::from_secs(5));
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+
+    let param =
+        build_past_xlog_param(&hashes, &date, now - 12 * 1000, now, 400, &PastCursor::default());
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+
+    let mut rows = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            rows.push((x.txid, x.service, x.apicall_count));
+        }
+    }
+
+    let mut cache = TextCache::new();
+    let svc: Vec<i32> = rows.iter().map(|r| r.1).collect();
+    let missing = cache.missing(text_type::SERVICE, &svc);
+    if !missing.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &missing);
+    }
+
+    // 서비스별로 apicall 스텝이 몇 개인지 센다
+    let mut seen: HashMap<String, (usize, usize, usize)> = HashMap::new(); // (건수, apicall스텝, socket스텝)
+    for (txid, service, _) in rows.iter() {
+        let name = cache.get(text_type::SERVICE, *service).unwrap_or("?").to_string();
+        if !(name.contains("dashboard") || name.contains("pipeline") || name.contains("/order/orders")) {
+            continue;
+        }
+        let e = seen.entry(name).or_insert((0, 0, 0));
+        if e.0 >= 3 {
+            continue;
+        }
+        let mut c = login();
+        let cs = c.session;
+        if c.send_request(CMD_TRANX_PROFILE_FULL, cs, &build_full_profile_param(&date, *txid)).is_err() {
+            continue;
+        }
+        let steps = match c.read_blob_stream() {
+            Ok(b) => parse_profile_steps(b),
+            Err(_) => continue,
+        };
+        e.0 += 1;
+        for st in &steps {
+            match st {
+                ProfileStep::ApiCall(_) => e.1 += 1,
+                ProfileStep::Socket(_) => e.2 += 1,
+                _ => {}
+            }
+        }
+    }
+
+    let mut list: Vec<_> = seen.into_iter().collect();
+    list.sort();
+    for (name, (n, api, sock)) in &list {
+        println!("{name}: 표본 {n}건 · ApiCall {api} · Socket {sock}");
+    }
+
+    // 대시보드는 order-app 을 부른다 — apicall 로 잡혀야 화면이 앱을 잇는다
+    let dash = list.iter().find(|(n, _)| n.contains("dashboard"));
+    if let Some((_, (n, api, _))) = dash {
+        assert!(*api >= *n, "대시보드 {n}건 중 ApiCall 스텝이 {api}개뿐 — 앱 간 호출이 안 잡힌다");
+    }
+
+    // 3단 체인 확인 — pipeline 의 gxid 그룹에 몇 개 앱이 들어오나
+    use nscouter_lib::scouter::trace::build_gxid_param;
+    let mut checked_chain = false;
+    for (txid, service, _) in rows.iter() {
+        let name = cache.get(text_type::SERVICE, *service).unwrap_or("");
+        if !name.contains("pipeline") {
+            continue;
+        }
+        let mut c = login();
+        let cs = c.session;
+        // gxid 는 XLog 에 있으므로 다시 받아야 한다 — 여기서는 txid 로 그룹을 못 찾으니
+        // 같은 창을 다시 훑어 gxid 를 얻는다
+        let p2 = build_past_xlog_param(&hashes, &date, now - 12 * 1000, now, 400, &PastCursor::default());
+        c.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, cs, &p2).expect("재조회 실패");
+        let mut gxid = 0i64;
+        while let Some(p) = c.read_next_pack().expect("수신 실패") {
+            if let AnyPack::XLog(x) = p {
+                if x.txid == *txid {
+                    gxid = x.gxid;
+                }
+            }
+        }
+        if gxid == 0 {
+            continue;
+        }
+        let mut g = login();
+        let gs = g.session;
+        g.send_request(CMD_XLOG_READ_BY_GXID, gs, &build_gxid_param(&date, gxid))
+            .expect("gxid 조회 실패");
+        let mut group = Vec::new();
+        while let Some(p) = g.read_next_pack().expect("수신 실패") {
+            if let AnyPack::XLog(x) = p {
+                group.push((x.service, x.obj_hash, x.elapsed));
+            }
+        }
+        let svc2: Vec<i32> = group.iter().map(|r| r.0).collect();
+        let m2 = cache.missing(text_type::SERVICE, &svc2);
+        if !m2.is_empty() {
+            let _ = fetch_texts(&mut g, &mut cache, text_type::SERVICE, &m2);
+        }
+        println!("pipeline gxid 그룹 {}건:", group.len());
+        for (s, obj, el) in &group {
+            println!("   {} ({}ms) obj=0x{:x}", cache.get(text_type::SERVICE, *s).unwrap_or("?"), el, obj);
+        }
+
+        // 앱을 두 번 오가야 3단이다. 2건이면 shop 이 order 를 다시 부르지 않은 것이다.
+        assert!(group.len() >= 3, "pipeline 그룹이 {}건 — 3단 체인이 끊겼다", group.len());
+        let objs: std::collections::HashSet<i32> = group.iter().map(|g| g.1).collect();
+        assert_eq!(objs.len(), 2, "두 앱을 오가야 한다 (obj {}종)", objs.len());
+        checked_chain = true;
+        break;
+    }
+
+    assert!(checked_chain, "pipeline 트랜잭션을 못 찾았다 — order-app 이 떠 있는지 볼 것");
+}
