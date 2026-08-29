@@ -651,6 +651,65 @@ param = "'book',100,90000,5,10,'zzz'"
 - 구현: `src/features/xlog/components/sqlBind.ts` (`scanSlots` 로 한 번 훑어 최댓값을 먼저 구한다)
 - 재현: `cargo test --test live_collector live_sql_mixed_literal_and_bind -- --ignored --nocapture`
 
+### F-54. `SEARCH_XLOG_LIST` — 서버가 걸러 준다. **500에서 조용히 잘린다**
+
+과거 XLog 를 다 받아 화면에서 거르는 대신, 콜렉터에 걸러 달라고 할 수 있다.
+
+| | 키 | 비고 |
+|---|---|---|
+| 구간 | `stime` `etime` | 날짜 경계를 서버가 알아서 넘는다 |
+| 오브젝트 | `objHash` | **`int` 하나.** 0 이면 안 가린다. 목록이 아니다 |
+| 내용 | `service` `ip` `login` `desc` `text1`~`text5` | `StrMatch` |
+
+**`StrMatch` 는 `*` 글롭이고 `*` 가 없으면 완전 일치(EQU)다.** 지금 화면 필터(포함)와 뜻이
+다르다 — 부분 일치를 하려면 `*/order/*` 처럼 감싸야 한다. 실측으로 확인했다.
+
+#### 같은 결과를 놓고 잰 값 (로컬, 6,815건 구간)
+
+txid 집합을 맞대 **완전히 같은 트랜잭션**임을 확인한 뒤에 시간을 비교했다.
+
+```
+service="/error"                    A 6,815건 받아 197건 · 390ms   B 197건 · 74ms
+service="/order/api/pipeline<GET>"  A 6,815건 받아 268건 · 390ms   B 268건 · 75ms
+service="/order/lab/timeout<GET>"   A 6,815건 받아  16건 · 390ms   B  16건 · 77ms
+   A 에만 있는 것 0건 · B 에만 있는 것 0건 (세 건 모두)
+
+창  2분: A  2,681건 180ms →  83건 | B  83건  40ms
+창  5분: A  6,815건 462ms → 197건 | B 197건  74ms
+창 10분: A 10,537건 772ms → 280건 | B 280건 178ms
+```
+
+**약 4~6배.** B 도 창이 넓어지면 느려진다 — 인덱스가 없어 구간을 다 훑기 때문이다.
+
+#### 쓰기 전에 알아야 할 것
+
+**상한에서 조용히 멈춘다.** `req_search_xlog_max_count`(서버 설정, 기본 500)에 닿으면
+Scala `return` 으로 빠져나오고, 응답에는 **XLog 말고 아무것도 오지 않는다** —
+MapPack 도 `hasMore` 도 없다(실측). «500건이 전부» 와 «500건에서 잘림» 이 구별되지 않는다.
+F-15 와 같은 실패 방식이다. 실측에서 `/order/orders` 하나만 걸어도 500 에 닿았다.
+
+ASIS 는 이걸 알고 라디오 버튼 이름을 아예 `Normal Search(Max:500)` 라고 적어 두었다
+(`XLogSearchDialog.java`). 스캐터 흐름이 아니라 **별도 검색 창**이다.
+
+**서버 부담은 오히려 는다.**
+
+```java
+// 지금 쓰는 것: pageCount 만큼만 읽고 멈춘다
+XLogRD.readByTimeLimitCount(date, stime, etime, ?, pageCount, closure)
+
+// SEARCH: 상한에 닿을 때까지 구간을 계속 읽는다
+XLogRD.readByTime(date, stime, etime, closure)
+  → 행마다 TextRD.getString(yyyymmdd, "service", hash)   // service 필터가 있을 때
+```
+
+필터 검사는 **단축 평가를 하지 않는다** — 조건이 3개면 첫 개가 틀려도 3개를 다 조회한다.
+넓은 구간에 드문 조건이면 디스크 읽기가 늘어난다.
+
+- 재현: `cargo test --test live_collector probe_search_xlog_list -- --ignored --nocapture`
+- 측정 주의: 창 끝을 **30초 물려야** 한다. 지금까지로 잡으면 A 를 받는 수백 ms 사이에
+  기록이 더 쌓여 B 가 몇 건 더 본다(실제로 174 vs 173 으로 어긋났다).
+  창을 고정하면 두 방식의 txid 집합이 정확히 같다 — **A 의 페이징은 흘리지 않는다.**
+
 ### F-53. `unknown` 은 사전 조회 실패가 아니다 — **에이전트가 그 말을 텍스트로 보낸다**
 
 프로파일에 SQL 본문 대신 `unknown` 이 뜬다. 해시를 찍어 보면 사전에 멀쩡히 들어 있고,

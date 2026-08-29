@@ -5564,6 +5564,251 @@ fn live_sql_literal_escape() {
     );
 }
 
+/// **서버가 걸러 주면 더 빠른가** — 두 방식을 같은 조건에서 잰다.
+///
+/// 지금(A): `TRANX_LOAD_TIME_GROUP_V2` 로 구간의 XLog 를 **다 받아** 화면에서 거른다.
+/// 후보(B): `SEARCH_XLOG_LIST` 로 **서버가 걸러** 준 것만 받는다.
+///
+/// 바이트코드로 읽은 B 의 성질(여기서 확인한다):
+///   · 키: stime · etime · objHash(**int 하나**) · service · ip · login · desc · text1..5
+///   · 필터는 `StrMatch` — `*` 글롭이고 **`*` 없으면 완전 일치**다
+///   · 상한은 서버 설정 `req_search_xlog_max_count`(기본 500). **커서가 없다**
+///   · objHash 가 0 이면 오브젝트를 안 가린다
+///   · 서버가 행마다 서비스명을 `TextRD.getString` 으로 풀어 맞춰 본다 — 공짜가 아니다
+#[test]
+#[ignore]
+fn probe_search_xlog_list() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::pack::MapPack;
+    use nscouter_lib::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
+    use nscouter_lib::scouter::protocol::text_type;
+    use nscouter_lib::scouter::value::ScouterValue;
+    use std::time::Instant;
+
+    let wall = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    // **창 끝을 30초 물린다.** 지금까지로 잡으면 A 를 받는 동안(수백 ms) 트랜잭션이
+    // 더 쌓여 B 가 한 건 더 본다 — 실제로 174 vs 173 으로 어긋났다.
+    // 흐르지 않는 구간이라야 두 방식을 같은 것으로 비교할 수 있다.
+    let now = wall - 30_000;
+    let date = yyyymmdd_local(now);
+
+    /// B: 서버가 걸러 준다. (걸린 시간, 건수, 서비스 해시들)
+    fn search(stime: i64, etime: i64, put: &dyn Fn(&mut MapPack)) -> (u128, usize, Vec<(i64, i32)>) {
+        let t0 = Instant::now();
+        let mut c = login();
+        let s = c.session;
+        let mut p = MapPack::new();
+        p.put("stime", ScouterValue::Decimal(stime));
+        p.put("etime", ScouterValue::Decimal(etime));
+        put(&mut p);
+        c.send_request("SEARCH_XLOG_LIST", s, &p).expect("SEARCH_XLOG_LIST 요청 실패");
+        let mut rows = Vec::new();
+        while let Some(pack) = c.read_next_pack().expect("수신 실패") {
+            if let AnyPack::XLog(x) = pack {
+                rows.push((x.txid, x.service));
+            }
+        }
+        (t0.elapsed().as_millis(), rows.len(), rows)
+    }
+
+    /// A: 지금 하는 방식. 페이지를 끝까지 넘겨 다 받는다.
+    fn load_all(hashes: &[i32], date: &str, stime: i64, etime: i64) -> (u128, usize, Vec<(i64, i32)>) {
+        let t0 = Instant::now();
+        let mut cursor = PastCursor::default();
+        let mut rows = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..50 {
+            let mut c = login();
+            let s = c.session;
+            let param = build_past_xlog_param(hashes, date, stime, etime, 500, &cursor);
+            c.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, s, &param).expect("과거 XLog 요청 실패");
+            let mut meta: Option<MapPack> = None;
+            while let Some(pack) = c.read_next_pack().expect("수신 실패") {
+                match pack {
+                    AnyPack::XLog(x) => {
+                        if seen.insert(x.txid) {
+                            rows.push((x.txid, x.service));
+                        }
+                    }
+                    AnyPack::Map(m) => meta = Some(m),
+                    _ => {}
+                }
+            }
+            match meta {
+                Some(m) => {
+                    cursor = parse_past_cursor(&m);
+                    if !cursor.has_more {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+        (t0.elapsed().as_millis(), rows.len(), rows)
+    }
+
+    let mut conn = login();
+    let obj: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let mut cache = TextCache::new();
+
+    // ── 1) 명령이 살아 있는가 · 서비스 이름 목록 ──────────────────────
+    let stime = now - 5 * 60 * 1000;
+    let (t_all, n_all, rows_all) = search(stime, now, &|_p| {});
+    println!("[B] 5분 · 필터 없음: {n_all}건 · {t_all}ms");
+
+    let svc_all: Vec<i32> = rows_all.iter().map(|(_, s)| *s).collect();
+    let missing = cache.missing(text_type::SERVICE, &svc_all);
+    if !missing.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &missing);
+    }
+    let mut names: Vec<String> = svc_all
+        .iter()
+        .filter_map(|h| cache.get(text_type::SERVICE, *h).map(|s| s.to_string()))
+        .collect();
+    names.sort();
+    names.dedup();
+    println!("     서비스 {}종", names.len());
+
+    let target = names
+        .iter()
+        .find(|n| n.contains("/order/orders"))
+        .cloned()
+        .unwrap_or_else(|| names.first().cloned().unwrap_or_default());
+
+    // ── 2) StrMatch 의미 확인 ───────────────────────────────────────
+    let (_, n_exact, _) = search(stime, now, &|p| {
+        p.put("service", ScouterValue::Text(target.clone()));
+    });
+    let (_, n_glob, glob_rows) = search(stime, now, &|p| {
+        p.put("service", ScouterValue::Text("*/order/*".to_string()));
+    });
+    let glob_svc: Vec<i32> = glob_rows.iter().map(|(_, s)| *s).collect();
+    println!("     service={target:?} 그대로: {n_exact}건 · \"*/order/*\": {n_glob}건");
+
+    // **서버가 정말 걸렀는가.** 키를 무시하고 다 보내면 «필터가 됐다» 로 착각한다.
+    let missing2 = cache.missing(text_type::SERVICE, &glob_svc);
+    if !missing2.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &missing2);
+    }
+    let wrong = glob_svc
+        .iter()
+        .filter(|h| !cache.get(text_type::SERVICE, **h).unwrap_or("").contains("/order/"))
+        .count();
+    println!("     글롭 결과 중 조건에 안 맞는 것: {wrong}건");
+    assert_eq!(wrong, 0, "서버가 service 필터를 무시했다 — 걸러진 척만 한 것이다");
+
+    // ── 3) **같은 결과를 놓고** A 와 B 를 잰다 ────────────────────────
+    //
+    // 상한(500)에 걸린 채로 «B 가 빠르다» 고 하면 안 된다 — 덜 준 것이지 빨리 준 게 아니다.
+    // 상한 아래로 떨어지는 조건을 골라, 두 방식이 **같은 트랜잭션**을 낼 때만 시간을 비교한다.
+    //
+    // 건수만 맞춰 보면 안 된다. **어느 쪽이 무엇을 흘렸는지**는 txid 를 맞대야 나온다.
+    let (ta, na, rows_a) = load_all(&obj, &date, stime, now);
+    let svc_a: Vec<i32> = rows_a.iter().map(|(_, s)| *s).collect();
+    let m = cache.missing(text_type::SERVICE, &svc_a);
+    if !m.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &m);
+    }
+
+    let mut fair = 0usize;
+    for name in names.iter() {
+        if fair >= 3 {
+            break;
+        }
+        let (tb, nb, rows_b) = search(stime, now, &|p| {
+            p.put("service", ScouterValue::Text(name.clone()));
+        });
+        if nb == 0 || nb >= 500 {
+            continue; // 상한에 걸렸으면 «다 준 것» 이 아니라 비교 대상이 아니다
+        }
+        let a_ids: std::collections::HashSet<i64> = rows_a
+            .iter()
+            .filter(|(_, h)| cache.get(text_type::SERVICE, *h) == Some(name.as_str()))
+            .map(|(t, _)| *t)
+            .collect();
+        let b_ids: std::collections::HashSet<i64> = rows_b.iter().map(|(t, _)| *t).collect();
+        let only_a: Vec<i64> = a_ids.difference(&b_ids).copied().collect();
+        let only_b: Vec<i64> = b_ids.difference(&a_ids).copied().collect();
+        fair += 1;
+        println!(
+            "[공정 비교] service={name:?}
+               A 다 받고 거름: {na}건 받아 {}건 · {ta}ms
+               B 서버가 거름: {nb}건 · {tb}ms
+               A 에만 있는 것 {}건 · B 에만 있는 것 {}건",
+            a_ids.len(),
+            only_a.len(),
+            only_b.len(),
+        );
+        if !only_b.is_empty() {
+            println!("    B 에만 있는 txid(앞 3개): {:?}", &only_b[..only_b.len().min(3)]);
+        }
+        if !only_a.is_empty() {
+            println!("    A 에만 있는 txid(앞 3개): {:?}", &only_a[..only_a.len().min(3)]);
+        }
+    }
+    assert!(fair > 0, "상한 아래로 떨어지는 서비스가 없어 공정 비교를 못 했다");
+
+    // ── 3-b) **창을 넓히면 어떻게 갈라지는가** ────────────────────────
+    //
+    // A 는 구간의 XLog 를 다 받으므로 창에 비례해 나빠진다.
+    // B 는 상한(500)에 걸리기 전까지만 «걸러 준 만큼» 이다 — 걸린 뒤로는 평평한데,
+    // 그건 빨라서가 아니라 **덜 줘서**다. 두 수를 나란히 찍어 그 경계를 보이게 한다.
+    if let Some(name) = names.iter().find(|n| n.contains("/error")).cloned() {
+        for mins in [2i64, 5, 10, 30] {
+            let st = now - mins * 60 * 1000;
+            let (ta, na, rows) = load_all(&obj, &date, st, now);
+            let (tb, nb, _) = search(st, now, &|p| {
+                p.put("service", ScouterValue::Text(name.clone()));
+            });
+            let svcs: Vec<i32> = rows.iter().map(|(_, s)| *s).collect();
+            let m = cache.missing(text_type::SERVICE, &svcs);
+            if !m.is_empty() {
+                let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &m);
+            }
+            let want = rows
+                .iter()
+                .filter(|(_, h)| cache.get(text_type::SERVICE, *h) == Some(name.as_str()))
+                .count();
+            let capped = if nb >= 500 { " ← 상한에 걸림(덜 준 것)" } else { "" };
+            println!(
+                "[창 {mins:>2}분] A {na:>5}건 받아 {want:>4}건 · {ta:>4}ms                    B {nb:>4}건 · {tb:>3}ms{capped}"
+            );
+        }
+    }
+
+    // ── 4) 상한에 걸렸을 때 **잘렸다는 신호가 오는가** ─────────────────
+    //
+    // 이게 이 명령의 가장 위험한 성질이다. 커서도 hasMore 도 없으면
+    // «500건이 전부» 와 «500건에서 잘림» 이 화면에서 구별되지 않는다 (F-15 와 같은 모양).
+    let mut c = login();
+    let cs = c.session;
+    let mut p = MapPack::new();
+    p.put("stime", ScouterValue::Decimal(now - 6 * 60 * 60 * 1000));
+    p.put("etime", ScouterValue::Decimal(now));
+    c.send_request("SEARCH_XLOG_LIST", cs, &p).expect("요청 실패");
+    let mut n_wide = 0usize;
+    let mut others: Vec<&'static str> = Vec::new();
+    while let Some(pack) = c.read_next_pack().expect("수신 실패") {
+        match pack {
+            AnyPack::XLog(_) => n_wide += 1,
+            AnyPack::Map(_) => others.push("MapPack"),
+            _ => others.push("기타"),
+        }
+    }
+    println!(
+        "[B] 6시간 · 필터 없음: {n_wide}건 · XLog 말고 온 것: {others:?}           (상한 req_search_xlog_max_count 기본 500)"
+    );
+    assert!(
+        others.is_empty(),
+        "잘렸다는 신호가 오고 있었다 — 그렇다면 화면에서 알릴 수 있다"
+    );
+
+    assert!(n_all > 0 || n_wide > 0, "SEARCH_XLOG_LIST 가 한 건도 주지 않았다");
+}
+
 /// 어떤 SQL 이 사전에서 «unknown» 으로 나오는가 — 서비스별로 세어 본다.
 ///
 /// 에이전트가 텍스트로 «unknown» 을 그대로 보낸다는 것까지는 확인했다
