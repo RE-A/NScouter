@@ -132,11 +132,19 @@ export function useXLogCanvas(
   // config 변경 시 렌더러 업데이트
   useEffect(() => {
     rendererRef.current?.updateConfig(config);
+    // Y축 기준이나 눈금이 바뀌면 **데이터가 그대로여도 그림이 달라진다.**
+    needsRedrawRef.current = true;
   }, [config]);
 
   // rAF 루프
   useEffect(() => {
     let running = true;
+
+    // **그리는 조건이 바뀌었으므로 한 번은 다시 그려야 한다.**
+    // 아래 루프는 스토어가 더러울 때만 그리는데, 실시간은 500ms 마다 새 XLog 가 들어와
+    // 저절로 더러워지지만 **과거 구간은 다 받고 나면 영원히 깨끗하다** —
+    // 그래서 과거 조회에서는 필터를 바꿔도 화면이 그대로 남았다.
+    needsRedrawRef.current = true;
 
     // 데이터가 안 들어와도 상태 문구는 갱신돼야 하므로
     // dirty 가 아니어도 문구가 바뀌면 다시 그린다.
