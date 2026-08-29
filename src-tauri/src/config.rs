@@ -66,13 +66,21 @@ pub struct UiLayout {
     pub table_h: f32,
     /// 마지막에 보던 탭. `"xlog"` · `"counter"` · `"alert"`
     pub active_tab: String,
+    /// 서비스 목록을 무엇으로 묶는가. `"type"`(오브젝트 종류) 또는 `"group"`(이름의 부모 경로)
+    pub agent_group_by: String,
 }
 
 impl Default for UiLayout {
     fn default() -> Self {
         // 0 을 기본값으로 두면 패널이 사라진 채로 뜬다. 화면 쪽 기본값과 같은 수를 쓴다
         // (`src/components/paneSizing.ts` 의 PANE).
-        Self { services_w: 200.0, detail_w: 420.0, table_h: 240.0, active_tab: "xlog".to_string() }
+        Self {
+            services_w: 200.0,
+            detail_w: 420.0,
+            table_h: 240.0,
+            active_tab: "xlog".to_string(),
+            agent_group_by: "type".to_string(),
+        }
     }
 }
 
@@ -208,6 +216,7 @@ mod bind_default_tests {
         assert_eq!(cfg.ui_layout.detail_w, 420.0);
         assert_eq!(cfg.ui_layout.table_h, 240.0);
         assert_eq!(cfg.ui_layout.active_tab, "xlog");
+        assert_eq!(cfg.ui_layout.agent_group_by, "type", "항목이 없으면 예전 동작(타입)이어야 한다");
         assert_eq!(cfg.xlog_chart.y_axis_mode, "elapsed");
         assert_eq!(cfg.xlog_chart.time_range_ms, 300_000);
         assert_eq!(cfg.xlog_chart.y_max, 9.0);

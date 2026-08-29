@@ -44,6 +44,7 @@ import { useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
 import { DetailTabBar } from './features/xlog/components/DetailTabBar';
 import { useShortcuts } from './features/xlog/hooks/useShortcuts';
 import { toLayout, fromLayout, toChartConfig, fromChartConfig } from './features/xlog/hooks/uiState';
+import type { GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
 import type { AgentObject, SXLog, XLogChartConfig, XLogFilterState } from './features/xlog/types/xlog';
 import { DEFAULT_CHART_CONFIG, DEFAULT_FILTER, xlogPackToSXLog } from './features/xlog/types/xlog';
@@ -180,6 +181,8 @@ export default function App() {
   const [servicesW, setServicesW] = useState<number>(PANE.servicesDefaultW);
   const [detailW, setDetailW] = useState<number>(PANE.detailDefaultW);
   const [tableH, setTableH] = useState<number>(PANE.tableDefaultH);
+  /** 서비스 목록을 무엇으로 묶는가. 껐다 켜도 남는다 */
+  const [agentGroupBy, setAgentGroupBy] = useState<GroupBy>('type');
 
   /**
    * 저장해 둔 배치·차트 설정을 한 번 읽어 온다.
@@ -198,6 +201,7 @@ export default function App() {
         setDetailW(l.detailW);
         setTableH(l.tableH);
         setActiveTab(l.activeTab);
+        setAgentGroupBy(l.agentGroupBy);
         setConfig(toChartConfig(cfg.xlog_chart));
       })
       // 못 읽어도 기본값으로 뜬다. 다만 그 기본값으로 파일을 덮지는 않는다 —
@@ -217,12 +221,12 @@ export default function App() {
     if (!hydrated) return;
     const id = setTimeout(() => {
       saveUiState(
-        fromLayout({ servicesW, detailW, tableH, activeTab }),
+        fromLayout({ servicesW, detailW, tableH, activeTab, agentGroupBy }),
         fromChartConfig(config),
       ).catch(() => {});
     }, 600);
     return () => clearTimeout(id);
-  }, [hydrated, servicesW, detailW, tableH, activeTab, config]);
+  }, [hydrated, servicesW, detailW, tableH, activeTab, agentGroupBy, config]);
 
   useEffect(() => {
     const el = xlogWsRef.current;
@@ -582,6 +586,8 @@ export default function App() {
                 selectedHashes={filter.objHashSet}
                 onSelectionChange={handleAgentSelectionChange}
                 onAgentsLoaded={handleAgentsLoaded}
+                groupBy={agentGroupBy}
+                onGroupByChange={setAgentGroupBy}
               />
             </Pane>
 

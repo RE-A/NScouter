@@ -6,6 +6,7 @@
 
 import type { UiLayout, XLogChartPrefs } from '../api/scouterApi';
 import { PANE } from '../../../components/paneSizing';
+import type { GroupBy } from '../components/agentTree';
 import type { XLogChartConfig, YAxisMode } from '../types/xlog';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
@@ -16,6 +17,8 @@ export interface StoredLayout {
   detailW: number;
   tableH: number;
   activeTab: TabId;
+  /** 서비스 목록을 무엇으로 묶는가 */
+  agentGroupBy: GroupBy;
 }
 
 export const DEFAULT_LAYOUT: StoredLayout = {
@@ -23,9 +26,11 @@ export const DEFAULT_LAYOUT: StoredLayout = {
   detailW: PANE.detailDefaultW,
   tableH: PANE.tableDefaultH,
   activeTab: 'xlog',
+  agentGroupBy: 'type',
 };
 
 const TABS: readonly TabId[] = ['xlog', 'counter', 'alert'];
+const GROUP_BYS: readonly GroupBy[] = ['type', 'group'];
 
 /** 0·음수·NaN 이면 기본값으로 돌린다 */
 function positive(v: unknown, fallback: number): number {
@@ -53,6 +58,10 @@ export function toLayout(saved: UiLayout | undefined): StoredLayout {
     tableH: px(saved.table_h, DEFAULT_LAYOUT.tableH),
     // 없는 탭 이름이 들어오면 빈 화면이 뜬다 — 아는 것만 받는다.
     activeTab: TABS.includes(tab) ? tab : 'xlog',
+    // 모르는 기준이 오면 예전 동작(타입)으로 둔다
+    agentGroupBy: GROUP_BYS.includes(saved.agent_group_by as GroupBy)
+      ? (saved.agent_group_by as GroupBy)
+      : 'type',
   };
 }
 
@@ -62,6 +71,7 @@ export function fromLayout(l: StoredLayout): UiLayout {
     detail_w: l.detailW,
     table_h: l.tableH,
     active_tab: l.activeTab,
+    agent_group_by: l.agentGroupBy,
   };
 }
 

@@ -540,6 +540,8 @@ export interface UiLayout {
   table_h: number;
   /** 'xlog' | 'counter' | 'alert' */
   active_tab: string;
+  /** 'type' | 'group' — 서비스 목록을 무엇으로 묶는가 */
+  agent_group_by: string;
 }
 
 /**

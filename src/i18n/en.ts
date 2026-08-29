@@ -365,6 +365,12 @@ export const EN: Record<string, string> = {
   '개:': ':',
   '개만 채웠습니다': ' filled',
   '넓은 구간에서 찾기': 'Search a wide range',
+  '묶기': 'Group by',
+  '타입': 'Type',
+  '오브젝트 종류로 묶습니다 (tomcat · datasource · linux)':
+    'Group by object kind (tomcat, datasource, linux)',
+  '이름의 부모 경로로 묶습니다 (/CJFW/PRD-FSCP)': "Group by the name's parent path (/CJFW/PRD-FSCP)",
+  '(그룹 없음)': '(no group)',
   '서버가 걸러서 보내 줍니다. 상한을 확인하는 중입니다…':
     'The collector filters and sends back the matches. Checking the limit…',
   '찾기': 'Search',

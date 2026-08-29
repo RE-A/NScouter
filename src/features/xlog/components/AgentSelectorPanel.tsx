@@ -4,7 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getObjectList } from '../api/scouterApi';
 import type { AgentObject } from '../types/xlog';
 import { agentRowState } from './agentFilter';
-import { groupAgents, shortName } from './agentTree';
+import { groupAgents, shortName, type GroupBy } from './agentTree';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { isJavaeeObjectType } from '../types/counter';
@@ -15,6 +15,9 @@ interface AgentSelectorPanelProps {
   selectedHashes: Set<number>;
   onSelectionChange: (hashes: Set<number>) => void;
   onAgentsLoaded?: (agents: AgentObject[]) => void;
+  /** 무엇으로 묶을지. 껐다 켜도 남는다 */
+  groupBy: GroupBy;
+  onGroupByChange: (by: GroupBy) => void;
 }
 
 export const AgentSelectorPanel = memo(function AgentSelectorPanel({
@@ -22,6 +25,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   selectedHashes,
   onSelectionChange,
   onAgentsLoaded,
+  groupBy,
+  onGroupByChange,
 }: AgentSelectorPanelProps) {
   const [agents, setAgents] = useState<AgentObject[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,7 +67,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   const filtering = selectedHashes.size > 0;
   const aliveCount = agents.filter(a => a.alive).length;
 
-  const groups = useMemo(() => groupAgents(agents, query), [agents, query]);
+  const groups = useMemo(() => groupAgents(agents, query, groupBy), [agents, query, groupBy]);
   const shown = groups.reduce((n, g) => n + g.agents.length, 0);
   /** 검색 중에는 접힘을 무시한다 — 찾은 걸 숨기면 검색이 아니다 */
   const searching = query.trim() !== '';
@@ -123,6 +128,30 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
       {/* 찾기 — 오브젝트가 백 개를 넘으면 눈으로 훑는 건 방법이 못 된다 */}
       {isConnected && agents.length > 0 && (
         <div className="shrink-0 border-b border-line px-2 py-1.5">
+          {/* **두 기준은 서로를 대신하지 못한다.** 타입은 «무엇인가», 그룹은 «어디에
+              속하는가» 다. 운영에서는 obj_type 에 시스템 이름을 넣어 쓰기도 해서
+              겹치기도 하지만, 그때도 그룹 쪽이 한 겹 더 잘게 나눈다. */}
+          <div className="mb-1.5 flex items-center gap-1">
+            <span className="text-micro text-fg-dim">{t('묶기')}</span>
+            {(['type', 'group'] as const).map(b => (
+              <button
+                key={b}
+                onClick={() => onGroupByChange(b)}
+                title={
+                  b === 'type'
+                    ? t('오브젝트 종류로 묶습니다 (tomcat · datasource · linux)')
+                    : t('이름의 부모 경로로 묶습니다 (/CJFW/PRD-FSCP)')
+                }
+                className={`rounded px-1.5 py-0.5 text-micro ${
+                  groupBy === b
+                    ? 'bg-accent/20 text-accent'
+                    : 'text-fg-faint hover:bg-hover hover:text-fg'
+                }`}
+              >
+                {b === 'type' ? t('타입') : t('그룹')}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1">
             <input
               value={query}

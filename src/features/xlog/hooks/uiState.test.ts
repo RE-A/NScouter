@@ -9,8 +9,14 @@ import { DEFAULT_CHART_CONFIG } from '../types/xlog';
 
 describe('toLayout', () => {
   it('저장해 둔 값을 그대로 쓴다', () => {
-    const l = toLayout({ services_w: 260, detail_w: 640, table_h: 300, active_tab: 'counter' });
-    expect(l).toEqual({ servicesW: 260, detailW: 640, tableH: 300, activeTab: 'counter' });
+    const l = toLayout({ services_w: 260, detail_w: 640, table_h: 300, active_tab: 'counter', agent_group_by: 'type' });
+    expect(l).toEqual({
+      servicesW: 260,
+      detailW: 640,
+      tableH: 300,
+      activeTab: 'counter',
+      agentGroupBy: 'type',
+    });
   });
 
   it('항목이 아예 없으면 기본값이다', () => {
@@ -19,7 +25,7 @@ describe('toLayout', () => {
 
   it('**0 이나 음수는 기본값으로 돌린다**', () => {
     // 0 이 들어가면 패널이 사라진 채로 뜬다 — 화면만 봐서는 이유를 모른다
-    const l = toLayout({ services_w: 0, detail_w: -10, table_h: 0, active_tab: 'xlog' });
+    const l = toLayout({ services_w: 0, detail_w: -10, table_h: 0, active_tab: 'xlog', agent_group_by: 'type' });
     expect(l.servicesW).toBe(DEFAULT_LAYOUT.servicesW);
     expect(l.detailW).toBe(DEFAULT_LAYOUT.detailW);
     expect(l.tableH).toBe(DEFAULT_LAYOUT.tableH);
@@ -31,6 +37,7 @@ describe('toLayout', () => {
       detail_w: 'abc' as unknown as number,
       table_h: 240,
       active_tab: 'xlog',
+      agent_group_by: 'type',
     });
     expect(l.servicesW).toBe(DEFAULT_LAYOUT.servicesW);
     expect(l.detailW).toBe(DEFAULT_LAYOUT.detailW);
@@ -39,18 +46,49 @@ describe('toLayout', () => {
 
   it('터무니없이 큰 값은 잘라 낸다', () => {
     // 모니터를 바꾸면 어제 맞던 값이 오늘 화면 밖이다
-    const l = toLayout({ services_w: 99999, detail_w: 420, table_h: 240, active_tab: 'xlog' });
+    const l = toLayout({ services_w: 99999, detail_w: 420, table_h: 240, active_tab: 'xlog', agent_group_by: 'type' });
     expect(l.servicesW).toBe(4000);
+  });
+
+  it('묶는 기준을 저장하고 되살린다', () => {
+    const l = toLayout({
+      services_w: 200,
+      detail_w: 420,
+      table_h: 240,
+      active_tab: 'xlog',
+      agent_group_by: 'group',
+    });
+    expect(l.agentGroupBy).toBe('group');
+  });
+
+  it('**모르는 기준이면 예전 동작(타입)이다**', () => {
+    // 항목이 생기기 전 파일에는 이 값이 없다. 빈 값으로 두면 아무 묶음도 안 된다.
+    const l = toLayout({
+      services_w: 200,
+      detail_w: 420,
+      table_h: 240,
+      active_tab: 'xlog',
+      agent_group_by: 'nope',
+    });
+    expect(l.agentGroupBy).toBe('type');
+    expect(toLayout({ services_w: 200, detail_w: 420, table_h: 240, active_tab: 'xlog' } as never)
+      .agentGroupBy).toBe('type');
   });
 
   it('모르는 탭 이름이면 XLog 로 간다', () => {
     // 없는 탭으로 뜨면 빈 화면이 나온다
-    const l = toLayout({ services_w: 200, detail_w: 420, table_h: 240, active_tab: 'nope' });
+    const l = toLayout({ services_w: 200, detail_w: 420, table_h: 240, active_tab: 'nope', agent_group_by: 'type' });
     expect(l.activeTab).toBe('xlog');
   });
 
   it('넣었다 뺐을 때 값이 같다', () => {
-    const l = { servicesW: 210, detailW: 500, tableH: 250, activeTab: 'alert' as const };
+    const l = {
+      servicesW: 210,
+      detailW: 500,
+      tableH: 250,
+      activeTab: 'alert' as const,
+      agentGroupBy: 'group' as const,
+    };
     expect(toLayout(fromLayout(l))).toEqual(l);
   });
 });
