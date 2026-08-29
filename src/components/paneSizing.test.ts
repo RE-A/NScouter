@@ -8,7 +8,7 @@
 // **사용자가 경계를 끌 때 어디까지 허용할 것인가.**
 
 import { describe, it, expect } from 'vitest';
-import { clampPane, sideRoom, tableRoom, PANE } from './paneSizing';
+import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './paneSizing';
 
 describe('clampPane', () => {
   it('여유가 충분하면 끌린 값을 그대로 쓴다', () => {
@@ -71,5 +71,33 @@ describe('tableRoom', () => {
 
   it('기본 목록 높이는 일반적인 창에서 그대로 쓰인다', () => {
     expect(clampPane(PANE.tableDefaultH, PANE.tableMinH, tableRoom(700))).toBe(PANE.tableDefaultH);
+  });
+});
+
+describe('isMeasured', () => {
+  it('둘 다 재고 나서야 참이다', () => {
+    expect(isMeasured({ w: 1400, h: 800 })).toBe(true);
+  });
+
+  it('**아직 못 잰 동안은 거짓이다**', () => {
+    // 탭이나 모드를 바꾸면 워크스페이스가 다시 붙으면서 잠깐 0 이 된다.
+    // 그때 경계를 끌면 sideRoom 이 음수가 되고 clampPane 이 0 을 돌려줘
+    // 패널이 통째로 사라진다 — 그리고 그 0 이 설정 파일에 저장된다(실제로 겪었다).
+    expect(isMeasured({ w: 0, h: 0 })).toBe(false);
+    expect(isMeasured({ w: 1400, h: 0 })).toBe(false);
+    expect(isMeasured({ w: 0, h: 800 })).toBe(false);
+  });
+
+  it('음수도 거짓이다', () => {
+    expect(isMeasured({ w: -1, h: 800 })).toBe(false);
+  });
+});
+
+describe('clampPane — 못 잰 크기가 만드는 0', () => {
+  it('자리가 음수면 0 이 나온다 (그래서 부르기 전에 걸러야 한다)', () => {
+    // wsW 가 0 일 때 sideRoom(0, 420, 2) = -708 이 된다
+    expect(clampPane(200, PANE.servicesMin, sideRoom(0, 420, 2))).toBe(0);
+    // 다 재고 나면 멀쩡하다
+    expect(clampPane(200, PANE.servicesMin, sideRoom(1400, 420, 2))).toBe(200);
   });
 });

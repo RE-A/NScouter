@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pane } from './components/Pane';
 import { Divider } from './components/Divider';
-import { clampPane, sideRoom, tableRoom, PANE } from './components/paneSizing';
+import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './components/paneSizing';
 import { ConnectionDialog } from './features/xlog/components/ConnectionDialog';
 import { SettingsDialog } from './features/settings/SettingsDialog';
 import { LogLevelSelector } from './features/xlog/components/LogLevelSelector';
@@ -545,7 +545,13 @@ export default function App() {
               label={t('서비스 목록 너비')}
               onDrag={d =>
                 setServicesW(w =>
-                  clampPane(w + d, PANE.servicesMin, sideRoom(wsSize.w, hasDetail ? detailW : 0, hasDetail ? 2 : 1)),
+                  isMeasured(wsSize)
+                    ? clampPane(
+                        w + d,
+                        PANE.servicesMin,
+                        sideRoom(wsSize.w, hasDetail ? detailW : 0, hasDetail ? 2 : 1),
+                      )
+                    : w,
                 )
               }
             />
@@ -574,7 +580,9 @@ export default function App() {
                 orientation="horizontal"
                 label={t('트랜잭션 목록 높이')}
                 onDrag={d =>
-                  setTableH(h => clampPane(h - d, PANE.tableMinH, tableRoom(wsSize.h)))
+                  setTableH(h =>
+                    isMeasured(wsSize) ? clampPane(h - d, PANE.tableMinH, tableRoom(wsSize.h)) : h,
+                  )
                 }
               />
               <Pane
@@ -636,7 +644,9 @@ export default function App() {
                   label={t('상세 패널 너비')}
                   onDrag={d =>
                     setDetailW(w =>
-                      clampPane(w - d, PANE.detailMin, sideRoom(wsSize.w, servicesW, 2)),
+                      isMeasured(wsSize)
+                        ? clampPane(w - d, PANE.detailMin, sideRoom(wsSize.w, servicesW, 2))
+                        : w,
                     )
                   }
                 />

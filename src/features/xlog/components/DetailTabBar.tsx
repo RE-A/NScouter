@@ -3,13 +3,17 @@
 // **탭 이름은 서비스명이다.** txid 는 사람이 못 알아본다. 같은 서비스를 두 개 열면
 // 이름이 같아지므로 시각을 덧붙인다 — 그게 두 트랜잭션을 가르는 실제 기준이다.
 //
-// 폭이 좁다(상세 패널 안이다). 그래서 줄을 접지 않고 **가로로 넘긴다** —
+// 폭이 좁다(상세 패널 기본 420px). 그래서 줄을 접지 않고 **가로로 넘긴다** —
 // 접으면 탭이 늘어날수록 프로파일 볼 자리를 먹는다.
+//
+// **한 탭에 다 넣으면 두 개도 안 들어간다.** 처음에 이름·시각·소요시간을 다 넣었더니
+// 탭 하나가 250px 이라 기본 폭에서 두 개째가 이미 잘렸다(화면에서 확인).
+// 소요시간은 뺐다 — 바로 아래 패널 머리에 크게 있고, 탭에서 필요한 건 «어느 것인가» 뿐이다.
+// 견주고 싶으면 툴팁에 있다. 이름 7rem + 시각으로 탭 하나가 약 170px 이다.
 
 import { memo } from 'react';
 import type { DetailTab } from '../hooks/useXLogDetailTabs';
 import { formatTime } from '../utils/colorPalette';
-import { durationTone } from './durationTone';
 import { t } from '../../../i18n';
 
 interface DetailTabBarProps {
@@ -46,11 +50,14 @@ export const DetailTabBar = memo(function DetailTabBar({
             >
               <button
                 onClick={() => onSelect(tab.key)}
-                title={xlog ? `${tab.title}\n${formatTime(xlog.endTime)}` : tab.title}
-                className="flex min-w-0 items-baseline gap-1.5"
+                // 소요시간은 탭에 없다. 툴팁에는 넣는다 — 탭을 옮기지 않고도 견줄 수 있게.
+                title={
+                  xlog ? `${tab.title}\n${formatTime(xlog.endTime)} · ${elapsed}ms` : tab.title
+                }
+                className="flex min-w-0 items-baseline gap-1"
               >
                 <span
-                  className={`max-w-[9rem] truncate text-micro ${active ? 'text-fg' : 'text-fg-muted'}`}
+                  className={`max-w-[7rem] truncate text-micro ${active ? 'text-fg' : 'text-fg-muted'}`}
                 >
                   {tab.state.isLoading ? t('여는 중…') : tab.title}
                 </span>
@@ -58,11 +65,6 @@ export const DetailTabBar = memo(function DetailTabBar({
                 {xlog && (
                   <span className="tnum shrink-0 font-mono text-micro text-fg-faint">
                     {formatTime(xlog.endTime)}
-                  </span>
-                )}
-                {xlog && elapsed > 0 && (
-                  <span className={`tnum shrink-0 font-mono text-micro ${durationTone(elapsed)}`}>
-                    {elapsed}ms
                   </span>
                 )}
               </button>
