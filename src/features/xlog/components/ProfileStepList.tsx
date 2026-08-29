@@ -267,6 +267,10 @@ const AGENT_UNKNOWN_SQL = 'unknown';
  *
  * **문장을 잃었을 때 남는 유일한 단서다.** `unknown` 옆에 «1행» 이 있으면
  * 적어도 읽기가 아니라 쓰기였다는 것은 알 수 있다.
+ *
+ * **정확한 행 수라고 단정하지 않는다 (F-55).** 에이전트가 `getUpdateCount()` 를
+ * 직전 스텝에 누적해서, 같은 연결로 UPDATE 를 잇달아 하면 부풀려진다
+ * (1행짜리가 «2행» 으로 온다). 그 뜻을 툴팁이 적는다.
  */
 function Affected({ updated }: { updated: number }) {
   const a = affectedRows(updated);
@@ -274,9 +278,9 @@ function Affected({ updated }: { updated: number }) {
   return (
     <span
       className="ml-1 shrink-0 font-mono text-micro text-fg-faint"
-      title={t('이 실행이 바꾼 행 수입니다')}
+      title={t('에이전트가 보고한 갱신 건수입니다. 같은 연결로 여러 번 갱신하면 앞 문장에 얹혀 실제보다 크게 나올 수 있습니다.')}
     >
-      {a.kind === 'rows' ? `${a.count}${t('행')}` : t('바꾼 행 수 모름')}
+      {a.kind === 'rows' ? `~${a.count}${t('행')}` : t('바꾼 행 수 모름')}
     </span>
   );
 }

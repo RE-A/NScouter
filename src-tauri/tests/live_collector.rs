@@ -5564,6 +5564,150 @@ fn live_sql_literal_escape() {
     );
 }
 
+/// `SqlStep3.updated` 가 **진짜 바뀐 행 수인가.**
+///
+/// 화면에 «N행» 으로 적고 있는 값이다. 그런데 에이전트는 `getUpdateCount()` 가
+/// 불릴 때마다 **더한다**:
+///
+/// ```java
+/// // TraceSQL.incUpdateCount(int n)
+/// SqlStep3 step = (SqlStep3) ctx.lastSqlStep;
+/// if (step.updated == -2 && n > 0)      step.updated = n;
+/// else if (step.updated >= 0 && n > 0)  step.updated = step.updated + n;  // 누적
+/// ```
+///
+/// `/shop/lab/touch-rows?n=K` 는 정확히 K 행을 바꾸고 그 수를 응답으로 준다.
+/// 신고값과 맞대 보면 «행 수» 인지 «호출 합» 인지 갈린다.
+#[test]
+#[ignore]
+fn live_sql_updated_is_row_count() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
+    use nscouter_lib::scouter::protocol::text_type;
+
+    // 행 수를 아는 UPDATE 를 만든다. 세 가지 크기로 — 배수인지 상수인지 갈리게.
+    for n in [1, 3, 7] {
+        for _ in 0..2 {
+            let _ = http_get("127.0.0.1", 8081, &format!("/shop/lab/touch-rows?n={n}"));
+        }
+    }
+    // 반복문 안에서 여러 번 UPDATE 하는 경우도 같이 본다 (PipelineService.touchDeliveries).
+    // 화면에서 이쪽이 1행짜리 UPDATE 를 «2행» 으로 보였다.
+    for _ in 0..2 {
+        let _ = http_get("127.0.0.1", 8082, "/order/api/pipeline?categories=3");
+    }
+    std::thread::sleep(std::time::Duration::from_secs(6));
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+    let param =
+        build_past_xlog_param(&hashes, &date, now - 20 * 1000, now, 400, &PastCursor::default());
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("과거 XLog 요청 실패");
+    let mut rows = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            rows.push((x.txid, x.service));
+        }
+    }
+    let mut cache = TextCache::new();
+    let svc: Vec<i32> = rows.iter().map(|r| r.1).collect();
+    let m = cache.missing(text_type::SERVICE, &svc);
+    if !m.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &m);
+    }
+
+    let mut seen = 0usize;
+    /** (요청한 행 수, 신고된 값) */
+    let mut single: Vec<(i32, i32)> = Vec::new();
+    /** 한 트랜잭션 안에서 잇달아 실행된 UPDATE 들의 신고값 */
+    let mut loop_updates: Vec<i32> = Vec::new();
+    for (txid, service) in rows.iter() {
+        if seen >= 20 {
+            break;
+        }
+        let name = cache.get(text_type::SERVICE, *service).unwrap_or("");
+        if !name.contains("touch-rows") && !name.contains("pipeline") {
+            continue;
+        }
+        let mut c = login();
+        let cs = c.session;
+        if c
+            .send_request(CMD_TRANX_PROFILE_FULL, cs, &build_full_profile_param(&date, *txid))
+            .is_err()
+        {
+            continue;
+        }
+        let blob = match c.read_blob_stream() {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let steps = parse_profile_steps(blob);
+        let sql: Vec<&nscouter_lib::scouter::profile::SqlProfileStep> = steps
+            .iter()
+            .filter_map(|s| match s {
+                ProfileStep::Sql(x) => Some(x),
+                _ => None,
+            })
+            .collect();
+        if sql.is_empty() {
+            continue;
+        }
+        let hs: Vec<i32> = sql.iter().map(|x| x.hash).collect();
+        let miss = cache.missing(text_type::SQL, &hs);
+        if !miss.is_empty() {
+            let _ = fetch_texts(&mut c, &mut cache, text_type::SQL, &miss);
+        }
+        for x in &sql {
+            let text = cache.get(text_type::SQL, x.hash).unwrap_or("");
+            let is_update = text.contains("touch-rows") || text.trim_start().starts_with("update ");
+            if !is_update {
+                continue;
+            }
+            seen += 1;
+            if text.contains("touch-rows") {
+                // param 이 곧 요청한 행 수다 (`limit ?`)
+                if let Ok(n) = x.param.trim().parse::<i32>() {
+                    single.push((n, x.updated));
+                }
+            } else if loop_updates.len() < 5 {
+                loop_updates.push(x.updated);
+            }
+            println!(
+                "updated={:>3}  param={:<24}  {}",
+                x.updated,
+                x.param.chars().take(24).collect::<String>(),
+                text.chars().take(70).collect::<String>()
+            );
+        }
+    }
+    assert!(seen > 0, "touch-rows 쿼리를 못 찾았다 — shop-app 이 새 이미지인지 볼 것");
+
+    // ── 못을 박는다 (F-55) ────────────────────────────────────────────
+    //
+    // 단독 UPDATE 는 정확하다. 반복문 안에서는 마지막을 뺀 나머지가 부풀려진다.
+    // 이 두 가지가 같이 성립해야 «누적 + 직전 스텝 귀속» 이라는 설명이 맞다.
+    for (n, got) in &single {
+        assert_eq!(got, n, "단독 UPDATE 는 실제 행 수와 같아야 한다");
+    }
+    if loop_updates.len() >= 3 {
+        let last = *loop_updates.last().unwrap();
+        let others: Vec<i32> = loop_updates[..loop_updates.len() - 1].to_vec();
+        println!("반복문 안: {loop_updates:?} (마지막 {last})");
+        assert_eq!(last, 1, "마지막 UPDATE 는 실제 행 수(1)여야 한다");
+        assert!(
+            others.iter().all(|v| *v == 2),
+            "앞의 것들은 직전 스텝에 얹혀 2 가 되어야 한다: {others:?}"
+        );
+    }
+}
+
 /// 상한을 **서버 설정에서 실제로 읽을 수 있는가** (F-54).
 ///
 /// 이게 안 되면 «잘렸다» 를 500 이라는 추측으로 판정해야 한다. 서버가 그 값을

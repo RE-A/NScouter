@@ -95,6 +95,16 @@ public class LabController {
     }
 
     /**
+     * 정확히 n 행을 바꾸는 UPDATE. 응답의 `updated` 가 **진짜 행 수**다.
+     *
+     * 화면이 보여주는 «N행» 과 이 값을 맞대 보면 `SqlStep3.updated` 의 뜻이 갈린다.
+     */
+    @GetMapping("/touch-rows")
+    public Map<String, Object> touchRows(@RequestParam(defaultValue = "3") int n) {
+        return Map.of("updated", labService.touchRows(Math.min(Math.max(n, 1), 50)));
+    }
+
+    /**
      * 리터럴이 **많은** SQL. IN 절에 값이 줄줄이 들어간다.
      *
      * 실환경에서 본 SQL 은 `@{1}` 부터 `@{11}` 까지 있었다. 자리 하나짜리로는

@@ -651,6 +651,46 @@ param = "'book',100,90000,5,10,'zzz'"
 - 구현: `src/features/xlog/components/sqlBind.ts` (`scanSlots` 로 한 번 훑어 최댓값을 먼저 구한다)
 - 재현: `cargo test --test live_collector live_sql_mixed_literal_and_bind -- --ignored --nocapture`
 
+### F-55. `updated` 는 «바뀐 행 수» 가 아니다 — **직전 스텝에 얹히는 누적값**이다
+
+`SqlStep3.updated` 를 화면에 «N행» 으로 적으려다 1행짜리 UPDATE 가 «2행» 으로 나와 캤다.
+
+`TraceSQL.incUpdateCount(int)` (바이트코드):
+
+```java
+SqlStep3 step = (SqlStep3) ctx.lastSqlStep;      // ← «지금» 의 마지막 SQL 스텝
+if (step.updated == -2 && n > 0)      step.updated = n;
+else if (step.updated >= 0 && n > 0)  step.updated = step.updated + n;   // 더한다
+```
+
+`PsUpdateCountMV` 가 `getUpdateCount()` 의 **반환 시점**을 감싸므로, 그 메서드가 불릴
+때마다 값이 더해진다. 그리고 귀속 대상이 «그 문장» 이 아니라 `ctx.lastSqlStep` 이라
+**다음 문장이 시작된 뒤에 도착한 호출은 직전 스텝에 얹힌다.**
+
+#### 실측 (두 번 돌려 같은 결과)
+
+`/shop/lab/touch-rows?n=K` 는 정확히 K 행을 바꾸고 그 수를 응답으로 준다.
+
+| 모양 | 실제 | 신고 |
+|---|---|---|
+| 단독 UPDATE (`n=1` · `3` · `7`) | 1 · 3 · 7 | **1 · 3 · 7** (정확) |
+| 반복문 안 UPDATE 5개 (각 1행) | 1 · 1 · 1 · 1 · 1 | **2 · 2 · 2 · 2 · 1** |
+
+마지막만 맞는 것이 설명과 정확히 들어맞는다 — 뒤에 올 문장이 없어 얹힐 것도 없다.
+
+#### 그래서 화면은
+
+숫자를 버리지 않는다. **문장을 잃은 INSERT(F-53)에서 남는 유일한 단서**이고,
+단독 실행에서는 정확하다. 다만 «바꾼 행 수» 라고 단정하지 않는다:
+
+- `~2행` 처럼 물결을 붙여 어림수임을 보인다
+- 툴팁에 «에이전트가 보고한 갱신 건수입니다. 같은 연결로 여러 번 갱신하면 앞 문장에
+  얹혀 실제보다 크게 나올 수 있습니다» 라고 적는다
+
+ASIS 도 같은 값을 `<Affected Rows : N>` 으로 그냥 적는다 — **틀릴 수 있다는 말은 없다.**
+
+- 재현: `cargo test --test live_collector live_sql_updated_is_row_count -- --ignored --nocapture`
+
 ### F-54. `SEARCH_XLOG_LIST` — 서버가 걸러 준다. **500에서 조용히 잘린다**
 
 과거 XLog 를 다 받아 화면에서 거르는 대신, 콜렉터에 걸러 달라고 할 수 있다.

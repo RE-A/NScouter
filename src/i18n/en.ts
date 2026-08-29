@@ -390,7 +390,8 @@ export const EN: Record<string, string> = {
     'The server limit looks reached. It is not in the server config, so the default was assumed.',
   '행': ' rows',
   '바꾼 행 수 모름': 'rows changed: unknown',
-  '이 실행이 바꾼 행 수입니다': 'Rows this execution changed',
+  '에이전트가 보고한 갱신 건수입니다. 같은 연결로 여러 번 갱신하면 앞 문장에 얹혀 실제보다 크게 나올 수 있습니다.':
+    'Update count as reported by the agent. When one connection runs several updates in a row, counts spill onto the previous statement and can read higher than reality.',
   '단축키': 'Keyboard shortcuts',
   '입력칸에 글자를 치는 중에는 동작하지 않습니다. Esc 는 그 칸에서 빠져나옵니다.':
     'Shortcuts stay out of the way while you are typing in a field. Esc leaves the field.',

@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -118,6 +119,26 @@ public class LabService {
                 .setParameter(1, minId)
                 .setParameter(2, name)
                 .getResultList();
+    }
+
+    /**
+     * **행 수를 아는 UPDATE.** 몇 행을 바꿨는지 JDBC 가 돌려주는 값을 그대로 반환한다.
+     *
+     * 화면의 «N행» 표시(`SqlStep3.updated`)가 진짜 행 수인지 가르기 위한 것이다.
+     * 에이전트는 `getUpdateCount()` 가 불릴 때마다 **더한다**
+     * (`TraceSQL.incUpdateCount`: `step.updated = cur + n`).
+     * 그래서 같은 실행에서 두 번 물어보면 실제의 두 배가 신고될 수 있다.
+     *
+     * 값을 실제로 바꾸지는 않는다(`name = name`). 데이터를 흔들지 않으면서
+     * 정확히 n 행을 건드리는 UPDATE 를 만든다.
+     */
+    @Transactional
+    public int touchRows(int n) {
+        return entityManager.createNativeQuery(
+                        "/*touch-rows*/ update product set name = name"
+                                + " where id in (select id from product order by id limit ?)")
+                .setParameter(1, n)
+                .executeUpdate();
     }
 
     /**
