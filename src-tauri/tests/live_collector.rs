@@ -5564,6 +5564,63 @@ fn live_sql_literal_escape() {
     );
 }
 
+/// 화면에서 «3초짜리가 왜 맨 밑에 있나» 로 보인 트랜잭션의 실제 값.
+///
+/// Y축이 SQL Time 이면 «SQL 에 쓴 시간» 으로 그린다. 응답이 3초여도 SQL 을 안 썼으면
+/// 0 이 맞다 — 그걸 값으로 확인한다.
+#[test]
+#[ignore]
+fn probe_timeout_xlog_fields() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::past::{build_past_xlog_param, PastCursor};
+    use nscouter_lib::scouter::protocol::text_type;
+
+    for _ in 0..2 {
+        let _ = http_get("127.0.0.1", 8082, "/order/lab/timeout?ms=3000");
+    }
+    std::thread::sleep(std::time::Duration::from_secs(6));
+
+    let mut conn = login();
+    let session = conn.session;
+    let hashes: Vec<i32> = fetch_objects(&mut conn).iter().map(|(_, h)| *h).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+    let param =
+        build_past_xlog_param(&hashes, &date, now - 30 * 1000, now, 400, &PastCursor::default());
+    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("요청 실패");
+    let mut rows = Vec::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::XLog(x) = p {
+            rows.push(x);
+        }
+    }
+    let mut cache = TextCache::new();
+    let svc: Vec<i32> = rows.iter().map(|r| r.service).collect();
+    let m = cache.missing(text_type::SERVICE, &svc);
+    if !m.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &m);
+    }
+    let mut seen = 0;
+    for x in &rows {
+        let name = cache.get(text_type::SERVICE, x.service).unwrap_or("");
+        if !name.contains("timeout") {
+            continue;
+        }
+        seen += 1;
+        println!(
+            "{name}  elapsed={}ms  sqlTime={}ms sqlCount={}  apiTime={}ms apiCount={}  cpu={}ms",
+            x.elapsed, x.sql_time, x.sql_count, x.apicall_time, x.apicall_count, x.cpu
+        );
+        if seen >= 3 {
+            break;
+        }
+    }
+    assert!(seen > 0, "timeout 트랜잭션을 못 찾았다");
+}
+
 /// `SqlStep3.updated` 가 **진짜 바뀐 행 수인가.**
 ///
 /// 화면에 «N행» 으로 적고 있는 값이다. 그런데 에이전트는 `getUpdateCount()` 가

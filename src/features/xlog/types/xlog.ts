@@ -182,6 +182,27 @@ export const Y_AXIS_CONFIGS: Record<YAxisMode, YAxisModeConfig> = {
   heapUsed:     { label: 'Heap Used(KB)',     defaultMax: 5000, unit: 'KB',  valueExtractor: x => x.allocKBytes },
 };
 
+/**
+ * Y축이 가리키는 값을 사람이 읽는 글자로.
+ *
+ * **점 높이와 목록의 숫자가 다른 값을 보고 있으면 «왜 3초짜리가 맨 밑에 있나» 가 된다.**
+ * 실제로 그렇게 헷갈렸다 — Y축이 SQL Time 인데 목록은 Elapsed 만 보여 주고 있었고,
+ * 3초를 기다린 트랜잭션(SQL 0건)이 0 에 찍혔다. 축 이름은 두 군데나 적혀 있었지만
+ * 두 수가 나란히 있으면 같은 것으로 읽힌다.
+ */
+export function formatYValue(mode: YAxisMode, x: SXLog): string {
+  const cfg = Y_AXIS_CONFIGS[mode];
+  const v = cfg.valueExtractor(x);
+  if (cfg.unit === 'sec') return `${(v * 1000).toLocaleString()}ms`;
+  if (cfg.unit === '') return v.toLocaleString();
+  return `${v.toLocaleString()}${cfg.unit}`;
+}
+
+/** Y축 이름에서 단위 괄호를 뗀 짧은 이름. 목록 머리에 쓴다 */
+export function yAxisShortLabel(mode: YAxisMode): string {
+  return Y_AXIS_CONFIGS[mode].label.replace(/\(.*\)$/, '').trim();
+}
+
 export interface XLogChartConfig {
   yAxisMode: YAxisMode;
   timeRangeMs: number;        // 기본 300_000 (5분)

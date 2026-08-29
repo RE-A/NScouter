@@ -365,6 +365,7 @@ export const EN: Record<string, string> = {
   '개:': ':',
   '개만 채웠습니다': ' filled',
   '넓은 구간에서 찾기': 'Search a wide range',
+  '차트 Y축이 그리는 값입니다': 'The value the chart Y axis plots',
   '묶기': 'Group by',
   '타입': 'Type',
   '오브젝트 종류로 묶습니다 (tomcat · datasource · linux)':

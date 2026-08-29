@@ -46,8 +46,14 @@ import { useShortcuts } from './features/xlog/hooks/useShortcuts';
 import { toLayout, fromLayout, toChartConfig, fromChartConfig } from './features/xlog/hooks/uiState';
 import type { GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
-import type { AgentObject, SXLog, XLogChartConfig, XLogFilterState } from './features/xlog/types/xlog';
-import { DEFAULT_CHART_CONFIG, DEFAULT_FILTER, xlogPackToSXLog } from './features/xlog/types/xlog';
+import type { AgentObject, SXLog, XLogChartConfig, XLogFilterState, YAxisMode } from './features/xlog/types/xlog';
+import {
+  DEFAULT_CHART_CONFIG,
+  DEFAULT_FILTER,
+  formatYValue,
+  xlogPackToSXLog,
+  yAxisShortLabel,
+} from './features/xlog/types/xlog';
 import type { PastRange, XLogMode } from './features/xlog/types/timeRange';
 import type { AlertPack } from './features/xlog/types/alert';
 import { alertLevelColor, alertLevelLabel } from './features/xlog/types/alert';
@@ -697,6 +703,7 @@ export default function App() {
                       getCached={getCached}
                       textVersion={textVersion}
                       onRowClick={handleRowClick}
+                      yAxisMode={config.yAxisMode}
                     />
                   </div>
                 </div>
@@ -977,6 +984,8 @@ interface XLogTableProps {
   /** 값 자체는 안 쓰고, 텍스트 캐시가 채워졌을 때 다시 그리기 위한 신호다 */
   textVersion?: number;
   onRowClick: (xlog: SXLog) => void;
+  /** 지금 차트가 그리는 축. Elapsed 가 아니면 그 값을 한 칸 더 보여준다 */
+  yAxisMode: YAxisMode;
 }
 
 /**
@@ -988,6 +997,15 @@ interface XLogTableProps {
  * 에러는 예외적으로만 표시한다(왼쪽 막대 + ERR 칩).
  */
 const XLOG_COLS = 'grid grid-cols-[62px_minmax(0,104px)_minmax(0,1fr)_minmax(0,96px)_74px] gap-x-3';
+/**
+ * Y축이 Elapsed 가 아닐 때 쓰는 배치. **그 축의 값을 한 칸 더 보여준다.**
+ *
+ * 점 높이와 목록의 숫자가 다른 값을 보고 있으면 «왜 3초짜리가 맨 밑에 있나» 가 된다.
+ * 실제로 그렇게 헷갈렸다 — 축 이름이 두 군데 적혀 있어도 두 수가 나란히 있으면
+ * 같은 것으로 읽힌다.
+ */
+const XLOG_COLS_Y =
+  'grid grid-cols-[62px_minmax(0,104px)_minmax(0,1fr)_minmax(0,96px)_74px_74px] gap-x-3';
 
 /** 목록에 실제로 그리는 최대 행 수. 넘으면 **느린 것부터** 자른다 */
 const XLOG_TABLE_LIMIT = 500;
@@ -999,7 +1017,11 @@ function XLogTable({
   activeXlog,
   getCached,
   onRowClick,
+  yAxisMode,
 }: XLogTableProps) {
+  // Elapsed 축이면 목록의 Elapsed 가 곧 점 높이라 더 보여줄 것이 없다.
+  const showY = yAxisMode !== 'elapsed';
+  const cols = showY ? XLOG_COLS_Y : XLOG_COLS;
   // 촘촘한 구간을 고르면 수천 건이 잡힌다. 시간 순으로 앞에서 500건을 자르면
   // **가장 오래된 500건**만 남는다 — 1ms 짜리 잡음이다.
   // 구간을 드래그하는 이유는 "무엇이 느렸나" 이므로 느린 순으로 자른다.
@@ -1012,13 +1034,19 @@ function XLogTable({
     <div className="flex h-full flex-col bg-surface">
       {/* 선택 개수와 해제 버튼은 Pane 타이틀바로 올렸다 — 머리가 둘이면 목록이 그만큼 짧아진다 */}
       <div
-        className={`${XLOG_COLS} shrink-0 items-center border-b border-line px-3 py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
+        className={`${cols} shrink-0 items-center border-b border-line px-3 py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
         <span>{t('시간')}</span>
         <span>{t('서버')}</span>
         <span>URL</span>
         <span>IP</span>
         <span className="text-right">Elapsed</span>
+        {/* 지금 점 높이가 무엇인지 — 축 이름을 그대로 쓴다 */}
+        {showY && (
+          <span className="truncate text-right text-accent normal-case" title={t('차트 Y축이 그리는 값입니다')}>
+            {yAxisShortLabel(yAxisMode)}
+          </span>
+        )}
       </div>
 
       <div className="flex-1 divide-y divide-line/40 overflow-y-auto">
@@ -1055,7 +1083,7 @@ function XLogTable({
                     : 'border-l-transparent hover:bg-hover/60',
               ].join(' ')}
             >
-              <div className={`${XLOG_COLS} items-center`}>
+              <div className={`${cols} items-center`}>
                 <span className="tnum font-mono text-micro text-fg-dim">
                   {formatTime(x.endTime)}
                 </span>
@@ -1078,6 +1106,11 @@ function XLogTable({
                 <span className={`tnum text-right font-mono ${durationTone(x.elapsed)}`}>
                   {x.elapsed.toLocaleString()}ms
                 </span>
+                {showY && (
+                  <span className="tnum truncate text-right font-mono text-accent">
+                    {formatYValue(yAxisMode, x)}
+                  </span>
+                )}
               </div>
 
               {/* **왜 걸렸는지 보여준다.** 목록만 좁혀 놓으면 검색어가 어디에 맞았는지
