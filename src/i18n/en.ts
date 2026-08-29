@@ -364,6 +364,33 @@ export const EN: Record<string, string> = {
   '개 중': ' of',
   '개:': ':',
   '개만 채웠습니다': ' filled',
+  '넓은 구간에서 찾기': 'Search a wide range',
+  '서버가 걸러서 보내 줍니다. 상한을 확인하는 중입니다…':
+    'The collector filters and sends back the matches. Checking the limit…',
+  '찾기': 'Search',
+  '구간과 조건을 정해 서버에서 찾습니다': 'Pick a range and conditions; the collector does the filtering',
+  '서버가 걸러서 보내 줍니다. 최대': 'The collector filters and sends back at most ',
+  '건까지만 오고, 그보다 많으면 잘립니다.': ' rows — anything beyond that is cut off.',
+  '(서버 설정에 상한이 안 적혀 있어 기본값으로 봅니다)':
+    '(the limit is not in the server config, so this is the default)',
+  '그냥 치면 «포함»으로 찾습니다. * 를 직접 쓰면 그 자리만 아무 글자로 봅니다.':
+    'Plain text matches anywhere in the value. Type * yourself to place your own wildcards.',
+  '시작이 끝보다 앞서야 합니다': 'Start must come before end',
+  '구간': 'Range',
+  '오브젝트': 'Object',
+  '로그인': 'Login',
+  '설명': 'Desc',
+  '앱 자유 필드 (text1~5)': 'App free fields (text1-5)',
+  '앱 자유 필드 접기': 'Hide app free fields',
+  '찾는 중…': 'Searching…',
+  '건에서 잘렸을 수 있습니다': ' rows — results may be cut off',
+  '서버 상한에 닿았습니다. 조건을 좁히거나 구간을 나눠 다시 찾으십시오.':
+    'The server limit was reached. Narrow the conditions or split the range and search again.',
+  '서버 상한에 닿은 것으로 보입니다. 상한이 설정에 안 적혀 있어 기본값으로 판단했습니다.':
+    'The server limit looks reached. It is not in the server config, so the default was assumed.',
+  '행': ' rows',
+  '바꾼 행 수 모름': 'rows changed: unknown',
+  '이 실행이 바꾼 행 수입니다': 'Rows this execution changed',
   '단축키': 'Keyboard shortcuts',
   '입력칸에 글자를 치는 중에는 동작하지 않습니다. Esc 는 그 칸에서 빠져나옵니다.':
     'Shortcuts stay out of the way while you are typing in a field. Esc leaves the field.',

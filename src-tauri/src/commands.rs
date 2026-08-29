@@ -30,6 +30,9 @@ use crate::scouter::objtype::{
 };
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
 use crate::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
+use crate::scouter::search::{
+    build_search_xlog_param, parse_search_max, SearchXLogFilter, DEFAULT_SEARCH_MAX,
+};
 use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, XLogProfilePack};
 use crate::scouter::protocol::*;
 use crate::scouter::alert::build_alert_param;
@@ -514,6 +517,93 @@ pub async fn load_past_xlog(
         next.last_xlog_time
     );
     Ok(PastXLogPage { xlogs, cursor: next })
+}
+
+/// 넓은 구간 검색 결과.
+///
+/// **`truncated` 를 반드시 화면에 보여야 한다.** 서버는 상한에서 그냥 끊고
+/// «잘렸다» 는 신호를 아무것도 주지 않는다 — 그대로 두면 «없다» 로 읽힌다 (F-54).
+#[derive(serde::Serialize)]
+pub struct SearchXLogResult {
+    pub xlogs: Vec<XLogPack>,
+    /// 서버 상한. 못 읽었으면 기본값을 쓴다
+    pub max: i32,
+    /// 상한을 서버 설정에서 실제로 읽었는가. 아니면 `max` 는 추측이다
+    pub max_known: bool,
+    /// 상한에 닿았다 — **더 있었을 수 있다**
+    pub truncated: bool,
+}
+
+/// 서버가 한 번에 돌려주는 검색 결과의 상한.
+///
+/// **찾기 전에 물어본다.** 창을 열자마자 «최대 500건» 이라고 적어 두려면 그 500 이
+/// 어디서 온 값인지 알아야 한다 — 안 물어보고 기본값을 단정하면, 서버가 상한을
+/// 올려 뒀을 때 화면이 거짓말을 한다.
+#[derive(serde::Serialize)]
+pub struct SearchMax {
+    pub max: i32,
+    /// 서버 설정에서 실제로 읽었는가. 아니면 기본값을 쓴 것이다
+    pub known: bool,
+}
+
+#[tauri::command]
+pub async fn get_search_max(state: State<'_, AppState>) -> Result<SearchMax, String> {
+    let found = request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
+        .await
+        .ok()
+        .flatten()
+        .map(|m| parse_config_text(&m))
+        .as_deref()
+        .and_then(parse_search_max);
+    Ok(SearchMax { max: found.unwrap_or(DEFAULT_SEARCH_MAX), known: found.is_some() })
+}
+
+/// 넓은 구간에서 조건으로 XLog 찾기 (SEARCH_XLOG_LIST).
+///
+/// 스캐터 드래그를 대체하지 않는다. 좁은 구간은 다 받는 편이 낫다 —
+/// 잘림이 없고 오브젝트를 여럿 다룬다. 이건 «넓은 구간에서 몇 건» 을 위한 입구다.
+///
+/// 상한은 서버 설정에서 읽어 온다. `req_search_xlog_max_count` 를 못 찾으면
+/// 기본값(500)을 쓰되 `max_known=false` 로 «추측» 임을 알린다.
+#[tauri::command]
+pub async fn search_xlog_list(
+    state: State<'_, AppState>,
+    filter: SearchXLogFilter,
+) -> Result<SearchXLogResult, String> {
+    // 상한을 먼저 읽는다. 실패해도 검색은 한다 — 상한을 모른다고 못 찾을 이유는 없다.
+    let max_from_server = request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
+        .await
+        .ok()
+        .flatten()
+        .map(|m| parse_config_text(&m))
+        .as_deref()
+        .and_then(parse_search_max);
+
+    let mut conn_guard = state.connection.lock().await;
+    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
+
+    let param = build_search_xlog_param(&filter);
+    let session = conn.session;
+    conn.send_request(CMD_SEARCH_XLOG_LIST, session, &param)
+        .map_err(|e| format!("XLog 검색 요청 실패: {e}"))?;
+
+    let mut xlogs = Vec::new();
+    loop {
+        match conn.read_next_pack().map_err(|e| format!("XLog 검색 수신 실패: {e}"))? {
+            Some(AnyPack::XLog(x)) => xlogs.push(x),
+            Some(_) => {}
+            None => break,
+        }
+    }
+
+    let max = max_from_server.unwrap_or(DEFAULT_SEARCH_MAX);
+    let truncated = xlogs.len() as i32 >= max;
+    log::debug!(
+        "search_xlog_list: {}건 (상한 {max}{}) truncated={truncated}",
+        xlogs.len(),
+        if max_from_server.is_some() { "" } else { ", 추측" }
+    );
+    Ok(SearchXLogResult { xlogs, max, max_known: max_from_server.is_some(), truncated })
 }
 
 /// 힙 히스토그램 — 클래스별 인스턴스 수와 점유 바이트.

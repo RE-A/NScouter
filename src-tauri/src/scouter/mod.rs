@@ -13,6 +13,7 @@ pub mod pack;
 pub mod past;
 pub mod profile;
 pub mod profile_search;
+pub mod search;
 pub mod protocol;
 pub mod streaming;
 pub mod summary;

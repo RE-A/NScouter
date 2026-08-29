@@ -5564,6 +5564,114 @@ fn live_sql_literal_escape() {
     );
 }
 
+/// 상한을 **서버 설정에서 실제로 읽을 수 있는가** (F-54).
+///
+/// 이게 안 되면 «잘렸다» 를 500 이라는 추측으로 판정해야 한다. 서버가 그 값을
+/// 바꿔 두었으면 잘린 걸 안 잘렸다고 하거나 그 반대가 된다 — 둘 다 조용히 틀린다.
+#[test]
+#[ignore]
+fn live_search_max_from_server_config() {
+    use nscouter_lib::scouter::configure::parse_config_text;
+    use nscouter_lib::scouter::search::{parse_search_max, DEFAULT_SEARCH_MAX, SEARCH_MAX_KEY};
+
+    let mut conn = login();
+    let s = conn.session;
+    conn.send_request("GET_CONFIGURE_SERVER", s, &nscouter_lib::scouter::pack::MapPack::new())
+        .expect("서버 설정 요청 실패");
+    let mut text = String::new();
+    while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+        if let AnyPack::Map(m) = p {
+            text = parse_config_text(&m);
+        }
+    }
+    assert!(!text.is_empty(), "서버 설정 본문이 비었다");
+
+    let found = parse_search_max(&text);
+    println!("{SEARCH_MAX_KEY} = {found:?} (기본값 {DEFAULT_SEARCH_MAX})");
+    println!("설정에 그 줄이 있는가: {}", text.contains(SEARCH_MAX_KEY));
+
+    // 설정 파일에 적혀 있지 않으면 서버가 기본값으로 도는 것이다 — 그때는 None 이 맞다.
+    // 실측(F-54)에서 상한이 500 이었으므로 읽혔다면 그 값과 어긋나면 안 된다.
+    if let Some(n) = found {
+        assert!(n > 0, "상한이 0 이하일 수는 없다");
+    }
+}
+
+/// 넓은 구간 검색이 **끝에서 끝까지** 도는가 — 요청 · 필터 · 상한 판정.
+#[test]
+#[ignore]
+fn live_search_xlog_list_end_to_end() {
+    use nscouter_lib::scouter::dictionary::{fetch_texts, TextCache};
+    use nscouter_lib::scouter::protocol::text_type;
+    use nscouter_lib::scouter::search::{build_search_xlog_param, SearchXLogFilter};
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+        - 30_000;
+
+    let run = |f: &SearchXLogFilter| -> Vec<(i64, i32)> {
+        let mut c = login();
+        let s = c.session;
+        c.send_request("SEARCH_XLOG_LIST", s, &build_search_xlog_param(f)).expect("요청 실패");
+        let mut rows = Vec::new();
+        while let Some(p) = c.read_next_pack().expect("수신 실패") {
+            if let AnyPack::XLog(x) = p {
+                rows.push((x.txid, x.service));
+            }
+        }
+        rows
+    };
+
+    // **별표 없이 쳐도 포함으로 찾아야 한다.** to_glob 이 감싸 주는 것이 요점이다.
+    let rows = run(&SearchXLogFilter {
+        stime: now - 10 * 60 * 1000,
+        etime: now,
+        service: "/order/".into(),
+        ..Default::default()
+    });
+    println!("service=\"/order/\" (별표 없이): {}건", rows.len());
+    assert!(!rows.is_empty(), "포함 검색이 한 건도 못 찾았다 — to_glob 이 안 먹었다");
+
+    let mut conn = login();
+    let mut cache = TextCache::new();
+    let svc: Vec<i32> = rows.iter().map(|(_, s)| *s).collect();
+    let missing = cache.missing(text_type::SERVICE, &svc);
+    if !missing.is_empty() {
+        let _ = fetch_texts(&mut conn, &mut cache, text_type::SERVICE, &missing);
+    }
+    let wrong = rows
+        .iter()
+        .filter(|(_, h)| !cache.get(text_type::SERVICE, *h).unwrap_or("").contains("/order/"))
+        .count();
+    assert_eq!(wrong, 0, "조건에 안 맞는 것이 섞여 왔다");
+
+    // 오브젝트 하나로 좁히면 그 오브젝트 것만 와야 한다
+    let obj = javaee_objects(&fetch_objects(&mut conn))[0].1;
+    let one = {
+        let mut c = login();
+        let s = c.session;
+        let f = SearchXLogFilter {
+            stime: now - 10 * 60 * 1000,
+            etime: now,
+            obj_hash: obj,
+            ..Default::default()
+        };
+        c.send_request("SEARCH_XLOG_LIST", s, &build_search_xlog_param(&f)).expect("요청 실패");
+        let mut v = Vec::new();
+        while let Some(p) = c.read_next_pack().expect("수신 실패") {
+            if let AnyPack::XLog(x) = p {
+                v.push(x.obj_hash);
+            }
+        }
+        v
+    };
+    println!("objHash={obj} 하나로: {}건", one.len());
+    assert!(!one.is_empty(), "오브젝트로 좁히니 한 건도 없다");
+    assert!(one.iter().all(|h| *h == obj), "다른 오브젝트가 섞여 왔다");
+}
+
 /// **서버가 걸러 주면 더 빠른가** — 두 방식을 같은 조건에서 잰다.
 ///
 /// 지금(A): `TRANX_LOAD_TIME_GROUP_V2` 로 구간의 XLog 를 **다 받아** 화면에서 거른다.

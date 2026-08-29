@@ -18,6 +18,7 @@ import { TopologyPanel } from './features/xlog/components/TopologyPanel';
 import { FiveMinCounterChart } from './features/xlog/components/FiveMinCounterChart';
 import { ServiceGroupPanel } from './features/xlog/components/ServiceGroupPanel';
 import { XLogSearchBar } from './features/xlog/components/XLogSearchBar';
+import { WideSearchDialog, type WideSearchValues } from './features/xlog/components/WideSearchDialog';
 import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
@@ -34,6 +35,7 @@ import {
   startAlertStream,
   getConfig,
   saveUiState,
+  searchXLogList,
 } from './features/xlog/api/scouterApi';
 import { subscribe } from './features/xlog/api/subscribe';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
@@ -388,6 +390,8 @@ export default function App() {
   const resetSearch = search.reset;
   const handleXLogSelect = useCallback((xlogs: SXLog[]) => {
     setSelectedXLogs(xlogs);
+    // 차트에서 새로 고른 것은 검색 결과가 아니다. 경고가 남아 있으면 거짓말이 된다.
+    setWideTruncated(null);
     // 다른 구간을 고르면 이전 검색 결과는 그 구간의 것이 아니다. 남겨 두면
     // 목록이 엉뚱한 트랜잭션만 걸러 보여준다.
     resetSearch();
@@ -398,8 +402,40 @@ export default function App() {
   const handleClearSelection = useCallback(() => {
     setSelectedXLogs([]);
     setClearSignal(n => n + 1);
+    setWideTruncated(null);
   }, []);
   const handleAlertBadgeClick = useCallback(() => setActiveTab('alert'), []);
+
+  /**
+   * 넓은 구간에서 찾기 (SEARCH_XLOG_LIST).
+   *
+   * 결과는 **기존 트랜잭션 목록으로 흘려보낸다** — 그래야 행을 눌러 상세를 열고
+   * 프로파일 검색을 거는 지금 흐름이 그대로 쓰인다. 새 목록을 따로 만들면
+   * 같은 기능을 두 벌 갖게 된다.
+   */
+  const [showWideSearch, setShowWideSearch] = useState(false);
+  const [wideRunning, setWideRunning] = useState(false);
+  /** 상한에 닿았다 — 더 있었을 수 있다. null 이면 검색 결과가 아니다 */
+  const [wideTruncated, setWideTruncated] = useState<{ max: number; known: boolean } | null>(null);
+
+  const runWideSearch = useCallback(
+    (v: WideSearchValues) => {
+      setWideRunning(true);
+      searchXLogList(v)
+        .then(res => {
+          setShowWideSearch(false);
+          setSelectedXLogs(res.xlogs.map(xlogPackToSXLog));
+          // 검색 결과는 차트에서 고른 구간이 아니다. 사각형을 남겨 두면
+          // 목록이 그 구간의 것인 줄 알게 된다.
+          setClearSignal(n => n + 1);
+          resetSearch();
+          setWideTruncated(res.truncated ? { max: res.max, known: res.max_known } : null);
+        })
+        .catch(() => {})
+        .finally(() => setWideRunning(false));
+    },
+    [resetSearch],
+  );
 
   const [showSettings, setShowSettings] = useState(false);
 
@@ -511,6 +547,14 @@ export default function App() {
 
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showWideSearch && (
+        <WideSearchDialog
+          agents={[...agentMap].map(([obj_hash, obj_name]) => ({ obj_hash, obj_name }) as AgentObject)}
+          running={wideRunning}
+          onSearch={runWideSearch}
+          onClose={() => setShowWideSearch(false)}
+        />
+      )}
 
       {/* ── XLog 탭 ── */}
       {activeTab === 'xlog' && (
@@ -524,6 +568,7 @@ export default function App() {
             onModeChange={setXLogMode}
             pastRange={pastRange}
             onPastRangeChange={handlePastRangeChange}
+            onWideSearch={() => setShowWideSearch(true)}
           />
           {/* 분할 배치.
               이전에는 워크스페이스를 재서 패널을 절대 좌표로 놓았다. 측정값이 실제
@@ -601,6 +646,21 @@ export default function App() {
                           <span className="text-fg-faint"> · {t('느린 순')} {XLOG_TABLE_LIMIT}{t('건')}</span>
                         )}
                       </span>
+                      {/* **서버는 잘렸다는 신호를 주지 않는다.** 여기서 말하지 않으면
+                          없는 트랜잭션을 없다고 믿게 된다 (F-54). */}
+                      {wideTruncated && (
+                        <span
+                          className="rounded border border-warn/50 px-1 text-micro normal-case text-warn"
+                          title={
+                            wideTruncated.known
+                              ? t('서버 상한에 닿았습니다. 조건을 좁히거나 구간을 나눠 다시 찾으십시오.')
+                              : t('서버 상한에 닿은 것으로 보입니다. 상한이 설정에 안 적혀 있어 기본값으로 판단했습니다.')
+                          }
+                        >
+                          {t('상한')} {wideTruncated.max.toLocaleString()}
+                          {t('건에서 잘렸을 수 있습니다')}
+                        </span>
+                      )}
                       <button
                         onClick={handleClearSelection}
                         title={t('선택 해제')}

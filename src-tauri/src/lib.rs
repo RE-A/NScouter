@@ -106,6 +106,8 @@ pub fn run() {
             get_config,
             save_config,
             save_ui_state,
+            search_xlog_list,
+            get_search_max,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

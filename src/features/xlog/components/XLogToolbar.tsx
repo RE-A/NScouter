@@ -22,6 +22,13 @@ interface XLogToolbarProps {
   /** 과거 모드에서 실제로 조회 중인 구간. null 이면 아직 조회 안 함 */
   pastRange: PastRange | null;
   onPastRangeChange: (r: PastRange | null) => void;
+  /**
+   * 넓은 구간에서 찾기 창을 연다.
+   *
+   * 드래그와 **다른 일**이라 따로 둔다 — 드래그는 «이 구간에 뭐가 있나» 이고
+   * 이건 «어디 있는지 모르는 걸 찾는다» 다.
+   */
+  onWideSearch: () => void;
 }
 
 const Y_AXIS_OPTIONS: YAxisMode[] = [
@@ -47,6 +54,7 @@ export function XLogToolbar({
   onModeChange,
   pastRange,
   onPastRangeChange,
+  onWideSearch,
 }: XLogToolbarProps) {
   // 입력 중인 값. **조회를 눌러야** 실제 구간이 된다 —
   // 타이핑할 때마다 수만 건을 다시 받으면 안 된다.
@@ -82,6 +90,16 @@ export function XLogToolbar({
           </button>
         ))}
       </div>
+
+      {/* 드래그로는 «이 구간에 뭐가 있나» 만 볼 수 있다. 어디 있는지 모르는 걸
+          찾으려면 구간을 잘게 나눠 여러 번 받아야 했다 — 그걸 한 번에 하는 입구다 */}
+      <button
+        onClick={onWideSearch}
+        title={t('구간과 조건을 정해 서버에서 찾습니다')}
+        className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
+      >
+        {t('찾기')}
+      </button>
 
       {mode === 'past' && (
         <>

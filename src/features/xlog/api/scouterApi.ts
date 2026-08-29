@@ -554,6 +554,54 @@ export interface XLogChartPrefs {
   ignore_threshold_ms: number;
 }
 
+/** 서버가 한 번에 돌려주는 상한. **찾기 전에 물어본다** — 안 물어보고 단정하면 화면이 거짓말한다 */
+export interface SearchMax {
+  max: number;
+  /** 서버 설정에서 실제로 읽었는가. 아니면 기본값이다 */
+  known: boolean;
+}
+
+export async function getSearchMax(): Promise<SearchMax> {
+  return invoke<SearchMax>('get_search_max');
+}
+
+/** 넓은 구간 검색 조건. 빈 항목은 Rust 가 요청에서 뺀다(= 안 가린다) */
+export interface SearchXLogFilter {
+  stime: number;
+  etime: number;
+  /** 0 이면 안 가린다. **리스트가 아니다** — 서버가 하나만 받는다 */
+  objHash: number;
+  service: string;
+  ip: string;
+  login: string;
+  desc: string;
+  text1: string;
+  text2: string;
+  text3: string;
+  text4: string;
+  text5: string;
+}
+
+export interface SearchXLogResult {
+  xlogs: XLogPack[];
+  /** 서버 상한 */
+  max: number;
+  /** 상한을 서버 설정에서 실제로 읽었는가. 아니면 `max` 는 추측이다 */
+  max_known: boolean;
+  /** 상한에 닿았다 — **더 있었을 수 있다** */
+  truncated: boolean;
+}
+
+/**
+ * 넓은 구간에서 조건으로 XLog 찾기.
+ *
+ * **`truncated` 를 반드시 화면에 보여야 한다.** 서버는 상한에서 그냥 끊고
+ * «잘렸다» 는 신호를 아무것도 주지 않는다 (F-54).
+ */
+export async function searchXLogList(filter: SearchXLogFilter): Promise<SearchXLogResult> {
+  return invoke<SearchXLogResult>('search_xlog_list', { filter });
+}
+
 export async function getConfig(): Promise<AppConfig> {
   return invoke<AppConfig>('get_config');
 }

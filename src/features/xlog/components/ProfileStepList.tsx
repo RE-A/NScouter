@@ -14,6 +14,7 @@ import { stepDepth, waterfallGeometry } from './stepLayout';
 import { durationBar, durationTone } from './durationTone';
 import { ErrorDetail } from './ErrorDetail';
 import { bindSql } from './sqlBind';
+import { affectedRows } from './sqlAffected';
 import { useViewOptions } from '../hooks/useViewOptions';
 import { t } from '../../../i18n';
 
@@ -213,7 +214,12 @@ function StepRow({
           </code>
         )}
         {step.kind === 'Sql' && (
-          <SqlBody sql={text(step.hash)} params={step.param} inline={sqlBindInline} />
+          <SqlBody
+            sql={text(step.hash)}
+            params={step.param}
+            inline={sqlBindInline}
+            updated={step.updated}
+          />
         )}
         {failed && <ErrorDetail text={text(errorHash)} compact />}
       </div>
@@ -256,14 +262,36 @@ function StepRow({
  */
 const AGENT_UNKNOWN_SQL = 'unknown';
 
+/**
+ * 몇 행을 바꿨는가.
+ *
+ * **문장을 잃었을 때 남는 유일한 단서다.** `unknown` 옆에 «1행» 이 있으면
+ * 적어도 읽기가 아니라 쓰기였다는 것은 알 수 있다.
+ */
+function Affected({ updated }: { updated: number }) {
+  const a = affectedRows(updated);
+  if (a === null) return null;
+  return (
+    <span
+      className="ml-1 shrink-0 font-mono text-micro text-fg-faint"
+      title={t('이 실행이 바꾼 행 수입니다')}
+    >
+      {a.kind === 'rows' ? `${a.count}${t('행')}` : t('바꾼 행 수 모름')}
+    </span>
+  );
+}
+
 function SqlBody({
   sql,
   params,
   inline,
+  updated,
 }: {
   sql: string;
   params: string;
   inline: boolean;
+  /** 몇 행을 바꿨는가 (`SqlStep3.updated`) */
+  updated: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   /**
@@ -305,11 +333,14 @@ function SqlBody({
   // 실행한 것으로 읽힌다. 무엇이 없는지, 왜 없는지 말해 주는 편이 낫다.
   if (sql === AGENT_UNKNOWN_SQL) {
     return (
-      <p
-        className="mt-0.5 text-micro text-warn"
-        title={t('자동 생성 키를 쓰는 INSERT 는 에이전트가 문장을 얻지 못합니다. 드라이버가 문장 없이 PreparedStatement 를 만들기 때문이고, 콜렉터까지 문장이 오지 않아 화면에서 복원할 수 없습니다.')}
-      >
-        {t('에이전트가 SQL 문장을 받지 못했습니다')}
+      <p className="mt-0.5 text-micro">
+        <span
+          className="text-warn"
+          title={t('자동 생성 키를 쓰는 INSERT 는 에이전트가 문장을 얻지 못합니다. 드라이버가 문장 없이 PreparedStatement 를 만들기 때문이고, 콜렉터까지 문장이 오지 않아 화면에서 복원할 수 없습니다.')}
+        >
+          {t('에이전트가 SQL 문장을 받지 못했습니다')}
+        </span>
+        <Affected updated={updated} />
       </p>
     );
   }
@@ -329,19 +360,22 @@ function SqlBody({
         {shown}
       </code>
 
-      {overflows && (
-        <button
-          type="button"
-          // 행 클릭(상세 열기)까지 번지면 접으려다 다른 창이 뜬다.
-          onClick={e => {
-            e.stopPropagation();
-            setExpanded(v => !v);
-          }}
-          className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-        >
-          {expanded ? t('접기') : `${t('펼치기')} (${shown.length.toLocaleString()}${t('자')})`}
-        </button>
-      )}
+      <div className="flex items-baseline">
+        {overflows && (
+          <button
+            type="button"
+            // 행 클릭(상세 열기)까지 번지면 접으려다 다른 창이 뜬다.
+            onClick={e => {
+              e.stopPropagation();
+              setExpanded(v => !v);
+            }}
+            className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+          >
+            {expanded ? t('접기') : `${t('펼치기')} (${shown.length.toLocaleString()}${t('자')})`}
+          </button>
+        )}
+        <Affected updated={updated} />
+      </div>
 
       {/* 채우지 않는 설정이면 값은 따로 보여준다 — 안 보여주면 정보가 사라진다.
           **채웠더라도 아귀가 안 맞으면 원본을 같이 보여준다.** 자리와 값의 수가 다르면

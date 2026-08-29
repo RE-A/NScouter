@@ -68,6 +68,8 @@ pub const CMD_OBJECT_HEAPHISTO: &str = "OBJECT_HEAPHISTO";
 
 /// 과거 XLog 시간 범위 조회. V1 과 달리 페이지네이션이 있다 (F-28).
 pub const CMD_TRANX_LOAD_TIME_GROUP_V2: &str = "TRANX_LOAD_TIME_GROUP_V2";
+/// 서버가 조건으로 걸러 준다. **상한(`req_search_xlog_max_count`)에서 조용히 끊긴다** (F-54)
+pub const CMD_SEARCH_XLOG_LIST: &str = "SEARCH_XLOG_LIST";
 pub const CMD_TRIGGER_THREAD_DUMP: &str = "TRIGGER_THREAD_DUMP";
 /// 액티브 서비스 목록을 **파일로** 남긴다. 응답은 파일명 하나 (F-35)
 pub const CMD_TRIGGER_ACTIVE_SERVICE_LIST: &str = "TRIGGER_ACTIVE_SERVICE_LIST";
