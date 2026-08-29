@@ -1406,7 +1406,7 @@ pub async fn get_service_group(
     .await?;
 
     // 응답은 MapPack 하나에 네 병렬 리스트다. 여러 개가 와도 이어 붙인다.
-    let rows: Vec<ServiceGroupRow> = maps.iter().flat_map(|m| parse_service_group(m)).collect();
+    let rows: Vec<ServiceGroupRow> = maps.iter().flat_map(parse_service_group).collect();
     log::debug!("get_service_group: 그룹 {}개", rows.len());
     Ok(rows)
 }

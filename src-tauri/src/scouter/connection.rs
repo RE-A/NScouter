@@ -548,7 +548,7 @@ impl ScouterConnection {
     /// PerfCounterPack (Type 60) 파싱
     /// ASIS: PerfCounterPack.read(DataInputX)
     fn read_perf_counter_pack(&mut self) -> io::Result<PerfCounterPack> {
-        let time = self.read_decimal()? as i64;
+        let time = self.read_decimal()?;
         let obj_name = self.read_text()?;
         let timetype = self.read_byte()?;
 

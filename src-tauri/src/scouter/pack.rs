@@ -132,7 +132,7 @@ impl XLogPack {
     }
 
     fn read_inner(d: &mut ScouterReader) -> io::Result<Self> {
-        let end_time = d.read_decimal()? as i64;
+        let end_time = d.read_decimal()?;
         let obj_hash = d.read_decimal()? as i32;
         let service = d.read_decimal()? as i32;
         let txid = d.read_long()?;
@@ -147,7 +147,7 @@ impl XLogPack {
         let ipaddr = bytes_to_ip(&ipaddr_bytes);
         let kbytes = d.read_decimal()? as i32;
         let status = d.read_decimal()? as i32;
-        let userid = d.read_decimal()? as i64;
+        let userid = d.read_decimal()?;
         let user_agent = d.read_decimal()? as i32;
         let referer = d.read_decimal()? as i32;
         let group = d.read_decimal()? as i32;

@@ -155,6 +155,12 @@ pub struct ScouterWriter {
     buf: Vec<u8>,
 }
 
+impl Default for ScouterWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScouterWriter {
     pub fn new() -> Self {
         Self { buf: Vec::new() }

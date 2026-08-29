@@ -15,6 +15,7 @@ import { durationBar, durationTone } from './durationTone';
 import { ErrorDetail } from './ErrorDetail';
 import { bindSql } from './sqlBind';
 import { affectedRows } from './sqlAffected';
+import { formatSql } from './sqlFormat';
 import { useViewOptions } from '../hooks/useViewOptions';
 import { t } from '../../../i18n';
 
@@ -313,7 +314,15 @@ function SqlBody({
     [inline, params, sql],
   );
 
-  const shown = bound ? bound.text : sql;
+  const filled = bound ? bound.text : sql;
+  /**
+   * **펼쳤을 때만 줄로 나눈다.**
+   *
+   * 접힌 상태는 세 줄뿐이라, 정렬하면 `select` · `from` · `where` 세 낱말만 보이고
+   * 정작 무슨 표를 읽는지가 안 보인다. 접혔을 때는 한 줄에 최대한 담는 편이 낫다.
+   * 펼치는 이유는 «문장을 읽으려는 것» 이므로 그때 나눈다.
+   */
+  const shown = expanded ? formatSql(filled) : filled;
   const mismatched = bound !== null && (bound.bound < bound.placeholders || bound.leftover.length > 0);
 
   useLayoutEffect(() => {
@@ -356,7 +365,7 @@ function SqlBody({
           (이 파일의 기존 `line-clamp-4` 도 같은 이유로 내내 안 먹고 있었다.) */}
       <code
         ref={codeRef}
-        title={shown}
+        title={filled}
         className={`break-all whitespace-pre-wrap font-mono text-micro text-fg-muted ${
           expanded ? 'block' : 'line-clamp-3'
         }`}
@@ -375,7 +384,7 @@ function SqlBody({
             }}
             className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
           >
-            {expanded ? t('접기') : `${t('펼치기')} (${shown.length.toLocaleString()}${t('자')})`}
+            {expanded ? t('접기') : `${t('펼치기')} (${filled.length.toLocaleString()}${t('자')})`}
           </button>
         )}
         <Affected updated={updated} />

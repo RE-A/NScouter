@@ -341,7 +341,7 @@ fn read_step(r: &mut ScouterReader) -> io::Result<ProfileStep> {
 fn read_step_base(r: &mut ScouterReader) -> io::Result<StepBase> {
     let parent = r.read_decimal()? as i32;
     let index = r.read_decimal()? as i32;
-    let start_time = r.read_decimal()? as i64;
+    let start_time = r.read_decimal()?;
     let start_cpu = r.read_decimal()? as i32;
     Ok(StepBase { parent, index, start_time, start_cpu })
 }
