@@ -9,9 +9,10 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 use super::connection::ScouterConnection;
-use super::pack::{AnyPack, MapPack};
+use super::pack::{AnyPack, MapPack, XLogPack};
 use super::protocol::*;
 use super::value::ScouterValue;
+use super::xlog_columns::XLogColumns;
 
 // ─── 스트리밍 커서 ────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ pub async fn run_xlog_stream(
     log::info!("XLog 스트리밍 종료");
 }
 
+
 /// 단일 폴링 요청/응답 처리
 fn poll_once(
     conn: &mut ScouterConnection,
@@ -111,6 +113,11 @@ fn poll_once(
     let session = conn.session;
     conn.send_request(cmd, session, &param)?;
 
+    // 한 폴링에서 받은 XLog 를 **모아서** 보낸다. 이유는 EMIT_CHUNK 주석 참고.
+    let t_start = std::time::Instant::now();
+    let mut batch: Vec<XLogPack> = Vec::new();
+    let mut n_xlog: usize = 0;
+
     // 응답 스트림 수신 루프
     loop {
         match conn.read_next_pack()? {
@@ -118,8 +125,11 @@ fn poll_once(
                 cursor.update_from(&map);
             }
             Some(AnyPack::XLog(xlog)) => {
-                log::trace!("XLog 수신: txid={}, elapsed={}ms", xlog.txid, xlog.elapsed);
-                let _ = app.emit("xlog-data", xlog);
+                n_xlog += 1;
+                batch.push(xlog);
+                if batch.len() >= EMIT_CHUNK {
+                    let _ = app.emit("xlog-data", XLogColumns::from(std::mem::take(&mut batch)));
+                }
             }
             // 모르는 팩 타입은 여기까지 오지 않는다 — read_next_pack 이 에러를 낸다 (O-5).
             Some(_) => {} // Object / Profile / PerfCounter / Alert → XLog 스트림에서 무시
@@ -127,8 +137,25 @@ fn poll_once(
         }
     }
 
+    if !batch.is_empty() {
+        let _ = app.emit("xlog-data", XLogColumns::from(batch));
+    }
+    // 대량으로 올 때 어디에 시간이 갔는지 보려면 이 줄이 필요하다 (F-56).
+    if n_xlog > 0 {
+        log::debug!("폴링 {}건 · {:.1}ms", n_xlog, t_start.elapsed().as_secs_f64() * 1000.0);
+    }
     Ok(())
 }
+
+/// 한 번에 웹뷰로 보낼 XLog 개수.
+///
+/// **한 건마다 보내면 안 된다.** 첫 폴링에서 10,000건이 오는데 건별로 보내면
+/// 화면도 콜백을 1만 번 받는다. 다만 **묶는 것만으로는 거의 안 줄었다**
+/// (590ms → 501ms) — 비용은 호출 횟수가 아니라 직렬화였고, 그건 `XLogColumns` 가 푼다.
+///
+/// 그렇다고 10,000건을 한 덩어리로 보내면 페이로드가 커진다
+/// (CLAUDE.md 3.3: «대용량은 청크 분할»). 나눠 보내면 화면이 첫 묶음부터 그리기 시작한다.
+const EMIT_CHUNK: usize = 500;
 
 /// 1회 폴링으로 가져올 XLog 최대 건수.
 /// ASIS: scouter.webapp XLogConsumer.handleRealTimeXLog() 의 firstRetrieveLimit

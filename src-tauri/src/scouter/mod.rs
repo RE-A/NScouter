@@ -19,3 +19,4 @@ pub mod streaming;
 pub mod summary;
 pub mod trace;
 pub mod value;
+pub mod xlog_columns;

@@ -651,6 +651,60 @@ param = "'book',100,90000,5,10,'zzz'"
 - 구현: `src/features/xlog/components/sqlBind.ts` (`scanSlots` 로 한 번 훑어 최댓값을 먼저 구한다)
 - 재현: `cargo test --test live_collector live_sql_mixed_literal_and_bind -- --ignored --nocapture`
 
+### F-56. 대량 XLog 의 비용은 **IPC 횟수가 아니라 JSON 직렬화**다
+
+실시간 스트리밍은 첫 폴링(`TRANX_REAL_TIME_GROUP_LATEST`)에서 상한인 10,000건이 온다.
+그게 느렸다. 원인을 **두 번 틀리게 짚고** 세 번째에 맞췄다.
+
+#### 1차 — 건별 emit 이라 그렇다 (틀림)
+
+`app.emit("xlog-data", xlog)` 를 한 건마다 부르고 있었다. 재 보니:
+
+```
+poll 10000건  total 699.5ms  emit 590.7ms (84%)  건당 63.1us
+```
+
+84% 가 emit 이라 «IPC 호출이 잦아서» 로 보고 500건씩 묶었다. **거의 안 줄었다:**
+
+```
+poll 10000건  total 675.1ms  emit 501.4ms (74%)
+```
+
+#### 2차 — 직렬화를 따로 재 보니
+
+`emit` 안에서 쓰는 시간이 통째로 `serde_json` 이었다.
+
+```
+poll 10000건  emit 287ms  직렬화 287ms  JSON 7,078KB   (건당 28.7us · 700B)
+```
+
+호출 횟수가 아니라 **한 번에 만드는 JSON 의 크기**가 비용이었다.
+
+#### 3차 — 같은 배치를 세 모양으로 재고 고름
+
+| 모양 | 직렬화 | JSON |
+|---|---|---|
+| `XLogPack` 배열 (필드 40개) | 585ms | 7,078KB |
+| 화면이 쓰는 것만 (필드 17개) | 214ms | 3,091KB |
+| **열 단위 (필드 17개)** | **105ms** | **1,327KB** |
+
+두 가지가 겹쳐서 줄었다:
+1. **안 쓰는 필드 23개.** `XLogPack` 은 40개인데 화면(`SXLog`)이 쓰는 건 17개다 —
+   `text1`~`text5` · `country_code` · `referer` 등을 1만 번 실어 보내고 있었다.
+2. **되풀이되는 필드 이름.** 객체 배열은 레코드마다 키를 다시 쓴다.
+
+#### 결과
+
+```
+before  total 699.5ms  emit 590.7ms
+after   total 109.7ms  emit  56.2ms      6.4배 · 10.5배
+```
+
+- 구현: `src-tauri/src/scouter/xlog_columns.rs` · `types/xlog.ts` 의 `xlogColumnsToSXLogs`
+- **열 길이가 어긋나면 다른 트랜잭션의 값이 섞인다.** 화면에서는 숫자가 그럴듯해서
+  알아챌 수 없다 — 양쪽에 순서·길이 테스트를 뒀다.
+- 재는 법: `streaming.rs` 의 `log::debug!("폴링 …")` 를 `info` 로 올리면 폴링당 시간이 보인다.
+
 ### F-55. `updated` 는 «바뀐 행 수» 가 아니다 — **직전 스텝에 얹히는 누적값**이다
 
 `SqlStep3.updated` 를 화면에 «N행» 으로 적으려다 1행짜리 UPDATE 가 «2행» 으로 나와 캤다.

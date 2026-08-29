@@ -61,7 +61,7 @@ impl MapPack {
 /// XLog 트랜잭션 데이터
 /// txid / caller / gxid는 i64이지만 JS Number.MAX_SAFE_INTEGER를 초과할 수 있으므로
 /// 직렬화 시 String으로 변환
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct XLogPack {
     pub end_time: i64,
     pub obj_hash: i32,

@@ -3,7 +3,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { XLogPack, AgentObject } from '../types/xlog';
+import type { XLogPack, AgentObject, XLogColumns } from '../types/xlog';
 import type { XLogProfilePack } from '../types/profile';
 import type { CounterName, CounterUpdate } from '../types/counter';
 import type { AlertPack } from '../types/alert';
@@ -482,8 +482,17 @@ export async function setLogLevel(level: LogLevel): Promise<void> {
 
 // ─── 이벤트 리스너 ────────────────────────────────────────────
 
-export function onXLogData(handler: (xlog: XLogPack) => void): Promise<UnlistenFn> {
-  return listen<XLogPack>('xlog-data', e => handler(e.payload));
+/**
+ * 실시간 XLog. **행이 아니라 열로 온다** (`XLogColumns`).
+ *
+ * 첫 폴링은 10,000건이라 `XLogPack` 배열로 보내면 JSON 직렬화에만 0.6초가 든다.
+ * 화면이 쓰는 17개 필드만, 열 단위로 보내면 105ms · 1.3MB 다 (실측, F-56).
+ *
+ * **모든 열의 길이가 같다.** 하나라도 어긋나면 다른 트랜잭션의 값이 섞이는데
+ * 화면에서는 알아챌 방법이 없다 — Rust 쪽 `XLogColumns::from` 이 한 번에 채운다.
+ */
+export function onXLogData(handler: (cols: XLogColumns) => void): Promise<UnlistenFn> {
+  return listen<XLogColumns>('xlog-data', e => handler(e.payload));
 }
 
 export function onXLogError(handler: (msg: string) => void): Promise<UnlistenFn> {

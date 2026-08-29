@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { onXLogData, onXLogError } from '../api/scouterApi';
 import { subscribe } from '../api/subscribe';
 import { XLogDataStore } from '../store/XLogDataStore';
-import { xlogPackToSXLog } from '../types/xlog';
+import { xlogColumnsToSXLogs } from '../types/xlog';
 import type { XLogChartConfig } from '../types/xlog';
 
 interface UseXLogStreamResult {
@@ -22,8 +22,9 @@ export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
     // 해지 함수가 Promise 로 오므로 직접 담아 두면 안 된다 — 정리가 먼저 돌면
     // 리스너가 살아남아 XLog 가 저장소에 두 번 들어간다. `subscribe` 참고.
     const off = subscribe(
-      onXLogData(xlogPack => {
-        storeRef.current.add(xlogPackToSXLog(xlogPack));
+      // **열로 받아 여기서 행으로 엮는다.** 건당 이벤트면 10,000건에 콜백이 1만 번 돈다.
+      onXLogData(cols => {
+        storeRef.current.addBatch(xlogColumnsToSXLogs(cols));
       }),
       onXLogError(msg => {
         setStreamError(msg);

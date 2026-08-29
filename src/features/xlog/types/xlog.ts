@@ -71,6 +71,67 @@ export interface SXLog {
   threadNameHash: number;
 }
 
+/**
+ * 한 묶음의 실시간 XLog. **행이 아니라 열이다** (F-56).
+ *
+ * 첫 폴링은 10,000건이라 객체 배열로 보내면 JSON 직렬화에만 0.6초가 든다.
+ * 화면이 쓰는 17개만, 열 단위로 보내면 105ms · 1.3MB 다.
+ * **모든 열의 길이가 같다** — 보내는 쪽(`XLogColumns::from`)이 한 번에 채운다.
+ */
+export interface XLogColumns {
+  txid: string[];
+  gxid: string[];
+  caller: string[];
+  end_time: number[];
+  elapsed: number[];
+  obj_hash: number[];
+  service: number[];
+  error: number[];
+  x_type: number[];
+  cpu: number[];
+  sql_count: number[];
+  sql_time: number[];
+  apicall_count: number[];
+  apicall_time: number[];
+  ipaddr: string[];
+  kbytes: number[];
+  thread_name_hash: number[];
+}
+
+/**
+ * 열로 온 묶음을 행으로 엮는다 (F-56).
+ *
+ * **`end_time` 의 길이를 기준으로 읽는다.** 열이 17개라 하나만 짧아도 그 뒤가 통째로
+ * 밀리는데, 화면에서는 그걸 알아챌 방법이 없다 — 보내는 쪽(`XLogColumns::from`)이
+ * 한 번에 채우고, 받는 쪽은 기준 하나만 본다.
+ */
+export function xlogColumnsToSXLogs(c: XLogColumns): SXLog[] {
+  const n = c.end_time.length;
+  const out: SXLog[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    out[i] = {
+      txid: c.txid[i],
+      gxid: c.gxid[i],
+      caller: c.caller[i],
+      endTime: c.end_time[i],
+      elapsed: c.elapsed[i],
+      objHash: c.obj_hash[i],
+      service: c.service[i],
+      error: c.error[i],
+      xType: c.x_type[i],
+      cpu: c.cpu[i],
+      sqlCount: c.sql_count[i],
+      sqlTime: c.sql_time[i],
+      apiCallCount: c.apicall_count[i],
+      apiCallTime: c.apicall_time[i],
+      ipAddr: c.ipaddr[i],
+      allocKBytes: c.kbytes[i],
+      threadNameHash: c.thread_name_hash[i],
+    };
+  }
+  return out;
+}
+
 export function xlogPackToSXLog(p: XLogPack): SXLog {
   return {
     txid: p.txid,
