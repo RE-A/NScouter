@@ -311,12 +311,13 @@ export const Y_AXIS_CONFIGS: Record<YAxisMode, YAxisModeConfig> = {
 
 ```bash
 cd src-tauri
-cargo test
+cargo test                                       # L2 유닛 + L3 mock 통합
+cargo test --test live_collector -- --ignored    # L4 실서버 (Test 환경이 떠 있어야 한다)
 ```
 
-현재 테스트 위치:
-- `scouter/codec.rs` — Decimal/Blob 경계값 15개 테스트
-- `scouter/connection.rs` — SHA-256 해시 테스트
+현재 152건(L2) + 4건(L3) + 85건(L4, 기본 `#[ignore]`).
+L2 는 각 모듈 하단의 `#[cfg(test)] mod tests`, L3 는 `tests/scouter_integration.rs`,
+L4 는 `tests/live_collector.rs` 에 있다.
 
 새 테스트 추가 위치:
 
@@ -338,11 +339,17 @@ mod tests {
 
 ### TypeScript 테스트
 
-현재 테스트 미구성. 추후 Vitest 추가 예정:
-
 ```bash
-npm install -D vitest @testing-library/react
+npm test                                # 전체
+npm run test:watch                      # 고칠 때
+npm test -- src/features/xlog/engine    # 일부만
 ```
+
+Vitest + jsdom. 설정은 `vite.config.ts` 의 `test` 블록이고 Tauri API mock 은
+`src/test/setup.ts` 에서 건다. 현재 570건 / 54개 파일이며, 테스트 파일은 대상 옆에
+`*.test.ts(x)` 로 둔다.
+
+계층(L1~L4) 구분과 «무엇을 어디서 검증하나» 는 [테스트 전략](testing-strategy.md).
 
 ---
 

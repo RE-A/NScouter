@@ -155,7 +155,7 @@ mod tests {
         let p = build_today_counter_param("ServiceCount", "tomcat");
         assert_eq!(p.get_text("counter"), Some("ServiceCount"));
         assert_eq!(p.get_text("objType"), Some("tomcat"));
-        assert!(p.entries.get("date").is_none(), "오늘 조회에 date 는 없다");
+        assert!(!p.entries.contains_key("date"), "오늘 조회에 date 는 없다");
     }
 
     #[test]
@@ -280,7 +280,7 @@ mod active_service_tests {
         let p = build_active_service_param("tomcat", None);
         assert_eq!(p.get_text("objType"), Some("tomcat"));
         // objHash 를 0으로라도 넣으면 결과가 달라진다 (실측). 아예 넣지 않는다.
-        assert!(p.entries.get("objHash").is_none());
+        assert!(!p.entries.contains_key("objHash"));
     }
 
     #[test]
@@ -385,7 +385,7 @@ mod service_group_tests {
     fn param_is_objhash_list_not_objtype() {
         // objType 으로 물으면 에러 없이 0건이 온다 (실측).
         let p = build_service_group_param(&[-1585387669, 16367847]);
-        assert!(p.entries.get("objType").is_none());
+        assert!(!p.entries.contains_key("objType"));
         match p.entries.get("objHash") {
             Some(ScouterValue::List(v)) => assert_eq!(v.len(), 2),
             other => panic!("objHash 가 리스트가 아니다: {other:?}"),

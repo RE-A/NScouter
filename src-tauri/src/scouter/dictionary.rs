@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn 잘못된_키는_None() {
+    fn 잘못된_키는_none_을_돌려준다() {
         assert_eq!(hexa32_to_i64(""), None);
         assert_eq!(hexa32_to_i64("x!!!"), None);
         assert_eq!(hexa32_to_i64("hello"), None);

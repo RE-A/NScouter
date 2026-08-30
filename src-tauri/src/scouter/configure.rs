@@ -75,6 +75,8 @@ pub fn escape_config_text(text: &str) -> String {
 ///
 /// 콜렉터는 성공/실패를 예외가 아니라 `result` 텍스트로 준다.
 /// **"응답이 왔다"를 성공으로 읽으면 안 된다** — 실패해도 MapPack 은 온다.
+// `Some("")` 로 줄일 수 있으나 위아래 `Some(r) if …` 와 모양이 갈라진다.
+#[allow(clippy::redundant_guards)]
 pub fn parse_save_result(map: &MapPack) -> Result<(), String> {
     match map.get_text("result") {
         Some(r) if r.eq_ignore_ascii_case("true") => Ok(()),

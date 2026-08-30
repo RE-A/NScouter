@@ -45,7 +45,7 @@ mod tests {
 
         // READ 는 date 를 텍스트로 읽는다. stime/etime 을 넣는 건 LOAD 의 계약이다.
         assert_eq!(p.get_text("date"), Some("20260817"));
-        assert!(p.entries.get("stime").is_none(), "READ 에 stime 을 넣으면 안 된다");
+        assert!(!p.entries.contains_key("stime"), "READ 에 stime 을 넣으면 안 된다");
 
         // i64 전 범위를 쓰므로 음수가 그대로 살아야 한다.
         assert_eq!(p.get_decimal("gxid"), Some(-8539914586336317490));

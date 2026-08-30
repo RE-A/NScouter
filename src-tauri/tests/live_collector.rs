@@ -1046,7 +1046,7 @@ fn live_thread_dump_roundtrip() {
     let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
     let mut sorted = names.clone();
     // 파일명에 박힌 yyyymmddHHMMSS 가 내림차순이어야 한다
-    sorted.sort_by(|a, b| stamp_of(b).cmp(&stamp_of(a)));
+    sorted.sort_by_key(|b| std::cmp::Reverse(stamp_of(b)));
     assert_eq!(names, sorted, "목록이 최신순이 아니다");
     assert_eq!(
         stamp_of(&files[0].name),
@@ -1888,6 +1888,9 @@ fn live_xlog_stream() {
 ///
 /// order-app → shop-app 호출이 돌고 있어(`trace_interservice_enabled`)
 /// caller != 0 인 XLog 가 실제로 존재한다.
+/// (설명, 커맨드, 파라미터) — 한 커맨드를 부르는 데 필요한 한 벌.
+type GxidVariant = (&'static str, &'static str, Vec<(&'static str, ScouterValue)>);
+
 #[test]
 #[ignore]
 fn probe_xlog_by_gxid() {
@@ -1937,7 +1940,7 @@ fn probe_xlog_by_gxid() {
     //      XLOG_LOAD_BY_GXID  → getLong("stime"), getLong("etime"), getLong("gxid")
     //                           날짜는 stime/etime 에서 유도한다. date 를 주면
     //                           stime=0 → 19700101 을 뒤져 **조용히 0건**이 된다 (F-15).
-    let variants: [(&str, &str, Vec<(&str, ScouterValue)>); 3] = [
+    let variants: [GxidVariant; 3] = [
         (
             "READ: date+gxid",
             "XLOG_READ_BY_GXID",
@@ -2102,7 +2105,7 @@ fn probe_full_profile() {
     while let Some(pack) = conn.read_next_pack().expect("응답 수신 실패") {
         if let AnyPack::XLog(x) = pack {
             let weight = x.sql_count + x.apicall_count;
-            if best.map_or(true, |(_, _, w)| weight > w) {
+            if best.is_none_or(|(_, _, w)| weight > w) {
                 best = Some((x.txid, x.obj_hash, weight));
             }
         }
@@ -2193,7 +2196,7 @@ fn live_full_profile_matches_profile() {
     while let Some(pack) = conn.read_next_pack().expect("응답 수신 실패") {
         if let AnyPack::XLog(x) = pack {
             let weight = x.sql_count + x.apicall_count;
-            if best.map_or(true, |(_, _, w)| weight > w) {
+            if best.is_none_or(|(_, _, w)| weight > w) {
                 best = Some((x.txid, x.obj_hash, weight));
             }
         }
@@ -5681,9 +5684,9 @@ fn live_sql_updated_is_row_count() {
     }
 
     let mut seen = 0usize;
-    /** (요청한 행 수, 신고된 값) */
+    // (요청한 행 수, 신고된 값)
     let mut single: Vec<(i32, i32)> = Vec::new();
-    /** 한 트랜잭션 안에서 잇달아 실행된 UPDATE 들의 신고값 */
+    // 한 트랜잭션 안에서 잇달아 실행된 UPDATE 들의 신고값
     let mut loop_updates: Vec<i32> = Vec::new();
     for (txid, service) in rows.iter() {
         if seen >= 20 {

@@ -103,12 +103,11 @@ cargo test --test live_collector <name> -- --ignored --nocapture
 ## 현재 상태
 
 ```
-L1  57건 / 6개 파일 — CoordinateMapper, GridCalculator, PointMap, XLogDataStore,
-                     counter(카운터명·objType), parity(이관율)
-L2  15건 — codec 경계값 12, sha256 2, 기타
-L3  3건 — connect/login, object list, xlog stream roundtrip
-L4  5건 — object list, sequential requests, xlog stream,
-          counter real time all, counter name case sensitivity
+L1  570건 / 54개 파일 — 렌더러 엔진(좌표·그리드·PointMap·픽셀 조회·영역 선택),
+                       스토어, 훅, 컴포넌트, i18n 사전, parity(이관율)
+L2  152건 — codec 경계값, sha256, 팩·요청 파라미터 파서
+L3  4건 — connect/login, object list, xlog stream roundtrip, 모르는 팩 타입
+L4  85건 — 실서버 프로토콜 전반 (기본 ignore)
 ```
 
 이관율은 `src/features/parity/`에 있다. 기능을 옮기면 `inventory.ts`의 status 와
@@ -123,10 +122,9 @@ L4  5건 — object list, sequential requests, xlog stream,
 |---|---|---|
 | `XLogChartRenderer` 렌더 파이프라인 | L1 | Canvas mock 필요 |
 | `DotImageCache` | L1 | OffscreenCanvas mock 필요 |
-| `useXLogStream` / `useXLogCanvas` 훅 | L1 | |
-| `dictionary.rs` 텍스트 캐시 | L2/L3 | |
-| `profile.rs` 스텝 파싱 | L2 | 실제 프로파일 바이트 픽스처 필요 |
-| `PerfCounterPack` 파싱 | L2 | 버그 확정(N-5). 현재 **도달 불가 경로**. 유닛 테스트하려면 파싱/소켓 분리 필요 |
+| `useXLogStream` 훅 | L1 | `useXLogCanvas` 는 채웠다 |
+| `TextCache` 적중·갱신 (`dictionary.rs`) | L2 | 키 해석(`hexa32_to_i64`)만 있다 |
+| 스텝 파싱 — 값을 꺼내 쓰는 6종 | L2 | ThreadCall 만 합성 blob 으로 검증. 나머지는 L4 에 기댄다.<br>SUM·Span 계열은 **자리만** 검증했다(내용은 화면에 안 쓴다) |
 | 알람 화면 표시 (`AlertPanel`) | L1 | 파싱은 L4로 검증됨. UI 계약 테스트 없음 |
 
 > 카운터·알람 프로토콜은 L4로 검증 완료다 (N-6/N-8 수정).

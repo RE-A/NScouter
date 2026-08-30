@@ -914,7 +914,7 @@ mod stack_range_tests {
         // 다른 OBJECT_* 는 objHash 인데 이것만 objName 이다.
         let p = build_stack_range_param("/shop-app/shop-app", 100, 200);
         assert_eq!(p.get_text("objName"), Some("/shop-app/shop-app"));
-        assert!(p.entries.get("objHash").is_none());
+        assert!(!p.entries.contains_key("objHash"));
         assert_eq!(p.get_decimal("from"), Some(100));
         assert_eq!(p.get_decimal("to"), Some(200));
     }
@@ -942,7 +942,7 @@ mod side_effect_tests {
     fn pstack_off_has_no_time() {
         // time 이 붙어 있으면 끄려던 게 다시 켜진다.
         let p = build_pstack_param(1, None);
-        assert!(p.entries.get("time").is_none());
+        assert!(!p.entries.contains_key("time"));
         assert_eq!(p.get_decimal("objHash"), Some(1));
     }
 }
