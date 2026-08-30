@@ -11,7 +11,8 @@
 use nscouter_lib::scouter::connection::ScouterConnection;
 use nscouter_lib::scouter::pack::{AnyPack, MapPack};
 use nscouter_lib::scouter::protocol::{
-    CMD_ACTIVESPEED_REAL_TIME, CMD_ACTIVESPEED_REAL_TIME_GROUP, CMD_COUNTER_TODAY_ALL,
+    CMD_ACTIVESPEED_REAL_TIME, CMD_ACTIVESPEED_REAL_TIME_GROUP, CMD_COUNTER_PAST_DATE_ALL,
+    CMD_COUNTER_TODAY_ALL,
     CMD_VISITOR_REALTIME_TOTAL,
     CMD_GET_STACK_ANALYZER, CMD_GET_STACK_INDEX, CMD_OBJECT_THREAD_DETAIL,
     CMD_OBJECT_CALL_HEAP_DUMP, CMD_OBJECT_RESET_CACHE, CMD_OBJECT_SYSTEM_GC, CMD_PSTACK_ON,
@@ -6635,4 +6636,87 @@ fn live_three_level_chain() {
     }
 
     assert!(checked_chain, "pipeline 트랜잭션을 못 찾았다 — order-app 이 떠 있는지 볼 것");
+}
+
+/// 과거 날짜 카운터(`COUNTER_PAST_DATE_ALL`)가 실제로 값을 주는가.
+///
+/// 백엔드(`build_past_date_counter_param`)는 오래 있었지만 **화면이 없어서**
+/// 실물로 확인한 적이 없었다. 날짜 고르기를 붙이기 전에 두 가지를 본다:
+///   · 오늘 날짜로 부르면 `COUNTER_TODAY_ALL` 과 **같은 모양**인가
+///     (같아야 화면에서 «오늘» 과 «날짜=오늘» 이 어긋나지 않는다)
+///   · 어제 날짜로 불러도 에러가 아니라 응답이 오는가
+///     (데이터가 없는 날은 값이 비는 것이지 실패가 아니다)
+#[test]
+#[ignore]
+fn live_past_date_counter() {
+    use nscouter_lib::scouter::objtype::{
+        build_past_date_counter_param, build_today_counter_param, parse_counter_series,
+    };
+
+    let objs = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+    };
+    let obj_type = objs[0].0.clone();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let today = yyyymmdd_local(now);
+    let yesterday = yyyymmdd_local(now - 24 * 60 * 60 * 1000);
+
+    let fetch = |cmd: &str, param: MapPack| -> Vec<(i32, usize, f32)> {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(cmd, sess, &param).expect("요청 실패");
+        let mut rows = Vec::new();
+        while let Some(pack) = c.read_next_pack().expect("수신 실패") {
+            if let AnyPack::Map(m) = pack {
+                let sr = parse_counter_series(&m);
+                let sum: f32 = sr.values.iter().sum();
+                rows.push((sr.obj_hash, sr.values.len(), sum));
+            }
+        }
+        rows.sort_by_key(|r| r.0);
+        rows
+    };
+
+    let today_all = fetch(
+        CMD_COUNTER_TODAY_ALL,
+        build_today_counter_param("ServiceCount", &obj_type),
+    );
+    let past_today = fetch(
+        CMD_COUNTER_PAST_DATE_ALL,
+        build_past_date_counter_param("ServiceCount", &obj_type, &today),
+    );
+    let past_yesterday = fetch(
+        CMD_COUNTER_PAST_DATE_ALL,
+        build_past_date_counter_param("ServiceCount", &obj_type, &yesterday),
+    );
+
+    for (label, rows) in [
+        ("TODAY_ALL", &today_all),
+        ("PAST(오늘)", &past_today),
+        ("PAST(어제)", &past_yesterday),
+    ] {
+        println!("── {label}: 오브젝트 {}개", rows.len());
+        for (hash, len, sum) in rows {
+            println!("   objHash={hash} 포인트={len} 합={sum}");
+        }
+    }
+
+    assert!(!today_all.is_empty(), "오늘 누적이 한 건도 안 왔다");
+    assert_eq!(
+        today_all.iter().map(|r| r.0).collect::<Vec<_>>(),
+        past_today.iter().map(|r| r.0).collect::<Vec<_>>(),
+        "오늘을 날짜로 물었을 때 오브젝트 구성이 다르다"
+    );
+    assert_eq!(
+        today_all.iter().map(|r| r.1).collect::<Vec<_>>(),
+        past_today.iter().map(|r| r.1).collect::<Vec<_>>(),
+        "같은 날인데 포인트 수가 다르다"
+    );
+    // 어제는 **데이터가 없을 수 있다.** 왔다는 것과 파싱된다는 것까지만 본다.
+    println!("어제({yesterday}) 응답 오브젝트 {}개", past_yesterday.len());
 }

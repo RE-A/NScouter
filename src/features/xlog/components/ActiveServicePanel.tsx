@@ -4,7 +4,7 @@
 // 소요 시간 단계로 나눠 쌓는다 — 총 10건이어도 전부 3초 이상이면 장애고,
 // 100건이어도 전부 1초 미만이면 그냥 바쁜 것이다. 합계로는 둘이 구별되지 않는다.
 
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { useObjTypeStats } from '../hooks/useObjTypeStats';
 import {
   barFillPct,
@@ -17,6 +17,7 @@ import {
 } from './activeSpeed';
 import { sparklinePoints, toPolyline } from './sparkline';
 import { ActiveServiceList } from './ActiveServiceList';
+import { toDateString } from '../utils/xlogDate';
 import { t } from '../../../i18n';
 
 interface ActiveServicePanelProps {
@@ -44,7 +45,17 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
   enabled,
   agentMap,
 }: ActiveServicePanelProps) {
-  const stats = useObjTypeStats(objType, enabled);
+  /**
+   * 보고 있는 날. 빈 문자열이면 오늘이다.
+   *
+   * 콜렉터는 하루치(5분 × 288)를 날짜로 갖고 있다. 오늘만 볼 수 있으면
+   * «어제 이 시간엔 어땠나» 를 답할 수 없다 — 장애 뒤에 가장 먼저 묻는 것이다.
+   * 오늘을 고르면 커맨드도 오늘 것으로 돌아간다(실측상 값은 같다).
+   */
+  const [day, setDay] = useState('');
+  const today = toDateString(Date.now());
+  const isToday = day === '' || day === today;
+  const stats = useObjTypeStats(objType, enabled, isToday ? undefined : day);
 
   if (!enabled) return null;
 
@@ -129,9 +140,31 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
           )}
         </div>
 
-        {/* 오늘 누적 — 5분 단위라 따로 느리게 받는다 */}
+        {/* 하루 누적 — 5분 단위라 따로 느리게 받는다 */}
         <div className="rounded border border-line bg-surface p-3">
-          <span className="text-micro tracking-wide text-fg-dim uppercase">{t('오늘')}</span>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-micro tracking-wide text-fg-dim uppercase">
+              {isToday ? t('오늘') : day}
+            </span>
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                value={isToday ? '' : `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`}
+                max={`${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}`}
+                onChange={e => setDay(e.target.value.split('-').join(''))}
+                title={t('그날 하루의 누적을 봅니다')}
+                className="rounded border border-line-strong bg-input px-1 py-0.5 text-micro text-fg"
+              />
+              {!isToday && (
+                <button
+                  onClick={() => setDay('')}
+                  className="rounded border border-line px-1.5 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+                >
+                  {t('오늘')}
+                </button>
+              )}
+            </div>
+          </div>
 
           <div className="mt-1 flex items-baseline gap-4">
             <div>
@@ -141,10 +174,16 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
               <div className="text-micro text-fg-faint">{t('서비스 호출')}</div>
             </div>
             <div>
+              {/* 지난 날에는 **화면에서** 숫자를 지운다. 훅이 null 을 주기는 하지만,
+                  거기에만 기대면 값이 한 박자 늦게 바뀔 때 어제 카드에 오늘 숫자가 뜬다 */}
               <div className="tnum font-mono text-base text-fg-muted">
-                {stats.visitors === null ? '—' : stats.visitors.toLocaleString()}
+                {!isToday || stats.visitors === null ? '—' : stats.visitors.toLocaleString()}
               </div>
-              <div className="text-micro text-fg-faint">{t('방문자')}</div>
+              {/* 방문자에는 날짜가 없다(VISITOR_REALTIME_TOTAL). 지난 날에는
+                  숫자를 지우고 이유를 적는다 — 비워 두면 «0명» 으로 읽힌다 */}
+              <div className="text-micro text-fg-faint">
+                {isToday ? t('방문자') : t('방문자는 오늘만')}
+              </div>
             </div>
           </div>
 

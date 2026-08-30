@@ -32,7 +32,7 @@ export const PARITY_GOAL = 0.9;
  * 목표(90%)를 처음부터 하한으로 두면 CI 가 계속 빨개서 신호가 무뎌진다.
  * 기능을 옮길 때마다 이 값을 올린다. 내려가면 테스트가 잡는다.
  */
-export const PARITY_RATCHET = 0.925;
+export const PARITY_RATCHET = 0.93;
 
 const L1_COUNTER = 'L1:src/features/xlog/types/counter.test.ts';
 const L1_MAPPER = 'L1:src/features/xlog/engine/CoordinateMapper.test.ts';
@@ -248,8 +248,17 @@ const OBJTYPE_MENU: ParityItem[] = [
   },
   {
     id: 'feature.objtype.TodayServiceCount', category: 'feature', name: 'Today Service Count',
-    status: 'partial', evidence: [L1_ACTIVE_SPEED, L4_OBJTYPE],
-    note: 'COUNTER_TODAY_ALL — 오늘 누적 288포인트를 스파크라인으로. 날짜 선택(COUNTER_PAST_DATE_ALL)은 백엔드만 있고 화면 없음',
+    status: 'implemented',
+    evidence: [
+      L1_ACTIVE_SPEED,
+      'L1:src/features/xlog/components/ActiveServicePanel.test.tsx',
+      L4_OBJTYPE,
+      'L4:live_past_date_counter',
+    ],
+    note:
+      '하루 누적 288포인트를 스파크라인으로. 날짜를 고르면 COUNTER_PAST_DATE_ALL 로 그날 것을 본다 — '
+      + '오늘을 날짜로 물어도 COUNTER_TODAY_ALL 과 값이 같은 것을 실측했다(live_past_date_counter). '
+      + '방문자(VISITOR_REALTIME_TOTAL)에는 날짜가 없어 지난 날에는 내놓지 않는다',
   },
   {
     id: 'feature.objtype.UniqueTotalVisitor', category: 'feature', name: 'Unique Total Visitor',

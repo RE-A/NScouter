@@ -35,7 +35,16 @@ const EMPTY: ObjTypeStats = {
   error: null,
 };
 
-export function useObjTypeStats(objType: string, enabled: boolean): ObjTypeStats {
+/**
+ * @param date `yyyyMMdd`. 주면 **그날의** 누적을 받는다(`COUNTER_PAST_DATE_ALL`).
+ *   오늘이면 주지 않는다 — 같은 값이 오지만(L4 `live_past_date_counter` 실측)
+ *   커맨드가 갈리면 «오늘» 이 어느 쪽인지 코드에서 안 보인다.
+ */
+export function useObjTypeStats(
+  objType: string,
+  enabled: boolean,
+  date?: string,
+): ObjTypeStats {
   const [state, setState] = useState<ObjTypeStats>(EMPTY);
 
   useEffect(() => {
@@ -63,8 +72,10 @@ export function useObjTypeStats(objType: string, enabled: boolean): ObjTypeStats
     const pollToday = async () => {
       try {
         const [todayCount, visitors] = await Promise.all([
-          getTodayCounter('ServiceCount', objType),
-          getTodayVisitor(objType),
+          getTodayCounter('ServiceCount', objType, date),
+          // **방문자는 «지금까지» 만 있다.** VISITOR_REALTIME_TOTAL 에는 날짜가 없다 —
+          // 과거 날짜를 보는 중에 오늘 숫자를 같이 띄우면 그날 것으로 읽힌다.
+          date ? Promise.resolve(null) : getTodayVisitor(objType),
         ]);
         if (!alive) return;
         setState(prev => ({ ...prev, todayCount, visitors }));
@@ -77,14 +88,15 @@ export function useObjTypeStats(objType: string, enabled: boolean): ObjTypeStats
     void pollLive();
     void pollToday();
     const liveTimer = setInterval(pollLive, LIVE_MS);
-    const todayTimer = setInterval(pollToday, TODAY_MS);
+    // **지난 날은 다시 물을 이유가 없다.** 이미 끝난 하루라 값이 바뀌지 않는다.
+    const todayTimer = date ? null : setInterval(pollToday, TODAY_MS);
 
     return () => {
       alive = false;
       clearInterval(liveTimer);
-      clearInterval(todayTimer);
+      if (todayTimer !== null) clearInterval(todayTimer);
     };
-  }, [objType, enabled]);
+  }, [objType, enabled, date]);
 
   return state;
 }

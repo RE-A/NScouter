@@ -488,6 +488,10 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 하루 누적 ─────────────────────────────────────────
+  '그날 하루의 누적을 봅니다': 'Show cumulative counts for that day',
+  '방문자는 오늘만': 'Visitors: today only',
+
   // ── 프로파일 저장본 ───────────────────────────────────
   '저장본': 'Saved',
   '저장한 프로파일': 'Saved profiles',
