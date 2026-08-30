@@ -16,3 +16,16 @@ export function toDateString(endTimeMs: number): string {
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}${mm}${dd}`;
 }
+
+/**
+ * epoch ms → "yyyyMMdd-HHmmss" (로컬 시간대).
+ *
+ * 저장본 파일 이름의 앞머리다. **여기서 만든다** — Rust 쪽에 시간 라이브러리를
+ * 두지 않는 기존 결정을 따른다(`chrono` 는 dev 전용).
+ * 파일 이름이라 `:` 를 쓸 수 없다 — 윈도에서 만들어지지 않는다.
+ */
+export function toFileStamp(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${toDateString(ms)}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}

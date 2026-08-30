@@ -29,7 +29,8 @@ pub struct AppConfig {
     /// 그대로 복사해 DB 에 붙일 수도 없다. 값을 따로 보고 싶은 사람을 위해 끌 수 있게 둔다.
     #[serde(default = "default_true")]
     pub sql_bind_inline: bool,
-    /// 글자 크기 배율. 1.0 이 기본이고 화면에서 0.8~1.6 사이로 고른다.
+    /// 글자 크기 배율. 1.0 이 기본이고 화면에서는 4단계(1·1.15·1.3·1.5) 중 고른다.
+    /// 파일을 손으로 고쳐 넣은 값은 읽는 쪽에서 0.8~1.6 으로 자른다(`clampFontScale`).
     ///
     /// 밀도를 위해 작게 잡은 화면이라 오래 보면 읽기 힘들다는 이야기가 있어 둔다.
     #[serde(default = "default_font_scale")]
@@ -149,6 +150,20 @@ impl Default for AppConfig {
             xlog_chart: XLogChartPrefs::default(),
         }
     }
+}
+
+/// 데이터 디렉토리 결정. `data_dir` 이 있으면 그것, 없으면 실행파일 폴더.
+///
+/// **두 곳에서 쓴다** — 기동할 때 로그 폴더를 잡는 자리(lib.rs)와
+/// 저장본을 읽고 쓰는 자리(AppState). 규칙이 갈라지면 로그와 저장본이
+/// 서로 다른 폴더로 흩어진다.
+pub fn resolve_data_dir(config: &AppConfig, exe_dir: &std::path::Path) -> PathBuf {
+    config
+        .data_dir
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| exe_dir.to_path_buf())
 }
 
 impl AppConfig {

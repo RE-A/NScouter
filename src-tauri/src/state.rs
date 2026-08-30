@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::config::AppConfig;
+use crate::config::{resolve_data_dir, AppConfig};
 use crate::scouter::connection::ScouterConnection;
 use crate::scouter::dictionary::TextCache;
 
@@ -108,6 +108,19 @@ impl AppState {
             config: Mutex::new(config),
             config_path,
         }
+    }
+
+    /// 저장본 폴더. `{data_dir}/profiles/`
+    ///
+    /// `config_path` 는 늘 `{exe_dir}/config.json` 이므로 그 부모가 실행파일 폴더다.
+    pub async fn profile_dir(&self) -> PathBuf {
+        let config = self.config.lock().await;
+        let exe_dir = self
+            .config_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        resolve_data_dir(&config, &exe_dir).join(crate::profile_store::DIR_NAME)
     }
 }
 

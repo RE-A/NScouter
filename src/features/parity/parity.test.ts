@@ -6,7 +6,7 @@
 // 이 테스트의 목적은 "얼마나 옮겼나"를 **셀 수 있게** 만드는 것이다.
 // 자기신고를 막는 게 핵심이라, implemented 주장에는 반드시 근거 테스트가 있어야 한다.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
   PARITY_INVENTORY,
@@ -39,9 +39,17 @@ function grepFile(path: string, needle: string): boolean {
 }
 
 function grepRust(dir: string, needle: string): boolean {
-  // L2 는 모듈 내 #[cfg(test)] 이므로 파일을 특정하지 않고 훑는다.
-  for (const f of ['codec.rs', 'connection.rs', 'counter.rs', 'value.rs', 'pack.rs']) {
-    if (grepFile(`${dir}/scouter/${f}`, needle)) return true;
+  // L2 는 모듈 안의 #[cfg(test)] 이라 파일을 특정하지 않고 훑는다.
+  // **목록을 손으로 들고 있으면 안 된다** — 목록에 없는 모듈에 붙인 근거가
+  // 조용히 «죽은 참조» 로 잡힌다. 실제로 profile_store.rs 에서 그랬다.
+  if (!existsSync(dir)) return false;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (grepRust(path, needle)) return true;
+    } else if (entry.name.endsWith('.rs') && grepFile(path, needle)) {
+      return true;
+    }
   }
   return false;
 }

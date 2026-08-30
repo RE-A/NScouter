@@ -488,6 +488,16 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 프로파일 저장본 ───────────────────────────────────
+  '저장본': 'Saved',
+  '저장한 프로파일': 'Saved profiles',
+  '이 트랜잭션을 파일로 저장합니다': 'Save this transaction to a file',
+  '파일로 남겨 둔 프로파일을 엽니다': 'Open a profile saved to a file',
+  '저장했습니다': 'Saved',
+  '폴더 열기': 'Open folder',
+  '저장한 프로파일이 없습니다. 상세 패널의 «저장» 을 누르면 여기 쌓입니다.':
+    'No saved profiles yet. Use «Save» in the detail panel and they show up here.',
+
   // ── 레이아웃 ──────────────────────────────────────────
   '서비스 목록 너비': 'Service list width',
   '상세 패널 너비': 'Detail panel width',

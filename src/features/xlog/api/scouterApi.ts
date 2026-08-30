@@ -3,7 +3,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { XLogPack, AgentObject, XLogColumns } from '../types/xlog';
+import type { XLogPack, AgentObject, XLogColumns, SXLog } from '../types/xlog';
 import type { XLogProfilePack } from '../types/profile';
 import type { CounterName, CounterUpdate } from '../types/counter';
 import type { AlertPack } from '../types/alert';
@@ -630,4 +630,63 @@ export async function saveConfig(newConfig: AppConfig): Promise<void> {
  */
 export async function saveUiState(layout: UiLayout, chart: XLogChartPrefs): Promise<void> {
   return invoke<void>('save_ui_state', { layout, chart });
+}
+
+
+// ─── 프로파일 저장본 ──────────────────────────────────────────
+
+/** 저장 파일의 알맹이. 화면이 이미 들고 있는 상세 그대로다 */
+export interface SavedProfile {
+  format: string;
+  version: number;
+  saved_at: number;
+  service: string;
+  txid: string;
+  end_time: number;
+  xlog: SXLog;
+  profile: XLogProfilePack;
+  /** hash → text. **푼 채로 저장한다** — 열 때 콜렉터가 없어도 이름이 나온다 */
+  texts: Record<number, string>;
+}
+
+/** 목록 한 줄. 알맹이는 빼고 머리만 */
+export interface SavedProfileEntry {
+  path: string;
+  file_name: string;
+  service: string;
+  txid: string;
+  end_time: number;
+  saved_at: number;
+  size: number;
+}
+
+/**
+ * 지금 보고 있는 트랜잭션을 파일로 남긴다. 만들어진 경로를 돌려준다.
+ *
+ * `stamp` 는 파일 이름에 쓸 `yyyymmdd-HHmmss` 다. **여기서 만들어 넘긴다** —
+ * 이 앱은 날짜 계산을 프론트에서 한다.
+ */
+export async function saveXLogProfile(input: {
+  service: string;
+  txid: string;
+  end_time: number;
+  stamp: string;
+  xlog: SXLog;
+  profile: XLogProfilePack;
+  texts: Record<number, string>;
+}): Promise<string> {
+  return invoke<string>('save_xlog_profile', { input });
+}
+
+export async function listSavedProfiles(): Promise<SavedProfileEntry[]> {
+  return invoke<SavedProfileEntry[]>('list_saved_profiles');
+}
+
+export async function openSavedProfile(path: string): Promise<SavedProfile> {
+  return invoke<SavedProfile>('open_saved_profile', { path });
+}
+
+/** 저장본 폴더 경로. «폴더 열기» 에 쓴다 */
+export async function getProfileDir(): Promise<string> {
+  return invoke<string>('get_profile_dir');
 }

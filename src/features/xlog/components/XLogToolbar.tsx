@@ -29,6 +29,8 @@ interface XLogToolbarProps {
    * 이건 «어디 있는지 모르는 걸 찾는다» 다.
    */
   onWideSearch: () => void;
+  /** 저장해 둔 프로파일 목록을 연다 */
+  onOpenSaved: () => void;
 }
 
 const Y_AXIS_OPTIONS: YAxisMode[] = [
@@ -55,6 +57,7 @@ export function XLogToolbar({
   pastRange,
   onPastRangeChange,
   onWideSearch,
+  onOpenSaved,
 }: XLogToolbarProps) {
   // 입력 중인 값. **조회를 눌러야** 실제 구간이 된다 —
   // 타이핑할 때마다 수만 건을 다시 받으면 안 된다.
@@ -99,6 +102,16 @@ export function XLogToolbar({
         className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
       >
         {t('찾기')}
+      </button>
+
+      {/* 저장본은 **접속과 무관하다.** 콜렉터에서 이미 밀려난 트랜잭션도 열리므로
+          연결 상태와 상관없이 늘 눌린다 */}
+      <button
+        onClick={onOpenSaved}
+        title={t('파일로 남겨 둔 프로파일을 엽니다')}
+        className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
+      >
+        {t('저장본')}
       </button>
 
       {mode === 'past' && (

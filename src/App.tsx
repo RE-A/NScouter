@@ -19,8 +19,9 @@ import { FiveMinCounterChart } from './features/xlog/components/FiveMinCounterCh
 import { ServiceGroupPanel } from './features/xlog/components/ServiceGroupPanel';
 import { XLogSearchBar } from './features/xlog/components/XLogSearchBar';
 import { WideSearchDialog, type WideSearchValues } from './features/xlog/components/WideSearchDialog';
+import { SavedProfileDialog } from './features/xlog/components/SavedProfileDialog';
 import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
-import { toDateString } from './features/xlog/utils/xlogDate';
+import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
 import { durationTone } from './features/xlog/components/durationTone';
 // ko-KR 로케일은 "4시 36분 18초" 를 낸다 — 폭을 먹고 줄바꿈되며 차트 X축(04:36:18)과도 어긋난다.
@@ -36,6 +37,7 @@ import {
   getConfig,
   saveUiState,
   searchXLogList,
+  saveXLogProfile,
 } from './features/xlog/api/scouterApi';
 import { subscribe } from './features/xlog/api/subscribe';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
@@ -449,6 +451,42 @@ export default function App() {
 
   const [showSettings, setShowSettings] = useState(false);
 
+  /**
+   * 저장본.
+   *
+   * 저장할 알맹이는 **지금 화면에 있는 상세 그대로**다 — 콜렉터에 다시 묻지 않는다.
+   * 사전이 풀린 채로 들어가야 나중에 접속 없이도 이름이 나온다.
+   */
+  const [showSaved, setShowSaved] = useState(false);
+  /** 방금 저장한 결과. 잠깐 띄우고 지운다 — 저장은 조용히 끝나면 됐는지 알 수 없다 */
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+
+  const saveActiveDetail = useCallback(async () => {
+    const active = detail.active;
+    if (!active?.xlog || !active.profile) return;
+    try {
+      const path = await saveXLogProfile({
+        service: getCached('service', active.xlog.service) ?? `0x${(active.xlog.service >>> 0).toString(16)}`,
+        txid: active.xlog.txid,
+        end_time: active.xlog.endTime,
+        stamp: toFileStamp(active.xlog.endTime),
+        xlog: active.xlog,
+        profile: active.profile,
+        texts: active.texts,
+      });
+      setSaveNote(path);
+    } catch (e) {
+      setSaveNote(String(e));
+    }
+  }, [detail.active, getCached]);
+
+  // 저장 알림은 **읽을 시간만** 남긴다. 계속 떠 있으면 화면을 먹는다.
+  useEffect(() => {
+    if (saveNote === null) return;
+    const id = setTimeout(() => setSaveNote(null), 4000);
+    return () => clearTimeout(id);
+  }, [saveNote]);
+
   /** Ctrl+F 로 옮겨 갈 자리 */
   const searchInputRef = useRef<HTMLInputElement>(null);
   /** F5 — 값이 바뀌면 차트가 같은 구간을 다시 받는다 */
@@ -557,6 +595,17 @@ export default function App() {
 
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showSaved && (
+        <SavedProfileDialog
+          onOpen={detail.openSaved}
+          onClose={() => setShowSaved(false)}
+        />
+      )}
+      {saveNote && (
+        <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded border border-line-strong bg-surface px-3 py-1.5 text-micro text-fg-muted shadow">
+          {t('저장했습니다')} · <span className="font-mono text-fg-dim">{saveNote}</span>
+        </div>
+      )}
       {showWideSearch && (
         <WideSearchDialog
           agents={[...agentMap].map(([obj_hash, obj_name]) => ({ obj_hash, obj_name }) as AgentObject)}
@@ -579,6 +628,7 @@ export default function App() {
             pastRange={pastRange}
             onPastRangeChange={handlePastRangeChange}
             onWideSearch={() => setShowWideSearch(true)}
+            onOpenSaved={() => setShowSaved(true)}
           />
           {/* 분할 배치.
               이전에는 워크스페이스를 재서 패널을 절대 좌표로 놓았다. 측정값이 실제
@@ -742,6 +792,8 @@ export default function App() {
                     onSelectTrace={detail.open}
                     onOpenTxid={openByTxid}
                     searchQuery={search.state.query}
+                    onSave={detail.activeKey?.startsWith('file:') ? undefined : saveActiveDetail}
+                    fromFile={detail.activeKey?.startsWith('file:') ?? false}
                   />
                 </Pane>
               </>

@@ -426,7 +426,10 @@ const XLOG_VIEWS: ParityItem[] = [
   {
     id: 'feature.xlog.Profile', category: 'feature', name: 'XLog Profile',
     status: 'implemented', evidence: ['L4:live_xlog_profile_steps'],
-    note: 'Step 6종(Method/HashedMessage/Sql3/Message/ApiCall/ThreadCall) 실측 검증. Span 계열 미구현',
+    note:
+      'Step 6종(Method/HashedMessage/Sql3/Message/ApiCall/ThreadCall) 실측 검증. '
+      + 'Span·SpanCall 과 요약(*_SUM) 계열은 ASIS 소스 그대로 **자리만 맞춰 소비**한다 — '
+      + '화면에는 안 낸다. 안 읽으면 그 뒤 스텝이 전부 깨져서다(L2 합성 blob 검증)',
   },
   {
     id: 'feature.xlog.LoadTime', category: 'feature', name: 'LoadTimeXLog',
@@ -451,9 +454,14 @@ const XLOG_VIEWS: ParityItem[] = [
     status: 'partial',
     evidence: [
       'L1:src/features/xlog/components/profileSummary.test.ts',
+      'L1:src/features/xlog/components/SavedProfileDialog.test.tsx',
+      'L2:profile_store::tests',
       'L4:live_full_profile_matches_profile',
     ],
-    note: 'TRANX_PROFILE_FULL(max=-1, blob 청크) 로 상세 패널 조회. 요약(횟수·합계·평균, 3종 정렬) 구현. ASIS 의 페이지 이동·프로파일 파일 저장/열기는 미구현',
+    note:
+      'TRANX_PROFILE_FULL(max=-1, blob 청크) 로 상세 패널 조회. 요약(횟수·합계·평균, 3종 정렬) 구현. '
+      + '파일 저장/열기는 **JSON 한 파일**로 구현했다 — 텍스트를 푼 채로 담아 접속 없이도 열린다. '
+      + 'ASIS 의 xlog.xlog+xlog.prof(와이어 포맷)와는 호환되지 않는다. 페이지 이동은 미구현',
   },
   {
     id: 'feature.xlog.ThreadProfile', category: 'feature', name: 'XLog Thread Profile',
@@ -482,7 +490,7 @@ const XLOG_VIEWS: ParityItem[] = [
       'L4:live_flow_apicall_links_child_xlog',
       'L4:live_flow_threadcall_links_child_xlog',
     ],
-    note: '사용자 IP → 서비스 → SQL/API 호출 트리. ApiCall·ThreadCall 스텝의 txid 로 호출된 앱·스레드를 잇고, 못 찾으면 잎으로 남긴다(실측 확인). 같은 대상은 접어 횟수·시간 누적, SQL/API 토글. Dispatch·ThreadSubmit·Span 계열은 이 환경에 스텝 자체가 오지 않아 미구현(F-48). ASIS 는 Zest 그래프, 여기서는 들여쓰기 트리',
+    note: '사용자 IP → 서비스 → SQL/API 호출 트리. ApiCall·ThreadCall 스텝의 txid 로 호출된 앱·스레드를 잇고, 못 찾으면 잎으로 남긴다(실측 확인). 같은 대상은 접어 횟수·시간 누적, SQL/API 토글. Dispatch·ThreadSubmit·Span 계열은 이 환경에 스텝 자체가 오지 않아 트리에 넣지 않았다(F-48) — 파싱은 자리를 맞춰 소비한다. ASIS 는 Zest 그래프, 여기서는 들여쓰기 트리',
   },
 ];
 

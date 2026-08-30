@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toDateString } from './xlogDate';
+import { toDateString, toFileStamp } from './xlogDate';
 
 describe('toDateString', () => {
   it('yyyyMMdd 로 만든다', () => {
@@ -15,5 +15,17 @@ describe('toDateString', () => {
     // UTC 로 계산하면 여기서 하루가 어긋나 조회가 통째로 빈다.
     expect(toDateString(new Date(2026, 7, 22, 23, 59, 59).getTime())).toBe('20260822');
     expect(toDateString(new Date(2026, 7, 23, 0, 0, 0).getTime())).toBe('20260823');
+  });
+});
+
+describe('toFileStamp', () => {
+  it('yyyyMMdd-HHmmss 로 만든다', () => {
+    expect(toFileStamp(new Date(2026, 7, 30, 14, 12, 3).getTime())).toBe('20260830-141203');
+  });
+
+  it('파일 이름에 못 쓰는 글자를 넣지 않는다', () => {
+    // `:` 가 들어가면 윈도에서 파일이 아예 만들어지지 않는다.
+    const stamp = toFileStamp(Date.now());
+    expect(stamp).toMatch(/^\d{8}-\d{6}$/);
   });
 });

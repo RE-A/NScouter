@@ -11,6 +11,7 @@
 import { useCallback, useState } from 'react';
 import { useTextResolver } from './useTextResolver';
 import { loadXLogDetail, type XLogDetailState } from './useXLogDetail';
+import type { SavedProfile } from '../api/scouterApi';
 import type { SXLog } from '../types/xlog';
 
 /**
@@ -39,6 +40,13 @@ export interface XLogDetailTabs {
   active: XLogDetailState | null;
   /** 열거나, 이미 열려 있으면 그리로 옮긴다 */
   open: (xlog: SXLog) => void;
+  /**
+   * 파일에서 읽은 저장본을 **조회 없이** 탭으로 연다.
+   *
+   * 콜렉터에 다시 묻지 않는다 — 저장본은 텍스트까지 풀린 채로 들어 있고,
+   * 애초에 그 트랜잭션이 콜렉터에서 이미 밀려났을 수 있다.
+   */
+  openSaved: (saved: SavedProfile) => void;
   close: (key: string) => void;
   closeActive: () => void;
   closeAll: () => void;
@@ -153,6 +161,49 @@ export function useXLogDetailTabs(): XLogDetailTabs {
     [resolve],
   );
 
+  /**
+   * 저장본 탭의 키.
+   *
+   * **txid 를 그대로 쓰면 안 된다** — 같은 트랜잭션이 실시간으로도 열려 있으면
+   * 그 탭을 저장본이 덮어쓴다. 파일 이름을 붙여 다른 자리로 둔다.
+   */
+  const openSaved = useCallback((saved: SavedProfile) => {
+    const key = `file:${saved.txid}:${saved.saved_at}`;
+    setState(prev => {
+      if (prev.tabs.some(t => t.key === key)) {
+        return {
+          tabs: prev.tabs.map(t => (t.key === key ? { ...t, touchedAt: Date.now() } : t)),
+          activeKey: key,
+        };
+      }
+
+      const tab: DetailTab = {
+        key,
+        title: saved.service || titleOf(saved.xlog, saved.texts),
+        state: {
+          isLoading: false,
+          error: null,
+          profile: saved.profile,
+          texts: saved.texts,
+          xlog: saved.xlog,
+        },
+        touchedAt: Date.now(),
+      };
+
+      let kept = prev.tabs;
+      if (kept.length >= MAX_DETAIL_TABS) {
+        const victim = kept
+          .filter(t => t.key !== prev.activeKey)
+          .reduce<DetailTab | null>(
+            (oldest, t) => (oldest === null || t.touchedAt < oldest.touchedAt ? t : oldest),
+            null,
+          );
+        if (victim) kept = kept.filter(t => t.key !== victim.key);
+      }
+      return { tabs: [...kept, tab], activeKey: key };
+    });
+  }, []);
+
   const close = useCallback((key: string) => {
     setState(prev => {
       const idx = prev.tabs.findIndex(t => t.key === key);
@@ -192,8 +243,10 @@ export function useXLogDetailTabs(): XLogDetailTabs {
   }, []);
 
   // 제목은 사전이 나중에 채워지기도 한다 — 그릴 때 한 번 더 본다.
+  // **저장본은 건드리지 않는다.** 이름은 파일 안에 이미 있고, 지금 붙은 서버의
+  // 사전이 같은 해시에 다른 이름을 갖고 있을 수 있다.
   const tabs = state.tabs.map(t =>
-    t.state.xlog
+    t.state.xlog && !t.key.startsWith('file:')
       ? { ...t, title: getCached('service', t.state.xlog.service) ?? t.title }
       : t,
   );
@@ -204,6 +257,7 @@ export function useXLogDetailTabs(): XLogDetailTabs {
     activeKey: state.activeKey,
     active,
     open,
+    openSaved,
     close,
     closeActive,
     closeAll,

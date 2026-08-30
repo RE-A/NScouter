@@ -1847,3 +1847,42 @@ pub async fn save_config(
     log::info!("config.json 저장 완료: {}", path.display());
     Ok(())
 }
+
+
+// ─── 프로파일 저장본 ──────────────────────────────────────────
+//
+// 파일 규칙과 봉투는 `profile_store` 가 안다. 여기서는 폴더를 정해 넘기기만 한다.
+
+/// 지금 보고 있는 트랜잭션을 파일로 남긴다. 만들어진 경로를 돌려준다.
+#[tauri::command]
+pub async fn save_xlog_profile(
+    input: crate::profile_store::SaveProfileInput,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let dir = state.profile_dir().await;
+    let path = crate::profile_store::save(&dir, input)?;
+    log::info!("프로파일 저장: {}", path.display());
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 저장본 목록 (최신 저장 순).
+#[tauri::command]
+pub async fn list_saved_profiles(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::profile_store::SavedProfileEntry>, String> {
+    Ok(crate::profile_store::list(&state.profile_dir().await))
+}
+
+/// 저장본 하나를 읽는다.
+#[tauri::command]
+pub async fn open_saved_profile(
+    path: String,
+) -> Result<crate::profile_store::SavedProfile, String> {
+    crate::profile_store::read_file(std::path::Path::new(&path))
+}
+
+/// 저장본 폴더 경로. 화면에서 «폴더 열기» 에 쓴다.
+#[tauri::command]
+pub async fn get_profile_dir(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.profile_dir().await.to_string_lossy().to_string())
+}

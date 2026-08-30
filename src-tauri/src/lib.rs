@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod config;
+pub mod profile_store;
 pub mod scouter;
 pub mod state;
 
@@ -30,12 +31,7 @@ pub fn run() {
     let config = AppConfig::load(&config_path);
 
     // 3. 데이터 디렉토리 결정: config.data_dir 우선, 없으면 exe_dir
-    let data_dir: PathBuf = config
-        .data_dir
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| exe_dir.clone());
+    let data_dir: PathBuf = config::resolve_data_dir(&config, &exe_dir);
 
     let log_dir = data_dir.join("logs");
 
@@ -106,6 +102,10 @@ pub fn run() {
             get_config,
             save_config,
             save_ui_state,
+            save_xlog_profile,
+            list_saved_profiles,
+            open_saved_profile,
+            get_profile_dir,
             search_xlog_list,
             get_search_max,
         ])

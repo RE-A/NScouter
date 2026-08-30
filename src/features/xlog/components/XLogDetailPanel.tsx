@@ -49,6 +49,15 @@ interface XLogDetailPanelProps {
    * 걸린 자리를 여기서 직접 찾는 게 싸고, 여러 군데 걸렸을 때 오갈 수 있다.
    */
   searchQuery?: string;
+  /**
+   * 이 트랜잭션을 파일로 남긴다.
+   *
+   * 저장할 알맹이는 **지금 화면에 있는 것 그대로**다 — 다시 조회하지 않는다.
+   * 없으면 버튼을 두지 않는다(저장본을 다시 저장할 일은 없다).
+   */
+  onSave?: () => void | Promise<void>;
+  /** 저장본을 열어 보고 있는 중인가. 헤더에 표시만 한다 */
+  fromFile?: boolean;
 }
 
 export const XLogDetailPanel = memo(function XLogDetailPanel({
@@ -58,6 +67,8 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
   onSelectTrace,
   onOpenTxid,
   searchQuery = '',
+  onSave,
+  fromFile = false,
 }: XLogDetailPanelProps) {
   const { getCached } = useTextResolver();
   const trace = useCallTrace(state.xlog);
@@ -134,8 +145,20 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
           </h2>
           <p className="tnum mt-0.5 font-mono text-micro text-fg-dim">
             {startTime} → {endTimeStr}
+            {/* 저장본은 **지금 흐르는 것이 아니다.** 말해 주지 않으면
+                옆의 실시간 탭과 구별되지 않는다 */}
+            {fromFile && <span className="ml-2 font-sans text-fg-faint">· {t('저장본')}</span>}
           </p>
         </div>
+        {onSave && xlog && (
+          <button
+            onClick={() => { void onSave(); }}
+            title={t('이 트랜잭션을 파일로 저장합니다')}
+            className="shrink-0 rounded border border-line-strong px-1.5 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+          >
+            {t('저장')}
+          </button>
+        )}
         <button
           onClick={onClose}
           aria-label={t('상세 닫기')}

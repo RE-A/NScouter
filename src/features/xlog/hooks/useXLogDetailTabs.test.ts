@@ -178,3 +178,49 @@ describe('useXLogDetailTabs', () => {
     expect(result.current.activeKey).toBeNull();
   });
 });
+
+describe('useXLogDetailTabs — 저장본', () => {
+  const saved = (txid: string, savedAt = 1) =>
+    ({
+      format: 'nscouter-profile',
+      version: 1,
+      saved_at: savedAt,
+      service: '/shop/order',
+      txid,
+      end_time: 1_700_000_000_000,
+      xlog: xlog(txid),
+      profile: { txid, obj_hash: 1, steps: [] },
+      texts: { 7: '/shop/order' },
+    }) as unknown as Parameters<
+      ReturnType<typeof useXLogDetailTabs>['openSaved']
+    >[0];
+
+  it('조회하지 않고 파일 내용 그대로 연다', async () => {
+    // 저장본은 콜렉터에서 이미 밀려났을 수 있다. 다시 물으면 빈 화면이 된다.
+    const { result } = renderHook(() => useXLogDetailTabs());
+    act(() => result.current.openSaved(saved('z1')));
+
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.active?.isLoading).toBe(false);
+    expect(result.current.active?.profile).toBeTruthy();
+    expect(result.current.active?.texts[7]).toBe('/shop/order');
+  });
+
+  it('같은 트랜잭션이 실시간으로 열려 있어도 덮어쓰지 않는다', async () => {
+    const { result } = renderHook(() => useXLogDetailTabs());
+    act(() => result.current.open(xlog('z1')));
+    await waitFor(() => expect(result.current.active?.isLoading).toBe(false));
+
+    act(() => result.current.openSaved(saved('z1')));
+
+    expect(result.current.tabs).toHaveLength(2);
+  });
+
+  it('같은 저장본을 두 번 열면 탭이 늘지 않는다', () => {
+    const { result } = renderHook(() => useXLogDetailTabs());
+    act(() => result.current.openSaved(saved('z1', 5)));
+    act(() => result.current.openSaved(saved('z1', 5)));
+
+    expect(result.current.tabs).toHaveLength(1);
+  });
+});
