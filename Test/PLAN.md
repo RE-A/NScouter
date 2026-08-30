@@ -662,25 +662,30 @@ cd src-tauri && cargo test --test live_collector -- --ignored --nocapture
 
 접속 정보: `127.0.0.1` / `6100` / `admin` / `admin`
 
-| # | 검증 항목 | 상태 |
-|---|-----------|------|
-| 1 | 로그인 | 백엔드 검증 완료 (L4) |
-| 2 | 에이전트 목록 2건 | 백엔드 검증 완료 (L4) |
-| 3 | XLog 실시간 유입 | 백엔드 검증 완료 (L4) |
-| 4 | 에이전트별 색상 | **화면 확인 필요** |
-| 5 | 에러 점(빨간색) | **화면 확인 필요** — 데이터에는 288건 존재 |
-| 6 | 비동기 점(회색/연빨강) | **화면 확인 필요** |
-| 7 | Y축 분포 | **화면 확인 필요** — max 6003ms |
-| 8 | 텍스트 사전(서비스명) | **화면 확인 필요** |
-| 9 | 프로파일 SQL 스텝 | **화면 확인 필요** — sqlCount>0 8567건 |
-| 10 | apicall 프로파일 | **화면 확인 필요** |
-| 11 | gxid 연계 | **화면 확인 필요** — caller!=0 1443건 |
-| 12 | 카운터 | 미검증 (PerfCounterPack 파싱 미확인) |
-| 13 | 알람 | 미검증 |
-| 14 | 대량 부하 렌더링 | **화면 확인 필요** |
+> **아래 표는 2026-08-15 시점의 기록이다.** 그 뒤로 기능이 크게 늘어 항목별 상태는
+> 여기서 관리하지 않는다 — **`src/features/parity/inventory.ts` 가 원본**이고,
+> `parity.test.ts` 가 status 마다 evidence(테스트명·파일)를 강제한다.
+> 아래는 그때 무엇을 열어 두고 시작했는지의 기록으로 남긴다.
 
-12·13은 `PerfCounterPack` / `AlertPack` 파싱이 ObjectPack과 같은 필드 순서 문제를 가질 수
-있어 별도 실측이 필요하다. [testing-strategy.md](../docs/testing-strategy.md)의 공백 표 참조.
+| # | 검증 항목 | 2026-08-15 상태 | 이후 |
+|---|-----------|------|------|
+| 1 | 로그인 | 백엔드 검증 완료 (L4) | |
+| 2 | 에이전트 목록 2건 | 백엔드 검증 완료 (L4) | |
+| 3 | XLog 실시간 유입 | 백엔드 검증 완료 (L4) | |
+| 4 | 에이전트별 색상 | 화면 확인 필요 | |
+| 5 | 에러 점(빨간색) | 화면 확인 필요 — 데이터에는 288건 존재 | |
+| 6 | 비동기 점(회색/연빨강) | 화면 확인 필요 | |
+| 7 | Y축 분포 | 화면 확인 필요 — max 6003ms | Y축 종류를 늘리며 실물로 확인 (`284d608`) |
+| 8 | 텍스트 사전(서비스명) | 화면 확인 필요 | L4 `live_text_dictionary_types` |
+| 9 | 프로파일 SQL 스텝 | 화면 확인 필요 — sqlCount>0 8567건 | L4 `live_xlog_profile_steps` · 바인딩은 `live_sql_mixed_literal_and_bind` |
+| 10 | apicall 프로파일 | 화면 확인 필요 | L4 `live_flow_apicall_links_child_xlog` |
+| 11 | gxid 연계 | 화면 확인 필요 — caller!=0 1443건 | L4 `live_xlog_by_gxid` |
+| 12 | 카운터 | 미검증 (PerfCounterPack 파싱 미확인) | 프로토콜 L4 검증(`live_counter_real_time_all`·`live_javaee_counter_values`·`live_host_counters`). PerfCounterPack 자체는 N-5 수정 + L3 회귀 |
+| 13 | 알람 | 미검증 | 파싱 L4 검증(`live_alert_pack_fields`·`live_alert_cursor_advances`). **화면 표시는 아직 미확인** — parity 에 partial |
+| 14 | 대량 부하 렌더링 | 화면 확인 필요 | 실환경 1,600건 드래그에서 나온 것들은 [backlog.md](../docs/backlog.md) |
+
+**화면 항목(4~7)은 항목별 대조표가 유지되지 않았다.** 실물 화면 확인은 이후 여러 번
+있었지만(`9b31190` 등) 이 표에 되돌려 적지 않았다. 다시 볼 때는 parity inventory 를 본다.
 
 부하 상태 신호 (`scripts/signal_check.py`):
 

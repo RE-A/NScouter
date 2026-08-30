@@ -4,7 +4,7 @@
 // 실행: cargo test --test scouter_integration
 
 use nscouter_lib::scouter::connection::ScouterConnection;
-use nscouter_lib::scouter::mock_server::MockServer;
+use nscouter_lib::scouter::mock_server::{MockServer, MOCK_PERF_COUNTER_TIME};
 use nscouter_lib::scouter::pack::{AnyPack, MapPack};
 use nscouter_lib::scouter::protocol::{
     CMD_OBJECT_LIST_REAL_TIME, CMD_TRANX_REAL_TIME_GROUP_LATEST,
@@ -90,6 +90,34 @@ fn 모르는_팩_타입은_조용히_넘어가지_않는다() {
     };
     // 무엇이 문제인지 메시지에 팩 타입이 있어야 다음 구현 대상을 안다.
     assert!(msg.contains("0xEE"), "에러 메시지에 팩 타입이 없다: {msg}");
+
+    server.stop();
+}
+
+/// N-5: PerfCounterPack 의 `time` 은 **8바이트 고정**이다.
+///
+/// `readDecimal` 로 읽으면 첫 바이트를 길이 지시자로 삼아 자리가 어긋난다.
+/// 첫 필드가 깨지면 팩 전체가 무의미해진다 — 그래서 값 하나를 끝까지 본다.
+#[test]
+fn perf_counter_pack_의_time_은_8바이트다() {
+    let server = MockServer::start().expect("Mock 서버 시작 실패");
+    let port = server.port;
+
+    let mut conn = ScouterConnection::connect("127.0.0.1", port).unwrap();
+    conn.login("admin", "admin").unwrap();
+
+    let session = conn.session;
+    conn.send_request("MOCK_PERF_COUNTER", session, &MapPack::new()).expect("요청 실패");
+
+    match conn.read_next_pack().expect("PerfCounterPack 파싱 실패") {
+        Some(AnyPack::PerfCounter(p)) => {
+            assert_eq!(p.time, MOCK_PERF_COUNTER_TIME, "time 을 8바이트로 읽지 않았다");
+            assert_eq!(p.obj_name, "/mock-host/mock-app", "time 뒤 자리가 밀렸다");
+            assert_eq!(p.timetype, 0);
+            assert_eq!(p.data.get("TPS").copied(), Some(12.5));
+        }
+        _ => panic!("PerfCounterPack 이 아니다"),
+    }
 
     server.stop();
 }

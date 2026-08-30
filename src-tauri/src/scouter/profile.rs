@@ -188,12 +188,9 @@ pub fn parse_profile_steps(blob: Vec<u8>) -> Vec<ProfileStep> {
 fn read_step(r: &mut ScouterReader) -> io::Result<ProfileStep> {
     let step_type = r.read_unsigned_byte()?;
 
-    // StepControl 은 StepSummary 상속이라 StepSingle base 가 없다.
-    // ASIS: message(text) → code(decimal) 순서다.
-    if step_type == 99 {
-        let _message = r.read_text()?;
-        let _code = r.read_decimal()?;
-        return Ok(ProfileStep::Unknown { step_type, base: None });
+    // StepSummary 계열은 StepSingle base 가 없다. 먼저 걸러낸다.
+    if let Some(step) = read_summary_step(r, step_type)? {
+        return Ok(step);
     }
 
     let base = read_step_base(r)?;
@@ -327,14 +324,119 @@ fn read_step(r: &mut ScouterReader) -> io::Result<ProfileStep> {
             let _lock_owner_name = r.read_text()?;
             Ok(ProfileStep::Unknown { step_type, base: Some(base) })
         }
-        // ─ 미구현 타입 ─────────────────────────────────────────────
+        // ─ SpanStep (51) / SpanCallStep (52) ───────────────────────
+        // 둘 다 CommonSpanStep 을 상속한다 — 공통 본문을 먼저 읽고
+        // SpanCall 만 txid/opt/async 를 더 읽는다.
+        51 | 52 => {
+            read_common_span_body(r)?;
+            if step_type == 52 {
+                let _txid = r.read_decimal()?;
+                // opt=1 일 때만 address 가 실려 온다. ASIS SpanCallStep.read()
+                let opt = r.read_unsigned_byte()?;
+                if opt == 1 {
+                    let _address = r.read_text()?;
+                }
+                let _async = r.read_byte()?;
+            }
+            Ok(ProfileStep::Unknown { step_type, base: Some(base) })
+        }
+        // ─ 이 버전에 없는 타입 ─────────────────────────────────────
+        // ASIS `StepEnum` 의 23종은 전부 위에서 다룬다. 여기 오는 것은
+        // 나중 버전에서 늘어난 타입이다.
         // 본문 길이를 모르므로 **여기서 멈춰야 한다.**
         // 그냥 Unknown 을 돌려주면 다음 Step 부터 전부 쓰레기가 된다.
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("미구현 Step 타입 {step_type} — 본문 길이를 몰라 이후 파싱 불가"),
+            format!("모르는 Step 타입 {step_type} — 본문 길이를 몰라 이후 파싱 불가"),
         )),
     }
+}
+
+/// **StepSingle base 가 없는** Step 을 읽는다. 해당 없으면 `None`.
+///
+/// ASIS 의 `StepSummary` 는 **필드가 하나도 없는** 추상 클래스다. 그 계열에
+/// `parent/index/start_time/start_cpu` 네 개를 읽으면 본문을 먹어 이후 Step 이
+/// 전부 어긋난다 — 여기서 먼저 갈라야 하는 이유다.
+///
+/// `*_SUM` 은 에이전트가 스텝을 **요약으로 바꿔 보낼 때** 온다.
+/// 2.21.3 에이전트 jar 안에 `scouter/agent/trace/ProfileSummary` 가 있고
+/// MethodSum·SqlSum·ApiCallSum·SocketSum 을 만든다(바이트코드 확인).
+/// **전환 조건까지는 확인하지 못했다** — 실측 표본이 없다.
+/// 필드 순서 근거는 ASIS `scouter.lang.step.*Sum.read(DataInputX)`.
+fn read_summary_step(r: &mut ScouterReader, step_type: u8) -> io::Result<Option<ProfileStep>> {
+    match step_type {
+        // ─ StepControl (99) : message, code ────────────────────────
+        99 => {
+            let _message = r.read_text()?;
+            let _code = r.read_decimal()?;
+        }
+        // ─ MethodSum (11) : hash, count, elapsed, cputime ──────────
+        11 => {
+            let _hash = r.read_decimal()?;
+            let _count = r.read_decimal()?;
+            let _elapsed = r.read_decimal()?;
+            let _cputime = r.read_decimal()?;
+        }
+        // ─ SqlSum (21) : MethodSum + error, param, param_error ─────
+        21 => {
+            let _hash = r.read_decimal()?;
+            let _count = r.read_decimal()?;
+            let _elapsed = r.read_decimal()?;
+            let _cputime = r.read_decimal()?;
+            let _error = r.read_decimal()?;
+            let _param = r.read_text()?;
+            let _param_error = r.read_text()?;
+        }
+        // ─ MessageSum (31) : message, count ────────────────────────
+        31 => {
+            let _message = r.read_text()?;
+            let _count = r.read_decimal()?;
+        }
+        // ─ SocketSum (42) : ipaddr, port, count, elapsed, error ────
+        42 => {
+            let _ipaddr = r.read_blob()?;
+            let _port = r.read_decimal()?;
+            let _count = r.read_decimal()?;
+            let _elapsed = r.read_decimal()?;
+            let _error = r.read_decimal()?;
+        }
+        // ─ ApiCallSum (43) : MethodSum + error, opt ────────────────
+        43 => {
+            let _hash = r.read_decimal()?;
+            let _count = r.read_decimal()?;
+            let _elapsed = r.read_decimal()?;
+            let _cputime = r.read_decimal()?;
+            let _error = r.read_decimal()?;
+            // ASIS 는 opt != 0 을 쓰기 단계에서 막는다. 읽기는 한 바이트로 끝난다.
+            let _opt = r.read_byte()?;
+        }
+        _ => return Ok(None),
+    }
+    Ok(Some(ProfileStep::Unknown { step_type, base: None }))
+}
+
+/// CommonSpanStep 공통 본문 (ASIS: CommonSpanStep.read(), base 는 읽은 뒤)
+///
+/// 끝의 세 값이 ListValue·ListValue·MapValue 다 — **길이가 값 안에 있어**
+/// 건너뛸 수 없고 실제로 읽어야 다음 Step 자리가 맞는다.
+fn read_common_span_body(r: &mut ScouterReader) -> io::Result<()> {
+    let _hash = r.read_decimal()?;
+    let _elapsed = r.read_decimal()?;
+    let _error = r.read_decimal()?;
+    let _timestamp = r.read_decimal()?;
+    let _span_type = r.read_byte()?;
+    let _local_service = r.read_decimal()?;
+    let _local_ip = r.read_blob()?;
+    let _local_port = r.read_short()?;
+    let _remote_service = r.read_decimal()?;
+    let _remote_ip = r.read_blob()?;
+    let _remote_port = r.read_short()?;
+    let _debug = r.read_boolean()?;
+    let _shared = r.read_boolean()?;
+    let _annotation_timestamps = ScouterValue::read_from(r)?;
+    let _annotation_values = ScouterValue::read_from(r)?;
+    let _tags = ScouterValue::read_from(r)?;
+    Ok(())
 }
 
 /// StepSingle 공통 base 읽기 (ASIS: StepSingle.read())
@@ -384,7 +486,7 @@ mod full_profile_tests {
         assert_eq!(p.get_text("date"), Some("20260817"));
         assert_eq!(p.get_decimal("txid"), Some(-735646748055516174));
         // max 를 보내면 안 된다 — FULL 은 서버가 -1 로 고정한다.
-        assert!(p.entries.get("max").is_none());
+        assert!(!p.entries.contains_key("max"));
     }
 }
 
@@ -450,5 +552,194 @@ mod thread_call_tests {
 
         let steps = parse_profile_steps(blob);
         assert_eq!(steps.len(), 2, "두 번째 스텝을 못 읽었다");
+    }
+}
+
+#[cfg(test)]
+mod summary_span_tests {
+    use super::*;
+    use super::super::codec::ScouterWriter;
+
+    /// 뒤에 붙여 **자리가 맞는지 확인하는** MethodStep(1).
+    /// 앞 Step 의 바이트 수를 하나라도 틀리면 이 hash 가 안 나온다.
+    fn method_blob(hash: i32) -> Vec<u8> {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(1);
+        w.write_decimal(-1); // parent
+        w.write_decimal(0); // index
+        w.write_decimal(10); // start_time
+        w.write_decimal(0); // start_cpu
+        w.write_decimal(hash as i64);
+        w.write_decimal(5); // elapsed
+        w.write_decimal(1); // cputime
+        w.into_bytes()
+    }
+
+    fn parse_with_trailing_method(mut blob: Vec<u8>) -> Vec<ProfileStep> {
+        blob.extend(method_blob(4242));
+        parse_profile_steps(blob)
+    }
+
+    /// 두 번째가 hash=4242 인 MethodStep 이면 첫 Step 을 **정확히** 소비한 것이다.
+    fn assert_aligned(steps: &[ProfileStep], step_type: u8) {
+        assert_eq!(steps.len(), 2, "타입 {step_type} 뒤의 스텝을 못 읽었다");
+        match &steps[0] {
+            ProfileStep::Unknown { step_type: t, base } => {
+                assert_eq!(*t, step_type);
+                assert!(base.is_none(), "StepSummary 계열에는 base 가 없다");
+            }
+            other => panic!("Unknown 이 아니다: {other:?}"),
+        }
+        match &steps[1] {
+            ProfileStep::Method(m) => assert_eq!(m.hash, 4242, "자리가 밀렸다"),
+            other => panic!("두 번째가 MethodStep 이 아니다: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn method_sum_은_base_없이_읽는다() {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(11);
+        w.write_decimal(100); // hash
+        w.write_decimal(3); // count
+        w.write_decimal(90); // elapsed
+        w.write_decimal(7); // cputime
+        assert_aligned(&parse_with_trailing_method(w.into_bytes()), 11);
+    }
+
+    #[test]
+    fn sql_sum_은_param_두_개를_읽는다() {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(21);
+        w.write_decimal(100);
+        w.write_decimal(3);
+        w.write_decimal(90);
+        w.write_decimal(7);
+        w.write_decimal(0); // error
+        w.write_text("'fruit',100");
+        w.write_text("");
+        assert_aligned(&parse_with_trailing_method(w.into_bytes()), 21);
+    }
+
+    #[test]
+    fn message_sum_은_텍스트가_먼저다() {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(31);
+        w.write_text("redis get");
+        w.write_decimal(12);
+        assert_aligned(&parse_with_trailing_method(w.into_bytes()), 31);
+    }
+
+    #[test]
+    fn socket_sum_은_ip_가_blob_이다() {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(42);
+        w.write_blob(&[127, 0, 0, 1]);
+        w.write_decimal(5432);
+        w.write_decimal(2);
+        w.write_decimal(30);
+        w.write_decimal(0);
+        assert_aligned(&parse_with_trailing_method(w.into_bytes()), 42);
+    }
+
+    #[test]
+    fn apicall_sum_은_끝에_opt_한_바이트다() {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(43);
+        w.write_decimal(100);
+        w.write_decimal(3);
+        w.write_decimal(90);
+        w.write_decimal(7);
+        w.write_decimal(0);
+        w.write_byte(0); // opt
+        assert_aligned(&parse_with_trailing_method(w.into_bytes()), 43);
+    }
+
+    /// CommonSpanStep 본문. base 는 부르는 쪽에서 쓴다.
+    fn span_body(w: &mut ScouterWriter) {
+        w.write_decimal(11); // hash
+        w.write_decimal(22); // elapsed
+        w.write_decimal(0); // error
+        w.write_decimal(1786721179122); // timestamp
+        w.write_byte(1); // spanType
+        w.write_decimal(5); // localEndpointServiceName
+        w.write_blob(&[10, 0, 0, 5]);
+        w.write_short(8080);
+        w.write_decimal(6); // remoteEndpointServiceName
+        w.write_blob(&[10, 0, 0, 6]);
+        w.write_short(9090);
+        w.write_boolean(false); // debug
+        w.write_boolean(true); // shared
+        ScouterValue::List(vec![ScouterValue::Decimal(1)]).write_to(w);
+        ScouterValue::List(vec![ScouterValue::Text("cs".to_string())]).write_to(w);
+        let mut tags = std::collections::HashMap::new();
+        tags.insert("http.method".to_string(), ScouterValue::Text("GET".to_string()));
+        ScouterValue::Map(tags).write_to(w);
+    }
+
+    fn base_and(step_type: u8, body: impl Fn(&mut ScouterWriter)) -> Vec<u8> {
+        let mut w = ScouterWriter::new();
+        w.write_unsigned_byte(step_type);
+        w.write_decimal(-1);
+        w.write_decimal(0);
+        w.write_decimal(30);
+        w.write_decimal(0);
+        body(&mut w);
+        w.into_bytes()
+    }
+
+    #[test]
+    fn span_은_뒤_스텝을_깨지_않는다() {
+        // 끝의 ListValue/ListValue/MapValue 를 안 읽으면 여기서 어긋난다.
+        let steps = parse_with_trailing_method(base_and(51, span_body));
+        assert_eq!(steps.len(), 2);
+        match &steps[0] {
+            ProfileStep::Unknown { step_type, base } => {
+                assert_eq!(*step_type, 51);
+                assert_eq!(base.as_ref().expect("Span 은 StepSingle base 가 있다").start_time, 30);
+            }
+            other => panic!("Unknown 이 아니다: {other:?}"),
+        }
+        match &steps[1] {
+            ProfileStep::Method(m) => assert_eq!(m.hash, 4242),
+            other => panic!("두 번째가 MethodStep 이 아니다: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn span_call_은_opt_1_일_때만_주소를_읽는다() {
+        let with_addr = base_and(52, |w| {
+            span_body(w);
+            w.write_decimal(4516550232655921395); // txid
+            w.write_byte(1); // opt
+            w.write_text("http://order-app:8082/order/place");
+            w.write_byte(0); // async
+        });
+        let without_addr = base_and(52, |w| {
+            span_body(w);
+            w.write_decimal(0);
+            w.write_byte(0); // opt — 주소 없음
+            w.write_byte(1); // async
+        });
+
+        for blob in [with_addr, without_addr] {
+            let steps = parse_with_trailing_method(blob);
+            assert_eq!(steps.len(), 2);
+            match &steps[1] {
+                ProfileStep::Method(m) => assert_eq!(m.hash, 4242, "자리가 밀렸다"),
+                other => panic!("두 번째가 MethodStep 이 아니다: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn 모르는_타입은_거기서_멈춘다() {
+        // 본문 길이를 모르면 이어 읽는 것이 더 나쁘다. 앞까지는 살린다.
+        let mut blob = method_blob(1);
+        blob.push(200); // 없는 타입
+        blob.extend(method_blob(2));
+
+        let steps = parse_profile_steps(blob);
+        assert_eq!(steps.len(), 1, "모르는 타입 뒤는 버려야 한다");
     }
 }

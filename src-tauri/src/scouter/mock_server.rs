@@ -222,6 +222,8 @@ fn handle_client(stream: TcpStream) {
     }
 
     // 2. 요청 루프
+    // `while let` 로 접으면 아래쪽 break 들과 층이 안 맞는다 — 루프를 그대로 둔다.
+    #[allow(clippy::while_let_loop)]
     loop {
         // cmd = text (blob 포맷)
         let cmd = match h.read_text() {
@@ -253,6 +255,8 @@ fn handle_client(stream: TcpStream) {
             CMD_GET_TEXT_100 => make_get_text_response(&param),
             // 테스트 전용 — 실제 콜렉터에는 없는 명령이다 (O-5 재현)
             "MOCK_UNKNOWN_PACK" => make_unknown_pack_response(),
+            // 테스트 전용 — PerfCounterPack 파싱 회귀용 (N-5)
+            "MOCK_PERF_COUNTER" => make_perf_counter_response(),
             _ => {
                 let mut w = ScouterWriter::new();
                 w.write_unsigned_byte(FLAG_NO_NEXT);
@@ -322,6 +326,29 @@ fn make_unknown_pack_response() -> Vec<u8> {
     w.write_unsigned_byte(FLAG_NO_NEXT);
     w.into_bytes()
 }
+
+/// PerfCounterPack(60) 응답.
+///
+/// **`time` 은 writeLong — 8바이트 고정이다**(ASIS `PerfCounterPack.write`).
+/// writeDecimal 로 쓰면 길이 지시자가 앞에 붙어 바이트 수가 달라진다.
+/// 그 차이를 이 mock 이 잡는다 (N-5).
+fn make_perf_counter_response() -> Vec<u8> {
+    let mut data = std::collections::HashMap::new();
+    data.insert("TPS".to_string(), ScouterValue::Float(12.5));
+
+    let mut w = ScouterWriter::new();
+    w.write_unsigned_byte(FLAG_HAS_NEXT);
+    w.write_unsigned_byte(PACK_PERF_COUNTER);
+    w.write_long(MOCK_PERF_COUNTER_TIME);
+    w.write_text("/mock-host/mock-app");
+    w.write_byte(0); // timetype = REALTIME
+    ScouterValue::Map(data).write_to(&mut w);
+    w.write_unsigned_byte(FLAG_NO_NEXT);
+    w.into_bytes()
+}
+
+/// mock 이 보내는 카운터 시각. 8바이트를 다 써야 하는 크기여야 의미가 있다.
+pub const MOCK_PERF_COUNTER_TIME: i64 = 1_786_721_179_122;
 
 /// XLog 스트리밍 응답: cursor MapPack + XLogPack 1개
 fn make_xlog_stream_response() -> Vec<u8> {

@@ -6,7 +6,7 @@
 | N-2 | XLog 요청 `count` 파라미터 누락 | 수정됨 |
 | N-3 | TCP 연결 재사용 불가 | 수정됨 |
 | N-4 | ObjectPack 필드 순서 오류 | 수정됨 |
-| N-5 | PerfCounterPack `time` 타입 오류 | 미수정 (경로 미사용 — N-8 참조) |
+| N-5 | PerfCounterPack `time` 타입 오류 | 수정됨 2026-08-30 (mock 회귀 확보) |
 | N-6 | AlertPack 필드 순서·타입 오류 4건 | 수정됨 2026-08-15 (실측 검증) |
 | N-7 | 카운터 키 이름이 실제 카운터명과 다름 | 수정됨 2026-08-15 |
 | N-8 | 카운터 요청 파라미터·응답 팩 타입 오류 | 수정됨 2026-08-15 |
@@ -127,9 +127,9 @@ MapPack 을 돌려준다. 그래서 `tests/scouter_integration.rs` 의 `test_get
 
 ---
 
-## N-5. PerfCounterPack `time` 필드 타입 오류 — 미수정
+## N-5. PerfCounterPack `time` 필드 타입 오류 — 수정됨 (2026-08-30)
 
-**N-4 와 같은 계열.** ASIS 소스 대조로 발견했다 (실서버 확인은 아직).
+**N-4 와 같은 계열.** ASIS 소스 대조로 발견했다.
 
 | | |
 |---|---|
@@ -145,6 +145,25 @@ MapPack 을 돌려준다. 그래서 `tests/scouter_integration.rs` 의 `test_get
 
 `readDecimal()` 은 `[길이 1바이트][값 N바이트]` 구조라 8바이트 고정값을 읽으면 위치가 어긋난다.
 **첫 필드가 깨지므로 팩 전체가 무의미해진다.** 카운터 차트가 값을 못 받거나 쓰레기값을 받는다.
+
+### 실서버 없이 재현했다
+
+«유닛 테스트를 하려면 파싱과 소켓을 떼어야 한다» 고 적어 뒀지만, **떼지 않고도**
+mock 서버로 세울 수 있었다 — 실제 콜렉터가 쓰는 것과 같은 바이트를 보내면 된다.
+
+`MOCK_PERF_COUNTER` 응답을 mock 에 넣고(`writeLong` 으로 `time` 을 씀) L3 테스트를
+붙이자 고치기 전에 이렇게 깨졌다:
+
+```
+알 수 없는 ValueEnum 타입 코드: 0xA0
+```
+
+`time` 한 필드가 밀리면서 뒤의 `objName`·`timetype` 을 지나 값 타입 코드 자리까지
+어긋난 것이다. `read_decimal()` → `read_long()` 으로 고치니 통과한다.
+
+- 회귀: `perf_counter_pack_의_time_은_8바이트다` (`tests/scouter_integration.rs`)
+- **이 경로는 여전히 앱에서 안 쓴다**(N-8 이후 카운터는 MapPack 으로 온다).
+  다시 쓰게 될 때 틀린 채로 남아 있지 않도록 고쳐 둔다.
 
 ---
 
@@ -629,16 +648,14 @@ appStyle { height: 100vh }
 > **알람 테스트 2건은 알람 이력이 있어야 통과한다.** 콜렉터를 재생성하면 초기화된다.
 > `podman stop order-app; podman start order-app` 으로 다시 만든다.
 
-### 남은 것 — 왜 아직 못 고쳤나
+### 남은 것
 
-**N-6 (AlertPack)**: 이 환경은 알람을 생성하지 못한다 (F-16 — 알람 규칙이 JDK 17 에서
-javassist 컴파일에 실패). 실서버 응답을 한 번도 못 받아 RED 테스트를 세울 수 없다.
-ASIS 소스 대조까지가 현재 근거의 전부다.
+**N-6 (AlertPack)** 은 그 뒤 실측으로 닫혔다 — 생명주기 알람(`podman stop/start`)으로
+실물 응답을 받아 `live_alert_pack_fields` 가 통과한다. 임계치 알람만 이 환경에서
+못 만든다 (F-16).
 
-**N-5 (PerfCounterPack)**: N-8 수정으로 **이 파싱 경로를 아무도 타지 않게 됐다.**
-`read_perf_counter_pack()` 은 여전히 틀렸지만 도달 불가다. 고치려면
-`ScouterConnection` 에서 팩 파싱을 소켓과 분리해야 유닛 테스트가 가능하다
-(현재는 `&mut self` 가 소켓을 물고 있어 바이트 버퍼로 검증할 수 없다).
+**N-5 (PerfCounterPack)** 도 mock 회귀로 닫혔다(위). 팩 파싱을 소켓과 분리하는
+리팩터링은 **하지 않았다** — mock 이 같은 바이트를 보내 주므로 필요가 없었다.
 
 ---
 

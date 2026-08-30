@@ -547,8 +547,13 @@ impl ScouterConnection {
 
     /// PerfCounterPack (Type 60) 파싱
     /// ASIS: PerfCounterPack.read(DataInputX)
+    ///
+    /// **`time` 은 `readLong` — 8바이트 고정이다.** `readDecimal` 로 읽으면
+    /// 첫 바이트를 길이 지시자로 삼아 자리가 어긋나고, 첫 필드가 깨지면
+    /// 팩 전체가 무의미해진다 (N-5).
+    /// 회귀: `perf_counter_pack_의_time_은_8바이트다`
     fn read_perf_counter_pack(&mut self) -> io::Result<PerfCounterPack> {
-        let time = self.read_decimal()?;
+        let time = self.read_long()?;
         let obj_name = self.read_text()?;
         let timetype = self.read_byte()?;
 
