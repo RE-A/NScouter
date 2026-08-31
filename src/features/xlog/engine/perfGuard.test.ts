@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { CoordinateMapper, rollingWindow } from './CoordinateMapper';
 import { PointMap } from './PointMap';
-import { XLogDataStore } from '../store/XLogDataStore';
+import { MAX_ITEMS, XLogDataStore } from '../store/XLogDataStore';
 import { DEFAULT_CHART_CONFIG, buildLayout } from '../types/xlog';
 import type { SXLog } from '../types/xlog';
 
@@ -93,6 +93,6 @@ describe('성능 회귀 가드 (100,000건)', () => {
       store.addBatch(makeXLogs(50_000), NOW);
       store.prune(NOW, 400_000);
     }
-    expect(store.size).toBeLessThanOrEqual(100_000);
+    expect(store.size).toBeLessThanOrEqual(MAX_ITEMS);
   });
 });

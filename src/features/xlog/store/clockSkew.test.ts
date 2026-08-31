@@ -5,7 +5,7 @@
 // 그걸 화면이 말해 주지 못하면 원인을 찾을 길이 없다.
 
 import { describe, expect, it } from 'vitest';
-import { XLogDataStore } from './XLogDataStore';
+import { MAX_ITEMS, XLogDataStore } from './XLogDataStore';
 import type { SXLog } from '../types/xlog';
 
 const at = (endTime: number): SXLog =>
@@ -40,5 +40,46 @@ describe('XLogDataStore.clockSkewMs', () => {
     s.addBatch([at(1_000_005_000)], 1_000_000_000);
     s.addBatch([], 1_000_010_000);
     expect(s.clockSkewMs).toBe(5_000);
+  });
+});
+
+describe('XLogDataStore — 버퍼 상한', () => {
+  it('상한을 넘으면 오래된 것부터 버리고, 버린 것을 센다', () => {
+    // 조용히 버리면 «데이터가 유실된다» 로 읽힌다. 화면이 말할 수 있어야 한다.
+    const s = new XLogDataStore();
+    const now = 1_000_000_000;
+    const over = 10;
+    s.addBatch(
+      Array.from({ length: MAX_ITEMS + over }, (_, i) => at(now - MAX_ITEMS - over + i)),
+      now,
+    );
+
+    // 창은 넉넉히 잡는다 — 여기서 보려는 것은 **시간이 아니라 개수**로 잘리는 자리다.
+    s.prune(now, 10 * 60 * 60 * 1000);
+
+    expect(s.size).toBeLessThanOrEqual(MAX_ITEMS);
+    expect(s.droppedCount).toBeGreaterThan(0);
+    expect(s.lastDropAtMs).toBe(now);
+  });
+
+  it('상한에 안 걸리면 아무것도 안 버린다', () => {
+    const s = new XLogDataStore();
+    const now = 1_000_000_000;
+    s.addBatch([at(now - 1000), at(now)], now);
+    s.prune(now, 60_000);
+
+    expect(s.droppedCount).toBe(0);
+    expect(s.lastDropAtMs).toBeNull();
+  });
+
+  it('창 밖으로 나가 지운 것은 상한으로 세지 않는다', () => {
+    // 둘은 다른 일이다 — 창 밖은 «지나간 것», 상한은 «담지 못한 것».
+    const s = new XLogDataStore();
+    const now = 1_000_000_000;
+    s.addBatch([at(now - 600_000), at(now)], now);
+    s.prune(now, 60_000);
+
+    expect(s.size).toBe(1);
+    expect(s.droppedCount).toBe(0);
   });
 });

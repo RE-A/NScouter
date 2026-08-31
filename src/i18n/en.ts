@@ -488,6 +488,11 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 버퍼 상한 ─────────────────────────────────────────
+  '버퍼 상한': 'Buffer limit',
+  '건 — 오래된 점부터 지웁니다. 범위를 좁히면 다 보입니다':
+    ' — dropping the oldest dots. Narrow the range to see them all',
+
   // ── 시계 어긋남 ───────────────────────────────────────
   '데이터 시각이 이 PC 보다': 'Data timestamps are',
   '초 앞섭니다 — 최신 점이 창 밖에 있을 수 있습니다':

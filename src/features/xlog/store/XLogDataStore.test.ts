@@ -1,7 +1,7 @@
 // src/features/xlog/store/XLogDataStore.test.ts
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { XLogDataStore } from './XLogDataStore';
+import { MAX_ITEMS, XLogDataStore } from './XLogDataStore';
 import type { SXLog } from '../types/xlog';
 
 function makeSXLog(endTime: number, elapsed: number = 100): SXLog {
@@ -97,14 +97,18 @@ describe('XLogDataStore', () => {
     expect(store.isDirty()).toBe(false);
   });
 
-  it('prune: MAX_ITEMS(100000) 초과 시 오래된 항목 제거', () => {
-    const COUNT = 100_002;
+  it('prune: 상한 초과 시 오래된 항목 제거', () => {
+    // 상한 값 자체는 여기서 못 박지 않는다 — 창(1~30분)이 진짜 경계이고
+    // 이 수는 메모리를 위한 빗장이라 조정될 수 있다.
+    const COUNT = MAX_ITEMS + 2;
     for (let i = 0; i < COUNT; i++) {
       store.add(makeSXLog(i * 10));
     }
     // 전체 시간 범위를 크게 잡아 시간 필터는 통과
     store.prune(COUNT * 10 + 1000, COUNT * 10 + 1000);
-    expect(store.size).toBeLessThanOrEqual(100_000);
+    expect(store.size).toBeLessThanOrEqual(MAX_ITEMS);
+    // 무엇을 버렸는지 셀 수 있어야 화면이 말할 수 있다
+    expect(store.droppedCount).toBe(2);
   });
 
   // "비어 있음"이 고장인지 데이터가 없는 건지 구분하려면

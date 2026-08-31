@@ -3,6 +3,7 @@
 import React, { memo, useMemo, useState } from 'react';
 import { useXLogCanvas } from '../hooks/useXLogCanvas';
 import { useXLogStream } from '../hooks/useXLogStream';
+import { MAX_ITEMS } from '../store/XLogDataStore';
 import { usePastXLog } from '../hooks/usePastXLog';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
@@ -56,6 +57,15 @@ interface XLogChartProps {
  * **점 자리가 눈에 띄게 밀리는 크기**를 임계로 둔다.
  */
 const SKEW_WARN_MS = 10_000;
+
+/**
+ * 상한 안내를 띄워 두는 시간.
+ *
+ * 상한은 **계속** 걸리므로(한 번 넘치면 폴링마다 넘친다) 안내도 계속 떠 있어야 한다.
+ * 다만 부하가 잦아들어 더 이상 안 버리면 조용히 사라져야 한다 — prune 주기(5초)의
+ * 몇 배로 둔다.
+ */
+const CAP_NOTICE_MS = 30_000;
 
 export const XLogChart = memo(function XLogChart({
   config,
@@ -163,6 +173,18 @@ export const XLogChart = memo(function XLogChart({
    *
    * 몇 초는 늘 있는 일이라(폴링 간격·전송 지연) 임계를 넘을 때만 띄운다.
    */
+  /**
+   * 상한에 걸려 오래된 점을 버리고 있는가.
+   *
+   * 창은 30분인데 화면에는 그보다 짧은 구간만 남는 상황이다. 조용히 두면
+   * «데이터가 유실된다» 로 읽힌다 — 무엇을 왜 버렸고 어떻게 하면 되는지 말한다.
+   */
+  const capWarning = (() => {
+    const at = store.lastDropAtMs;
+    if (at === null || Date.now() - at > CAP_NOTICE_MS) return null;
+    return `${t('버퍼 상한')} ${MAX_ITEMS.toLocaleString()}${t('건 — 오래된 점부터 지웁니다. 범위를 좁히면 다 보입니다')}`;
+  })();
+
   const skewWarning = (() => {
     const skew = store.clockSkewMs;
     if (skew === null || Math.abs(skew) < SKEW_WARN_MS) return null;
@@ -211,6 +233,12 @@ export const XLogChart = memo(function XLogChart({
           차트의 오른쪽 끝은 이 PC 의 «지금» 이다. 콜렉터 쪽 시각이 앞서면 방금 온 점이
           오른쪽 밖으로, 뒤처지면 오른쪽이 빈 채로 남는다 — 스트림은 멀쩡한데
           화면에서만 사라진 것처럼 보인다. 조용히 두면 원인을 찾을 길이 없다. */}
+      {!isPast && capWarning !== null && (
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
+          {capWarning}
+        </div>
+      )}
+
       {!isPast && skewWarning !== null && (
         <div className="absolute top-2 right-2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
           {skewWarning}
