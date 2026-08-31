@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { onXLogData, onXLogError } from '../api/scouterApi';
 import { subscribe } from '../api/subscribe';
 import { XLogDataStore } from '../store/XLogDataStore';
+import { useViewOptions } from './useViewOptions';
 import { xlogColumnsToSXLogs } from '../types/xlog';
 import type { XLogChartConfig } from '../types/xlog';
 
@@ -17,6 +18,17 @@ interface UseXLogStreamResult {
 export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
   const storeRef = useRef(new XLogDataStore());
   const [streamError, setStreamError] = useState<string | null>(null);
+  const { bufferMax } = useViewOptions();
+
+  /**
+   * 설정에서 바꾼 상한을 **살아 있는 저장소에** 물린다.
+   *
+   * 새로 만들지 않는다 — 만들면 지금까지 받아 둔 점이 통째로 사라져서,
+   * 상한을 올리려다 화면을 비우는 꼴이 된다.
+   */
+  useEffect(() => {
+    storeRef.current.setMaxItems(bufferMax);
+  }, [bufferMax]);
 
   useEffect(() => {
     // 해지 함수가 Promise 로 오므로 직접 담아 두면 안 된다 — 정리가 먼저 돌면

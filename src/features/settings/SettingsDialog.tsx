@@ -9,6 +9,7 @@ import {
 } from '../xlog/hooks/useViewOptions';
 import { T, F, FONT_MONO } from '../../styles/tokens';
 import { t, toLang, type Lang } from '../../i18n';
+import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../xlog/store/XLogDataStore';
 import { SHORTCUT_HELP, type ShortcutAction } from '../xlog/hooks/shortcuts';
 
 /**
@@ -35,6 +36,22 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
+/**
+ * 고를 수 있는 상한. 값을 자유로 받지 않는 이유는 글자 크기와 같다 —
+ * 손으로 친 수(0, 10억)가 그대로 들어오면 화면이 비거나 앱이 무거워진다.
+ */
+const BUFFER_CHOICES = [100_000, 300_000, 500_000, 1_000_000] as const;
+
+/**
+ * 대략적인 메모리(MB).
+ *
+ * 30만 건에서 heapUsed 113MB 를 쟀다(perf-baseline). 건당 ~0.38KB 로 잡는다 —
+ * **정확한 수가 아니라 크기 감각**을 주려는 것이다.
+ */
+function estimatedMb(items: number): number {
+  return Math.round((items * 0.38) / 1024);
+}
+
 export const SettingsDialog = memo(function SettingsDialog({ onClose }: SettingsDialogProps) {
   const [config, setConfig] = useState<AppConfig>({});
   const [dataDir, setDataDir] = useState('');
@@ -44,6 +61,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   const [fontScale, setFontScale] = useState(1);
   /** 화면 언어 */
   const [lang, setLangValue] = useState<Lang>('ko');
+  /** XLog 버퍼에 담아 둘 최대 건수 */
+  const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -55,6 +74,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setBindInline(cfg.sql_bind_inline ?? true);
       setFontScale(clampFontScale(cfg.ui_font_scale ?? 1));
       setLangValue(toLang(cfg.ui_language));
+      setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
     }).catch(() => {});
   }, []);
 
@@ -69,6 +89,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         sql_bind_inline: bindInline,
         ui_font_scale: fontScale,
         ui_language: lang,
+        xlog_buffer_max: bufferMax,
       };
       await saveConfig(next);
       setConfig(next);
@@ -82,7 +103,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     } finally {
       setSaving(false);
     }
-  }, [config, dataDir, bindInline, fontScale, lang]);
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax]);
 
   // ESC 닫기
   useEffect(() => {
@@ -177,6 +198,41 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* 버퍼 상한 */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>{t('XLog 버퍼 상한')}</div>
+            <div style={sectionDescStyle}>
+              {t('차트가 들고 있을 최대 건수입니다. 넘으면 오래된 점부터 버립니다 — 창(범위)은 30분인데 화면에는 그보다 짧은 구간만 남는다면 이 값이 먼저 걸린 것입니다. 올릴수록 메모리를 씁니다.')}
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              {BUFFER_CHOICES.map(v => {
+                const on = v === bufferMax;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setBufferMax(v)}
+                    aria-pressed={on}
+                    title={`${estimatedMb(v)}MB`}
+                    style={{
+                      ...scaleBtnStyle,
+                      borderColor: on ? T.accent : T.border,
+                      color: on ? T.text : T.textDim,
+                      background: on ? T.bgHover : 'transparent',
+                    }}
+                  >
+                    {/* «30만» 같은 말은 언어마다 자릿수 감각이 다르다. 숫자를 그대로 적는다 */}
+                    {v.toLocaleString()}
+                  </button>
+                );
+              })}
+            </div>
+            {/* **메모리를 숨기지 않는다.** 고르는 값이 곧 이 앱이 지고 갈 무게다 */}
+            <div style={{ ...sectionDescStyle, marginTop: 6 }}>
+              {t('선택한 값의 대략적인 메모리:')} {estimatedMb(bufferMax)}MB
+              {bufferMax > DEFAULT_MAX_ITEMS ? ` · ${t('기본값보다 큽니다')}` : ''}
             </div>
           </div>
 

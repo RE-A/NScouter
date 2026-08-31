@@ -1,7 +1,7 @@
 // src/features/xlog/store/XLogDataStore.test.ts
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MAX_ITEMS, XLogDataStore } from './XLogDataStore';
+import { DEFAULT_MAX_ITEMS as MAX_ITEMS, XLogDataStore } from './XLogDataStore';
 import type { SXLog } from '../types/xlog';
 
 function makeSXLog(endTime: number, elapsed: number = 100): SXLog {

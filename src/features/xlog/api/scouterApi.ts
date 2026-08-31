@@ -536,6 +536,8 @@ export interface AppConfig {
   ui_font_scale?: number;
   /** 화면 언어 'ko' | 'en'. 없으면 'ko' */
   ui_language?: string;
+  /** XLog 버퍼 최대 건수. 없으면 300,000 */
+  xlog_buffer_max?: number;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
   ui_layout?: UiLayout;
   /** XLog 스캐터 차트 설정 */

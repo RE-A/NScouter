@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadPastXLogs, type PastProgress } from '../api/pastXLog';
 import { XLogDataStore } from '../store/XLogDataStore';
+import { useViewOptions } from './useViewOptions';
 import { xlogPackToSXLog } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
 import { yyyymmdd } from '../types/timeRange';
@@ -35,6 +36,13 @@ export function usePastXLog(
   const [nonce, setNonce] = useState(0);
 
   const reload = useCallback(() => setNonce(n => n + 1), []);
+
+  // 과거 조회도 같은 상한을 쓴다. 여기만 상한이 다르면 «같은 구간인데 실시간과
+  // 과거의 점 수가 다르다» 가 된다.
+  const { bufferMax } = useViewOptions();
+  useEffect(() => {
+    storeRef.current.setMaxItems(bufferMax);
+  }, [bufferMax]);
 
   // objHashes 는 매 렌더 새 배열이라 그대로 의존성에 넣으면 무한 재조회가 된다.
   const hashKey = objHashes.join(',');

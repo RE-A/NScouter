@@ -35,6 +35,14 @@ pub struct AppConfig {
     /// 밀도를 위해 작게 잡은 화면이라 오래 보면 읽기 힘들다는 이야기가 있어 둔다.
     #[serde(default = "default_font_scale")]
     pub ui_font_scale: f32,
+    /// XLog 버퍼에 담아 둘 최대 건수.
+    ///
+    /// 창(1~30분) 밖은 시간으로 지우고, 그래도 남는 것이 많으면 이 수에서
+    /// **오래된 것부터** 버린다. 상한이 낮으면 창은 30분인데 화면에는 그보다 짧은
+    /// 구간만 남는다 — 현장에서 «중간 넘어가면 뒷부분이 갑자기 날아간다» 로 나왔다.
+    /// 올릴수록 메모리를 쓴다(30만 ≈ 110MB 실측). 화면 쪽에서 자른다.
+    #[serde(default = "default_buffer_max")]
+    pub xlog_buffer_max: u32,
     /// 화면 언어. `"ko"` 또는 `"en"`.
     ///
     /// Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같다.
@@ -186,6 +194,11 @@ fn default_font_scale() -> f32 {
     1.0
 }
 
+/// 파생 기본값(0)이면 버퍼가 한 건도 못 담는다.
+fn default_buffer_max() -> u32 {
+    300_000
+}
+
 /// 빈 문자열이 기본값이 되면 언어를 못 정한다.
 fn default_lang() -> String {
     "ko".to_string()
@@ -204,6 +217,7 @@ impl Default for AppConfig {
             last_pass: None,
             sql_bind_inline: true,
             ui_font_scale: 1.0,
+            xlog_buffer_max: default_buffer_max(),
             ui_language: "ko".to_string(),
             ui_layout: UiLayout::default(),
             xlog_chart: XLogChartPrefs::default(),

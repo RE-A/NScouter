@@ -5,7 +5,14 @@
 // 그걸 화면이 말해 주지 못하면 원인을 찾을 길이 없다.
 
 import { describe, expect, it } from 'vitest';
-import { MAX_ITEMS, XLogDataStore } from './XLogDataStore';
+import {
+  clampMaxItems,
+  DEFAULT_MAX_ITEMS,
+  DEFAULT_MAX_ITEMS as MAX_ITEMS,
+  LIMIT_MAX_ITEMS,
+  MIN_MAX_ITEMS,
+  XLogDataStore,
+} from './XLogDataStore';
 import type { SXLog } from '../types/xlog';
 
 const at = (endTime: number): SXLog =>
@@ -81,5 +88,57 @@ describe('XLogDataStore — 버퍼 상한', () => {
 
     expect(s.size).toBe(1);
     expect(s.droppedCount).toBe(0);
+  });
+});
+
+describe('XLogDataStore — 상한을 설정에서 바꾼다', () => {
+  it('생성할 때 받은 값으로 자른다', () => {
+    const s = new XLogDataStore(MIN_MAX_ITEMS);
+    expect(s.maxItemCount).toBe(MIN_MAX_ITEMS);
+  });
+
+  it('못 쓸 값은 기본값·범위로 다듬는다', () => {
+    // config.json 은 사람이 여는 파일이다. 0 이면 한 건도 못 담는다.
+    expect(clampMaxItems(0)).toBe(DEFAULT_MAX_ITEMS);
+    expect(clampMaxItems('abc')).toBe(DEFAULT_MAX_ITEMS);
+    expect(clampMaxItems(5)).toBe(MIN_MAX_ITEMS);
+    expect(clampMaxItems(9_999_999)).toBe(LIMIT_MAX_ITEMS);
+    expect(clampMaxItems(250_000)).toBe(250_000);
+  });
+
+  it('바꿔도 이미 받아 둔 점은 남는다', () => {
+    // 저장소를 새로 만들면 상한을 올리려다 화면을 비우는 꼴이 된다.
+    const s = new XLogDataStore(MIN_MAX_ITEMS);
+    const now = 1_000_000_000;
+    s.addBatch([at(now - 2000), at(now - 1000), at(now)], now);
+
+    s.setMaxItems(500_000);
+
+    expect(s.maxItemCount).toBe(500_000);
+    expect(s.size).toBe(3);
+  });
+
+  it('줄이면 다음 prune 에서 오래된 것부터 잘린다', () => {
+    const s = new XLogDataStore(500_000);
+    const now = 1_000_000_000;
+    const over = 5;
+    s.addBatch(
+      Array.from({ length: MIN_MAX_ITEMS + over }, (_, i) => at(now - MIN_MAX_ITEMS - over + i)),
+      now,
+    );
+
+    s.setMaxItems(MIN_MAX_ITEMS);
+    s.prune(now, 10 * 60 * 60 * 1000);
+
+    expect(s.size).toBe(MIN_MAX_ITEMS);
+    expect(s.droppedCount).toBe(over);
+    // 남은 것 중 가장 오래된 것이 앞에서 잘린 만큼 밀려 있다
+    expect(s.getAll()[0].endTime).toBe(now - MIN_MAX_ITEMS);
+  });
+
+  it('너무 작은 값은 최소치로 올린다 — 한 건도 못 담으면 화면이 빈다', () => {
+    const s = new XLogDataStore(500_000);
+    s.setMaxItems(2);
+    expect(s.maxItemCount).toBe(MIN_MAX_ITEMS);
   });
 });

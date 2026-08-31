@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../api/scouterApi';
 import { setLang, toLang, type Lang } from '../../../i18n';
+import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../store/XLogDataStore';
 
 export interface ViewOptions {
   /** SQL 바인딩 파라미터를 문장에 채워 보여줄지 */
@@ -17,6 +18,8 @@ export interface ViewOptions {
   fontScale: number;
   /** 화면 언어 */
   lang: Lang;
+  /** XLog 버퍼에 담아 둘 최대 건수 */
+  bufferMax: number;
 }
 
 /** 화면에서 고를 수 있는 배율. 사이 값이 오면 가장 가까운 것으로 붙인다 */
@@ -39,7 +42,12 @@ export function clampFontScale(v: unknown): number {
  *
  * **채우기가 기본이다.** `where id=?` 만 봐서는 무슨 값으로 느렸는지 알 수 없다.
  */
-const DEFAULTS: ViewOptions = { sqlBindInline: true, fontScale: 1, lang: 'ko' };
+const DEFAULTS: ViewOptions = {
+  sqlBindInline: true,
+  fontScale: 1,
+  lang: 'ko',
+  bufferMax: DEFAULT_MAX_ITEMS,
+};
 
 let current: ViewOptions = DEFAULTS;
 let loaded = false;
@@ -57,6 +65,7 @@ function fromConfig(cfg: AppConfig): ViewOptions {
     sqlBindInline: cfg.sql_bind_inline ?? DEFAULTS.sqlBindInline,
     fontScale: clampFontScale(cfg.ui_font_scale ?? DEFAULTS.fontScale),
     lang: toLang(cfg.ui_language),
+    bufferMax: clampMaxItems(cfg.xlog_buffer_max ?? DEFAULTS.bufferMax),
   };
 }
 
@@ -97,6 +106,7 @@ export async function setViewOption<K extends keyof ViewOptions>(
       sql_bind_inline: current.sqlBindInline,
       ui_font_scale: current.fontScale,
       ui_language: current.lang,
+      xlog_buffer_max: current.bufferMax,
     });
   } catch {
     // 저장 실패는 화면을 되돌릴 이유가 못 된다. 다음 실행에 기본값으로 돌아갈 뿐이다.

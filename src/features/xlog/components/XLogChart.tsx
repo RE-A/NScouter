@@ -3,7 +3,7 @@
 import React, { memo, useMemo, useState } from 'react';
 import { useXLogCanvas } from '../hooks/useXLogCanvas';
 import { useXLogStream } from '../hooks/useXLogStream';
-import { MAX_ITEMS } from '../store/XLogDataStore';
+
 import { usePastXLog } from '../hooks/usePastXLog';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
@@ -182,7 +182,8 @@ export const XLogChart = memo(function XLogChart({
   const capWarning = (() => {
     const at = store.lastDropAtMs;
     if (at === null || Date.now() - at > CAP_NOTICE_MS) return null;
-    return `${t('버퍼 상한')} ${MAX_ITEMS.toLocaleString()}${t('건 — 오래된 점부터 지웁니다. 범위를 좁히면 다 보입니다')}`;
+    // **지금 걸려 있는 값**을 적는다. 설정에서 바꿀 수 있으므로 상수를 적으면 거짓이 된다.
+    return `${t('버퍼 상한')} ${store.maxItemCount.toLocaleString()}${t('건 — 오래된 점부터 지웁니다. 범위를 좁히거나 설정에서 상한을 올리면 다 보입니다')}`;
   })();
 
   const skewWarning = (() => {

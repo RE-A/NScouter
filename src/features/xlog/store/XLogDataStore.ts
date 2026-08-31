@@ -4,7 +4,7 @@
 import type { SXLog } from '../types/xlog';
 
 /**
- * 버퍼 상한. 넘으면 **오래된 것부터** 버린다.
+ * 버퍼 상한 **기본값**. 설정에서 바꾼다.
  *
  * 창(1~30분)이 진짜 경계이고 이 값은 메모리가 끝없이 늘지 않게 하는 마지막 빗장이다.
  * 100,000 이던 것을 올렸다 — 5분 창이면 333 TPS, 30분 창이면 **55 TPS 만 넘어도**
@@ -13,17 +13,53 @@ import type { SXLog } from '../types/xlog';
  *
  * 30만 건 실측(jsdom, 이 저장소 기준): prune 1.0ms · heap 113MB.
  * 그리기는 10만 건에 2.1ms 였으므로(perf-baseline) 3배로도 프레임 안에 든다.
- * 메모리가 비용이라 무한정 올리지는 않는다 — 대신 **버릴 때 화면에 말한다.**
  */
-export const MAX_ITEMS = 300_000;
+export const DEFAULT_MAX_ITEMS = 300_000;
+
+/**
+ * 설정에서 받을 수 있는 범위.
+ *
+ * 아래는 «상한이 창보다 먼저 걸려도 쓸모는 있는» 최소, 위는 이 앱이 지고 갈 만한 메모리의 끝이다
+ * (100만 ≈ 370MB 추정 — 30만에서 잰 건당 크기로 늘린 값이다).
+ * 설정 파일은 사람이 여는 곳이라 **읽는 쪽에서 자른다.**
+ */
+export const MIN_MAX_ITEMS = 10_000;
+export const LIMIT_MAX_ITEMS = 1_000_000;
+
+/** 설정에서 온 값을 쓸 수 있는 수로 다듬는다 */
+export function clampMaxItems(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MAX_ITEMS;
+  return Math.min(Math.max(Math.round(n), MIN_MAX_ITEMS), LIMIT_MAX_ITEMS);
+}
 
 export class XLogDataStore {
   private items: SXLog[] = [];
+  private maxItems: number;
   private dirty = false;
   private lastReceived: number | null = null;
   private skewMs: number | null = null;
   private droppedByCap = 0;
   private lastDropAt: number | null = null;
+
+  constructor(maxItems: number = DEFAULT_MAX_ITEMS) {
+    this.maxItems = clampMaxItems(maxItems);
+  }
+
+  /** 지금 걸려 있는 상한. 화면이 «얼마에서 잘렸는지» 를 말할 때 쓴다 */
+  get maxItemCount(): number {
+    return this.maxItems;
+  }
+
+  /**
+   * 상한을 바꾼다. 설정에서 바로 반영하려고 둔다 — 저장소를 새로 만들면
+   * **지금까지 받아 둔 점이 통째로 사라진다.**
+   *
+   * 줄이면 다음 prune 에서 잘리고, 늘리면 그때부터 더 담는다. 이미 버린 것은 안 돌아온다.
+   */
+  setMaxItems(v: number): void {
+    this.maxItems = clampMaxItems(v);
+  }
 
   /**
    * 마지막으로 데이터를 실제 수신한 시각(epoch ms). 한 번도 없으면 null.
@@ -68,7 +104,7 @@ export class XLogDataStore {
     }
   }
 
-  /** 시간 윈도우 밖 데이터 제거 + MAX_ITEMS 초과 시 오래된 항목 제거 */
+  /** 시간 윈도우 밖 데이터 제거 + 상한 초과 시 오래된 항목 제거 */
   prune(now: number, timeRangeMs: number): void {
     const cutoff = now - timeRangeMs;
     const before = this.items.length;
@@ -83,8 +119,8 @@ export class XLogDataStore {
     // MAX_ITEMS 초과 시 앞부분 제거.
     // **조용히 버리면 안 된다.** 창 안에 있어야 할 점이 사라지는 것이라,
     // 화면이 말해 주지 않으면 «데이터가 유실된다» 로 읽힌다.
-    if (this.items.length > MAX_ITEMS) {
-      const drop = this.items.length - MAX_ITEMS;
+    if (this.items.length > this.maxItems) {
+      const drop = this.items.length - this.maxItems;
       this.items = this.items.slice(drop);
       this.droppedByCap += drop;
       this.lastDropAt = now;
