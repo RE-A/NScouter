@@ -488,6 +488,13 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 시계 어긋남 ───────────────────────────────────────
+  '데이터 시각이 이 PC 보다': 'Data timestamps are',
+  '초 앞섭니다 — 최신 점이 창 밖에 있을 수 있습니다':
+    's ahead of this PC — the newest dots may fall outside the window',
+  '초 뒤처집니다 — 오른쪽이 비어 보일 수 있습니다':
+    's behind this PC — the right edge may look empty',
+
   // ── 카운터 서버 고르기 ────────────────────────────────
   // '서버'·'전체' 는 위에 이미 있다. 같은 말을 두 번 적으면 사전이 갈린다.
   '전체 보기': 'Show all',

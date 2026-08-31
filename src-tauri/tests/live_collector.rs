@@ -6785,3 +6785,98 @@ fn probe_alert_summary() {
         }
     }
 }
+
+/// «실시간으로 켜 두면 중간 이후가 사라진다» — 스트림이 끊기는가, 화면이 못 그리는가.
+///
+/// 현장에서 나온 말이라 **먼저 어디서 없어지는지부터** 재야 한다.
+/// 여기서는 콜렉터~백엔드 구간만 본다(화면은 이 테스트 밖이다):
+///   · 폴링마다 몇 건이 오는가 — 갑자기 0 이 되어 안 돌아오면 스트림이 끊긴 것이다
+///   · 커서가 계속 나아가는가 — 멈추면 같은 자리를 다시 묻고 있다는 뜻이다
+///   · 받은 XLog 의 `endTime` 이 **클라이언트 시각과 얼마나 벌어지는가** —
+///     콜렉터가 앞서면 방금 온 점이 «지금» 보다 미래라 화면 오른쪽 밖으로 나간다.
+///     그러면 스트림은 멀쩡한데 화면에서만 사라진다.
+#[test]
+#[ignore]
+fn probe_realtime_stream_continuity() {
+    let hashes = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c)).iter().map(|(_, h)| *h).collect::<Vec<_>>()
+    };
+
+    let mut conn = login();
+    let mut cursor = StreamCursor::default();
+    let mut empty_streak = 0usize;
+    let mut worst_streak = 0usize;
+    let mut stalled_cursor = 0usize;
+    let mut skew_min = i64::MAX;
+    let mut skew_max = i64::MIN;
+    let mut total = 0usize;
+
+    for round in 0..40 {
+        let cmd = if round == 0 {
+            CMD_TRANX_REAL_TIME_GROUP_LATEST
+        } else {
+            CMD_TRANX_REAL_TIME_GROUP
+        };
+        let before = (cursor.loop_val, cursor.index);
+        let param = build_request_param(&hashes, &cursor);
+        let session = conn.session;
+        conn.send_request(cmd, session, &param).expect("스트림 요청 실패");
+
+        let mut got = 0usize;
+        let mut newest: i64 = 0;
+        loop {
+            match conn.read_next_pack().expect("스트림 수신 실패") {
+                Some(AnyPack::Map(m)) => cursor.update_from(&m),
+                Some(AnyPack::XLog(x)) => {
+                    got += 1;
+                    total += 1;
+                    newest = newest.max(x.end_time);
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        if newest > 0 {
+            // 양수면 **콜렉터가 앞선다**(미래에서 온 점), 음수면 뒤처진다.
+            let skew = newest - now;
+            skew_min = skew_min.min(skew);
+            skew_max = skew_max.max(skew);
+        }
+
+        if got == 0 {
+            empty_streak += 1;
+            worst_streak = worst_streak.max(empty_streak);
+        } else {
+            empty_streak = 0;
+        }
+        if (cursor.loop_val, cursor.index) == before && round > 0 && got == 0 {
+            stalled_cursor += 1;
+        }
+
+        if round % 5 == 0 || got == 0 {
+            println!(
+                "라운드 {round:2}: {got:5}건 loop={} index={} 최신-지금={}ms",
+                cursor.loop_val,
+                cursor.index,
+                if newest > 0 { (newest - now).to_string() } else { "—".to_string() },
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    println!("── 20초 관찰");
+    println!("   총 {total}건 · 빈 폴링 최대 연속 {worst_streak}회 · 커서 정지 {stalled_cursor}회");
+    if skew_min != i64::MAX {
+        println!("   콜렉터-클라이언트 시각차: {skew_min}ms ~ {skew_max}ms (양수면 콜렉터가 앞선다)");
+    }
+
+    assert!(total > 0, "한 건도 못 받았다 — 부하가 없거나 요청이 틀렸다");
+    // 부하가 도는 동안 **연속으로 다섯 번(2.5초) 넘게** 비면 스트림이 끊긴 것이다.
+    assert!(worst_streak < 5, "빈 폴링이 {worst_streak}회 연속 — 스트림이 끊겼다");
+}

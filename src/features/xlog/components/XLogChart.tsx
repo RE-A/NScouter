@@ -48,6 +48,15 @@ interface XLogChartProps {
   refreshSignal?: number;
 }
 
+/**
+ * 이 이상 벌어지면 알린다.
+ *
+ * 폴링 간격(500ms)과 전송 지연으로 늘 몇백 ms 는 벌어진다 — 그 정도로 띄우면
+ * 경고가 늘 떠 있어 아무도 안 읽는다. 창 폭(가장 좁은 것이 1분)에 견주어
+ * **점 자리가 눈에 띄게 밀리는 크기**를 임계로 둔다.
+ */
+const SKEW_WARN_MS = 10_000;
+
 export const XLogChart = memo(function XLogChart({
   config,
   filter,
@@ -149,6 +158,20 @@ export const XLogChart = memo(function XLogChart({
     clearSelection();
   }, [clearSignal, clearSelection]);
 
+  /**
+   * 콜렉터 시각과 이 PC 시각이 얼마나 벌어졌나. 작으면 아무 말도 하지 않는다.
+   *
+   * 몇 초는 늘 있는 일이라(폴링 간격·전송 지연) 임계를 넘을 때만 띄운다.
+   */
+  const skewWarning = (() => {
+    const skew = store.clockSkewMs;
+    if (skew === null || Math.abs(skew) < SKEW_WARN_MS) return null;
+    const sec = Math.round(Math.abs(skew) / 1000);
+    return skew > 0
+      ? `${t('데이터 시각이 이 PC 보다')} ${sec}${t('초 앞섭니다 — 최신 점이 창 밖에 있을 수 있습니다')}`
+      : `${t('데이터 시각이 이 PC 보다')} ${sec}${t('초 뒤처집니다 — 오른쪽이 비어 보일 수 있습니다')}`;
+  })();
+
   return (
     <div
       style={{ position: 'relative', width: '100%', height: '100%' }}
@@ -181,6 +204,16 @@ export const XLogChart = memo(function XLogChart({
       {isPast && !past.loading && past.progress?.truncated && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-warn/50 bg-overlay px-3 py-1 text-body text-warn shadow-lg">
           {t('너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요')}
+        </div>
+      )}
+
+      {/* **시계가 어긋나면 점이 창 밖에 놓인다.**
+          차트의 오른쪽 끝은 이 PC 의 «지금» 이다. 콜렉터 쪽 시각이 앞서면 방금 온 점이
+          오른쪽 밖으로, 뒤처지면 오른쪽이 빈 채로 남는다 — 스트림은 멀쩡한데
+          화면에서만 사라진 것처럼 보인다. 조용히 두면 원인을 찾을 길이 없다. */}
+      {!isPast && skewWarning !== null && (
+        <div className="absolute top-2 right-2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
+          {skewWarning}
         </div>
       )}
 
