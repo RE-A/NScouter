@@ -19,9 +19,11 @@ describe('durationTone', () => {
     expect(durationTone(999)).toBe('text-warn');
   });
 
-  it('1000ms 이상은 위험색', () => {
-    expect(durationTone(1000)).toBe('text-danger');
-    expect(durationTone(30000)).toBe('text-danger');
+  // 현장 피드백: 소요 시간이 빨간색이라 에러로 읽혔다. 빨강은 에러 전용이다.
+  it('가장 느린 구간도 빨강이 아니라 같은 주황에 굵기만 더한다', () => {
+    expect(durationTone(1000)).toBe('text-warn font-medium');
+    expect(durationTone(30000)).toBe('text-warn font-medium');
+    expect(durationTone(30000)).not.toContain('danger');
   });
 
   // 음수는 오지 않아야 하지만, 와도 색이 튀면 안 된다.
@@ -34,6 +36,7 @@ describe('durationBar', () => {
   it('막대는 같은 경계를 쓰되 배경색을 낸다', () => {
     expect(durationBar(299)).toBe('bg-accent');
     expect(durationBar(300)).toBe('bg-warn');
-    expect(durationBar(1000)).toBe('bg-danger');
+    // 막대는 길이로도 길이를 말한다. 색을 하나 더 쓸 이유가 없다.
+    expect(durationBar(1000)).toBe('bg-warn');
   });
 });

@@ -116,3 +116,27 @@ describe('formatSql — 실측 문장', () => {
     expect(out).toContain('\nwhere s.quantity');
   });
 });
+
+describe('formatSql — 이미 줄로 나뉘어 온 SQL', () => {
+  it('빈 줄을 남기지 않는다', () => {
+    // 운영 SQL 은 손으로 줄을 나눠 쓴 것이 많다. 거기에 절 앞에서 한 번 더 나누면
+    // 빈 줄이 되어 **한 줄 걸러 여백**이 된다 — 화면 한 판에 문장 몇 줄만 남았다.
+    const sql = [
+      'SELECT count(1) AS count',
+      '  FROM TMMMM007 m007',
+      " WHERE m007.co_id = 'FW00'",
+      "   AND m007.gd_no = '399894'",
+    ].join('\n');
+
+    const out = formatSql(sql);
+
+    expect(out.split('\n').some(l => l.trim() === '')).toBe(false);
+    // 글자는 그대로다
+    expect(collapseWhitespace(out)).toBe(collapseWhitespace(sql));
+  });
+
+  it('원문에 빈 줄이 여러 개여도 여백으로 남지 않는다', () => {
+    const sql = 'SELECT a\n\n\nFROM t\n\nWHERE x = 1';
+    expect(formatSql(sql).split('\n')).toEqual(['SELECT a', 'FROM t', 'WHERE x = 1']);
+  });
+});

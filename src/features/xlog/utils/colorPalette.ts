@@ -76,3 +76,16 @@ export function formatTime(ms: number): string {
   const ss = d.getSeconds().toString().padStart(2, '0');
   return `${hh}:${mm}:${ss}`;
 }
+
+/**
+ * 밀리초까지 — `14:14:11.245`
+ *
+ * **한 트랜잭션을 들여다보는 자리에서는 초로는 부족하다.** 같은 초에 수십 건이
+ * 끝나므로 «어느 것이 먼저였나» 를 초 단위로는 못 가른다. 시작·끝을 초로만 적으면
+ * 3,975ms 짜리가 «11초 → 15초» 로 보여 실제 4초와 어긋나 보이기도 한다.
+ *
+ * 축 눈금(GridCalculator)에는 쓰지 않는다 — 거기서는 자리만 먹는다.
+ */
+export function formatTimeMs(ms: number): string {
+  return `${formatTime(ms)}.${Math.floor(ms % 1000).toString().padStart(3, '0')}`;
+}

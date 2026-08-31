@@ -13,7 +13,7 @@
 
 import { memo } from 'react';
 import type { DetailTab } from '../hooks/useXLogDetailTabs';
-import { formatTime } from '../utils/colorPalette';
+import { formatTime, formatTimeMs } from '../utils/colorPalette';
 import { t } from '../../../i18n';
 
 interface DetailTabBarProps {
@@ -52,7 +52,7 @@ export const DetailTabBar = memo(function DetailTabBar({
                 onClick={() => onSelect(tab.key)}
                 // 소요시간은 탭에 없다. 툴팁에는 넣는다 — 탭을 옮기지 않고도 견줄 수 있게.
                 title={
-                  xlog ? `${tab.title}\n${formatTime(xlog.endTime)} · ${elapsed}ms` : tab.title
+                  xlog ? `${tab.title}\n${formatTimeMs(xlog.endTime)} · ${elapsed}ms` : tab.title
                 }
                 className="flex min-w-0 items-baseline gap-1"
               >

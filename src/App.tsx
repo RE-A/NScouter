@@ -25,7 +25,7 @@ import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
 import { durationTone } from './features/xlog/components/durationTone';
 // ko-KR 로케일은 "4시 36분 18초" 를 낸다 — 폭을 먹고 줄바꿈되며 차트 X축(04:36:18)과도 어긋난다.
-import { formatTime } from './features/xlog/utils/colorPalette';
+import { formatTime, formatTimeMs } from './features/xlog/utils/colorPalette';
 import { AlertPanel } from './features/xlog/components/AlertPanel';
 import {
   onConnected,
@@ -1137,7 +1137,7 @@ function XLogTable({
             >
               <div className={`${cols} items-center`}>
                 <span className="tnum font-mono text-micro text-fg-dim">
-                  {formatTime(x.endTime)}
+                  {formatTimeMs(x.endTime)}
                 </span>
                 <span className="truncate text-fg-muted" title={agentName}>
                   {agentName}

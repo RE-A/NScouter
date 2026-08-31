@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toDateString, toFileStamp } from './xlogDate';
+import { formatTimeMs } from './colorPalette';
 
 describe('toDateString', () => {
   it('yyyyMMdd 로 만든다', () => {
@@ -27,5 +28,15 @@ describe('toFileStamp', () => {
     // `:` 가 들어가면 윈도에서 파일이 아예 만들어지지 않는다.
     const stamp = toFileStamp(Date.now());
     expect(stamp).toMatch(/^\d{8}-\d{6}$/);
+  });
+});
+
+describe('formatTimeMs', () => {
+  it('밀리초를 세 자리로 붙인다', () => {
+    const base = new Date(2026, 7, 30, 14, 14, 11).getTime();
+    expect(formatTimeMs(base + 245)).toBe('14:14:11.245');
+    // 한 자리·두 자리도 자리를 채워야 세로로 읽힌다
+    expect(formatTimeMs(base + 7)).toBe('14:14:11.007');
+    expect(formatTimeMs(base)).toBe('14:14:11.000');
   });
 });

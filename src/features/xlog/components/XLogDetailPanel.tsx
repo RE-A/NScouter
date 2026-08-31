@@ -12,7 +12,7 @@ import { useTextResolver } from '../hooks/useTextResolver';
 import { useCallTrace } from '../hooks/useCallTrace';
 import { useFlowProfiles } from '../hooks/useFlowProfiles';
 import { buildFlowTree } from '../trace/flowTree';
-import { formatTime } from '../utils/colorPalette';
+import { formatTimeMs } from '../utils/colorPalette';
 import { findStepHits } from './stepSearch';
 import { yyyymmdd } from '../types/timeRange';
 import type { SXLog } from '../types/xlog';
@@ -132,8 +132,10 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
     : null;
 
   // ko-KR 로케일은 "4시 36분 18초" 를 낸다. 차트 X축과 같은 표기(04:36:18)를 쓴다.
-  const startTime = xlog ? formatTime(xlog.endTime - xlog.elapsed) : '';
-  const endTimeStr = xlog ? formatTime(xlog.endTime) : '';
+  // 밀리초까지 적는다. 초로만 적으면 3,975ms 짜리가 «11초 → 15초» 로 보여
+  // 실제 소요와 어긋나 보이고, 같은 초에 끝난 것들 사이의 순서도 안 보인다.
+  const startTime = xlog ? formatTimeMs(xlog.endTime - xlog.elapsed) : '';
+  const endTimeStr = xlog ? formatTimeMs(xlog.endTime) : '';
 
   return (
     <div className="flex h-full flex-col bg-surface">

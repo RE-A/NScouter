@@ -195,12 +195,17 @@ export function formatSql(sql: string): string {
     if (plain !== '') parts.push(plain);
   }
 
-  // 줄 끝 공백을 털고, 맨 앞의 빈 줄을 없앤다
+  // 줄 끝 공백을 털고 **빈 줄을 모두 없앤다.**
+  //
+  // 원문이 이미 줄로 나뉘어 오는 SQL 이 있다(운영 코드에 손으로 쓴 것들).
+  // 거기에 우리가 절 앞에서 한 번 더 나누면 빈 줄이 되어 **한 줄 걸러 여백**이 된다 —
+  // 화면 한 판에 문장 몇 줄만 남았다. 공백만 지우므로 「글자를 하나도 잃지 않는다」 는
+  // 그대로다(collapseWhitespace 비교 테스트가 본다).
   return parts
     .join('')
     .split('\n')
     .map(l => l.replace(/\s+$/, ''))
-    .filter((l, idx) => !(idx === 0 && l.trim() === ''))
+    .filter(l => l.trim() !== '')
     .join('\n')
     .trim();
 }
