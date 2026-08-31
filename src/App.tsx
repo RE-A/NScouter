@@ -24,6 +24,7 @@ import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
 import { durationTone } from './features/xlog/components/durationTone';
+import { nextPicked, prunePicked } from './features/xlog/components/counterPick';
 // ko-KR 로케일은 "4시 36분 18초" 를 낸다 — 폭을 먹고 줄바꿈되며 차트 X축(04:36:18)과도 어긋난다.
 import { formatTime, formatTimeMs } from './features/xlog/utils/colorPalette';
 import { AlertPanel } from './features/xlog/components/AlertPanel';
@@ -1039,12 +1040,17 @@ function CounterSection({
   const [pickerOpen, setPickerOpen] = useState(false);
   const visible = picked.size === 0 ? null : picked;
 
-  const toggle = (hash: number) => {
-    const next = new Set(picked);
-    if (next.has(hash)) next.delete(hash);
-    else next.add(hash);
-    onPickedChange(next);
-  };
+  // 에이전트가 죽으면 그 해시는 더 이상 오지 않는다. 선택에 남겨 두면
+  // «3대 중 0대» 처럼 아무것도 안 그려지는 상태로 굳는다.
+  useEffect(() => {
+    const alive = prunePicked(picked, hashes);
+    if (alive !== picked) onPickedChange(new Set(alive));
+    // picked 를 넣으면 onPickedChange 가 새 객체를 줄 때마다 다시 돈다. 목록이 기준이다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hashes]);
+
+  // 규칙은 counterPick.ts 에 있다 — 빈 집합이 «전부» 라서 체크 동작이 한 번 꼬인다.
+  const toggle = (hash: number) => onPickedChange(nextPicked(picked, hashes, hash));
 
   const shortName = (hash: number) => {
     const name = agentMap.get(hash) ?? String(hash);
