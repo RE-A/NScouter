@@ -110,17 +110,27 @@ impl AppState {
         }
     }
 
-    /// 저장본 폴더. `{data_dir}/profiles/`
+    /// 데이터 폴더 아래의 한 자리.
     ///
     /// `config_path` 는 늘 `{exe_dir}/config.json` 이므로 그 부모가 실행파일 폴더다.
-    pub async fn profile_dir(&self) -> PathBuf {
+    async fn data_sub_dir(&self, name: &str) -> PathBuf {
         let config = self.config.lock().await;
         let exe_dir = self
             .config_path
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
-        resolve_data_dir(&config, &exe_dir).join(crate::profile_store::DIR_NAME)
+        resolve_data_dir(&config, &exe_dir).join(name)
+    }
+
+    /// 저장본 폴더. `{data_dir}/profiles/`
+    pub async fn profile_dir(&self) -> PathBuf {
+        self.data_sub_dir(crate::profile_store::DIR_NAME).await
+    }
+
+    /// 내보내기 폴더. `{data_dir}/exports/`
+    pub async fn export_dir(&self) -> PathBuf {
+        self.data_sub_dir(crate::export_store::DIR_NAME).await
     }
 }
 

@@ -80,10 +80,13 @@ pub struct SavedProfileEntry {
 
 /// 파일 이름에 쓸 수 없는 글자를 눕힌다.
 ///
+/// 저장본 말고 **내보내기(csv)도 같은 규칙**을 쓴다 — 규칙이 갈라지면
+/// 한쪽에서만 만들어지지 않는 파일 이름이 생긴다.
+///
 /// 서비스명은 `/shop/order<GET>` 처럼 오므로 그대로 쓰면 경로가 되거나
 /// 윈도에서 만들어지지 않는다. **자르기 전에 바꾼다** — 잘린 끝에 남은
 /// 반쪽짜리 글자로 이름이 갈리지 않게.
-fn sanitize(service: &str) -> String {
+pub(crate) fn sanitize(service: &str) -> String {
     let cleaned: String = service
         .chars()
         .map(|c| match c {

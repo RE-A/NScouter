@@ -12,6 +12,9 @@ import { yyyymmdd } from '../types/timeRange';
 import { useTextResolver } from '../hooks/useTextResolver';
 import { ipFromInt, sortSummary, withAverage, type SummarySortKey } from './summaryRows';
 import { durationTone } from './durationTone';
+import { errorSummaryCsv, summaryCsv } from './summaryCsv';
+import { saveCsvExport } from '../api/scouterApi';
+import { toFileStamp } from '../utils/xlogDate';
 import { t } from '../../../i18n';
 
 interface SummaryPanelProps {
@@ -137,6 +140,30 @@ export const SummaryPanel = memo(function SummaryPanel({
     [kind, dict, getCached],
   );
 
+  /** 방금 내보낸 경로. 잠깐 띄우고 지운다 */
+  const [exported, setExported] = useState<string | null>(null);
+  useEffect(() => {
+    if (exported === null) return;
+    const id = setTimeout(() => setExported(null), 4000);
+    return () => clearTimeout(id);
+  }, [exported]);
+
+  /**
+   * 표를 파일로 내보낸다.
+   *
+   * **화면에 그린 50줄이 아니라 받아 온 전부**를 넣는다 — 내보내는 이유가
+   * 「화면에 안 보이는 것까지 보겠다」 이다. 이름은 화면과 같은 사전으로 푼다.
+   */
+  const exportCsv = useCallback(() => {
+    const csv =
+      kind === 'error'
+        ? errorSummaryCsv(errorRows, (type, hash) => getCached(type, hash) ?? `0x${(hash >>> 0).toString(16)}`)
+        : summaryCsv(view, label);
+    saveCsvExport({ name: `summary-${kind}`, stamp: toFileStamp(Date.now()), csv })
+      .then(setExported)
+      .catch(e => setExported(String(e)));
+  }, [kind, errorRows, view, label, getCached]);
+
   if (!enabled) return null;
 
   const totalCalls = rows.reduce((s, r) => s + r.count, 0);
@@ -203,6 +230,16 @@ export const SummaryPanel = memo(function SummaryPanel({
             </div>
 
             <div className="flex-1" />
+            {/* 내보내기는 **받아 온 것이 있을 때만** 뜬다. 빈 파일을 만들 이유가 없다 */}
+            {(kind === 'error' ? errorRows.length : rows.length) > 0 && (
+              <button
+                onClick={exportCsv}
+                title={t('화면에 보이는 50줄이 아니라 받아 온 전부를 CSV 로 남깁니다')}
+                className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+              >
+                {t('내보내기')}
+              </button>
+            )}
             <button
               onClick={load}
               className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
@@ -210,6 +247,12 @@ export const SummaryPanel = memo(function SummaryPanel({
               {t('새로고침')}
             </button>
           </div>
+
+          {exported && (
+            <p className="border-b border-line px-3 py-1 text-micro text-fg-dim">
+              {t('내보냈습니다')} · <span className="font-mono">{exported}</span>
+            </p>
+          )}
 
           {loading && <p className="px-3 py-6 text-center text-small text-fg-faint">{t('조회 중…')}</p>}
           {error && <p className="px-3 py-6 text-center text-small text-danger">{error}</p>}

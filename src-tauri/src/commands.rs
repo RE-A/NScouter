@@ -1886,3 +1886,26 @@ pub async fn open_saved_profile(
 pub async fn get_profile_dir(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.profile_dir().await.to_string_lossy().to_string())
 }
+
+// ─── 표 내보내기 ──────────────────────────────────────────────
+
+/// 화면이 만든 CSV 를 파일로 남긴다. 만들어진 경로를 돌려준다.
+///
+/// **서버에 다시 묻지 않는다**(ASIS 는 EXPORT_APP_SUMMARY 를 쓴다).
+/// 표에 그린 행을 화면이 이미 다 갖고 있다.
+#[tauri::command]
+pub async fn save_csv_export(
+    input: crate::export_store::SaveCsvInput,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let dir = state.export_dir().await;
+    let path = crate::export_store::save(&dir, input)?;
+    log::info!("표 내보내기: {}", path.display());
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 내보내기 폴더 경로.
+#[tauri::command]
+pub async fn get_export_dir(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.export_dir().await.to_string_lossy().to_string())
+}

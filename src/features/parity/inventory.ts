@@ -201,8 +201,11 @@ const DEFAULT_VIEWS: ParityItem[] = [
   },
   {
     id: 'feature.view.ObjectNavigation', category: 'feature', name: 'Objects',
-    status: 'partial', evidence: [L4_OBJECT],
-    note: '목록·선택만. 트리 구조와 컨텍스트 메뉴 없음',
+    status: 'partial',
+    evidence: [L4_OBJECT, 'L1:src/features/xlog/components/agentTree.test.ts'],
+    note:
+      '찾기 + 한 겹 묶기(타입 또는 호스트) + 우클릭 메뉴. '
+      + 'ASIS 처럼 여러 겹으로 쌓지는 않는다 — 실물에서 이름의 깊이가 제각각이라 계층이 들쭉날쭉해진다(B-7)',
   },
   {
     id: 'feature.view.CounterRealTimeAll', category: 'feature', name: 'RealTimeAllCount',
@@ -307,7 +310,7 @@ const OBJTYPE_MENU: ParityItem[] = [
     id: 'feature.objtype.TypeSummary', category: 'feature', name: 'Type Summary',
     status: 'partial',
     evidence: ['L4:live_summary_shapes', 'L1:src/features/xlog/components/summaryRows.test.ts'],
-    note: '6종(서비스/SQL/API/IP/UA/에러) + 구간(1·6·24시간) + 정렬 4가지. 커맨드가 파라미터를 공유한다(F-38). 에러 탭은 대표 txid 로 트랜잭션을 바로 연다(F-39). ASIS 의 내보내기(EXPORT_APP_SUMMARY)와 알림 요약(LOAD_ALERT_SUMMARY)은 없다',
+    note: '6종(서비스/SQL/API/IP/UA/에러) + 구간(1·6·24시간) + 정렬 4가지. 커맨드가 파라미터를 공유한다(F-38). 에러 탭은 대표 txid 로 트랜잭션을 바로 연다(F-39). ASIS 의 내보내기(EXPORT_APP_SUMMARY)는 없다. 알림 요약(LOAD_ALERT_SUMMARY)은 커맨드가 응답은 하는데 이 환경에서는 늘 빈 목록이라 화면을 만들지 않았다(F-57 — 값이 안 오는 커맨드로 화면을 만들면 비어 있음이 정상인지 알 수 없다)',
   },
 ];
 
@@ -319,7 +322,9 @@ const OBJECT_MENU: ParityItem[] = [
     id: 'feature.object.ThreadList', category: 'feature', name: 'Thread List',
     status: 'implemented',
     evidence: ['L4:live_object_thread_list', 'L1:src-tauri/src/scouter/object.rs'],
-    note: '조회 스냅샷. 스레드 상세(OBJECT_THREAD_DETAIL)와 중지는 미구현',
+    note:
+      '조회 스냅샷. 스레드 상세(OBJECT_THREAD_DETAIL)도 구현했다 — 실측 검증 live_thread_detail_contract. '
+      + '중지(OBJECT_THREAD_CONTROL)는 미구현: 돌고 있는 스레드를 끊는 일이라 화면에 두려면 별도 판단이 필요하다',
   },
   {
     id: 'feature.object.Env', category: 'feature', name: 'Agent Env',

@@ -1684,6 +1684,30 @@ SQL·apicall 프로파일은 `profile_off`가 마스터 스위치이고 기본 �
 이 머신의 machine 이름은 `podman-machine`이다. 기본값(`podman-machine-default`)이 아니므로
 `podman machine start podman-machine`처럼 이름을 명시해야 한다.
 
+### F-57. `LOAD_ALERT_SUMMARY` 는 응답하지만 **이 환경에서는 늘 빈 목록**이다
+
+요약 표에 «알림» 을 붙이려고 먼저 쟀다. 커맨드는 살아 있고 ASIS 가 읽는 키
+(`title`·`level`·`count`, 그리고 `id`)를 그대로 돌려준다. **다만 길이가 0이다.**
+
+파라미터를 다섯 가지로 바꿔 봐도 같다 — 오늘/어제, 1시간/24시간, objType 유무,
+objHash 유무:
+
+```
+── 오늘·1시간·타입:      키 ["title", "count", "id", "level"]   title[0] level[0] count[0]
+── 오늘·24시간·오브젝트: 키 ["id", "title", "level", "count"]   title[0] level[0] count[0]
+── 어제·24시간·타입:     키 ["level", "id", "count", "title"]   title[0] level[0] count[0]
+```
+
+같은 시점에 `live_alert_pack_fields` 는 통과한다 — **알람 자체는 있다**(생명주기
+알람 INACTIVE_OBJECT/ACTIVATED_OBJECT). 즉 생명주기 알람은 요약 색인에 쌓이지
+않는 것으로 보이고, 요약에 들어갈 임계치 알람은 F-16 때문에 이 환경에서 만들 수 없다.
+
+**그래서 화면을 만들지 않았다.** 값이 안 오는 커맨드로 화면을 만들면 «비어 있음» 이
+정상인지 고장인지 아무도 모른다. 실환경에서 임계치 알람이 도는 콜렉터에 붙여
+한 번 재고 나서 붙일 일이다.
+
+- 재현: `cargo test --test live_collector probe_alert_summary -- --ignored --nocapture`
+
 ---
 
 ## 미해결 / 관찰만 한 것

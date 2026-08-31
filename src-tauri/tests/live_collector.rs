@@ -6720,3 +6720,68 @@ fn live_past_date_counter() {
     // 어제는 **데이터가 없을 수 있다.** 왔다는 것과 파싱된다는 것까지만 본다.
     println!("어제({yesterday}) 응답 오브젝트 {}개", past_yesterday.len());
 }
+
+/// 알림 요약(`LOAD_ALERT_SUMMARY`)이 무엇을 주는가.
+///
+/// 요약 표에 «알림» 을 붙이기 전에 먼저 잰다. ASIS 클라이언트
+/// (`AlertSummaryComposite`)는 `title`·`level`·`count` 세 리스트를 읽고,
+/// webapp(`SummaryConsumer`)은 나머지 요약과 **같은 파라미터**(date/stime/etime/
+/// objType/objHash)를 보낸다 — 그대로인지 실물로 본다.
+#[test]
+#[ignore]
+fn probe_alert_summary() {
+    use nscouter_lib::scouter::summary::build_summary_param;
+
+    let objs = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+    };
+    let obj_type = objs[0].0.clone();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let date = yyyymmdd_local(now);
+
+    let yesterday = yyyymmdd_local(now - 24 * 60 * 60 * 1000);
+    let one_hash = objs[0].1;
+
+    // (설명, 날짜, 몇 시간 전부터, objType, objHash)
+    let cases: [(&str, &str, i64, &str, i32); 5] = [
+        ("오늘·1시간·타입", &date, 1, &obj_type, 0),
+        ("오늘·24시간·타입", &date, 24, &obj_type, 0),
+        ("오늘·24시간·오브젝트", &date, 24, &obj_type, one_hash),
+        ("오늘·24시간·타입없음", &date, 24, "", 0),
+        ("어제·24시간·타입", &yesterday, 24, &obj_type, 0),
+    ];
+
+    for (label, day, hours, otype, ohash) in cases {
+        let mut c = login();
+        let sess = c.session;
+        let param = build_summary_param(day, now - hours * 60 * 60 * 1000, now, otype, ohash);
+        if c.send_request("LOAD_ALERT_SUMMARY", sess, &param).is_err() {
+            println!("── {label}: 요청 실패");
+            continue;
+        }
+
+        let mut packs = 0usize;
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Map(m) = pack {
+                packs += 1;
+                let keys: Vec<&String> = m.entries.keys().collect();
+                println!("── {label}: 키 {keys:?}");
+                for k in ["title", "level", "count", "objHash", "objType"] {
+                    if let Some(ScouterValue::List(items)) = m.entries.get(k) {
+                        let head: Vec<String> =
+                            items.iter().take(6).map(|v| v.to_display()).collect();
+                        println!("   {k}[{}] = {}", items.len(), head.join(", "));
+                    }
+                }
+            }
+        }
+        if packs == 0 {
+            println!("── {label}: 응답 팩 없음");
+        }
+    }
+}

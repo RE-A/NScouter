@@ -690,3 +690,17 @@ export async function openSavedProfile(path: string): Promise<SavedProfile> {
 export async function getProfileDir(): Promise<string> {
   return invoke<string>('get_profile_dir');
 }
+
+/** 표를 CSV 로 남긴다. 만들어진 경로를 돌려준다 */
+export async function saveCsvExport(input: {
+  name: string;
+  stamp: string;
+  csv: string;
+}): Promise<string> {
+  return invoke<string>('save_csv_export', { input });
+}
+
+/** 내보내기 폴더 경로 */
+export async function getExportDir(): Promise<string> {
+  return invoke<string>('get_export_dir');
+}

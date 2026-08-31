@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod config;
+pub mod export_store;
 pub mod profile_store;
 pub mod scouter;
 pub mod state;
@@ -106,6 +107,8 @@ pub fn run() {
             list_saved_profiles,
             open_saved_profile,
             get_profile_dir,
+            save_csv_export,
+            get_export_dir,
             search_xlog_list,
             get_search_max,
         ])

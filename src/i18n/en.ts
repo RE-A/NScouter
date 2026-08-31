@@ -488,6 +488,12 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 표 내보내기 ───────────────────────────────────────
+  '내보내기': 'Export',
+  '내보냈습니다': 'Exported',
+  '화면에 보이는 50줄이 아니라 받아 온 전부를 CSV 로 남깁니다':
+    'Writes every row fetched to CSV, not just the 50 shown',
+
   // ── 하루 누적 ─────────────────────────────────────────
   '그날 하루의 누적을 봅니다': 'Show cumulative counts for that day',
   '방문자는 오늘만': 'Visitors: today only',
