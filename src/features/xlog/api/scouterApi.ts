@@ -540,6 +540,10 @@ export interface AppConfig {
   ui_layout?: UiLayout;
   /** XLog 스캐터 차트 설정 */
   xlog_chart?: XLogChartPrefs;
+  /** 마지막으로 걸어 두었던 조회 조건 */
+  xlog_filter?: XLogFilterPrefs;
+  /** 카운터에서 그리기로 고른 서버 */
+  counter_picks?: CounterPickPrefs;
 }
 
 /** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
@@ -563,6 +567,32 @@ export interface XLogChartPrefs {
   y_max: number;
   show_ignore_area: boolean;
   ignore_threshold_ms: number;
+}
+
+/**
+ * 마지막으로 걸어 두었던 조회 조건. Rust `XLogFilterPrefs` 와 짝이다.
+ *
+ * **과거 구간(stime/etime)은 담지 않는다.** 어제 보던 «최근 1시간» 은 오늘 열면
+ * 남의 시간이다 — 조건만 남기고 시점은 지금으로 되돌린다.
+ */
+export interface XLogFilterPrefs {
+  elapsed_ms: number;
+  elapsed_exclude: boolean;
+  error_only: boolean;
+  obj_hashes: number[];
+  service_text: string;
+  service_exclude: boolean;
+  ip_text: string;
+  ip_exclude: boolean;
+  /** 'live' | 'past' */
+  mode: string;
+}
+
+/** 카운터에서 그리기로 고른 서버. 비어 있으면 전부 */
+export interface CounterPickPrefs {
+  javaee: number[];
+  host: number[];
+  datasource: number[];
 }
 
 /** 서버가 한 번에 돌려주는 상한. **찾기 전에 물어본다** — 안 물어보고 단정하면 화면이 거짓말한다 */
@@ -628,8 +658,13 @@ export async function saveConfig(newConfig: AppConfig): Promise<void> {
  * 화면에서 읽어 고쳐 쓰면 그 사이에 설정 창이 바꾼 값(언어 등)을 되돌린다.
  * 병합은 Rust 가 한다.
  */
-export async function saveUiState(layout: UiLayout, chart: XLogChartPrefs): Promise<void> {
-  return invoke<void>('save_ui_state', { layout, chart });
+export async function saveUiState(
+  layout: UiLayout,
+  chart: XLogChartPrefs,
+  filter: XLogFilterPrefs,
+  picks: CounterPickPrefs,
+): Promise<void> {
+  return invoke<void>('save_ui_state', { layout, chart, filter, picks });
 }
 
 

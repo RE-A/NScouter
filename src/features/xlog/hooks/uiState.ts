@@ -4,10 +4,11 @@
 // 그렇다). 그래서 **읽어 온 값을 그대로 믿지 않는다** — 못 쓸 값이면 기본값으로 돌린다.
 // 배치가 0 이면 패널이 사라진 채로 뜨고, 그게 왜 그런지는 화면만 봐서는 모른다.
 
-import type { UiLayout, XLogChartPrefs } from '../api/scouterApi';
+import type { CounterPickPrefs, UiLayout, XLogChartPrefs, XLogFilterPrefs } from '../api/scouterApi';
 import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
-import type { XLogChartConfig, YAxisMode } from '../types/xlog';
+import type { XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
+import type { XLogMode } from '../types/timeRange';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
 export type TabId = 'xlog' | 'counter' | 'alert';
@@ -110,4 +111,66 @@ export function fromChartConfig(c: XLogChartConfig): XLogChartPrefs {
     show_ignore_area: c.showIgnoreArea,
     ignore_threshold_ms: c.ignoreThresholdMs,
   };
+}
+
+// ─── 조회 조건 ────────────────────────────────────────────────
+
+/**
+ * 저장해 둔 조건 → 화면 값.
+ *
+ * **읽어 온 값을 그대로 믿지 않는다.** 파일은 사람이 여는 곳이고, 숫자 자리에
+ * 글자가 들어와 있으면 필터가 통째로 이상해진다 — 배치와 같은 규칙이다.
+ */
+export function toFilterState(p: XLogFilterPrefs | undefined): {
+  filter: XLogFilterState;
+  mode: XLogMode;
+} {
+  const nonNegative = (v: unknown): number => {
+    const n = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  };
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const flag = (v: unknown): boolean => v === true;
+
+  return {
+    filter: {
+      elapsedMs: nonNegative(p?.elapsed_ms),
+      elapsedExclude: flag(p?.elapsed_exclude),
+      errorOnly: flag(p?.error_only),
+      objHashSet: new Set(
+        Array.isArray(p?.obj_hashes) ? p.obj_hashes.filter(h => Number.isInteger(h)) : [],
+      ),
+      service: { text: text(p?.service_text), exclude: flag(p?.service_exclude) },
+      ip: { text: text(p?.ip_text), exclude: flag(p?.ip_exclude) },
+    },
+    // **과거 모드로는 되돌리지 않는다.** 어제 보던 구간은 오늘 열면 남의 시간이고,
+    // 켜자마자 옛날 구간을 다시 받아 오면 «지금» 이 안 보인다.
+    mode: p?.mode === 'past' ? 'past' : 'live',
+  };
+}
+
+/** 화면 값 → 저장할 조건 */
+export function fromFilterState(filter: XLogFilterState, mode: XLogMode): XLogFilterPrefs {
+  return {
+    elapsed_ms: filter.elapsedMs,
+    elapsed_exclude: filter.elapsedExclude,
+    error_only: filter.errorOnly,
+    obj_hashes: [...filter.objHashSet],
+    service_text: filter.service.text,
+    service_exclude: filter.service.exclude,
+    ip_text: filter.ip.text,
+    ip_exclude: filter.ip.exclude,
+    mode,
+  };
+}
+
+/** 저장해 둔 카운터 서버 고르기 → 화면 값 */
+export function toCounterPicks(p: CounterPickPrefs | undefined): {
+  javaee: Set<number>;
+  host: Set<number>;
+  datasource: Set<number>;
+} {
+  const set = (v: unknown): Set<number> =>
+    new Set(Array.isArray(v) ? v.filter((h): h is number => Number.isInteger(h)) : []);
+  return { javaee: set(p?.javaee), host: set(p?.host), datasource: set(p?.datasource) };
 }

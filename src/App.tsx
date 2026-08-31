@@ -45,7 +45,15 @@ import { useAlertStream } from './features/xlog/hooks/useAlertStream';
 import { useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
 import { DetailTabBar } from './features/xlog/components/DetailTabBar';
 import { useShortcuts } from './features/xlog/hooks/useShortcuts';
-import { toLayout, fromLayout, toChartConfig, fromChartConfig } from './features/xlog/hooks/uiState';
+import {
+  toLayout,
+  fromLayout,
+  toChartConfig,
+  fromChartConfig,
+  toFilterState,
+  fromFilterState,
+  toCounterPicks,
+} from './features/xlog/hooks/uiState';
 import type { GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
 import type { AgentObject, SXLog, XLogChartConfig, XLogFilterState, YAxisMode } from './features/xlog/types/xlog';
@@ -191,6 +199,17 @@ export default function App() {
   const [tableH, setTableH] = useState<number>(PANE.tableDefaultH);
   /** 서비스 목록을 무엇으로 묶는가. 껐다 켜도 남는다 */
   const [agentGroupBy, setAgentGroupBy] = useState<GroupBy>('type');
+  /**
+   * 카운터 화면에서 그리기로 고른 서버. Family 별로 따로 고른다.
+   *
+   * 여기(App)에 두는 이유는 **저장하기 위해서**다 — 구역 안에 두면 탭을 옮길 때마다
+   * 초기화되고, 껐다 켜면 통째로 날아간다.
+   */
+  const [counterPicks, setCounterPicks] = useState<{
+    javaee: Set<number>;
+    host: Set<number>;
+    datasource: Set<number>;
+  }>({ javaee: new Set(), host: new Set(), datasource: new Set() });
 
   /**
    * 저장해 둔 배치·차트 설정을 한 번 읽어 온다.
@@ -211,6 +230,11 @@ export default function App() {
         setActiveTab(l.activeTab);
         setAgentGroupBy(l.agentGroupBy);
         setConfig(toChartConfig(cfg.xlog_chart));
+        // 조회 조건도 되살린다. **껐다 켜면 다 날아간다** 가 현장에서 가장 많이 나온 말이다.
+        const f = toFilterState(cfg.xlog_filter);
+        setFilter(f.filter);
+        setXLogMode(f.mode);
+        setCounterPicks(toCounterPicks(cfg.counter_picks));
       })
       // 못 읽어도 기본값으로 뜬다. 다만 그 기본값으로 파일을 덮지는 않는다 —
       // 읽기가 실패한 이유가 «잠깐 못 읽었다» 일 수도 있다.
@@ -231,10 +255,27 @@ export default function App() {
       saveUiState(
         fromLayout({ servicesW, detailW, tableH, activeTab, agentGroupBy }),
         fromChartConfig(config),
+        fromFilterState(filter, xlogMode),
+        {
+          javaee: [...counterPicks.javaee],
+          host: [...counterPicks.host],
+          datasource: [...counterPicks.datasource],
+        },
       ).catch(() => {});
     }, 600);
     return () => clearTimeout(id);
-  }, [hydrated, servicesW, detailW, tableH, activeTab, agentGroupBy, config]);
+  }, [
+    hydrated,
+    servicesW,
+    detailW,
+    tableH,
+    activeTab,
+    agentGroupBy,
+    config,
+    filter,
+    xlogMode,
+    counterPicks,
+  ]);
 
   useEffect(() => {
     const el = xlogWsRef.current;
@@ -838,6 +879,9 @@ export default function App() {
                 counters={JAVAEE_CHARTS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
+                hashes={counterHashes.javaee}
+                picked={counterPicks.javaee}
+                onPickedChange={next => setCounterPicks(p => ({ ...p, javaee: next }))}
                 empty={counterHashes.javaee.length === 0 ? t('자바 에이전트가 없습니다.') : null}
                 // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
                 footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
@@ -848,6 +892,9 @@ export default function App() {
                 counters={HOST_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
+                hashes={counterHashes.host}
+                picked={counterPicks.host}
+                onPickedChange={next => setCounterPicks(p => ({ ...p, host: next }))}
                 empty={
                   counterHashes.host.length === 0
                     ? t('호스트 에이전트가 없습니다. scouter.host 를 콜렉터에 붙이면 CPU·메모리·네트워크가 표시됩니다.')
@@ -867,6 +914,9 @@ export default function App() {
                 counters={DATASOURCE_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
+                hashes={counterHashes.datasource}
+                picked={counterPicks.datasource}
+                onPickedChange={next => setCounterPicks(p => ({ ...p, datasource: next }))}
                 empty={
                   counterHashes.datasource.length === 0
                     ? // 두 관문이 모두 닫혀 있으면 0건이다. 어느 쪽인지 말해 주지 않으면 고장으로 읽힌다 (F-41).
@@ -948,6 +998,9 @@ function CounterSection({
   counters,
   isStreaming,
   agentMap,
+  hashes,
+  picked,
+  onPickedChange,
   empty,
   footnote,
 }: {
@@ -956,6 +1009,11 @@ function CounterSection({
   counters: readonly CounterName[];
   isStreaming: boolean;
   agentMap: Map<number, string>;
+  /** 이 구역이 받는 오브젝트. 여기서 골라 그린다 */
+  hashes: readonly number[];
+  /** 그릴 서버. 빈 집합이면 전부다. **App 이 들고 있다** — 저장해야 하기 때문이다 */
+  picked: Set<number>;
+  onPickedChange: (next: Set<number>) => void;
   /** 이 Family 의 오브젝트가 없을 때 보여줄 안내. 없으면 null */
   empty: string | null;
   /** 이 구역에서 **영영 못 받는** 카운터에 대한 각주. 없으면 생략 */
@@ -970,6 +1028,29 @@ function CounterSection({
    */
   const [total, setTotal] = useState(false);
 
+  /**
+   * 그릴 서버. 빈 집합이면 **전부**다.
+   *
+   * 운영에서는 한 타입에 서버가 10대씩 붙는다. 차트 하나에 선 열 개가 겹치면
+   * 색으로도 못 가르고, 정작 보려던 한 대의 모양이 나머지에 묻힌다.
+   * 그렇다고 기본을 «하나만» 으로 두면 처음 연 사람이 나머지를 없는 것으로 읽는다 —
+   * 기본은 전부, 고르는 건 사용자 몫이다.
+   */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const visible = picked.size === 0 ? null : picked;
+
+  const toggle = (hash: number) => {
+    const next = new Set(picked);
+    if (next.has(hash)) next.delete(hash);
+    else next.add(hash);
+    onPickedChange(next);
+  };
+
+  const shortName = (hash: number) => {
+    const name = agentMap.get(hash) ?? String(hash);
+    return name.split('/').filter(Boolean).pop() ?? name;
+  };
+
   return (
     <section className="mb-4 last:mb-0">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
@@ -978,6 +1059,43 @@ function CounterSection({
         <div className="flex-1" />
         {/* counters.xml 이 합계를 허용한 카운터가 하나도 없는 구역(host)에는
             토글 자체를 두지 않는다. 눌러도 아무것도 안 바뀌는 버튼은 고장으로 읽힌다. */}
+        {!empty && hashes.length > 1 && (
+          <div className="relative">
+            <button
+              onClick={() => setPickerOpen(o => !o)}
+              aria-expanded={pickerOpen}
+              title={t('그릴 서버를 고릅니다')}
+              className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+            >
+              {t('서버')} {picked.size === 0 ? t('전체') : `${picked.size}/${hashes.length}`}
+            </button>
+            {pickerOpen && (
+              <div className="absolute right-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded border border-line-strong bg-surface p-1 shadow">
+                <button
+                  onClick={() => onPickedChange(new Set())}
+                  className="mb-1 w-full rounded px-2 py-0.5 text-left text-micro text-fg-dim hover:bg-hover hover:text-fg"
+                >
+                  {t('전체 보기')}
+                </button>
+                {hashes.map(h => (
+                  <label
+                    key={h}
+                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-0.5 text-micro text-fg-muted hover:bg-hover"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={picked.size === 0 || picked.has(h)}
+                      onChange={() => toggle(h)}
+                    />
+                    <span className="truncate" title={agentMap.get(h) ?? String(h)}>
+                      {shortName(h)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {!empty && counters.some(isTotalCapable) && (
           <div className="flex gap-0.5">
             {([false, true] as const).map(v => (
@@ -1008,6 +1126,7 @@ function CounterSection({
               agentMap={agentMap}
               height={110}
               total={total}
+              visible={visible}
             />
           ))}
         </div>

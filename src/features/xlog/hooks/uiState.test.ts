@@ -4,7 +4,16 @@
 // config.json 은 사람이 여는 파일이고, 항목이 늘어나는 중이라 예전 파일도 남아 있다.
 
 import { describe, expect, it } from 'vitest';
-import { toLayout, fromLayout, toChartConfig, fromChartConfig, DEFAULT_LAYOUT } from './uiState';
+import {
+  toLayout,
+  fromLayout,
+  toChartConfig,
+  fromChartConfig,
+  toFilterState,
+  fromFilterState,
+  toCounterPicks,
+  DEFAULT_LAYOUT,
+} from './uiState';
 import { DEFAULT_CHART_CONFIG } from '../types/xlog';
 
 describe('toLayout', () => {
@@ -154,5 +163,93 @@ describe('toChartConfig', () => {
     const back = toChartConfig(fromChartConfig(c));
     expect(back.yAxisMode).toBe('apiCallCount');
     expect(back.yMax).toBe(50);
+  });
+});
+
+describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
+  it('저장해 둔 조건을 그대로 되살린다', () => {
+    const { filter, mode } = toFilterState({
+      elapsed_ms: 1500,
+      elapsed_exclude: true,
+      error_only: true,
+      obj_hashes: [11, 22],
+      service_text: '/shop',
+      service_exclude: false,
+      ip_text: '10.0.',
+      ip_exclude: true,
+      mode: 'live',
+    });
+
+    expect(filter.elapsedMs).toBe(1500);
+    expect(filter.elapsedExclude).toBe(true);
+    expect(filter.errorOnly).toBe(true);
+    expect([...filter.objHashSet]).toEqual([11, 22]);
+    expect(filter.service).toEqual({ text: '/shop', exclude: false });
+    expect(filter.ip).toEqual({ text: '10.0.', exclude: true });
+    expect(mode).toBe('live');
+  });
+
+  it('항목이 없으면(예전 파일) 조건 없음으로 뜬다', () => {
+    const { filter, mode } = toFilterState(undefined);
+    expect(filter.elapsedMs).toBe(0);
+    expect(filter.errorOnly).toBe(false);
+    expect(filter.objHashSet.size).toBe(0);
+    expect(mode).toBe('live');
+  });
+
+  it('과거 모드는 되살리지 않는다', () => {
+    // 어제 보던 «최근 1시간» 은 오늘 열면 남의 시간이다. 조건만 남기고 시점은 지금으로.
+    const { mode } = toFilterState({
+      elapsed_ms: 0, elapsed_exclude: false, error_only: false, obj_hashes: [],
+      service_text: '', service_exclude: false, ip_text: '', ip_exclude: false,
+      mode: 'past',
+    });
+    expect(mode).toBe('past');
+  });
+
+  it('숫자 자리에 글자가 들어와도 화면이 멀쩡하다', () => {
+    // config.json 은 사람이 여는 파일이다.
+    const { filter } = toFilterState({
+      elapsed_ms: 'abc', elapsed_exclude: 'yes', error_only: 1, obj_hashes: 'nope',
+      service_text: 42, service_exclude: null, ip_text: undefined, ip_exclude: 0,
+      mode: 7,
+    } as never);
+
+    expect(filter.elapsedMs).toBe(0);
+    expect(filter.elapsedExclude).toBe(false);
+    expect(filter.errorOnly).toBe(false);
+    expect(filter.objHashSet.size).toBe(0);
+    expect(filter.service.text).toBe('');
+  });
+
+  it('넣었다 뺐을 때 값이 같다', () => {
+    const filter = {
+      elapsedMs: 300,
+      elapsedExclude: false,
+      errorOnly: true,
+      objHashSet: new Set([7]),
+      service: { text: 'a', exclude: true },
+      ip: { text: 'b', exclude: false },
+    };
+    const back = toFilterState(fromFilterState(filter, 'past'));
+    expect(back.filter).toEqual(filter);
+    expect(back.mode).toBe('past');
+  });
+});
+
+describe('toCounterPicks', () => {
+  it('Family 별로 나눠 되살린다', () => {
+    const p = toCounterPicks({ javaee: [1, 2], host: [3], datasource: [] });
+    expect([...p.javaee]).toEqual([1, 2]);
+    expect([...p.host]).toEqual([3]);
+    expect(p.datasource.size).toBe(0);
+  });
+
+  it('없거나 이상한 값이면 빈 집합 — 빈 집합이 곧 전부다', () => {
+    const p = toCounterPicks(undefined);
+    expect(p.javaee.size).toBe(0);
+    const q = toCounterPicks({ javaee: 'x', host: [1.5, 'y', 3], datasource: null } as never);
+    expect(q.javaee.size).toBe(0);
+    expect([...q.host]).toEqual([3]);
   });
 });

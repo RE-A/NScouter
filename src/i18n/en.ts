@@ -488,6 +488,11 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 카운터 서버 고르기 ────────────────────────────────
+  // '서버'·'전체' 는 위에 이미 있다. 같은 말을 두 번 적으면 사전이 갈린다.
+  '전체 보기': 'Show all',
+  '그릴 서버를 고릅니다': 'Choose which servers to plot',
+
   // ── 상세 안에서 찾기 ──────────────────────────────────
   '이 안에서 찾기': 'Find in this profile',
   '없음': 'none',

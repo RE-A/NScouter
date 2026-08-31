@@ -49,6 +49,12 @@ pub struct AppConfig {
     /// XLog 스캐터 차트 설정(Y축·시간 범위·무시 구간).
     #[serde(default)]
     pub xlog_chart: XLogChartPrefs,
+    /// 마지막으로 걸어 두었던 조회 조건
+    #[serde(default)]
+    pub xlog_filter: XLogFilterPrefs,
+    /// 카운터에서 그리기로 고른 서버
+    #[serde(default)]
+    pub counter_picks: CounterPickPrefs,
 }
 
 /// 끌어서 정한 패널 크기. 픽셀이다.
@@ -89,6 +95,59 @@ impl Default for UiLayout {
 ///
 /// 색은 넣지 않는다 — 팔레트는 `colorPalette.ts` 한 곳에만 있어야 하고,
 /// 설정 파일에 두 벌이 되면 테마를 바꿔도 저장해 둔 색이 이긴다.
+/// 마지막으로 걸어 두었던 XLog 조회 조건.
+///
+/// **껐다 켜면 다 날아간다** 는 것이 현장에서 가장 많이 나온 말이다.
+/// 필터를 다시 채우는 데 드는 시간보다, 어제 보던 자리로 바로 돌아가는 것이 훨씬 낫다.
+/// 화면 값과 1:1 이라 화면 타입이 바뀌면 여기도 바뀐다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XLogFilterPrefs {
+    /// 응답시간 임계(ms). 0 이면 조건 없음
+    pub elapsed_ms: i64,
+    /// true 면 임계 **미만**만 통과
+    pub elapsed_exclude: bool,
+    pub error_only: bool,
+    /// 고른 오브젝트. 비어 있으면 전부
+    pub obj_hashes: Vec<i32>,
+    pub service_text: String,
+    pub service_exclude: bool,
+    pub ip_text: String,
+    pub ip_exclude: bool,
+    /// `"live"` 또는 `"past"`
+    pub mode: String,
+}
+
+impl Default for XLogFilterPrefs {
+    fn default() -> Self {
+        Self {
+            elapsed_ms: 0,
+            elapsed_exclude: false,
+            error_only: false,
+            obj_hashes: Vec::new(),
+            service_text: String::new(),
+            service_exclude: false,
+            ip_text: String::new(),
+            ip_exclude: false,
+            // **과거 구간은 복원하지 않는다.** 어제 보던 «최근 1시간» 은 오늘 열면
+            // 남의 시간이다. 조건은 남기고 시점만 지금으로 되돌린다.
+            mode: "live".to_string(),
+        }
+    }
+}
+
+/// 카운터 화면에서 그리기로 고른 서버.
+///
+/// Family 마다 따로 고른다 — 앱과 호스트는 대수도 다르고 보는 이유도 다르다.
+/// 비어 있으면 **전부**다(고르지 않은 것과 «하나도 안 고른 것» 을 가르지 않는다).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CounterPickPrefs {
+    pub javaee: Vec<i32>,
+    pub host: Vec<i32>,
+    pub datasource: Vec<i32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct XLogChartPrefs {
@@ -148,6 +207,8 @@ impl Default for AppConfig {
             ui_language: "ko".to_string(),
             ui_layout: UiLayout::default(),
             xlog_chart: XLogChartPrefs::default(),
+            xlog_filter: XLogFilterPrefs::default(),
+            counter_picks: CounterPickPrefs::default(),
         }
     }
 }

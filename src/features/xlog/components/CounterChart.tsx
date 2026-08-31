@@ -31,6 +31,13 @@ interface CounterChartProps {
    * 접는 방식(합/평균)은 카운터가 정한다 — counterTotal.totalMode
    */
   total?: boolean;
+  /**
+   * 그릴 오브젝트. `null` 이면 전부.
+   *
+   * **거르는 자리는 그리는 쪽이다.** 받는 쪽에서 거르면 골랐다 풀 때마다 그 서버의
+   * 지난 값이 통째로 비어 다시 쌓일 때까지 기다려야 한다.
+   */
+  visible?: ReadonlySet<number> | null;
 }
 
 interface AgentSamples {
@@ -50,6 +57,7 @@ export const CounterChart = memo(function CounterChart({
   agentMap,
   height = 80,
   total = false,
+  visible = null,
 }: CounterChartProps) {
   // prop 이름이 `total` 인데 쌍 카운터의 상한도 `total` 이라 같은 함수 안에서 겹친다.
   // 지역에서는 이름을 갈라 둔다.
@@ -67,6 +75,9 @@ export const CounterChart = memo(function CounterChart({
   const lastReceivedRef = useRef<number | null>(null);
   const streamingRef = useRef(isStreaming);
   streamingRef.current = isStreaming;
+  // rAF 클로저에서 읽는다 — deps 에 넣어 루프를 다시 세우면 프레임이 한 번 끊긴다.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   // 카운터 데이터 수신 — 이벤트는 카운터 단위로 오므로 내 카운터만 골라낸다
   useEffect(() => {
@@ -159,7 +170,11 @@ export const CounterChart = memo(function CounterChart({
       ctx.fillStyle = CANVAS.bgSurface;
       ctx.fillRect(0, 0, w, h);
 
-      const agents = Array.from(seriesRef.current.values());
+      // 고른 서버만 그린다. 합계 선(TOTAL_HASH)은 고르기와 무관하다.
+      const picked = visibleRef.current;
+      const all = Array.from(seriesRef.current.values());
+      const agents =
+        picked === null || totalOne ? all : all.filter(a => picked.has(a.objHash));
       if (agents.length === 0) {
         // "데이터 없음"만 띄우면 고장인지 트래픽이 없는 건지 알 수 없다.
         const st = deriveStreamStatus({
@@ -207,6 +222,16 @@ export const CounterChart = memo(function CounterChart({
 
   // javaee / host 어느 Family 든 여기서 찾는다.
   const meta = counterMeta(counter);
+  /**
+   * 머리글에 적는 수.
+   *
+   * **고른 수를 적는다.** 받은 수를 적으면 «3개 에이전트» 라고 써 놓고 선은 하나만
+   * 그려져 고장으로 읽힌다. 합계 모드는 접은 선 하나라 받은 수가 그대로 뜻이 있다.
+   */
+  const shownCount =
+    totalOne || visible === null
+      ? agentCount
+      : Array.from(seriesRef.current.keys()).filter(h => visible.has(h)).length;
 
   return (
     <div className="overflow-hidden rounded border border-line bg-surface">
@@ -215,12 +240,12 @@ export const CounterChart = memo(function CounterChart({
           (CounterChart.test.tsx). */}
       <div className="truncate px-2 pt-1 text-micro text-fg-muted" title={meta.disp}>
         {meta.disp} ({meta.unit}){' '}
-        {agentCount > 0
+        {shownCount > 0
           ? totalOne
             ? `· ${mode === 'avg' ? t('평균') : t('합계')} · ${agentCount}${t('개 에이전트')}`
             : // 구역이 합계인데 이 카운터만 개별이면 **말해 줘야 한다.**
               // 조용히 두면 옆 차트와 같은 자로 읽는다.
-              `· ${agentCount}${t('개 에이전트')}${total && !capable ? ` · ${t('합계 없음')}` : ''}`
+              `· ${shownCount}${t('개 에이전트')}${total && !capable ? ` · ${t('합계 없음')}` : ''}`
           : ''}
       </div>
       <canvas

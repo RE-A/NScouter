@@ -1826,12 +1826,16 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String>
 pub async fn save_ui_state(
     layout: crate::config::UiLayout,
     chart: crate::config::XLogChartPrefs,
+    filter: crate::config::XLogFilterPrefs,
+    picks: crate::config::CounterPickPrefs,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = state.config_path.clone();
     let mut cfg = state.config.lock().await;
     cfg.ui_layout = layout;
     cfg.xlog_chart = chart;
+    cfg.xlog_filter = filter;
+    cfg.counter_picks = picks;
     cfg.save(&path)
 }
 
