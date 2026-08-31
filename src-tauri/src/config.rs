@@ -58,6 +58,12 @@ pub struct AppConfig {
     /// XLog 스캐터 차트 설정(Y축·시간 범위·무시 구간).
     #[serde(default)]
     pub xlog_chart: XLogChartPrefs,
+    /// 갈아 가며 볼 서버들. 비어 있으면 `last_*` 로 하나를 만들어 쓴다
+    #[serde(default)]
+    pub servers: Vec<ServerProfile>,
+    /// 마지막으로 고른 서버 이름
+    #[serde(default)]
+    pub last_server: String,
     /// 마지막으로 걸어 두었던 조회 조건
     #[serde(default)]
     pub xlog_filter: XLogFilterPrefs,
@@ -104,6 +110,25 @@ impl Default for UiLayout {
 ///
 /// 색은 넣지 않는다 — 팔레트는 `colorPalette.ts` 한 곳에만 있어야 하고,
 /// 설정 파일에 두 벌이 되면 테마를 바꿔도 저장해 둔 색이 이긴다.
+/// 접속해 둘 서버 하나.
+///
+/// **여러 콜렉터를 갈아 가며 본다.** 운영·QA 를 오가거나, 시스템별로 콜렉터가 나뉜
+/// 환경에서 매번 호스트·계정을 다시 치는 것이 현장에서 나온 불편이었다.
+///
+/// 비밀번호는 **비워 둘 수 있다.** 비면 그 서버로 갈아탈 때 한 번 묻는다 —
+/// 저장하면 `config.json` 에 평문으로 남기 때문에 고르게 둔다(자동 연결과 같은 규칙).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServerProfile {
+    /// 화면에 보일 이름. 비면 `host:port` 를 쓴다
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    /// 저장하지 않으면 빈 문자열
+    pub pass: String,
+}
+
 /// 마지막으로 걸어 두었던 XLog 조회 조건.
 ///
 /// **껐다 켜면 다 날아간다** 는 것이 현장에서 가장 많이 나온 말이다.
@@ -224,6 +249,8 @@ impl Default for AppConfig {
             ui_language: "ko".to_string(),
             ui_layout: UiLayout::default(),
             xlog_chart: XLogChartPrefs::default(),
+            servers: Vec::new(),
+            last_server: String::new(),
             xlog_filter: XLogFilterPrefs::default(),
             counter_picks: CounterPickPrefs::default(),
         }

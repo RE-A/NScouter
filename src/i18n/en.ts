@@ -488,6 +488,14 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 서버 갈아타기 ─────────────────────────────────────
+  '서버 고르기': 'Choose server',
+  '붙을 서버를 고릅니다': 'Choose which collector to connect to',
+  '바꾸는 중…': 'Switching…',
+  '비밀번호 물음': 'asks for password',
+  '지우기': 'remove',
+  '목록에서 지웁니다': 'Remove from the list',
+
   // ── 버퍼 상한 ─────────────────────────────────────────
   '버퍼 상한': 'Buffer limit',
   '건 — 오래된 점부터 지웁니다. 범위를 좁히거나 설정에서 상한을 올리면 다 보입니다':

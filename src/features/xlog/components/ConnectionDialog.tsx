@@ -3,27 +3,37 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { T, F } from '../../../styles/tokens';
 import {
-  connectScouter,
-  startXLogStream,
   startMockStream,
   stopXLogStream,
   disconnectScouter,
-  getObjectList,
   getConfig,
   saveConfig,
+  type ServerProfile,
 } from '../api/scouterApi';
+import { connectToServer } from '../api/connectFlow';
 import { t } from '../../../i18n';
 
 interface ConnectionDialogProps {
   onConnected: (serverId: string, objHashes: number[]) => void;
   onDisconnected: () => void;
   isConnected: boolean;
+  /**
+   * 폼에 미리 채워 둘 접속 정보.
+   *
+   * 비밀번호를 저장하지 않은 서버로 갈아탈 때 쓴다 — 호스트·계정은 아는데
+   * 비밀번호만 모르는 상태라, 그것만 치면 되게 한다.
+   */
+  prefill?: ServerProfile | null;
+  /** 접속에 성공했을 때. 목록에 넣거나 갱신하는 것은 부르는 쪽 몫이다 */
+  onConnectedProfile?: (profile: ServerProfile, savePass: boolean) => void;
 }
 
 export function ConnectionDialog({
   onConnected,
   onDisconnected,
   isConnected,
+  prefill = null,
+  onConnectedProfile,
 }: ConnectionDialogProps) {
   const [host, setHost] = useState('localhost');
   const [port, setPort] = useState('6100');
@@ -41,18 +51,32 @@ export function ConnectionDialog({
     setLoading(true);
     setError(null);
     try {
-      await connectScouter(p);
-      const objects = await getObjectList();
-      const hashes = objects.map(o => o.obj_hash);
-      await startXLogStream(hashes.length > 0 ? hashes : [0]);
+      const hashes = await connectToServer(p);
       onConnected('scouter', hashes);
+      // 붙은 곳은 목록에 남긴다 — 다음에 갈아탈 때 다시 치지 않게.
+      // 비밀번호 저장은 자동 연결과 같은 규칙을 따른다(평문으로 남는다).
+      onConnectedProfile?.({ name: '', ...p }, autoConnect);
     } catch (err) {
       setError(String(err));
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [onConnected]);
+  }, [onConnected, onConnectedProfile, autoConnect]);
+
+  /**
+   * 갈아탈 서버가 정해지면 폼을 그 값으로 채운다.
+   *
+   * 비밀번호는 **비운다** — 저장 안 한 서버라서 여기까지 온 것이고,
+   * 앞 서버의 비밀번호가 남아 있으면 엉뚱한 값으로 붙으려다 실패한다.
+   */
+  useEffect(() => {
+    if (!prefill) return;
+    setHost(prefill.host);
+    setPort(String(prefill.port));
+    setUser(prefill.user);
+    setPass('');
+  }, [prefill]);
 
   // 마지막 접속 정보 prefill + 자동 연결
   useEffect(() => {

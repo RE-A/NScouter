@@ -20,6 +20,16 @@ import { ServiceGroupPanel } from './features/xlog/components/ServiceGroupPanel'
 import { XLogSearchBar } from './features/xlog/components/XLogSearchBar';
 import { WideSearchDialog, type WideSearchValues } from './features/xlog/components/WideSearchDialog';
 import { SavedProfileDialog } from './features/xlog/components/SavedProfileDialog';
+import { ServerSwitcher } from './features/xlog/components/ServerSwitcher';
+import {
+  displayName,
+  fromLegacy,
+  normalize,
+  sameTarget,
+  upsert,
+} from './features/xlog/components/serverProfiles';
+import type { ServerProfile } from './features/xlog/api/scouterApi';
+import { switchToServer } from './features/xlog/api/connectFlow';
 import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
@@ -39,6 +49,7 @@ import {
   saveUiState,
   searchXLogList,
   saveXLogProfile,
+  saveConfig,
 } from './features/xlog/api/scouterApi';
 import { subscribe } from './features/xlog/api/subscribe';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
@@ -236,6 +247,11 @@ export default function App() {
         setFilter(f.filter);
         setXLogMode(f.mode);
         setCounterPicks(toCounterPicks(cfg.counter_picks));
+        // 프로필 목록이 없으면 **예전 설정에서 하나 만든다** — 앱을 올리자마자
+        // «어제까지 붙던 서버» 를 다시 쳐야 하는 것은 퇴보다.
+        const list = normalize(cfg.servers);
+        setServers(list.length > 0 ? list : fromLegacy(cfg));
+        if (cfg.last_server) setCurrentServer(cfg.last_server);
       })
       // 못 읽어도 기본값으로 뜬다. 다만 그 기본값으로 파일을 덮지는 않는다 —
       // 읽기가 실패한 이유가 «잠깐 못 읽었다» 일 수도 있다.
@@ -349,6 +365,89 @@ export default function App() {
   const handleFilterChange = useCallback((p: Partial<XLogFilterState>) => setFilter(prev => ({ ...prev, ...p })), []);
   const handleConnected = useCallback((_sid: string, _hashes: number[]) => {}, []);
   const handleDisconnected = useCallback(() => {}, []);
+
+  /**
+   * 갈아 가며 볼 서버들.
+   *
+   * **한 번에 한 서버다.** 두 콜렉터를 나란히 보는 것이 아니라, 매번 호스트·계정을
+   * 다시 치지 않고 옮겨 가기 위한 목록이다.
+   */
+  const [servers, setServers] = useState<ServerProfile[]>([]);
+  /** 지금 붙어 있는 서버 이름. 미연결이면 null */
+  const [currentServer, setCurrentServer] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
+  /** 비밀번호를 저장 안 한 서버를 골랐을 때, 접속 폼에 채워 줄 값 */
+  const [prefill, setPrefill] = useState<ServerProfile | null>(null);
+
+  /** 목록을 config.json 에 남긴다. 화면에는 이미 반영된 뒤다 */
+  const persistServers = useCallback(async (list: ServerProfile[], last: string) => {
+    try {
+      const cfg = await getConfig();
+      await saveConfig({ ...cfg, servers: list, last_server: last });
+    } catch {
+      // 목록 저장 실패가 접속을 막을 이유는 없다. 이번 세션에서는 그대로 쓴다.
+    }
+  }, []);
+
+  /** 접속에 성공한 서버를 목록에 넣거나 갱신한다 */
+  const rememberServer = useCallback(
+    (profile: ServerProfile, savePass: boolean) => {
+      setServers(prev => {
+        const next = upsert(prev, profile, { savePass });
+        // 이름은 목록에 있는 것이 이긴다(사용자가 지었을 수 있다). 같은 «대상» 으로 찾는다 —
+        // host:port 만 보면 계정이 다른 두 프로필이 한 이름으로 뭉친다.
+        const label = displayName(next.find(x => sameTarget(x, profile)) ?? profile);
+        setCurrentServer(label);
+        void persistServers(next, label);
+        return next;
+      });
+    },
+    [persistServers],
+  );
+
+  /**
+   * 다른 서버로 갈아탄다.
+   *
+   * 화면 상태는 **끊길 때** 이미 비워진다(onDisconnected) — 오브젝트 해시가 서버마다
+   * 달라 필터도 상세 탭도 그대로 둘 수 없다. 여기서는 붙이는 일만 한다.
+   */
+  const switchServer = useCallback(
+    (profile: ServerProfile) => {
+      const label = displayName(profile);
+      if (profile.pass === '') {
+        // 저장 안 한 비밀번호는 물어야 한다. 끊고 접속 폼에 값을 채워 둔다.
+        setPrefill(profile);
+        void switchToServer({ host: profile.host, port: profile.port, user: profile.user, pass: '' })
+          .catch(() => {});
+        return;
+      }
+      setSwitching(true);
+      switchToServer(profile)
+        .then(hashes => {
+          setCurrentServer(label);
+          void persistServers(servers, label);
+          handleConnected('scouter', hashes);
+        })
+        .catch(() => {
+          // 실패하면 끊긴 채로 남는다. 접속 폼이 다시 나오므로 손으로 붙을 수 있다.
+          setCurrentServer(null);
+          setPrefill(profile);
+        })
+        .finally(() => setSwitching(false));
+    },
+    [servers, persistServers, handleConnected],
+  );
+
+  const removeServer = useCallback(
+    (profile: ServerProfile) => {
+      setServers(prev => {
+        const next = prev.filter(x => displayName(x) !== displayName(profile));
+        void persistServers(next, currentServer ?? '');
+        return next;
+      });
+    },
+    [persistServers, currentServer],
+  );
   const handleAgentSelectionChange = useCallback((hashes: Set<number>) => {
     setFilter(prev => ({ ...prev, objHashSet: hashes }));
   }, []);
@@ -610,10 +709,19 @@ export default function App() {
 
         {/* 상태·설정 — 평소엔 조용히 물러나 있어야 한다 */}
         <div className="flex items-center gap-2">
+          <ServerSwitcher
+            profiles={servers}
+            current={isConnected ? currentServer : null}
+            busy={switching}
+            onSwitch={switchServer}
+            onRemove={removeServer}
+          />
           <ConnectionDialog
             isConnected={isConnected}
             onConnected={handleConnected}
             onDisconnected={handleDisconnected}
+            prefill={prefill}
+            onConnectedProfile={rememberServer}
           />
           <AlertPanel
             alerts={alertStream.alerts}

@@ -546,6 +546,10 @@ export interface AppConfig {
   xlog_filter?: XLogFilterPrefs;
   /** 카운터에서 그리기로 고른 서버 */
   counter_picks?: CounterPickPrefs;
+  /** 갈아 가며 볼 서버들 */
+  servers?: ServerProfile[];
+  /** 마지막으로 고른 서버 이름 */
+  last_server?: string;
 }
 
 /** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
@@ -569,6 +573,19 @@ export interface XLogChartPrefs {
   y_max: number;
   show_ignore_area: boolean;
   ignore_threshold_ms: number;
+}
+
+/**
+ * 갈아 가며 볼 서버 하나. Rust `ServerProfile` 과 짝이다.
+ *
+ * 비밀번호는 비어 있을 수 있다 — 그러면 그 서버로 갈아탈 때 한 번 묻는다.
+ */
+export interface ServerProfile {
+  name: string;
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
 }
 
 /**
