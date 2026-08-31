@@ -5,6 +5,7 @@ import React, { memo, useEffect, useMemo, useState } from 'react';
 import type { XLogDetailState } from '../hooks/useXLogDetail';
 import { ProfileStepList } from './ProfileStepList';
 import { ProfileSummaryTable } from './ProfileSummaryTable';
+import { firstStepIndexOf } from './profileSummary';
 import { CallTreeView } from './CallTreeView';
 import { FlowTreeView } from './FlowTreeView';
 import { ErrorDetail } from './ErrorDetail';
@@ -74,13 +75,24 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
   const trace = useCallTrace(state.xlog);
   const [profileMode, setProfileMode] = useState<ProfileMode>('list');
 
+  /**
+   * 이 패널 안에서만 쓰는 검색어.
+   *
+   * 위쪽 검색바는 **트랜잭션을 찾는** 자리다(어느 트랜잭션에 그 SQL 이 있나).
+   * 여기는 이미 연 트랜잭션 **안에서** 찾는 자리다 — 스텝이 수백 개면 눈으로 못 찾는다.
+   * 둘을 한 칸으로 합치면 «찾았더니 목록이 갈아엎어졌다» 가 된다.
+   */
+  const [panelQuery, setPanelQuery] = useState('');
+  /** 패널에 친 것이 있으면 그것을 쓰고, 없으면 위에서 내려온 검색어를 쓴다 */
+  const query = panelQuery.trim() !== '' ? panelQuery : searchQuery;
+
   /** 이 트랜잭션 안에서 검색어가 걸린 자리들 */
   const stepHits = useMemo(
     () =>
-      state.profile && searchQuery
-        ? findStepHits(state.profile.steps, state.texts, searchQuery)
+      state.profile && query
+        ? findStepHits(state.profile.steps, state.texts, query)
         : [],
-    [state.profile, state.texts, searchQuery],
+    [state.profile, state.texts, query],
   );
   /** 몇 번째 자리를 보고 있나 */
   const [hitIdx, setHitIdx] = useState(0);
@@ -89,9 +101,20 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
   // 안 되돌리면 "3곳 중 3번째"인데 두 곳뿐인 프로파일이 열려 강조가 사라진다.
   useEffect(() => {
     setHitIdx(0);
-  }, [state.xlog?.txid, searchQuery]);
+  }, [state.xlog?.txid, query]);
 
-  const highlightStep = stepHits[hitIdx]?.index ?? null;
+  /**
+   * 요약에서 눌러 데려온 자리.
+   *
+   * 검색 적중과 **다른 축**이다 — 검색은 «이 글자가 어디 있나», 이건 «그 쿼리가
+   * 처음 돈 곳». 하나로 합치면 요약에서 누른 뒤 검색 이동 버튼이 엉뚱한 데로 간다.
+   */
+  const [picked, setPicked] = useState<number | null>(null);
+  useEffect(() => {
+    setPicked(null);
+  }, [state.xlog?.txid, query]);
+
+  const highlightStep = picked ?? stepHits[hitIdx]?.index ?? null;
 
   /**
    * 검색으로 연 트랜잭션은 **목록으로 돌려놓는다.**
@@ -294,8 +317,21 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
             aside={
               profile && profile.steps.length > 0 ? (
                 <div className="flex items-center gap-2">
+                  {/* **이 트랜잭션 안에서** 찾는다. 스텝이 수백 개면 눈으로는 못 찾는다 */}
+                  <input
+                    type="search"
+                    value={panelQuery}
+                    onChange={e => setPanelQuery(e.target.value)}
+                    placeholder={t('이 안에서 찾기')}
+                    aria-label={t('이 안에서 찾기')}
+                    spellCheck={false}
+                    className="w-28 rounded border border-line-strong bg-input px-1.5 py-0.5 text-micro text-fg placeholder:text-fg-faint focus:w-40"
+                  />
                   {/* 걸린 자리가 여럿이면 오갈 수 있어야 한다 —
                       한 군데만 데려다 놓으면 나머지는 직접 찾아야 한다. */}
+                  {query !== '' && stepHits.length === 0 && (
+                    <span className="text-micro text-fg-faint">{t('없음')}</span>
+                  )}
                   {stepHits.length > 0 && (
                     <div className="flex items-center gap-1">
                       <button
@@ -351,7 +387,18 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                   highlightIndex={highlightStep}
                 />
               ) : (
-                <ProfileSummaryTable steps={profile.steps} texts={texts} />
+                <ProfileSummaryTable
+                  steps={profile.steps}
+                  texts={texts}
+                  onPick={key => {
+                    const idx = firstStepIndexOf(profile.steps, texts, key);
+                    if (idx < 0) return;
+                    // 목록으로 넘기고 그 자리를 짚는다. 요약에서 «이게 뭔데 느리지» 다음에
+                    // 하는 일은 늘 «그래서 언제 돌았는데» 다.
+                    setPicked(idx);
+                    setProfileMode('list');
+                  }}
+                />
               )
             ) : (
               <p className="px-2 py-4 text-center text-body text-fg-faint">{t('프로파일이 없습니다')}</p>

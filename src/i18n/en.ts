@@ -488,6 +488,11 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 상세 안에서 찾기 ──────────────────────────────────
+  '이 안에서 찾기': 'Find in this profile',
+  '없음': 'none',
+  '누르면 목록에서 이 스텝으로 갑니다': 'Click to jump to this step in the list',
+
   // ── 표 내보내기 ───────────────────────────────────────
   '내보내기': 'Export',
   '내보냈습니다': 'Exported',

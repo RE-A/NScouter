@@ -13,6 +13,13 @@ import { t } from '../../../i18n';
 interface ProfileSummaryTableProps {
   steps: ProfileStep[];
   texts: Record<number, string>;
+  /**
+   * 한 줄을 눌렀을 때. 요약의 `key`(종류+이름)를 넘긴다.
+   *
+   * 요약은 «무엇이 몇 번» 이라 그 자체로는 갈 곳이 없다 — 부르는 쪽이
+   * 목록의 어디로 데려갈지 정한다.
+   */
+  onPick?: (key: string) => void;
 }
 
 /** 종류 표기 — 목록(ProfileStepList)과 같은 색을 쓴다 */
@@ -43,6 +50,7 @@ const SORTS: { by: SummarySort; label: string; hint: string }[] = [
 export const ProfileSummaryTable = memo(function ProfileSummaryTable({
   steps,
   texts,
+  onPick,
 }: ProfileSummaryTableProps) {
   const [by, setBy] = useState<SummarySort>('sum');
 
@@ -82,23 +90,42 @@ export const ProfileSummaryTable = memo(function ProfileSummaryTable({
 
       <ol className="divide-y divide-line/60">
         {sorted.map(row => (
-          <li
-            key={row.key}
-            className="grid grid-cols-[28px_minmax(0,1fr)_40px_56px_56px] items-baseline gap-x-2 px-2 py-1 hover:bg-hover/60"
-          >
-            <span className={`font-mono text-micro font-semibold ${KIND_CLS[row.kind]}`}>
-              {KIND_LABEL[row.kind]}
-            </span>
-            <span className="truncate text-small text-fg" title={row.name}>
-              {row.name}
-            </span>
-            <span className="tnum text-right font-mono text-small text-fg-muted">{row.count}</span>
-            <span className={`tnum text-right font-mono text-small ${durationTone(row.sum)}`}>
-              {row.sum.toLocaleString()}
-            </span>
-            <span className="tnum text-right font-mono text-small text-fg-muted">
-              {row.avg.toLocaleString()}
-            </span>
+          <li key={row.key}>
+            {/* 줄 전체가 버튼이다 — 요약에서 «이게 뭔데 느리지» 다음에 하는 일은
+                늘 «그래서 언제 돌았는데» 라서, 누르면 목록의 그 자리로 간다.
+                누를 곳이 없으면(onPick 없음) 그냥 줄로 남는다 */}
+            <div
+              role={onPick ? 'button' : undefined}
+              tabIndex={onPick ? 0 : undefined}
+              onClick={onPick ? () => onPick(row.key) : undefined}
+              onKeyDown={
+                onPick
+                  ? e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onPick(row.key);
+                      }
+                    }
+                  : undefined
+              }
+              title={onPick ? `${row.name}
+${t('누르면 목록에서 이 스텝으로 갑니다')}` : row.name}
+              className={`grid grid-cols-[28px_minmax(0,1fr)_40px_56px_56px] items-baseline gap-x-2 px-2 py-1 hover:bg-hover/60 ${
+                onPick ? 'cursor-pointer' : ''
+              }`}
+            >
+              <span className={`font-mono text-micro font-semibold ${KIND_CLS[row.kind]}`}>
+                {KIND_LABEL[row.kind]}
+              </span>
+              <span className="truncate text-small text-fg">{row.name}</span>
+              <span className="tnum text-right font-mono text-small text-fg-muted">{row.count}</span>
+              <span className={`tnum text-right font-mono text-small ${durationTone(row.sum)}`}>
+                {row.sum.toLocaleString()}
+              </span>
+              <span className="tnum text-right font-mono text-small text-fg-muted">
+                {row.avg.toLocaleString()}
+              </span>
+            </div>
           </li>
         ))}
       </ol>
