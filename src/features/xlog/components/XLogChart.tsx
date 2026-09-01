@@ -1,13 +1,13 @@
 // src/features/xlog/components/XLogChart.tsx
 
-import React, { memo, useMemo, useState } from 'react';
+import React, { memo, useMemo } from 'react';
 import { useXLogCanvas } from '../hooks/useXLogCanvas';
 import { useXLogStream } from '../hooks/useXLogStream';
 
 import { usePastXLog } from '../hooks/usePastXLog';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
-import { needsRefetch, panRange, zoomRange } from '../types/timeRange';
+import { panRange, zoomRange } from '../types/timeRange';
 import { T, F } from '../../../styles/tokens';
 import { t } from '../../../i18n';
 
@@ -82,20 +82,11 @@ export const XLogChart = memo(function XLogChart({
 
   const isPast = pastRange !== null;
 
-  // **받아온 구간과 보는 창을 나눈다.**
-  // 안쪽으로 확대하는 동안에는 이미 가진 데이터로 충분하므로 재조회하지 않는다.
-  // 휠을 굴릴 때마다 수만 건을 다시 받으면 못 쓴다.
-  const [fetchRange, setFetchRange] = useState<PastRange | null>(pastRange);
-  React.useEffect(() => {
-    setFetchRange(pastRange);
-  }, [pastRange]);
-
-  React.useEffect(() => {
-    if (!pastRange) return;
-    if (needsRefetch(pastRange, fetchRange)) setFetchRange(pastRange);
-  }, [pastRange, fetchRange]);
-
-  const past = usePastXLog(fetchRange, pastObjHashes);
+  // **보는 창을 그대로 넘긴다.**
+  // 무엇을 더 받을지는 훅이 정한다 — 안쪽으로 확대하면 받을 것이 없고,
+  // 좌우로 옮기면 **모자란 쪽만** 받는다(planFetch). 예전에는 창이 벗어날 때마다
+  // 구간 전체를 다시 받아서, 조금만 옮겨도 수만 건을 처음부터 끌어왔다.
+  const past = usePastXLog(pastRange, pastObjHashes);
 
   // **처음 마운트될 때는 다시 받지 않는다.** 이미 위에서 받고 있다.
   const pastReload = past.reload;
@@ -183,7 +174,9 @@ export const XLogChart = memo(function XLogChart({
     const at = store.lastDropAtMs;
     if (at === null || Date.now() - at > CAP_NOTICE_MS) return null;
     // **지금 걸려 있는 값**을 적는다. 설정에서 바꿀 수 있으므로 상수를 적으면 거짓이 된다.
-    return `${t('버퍼 상한')} ${store.maxItemCount.toLocaleString()}${t('건 — 오래된 점부터 지웁니다. 범위를 좁히거나 설정에서 상한을 올리면 다 보입니다')}`;
+    // **받은 것 기준**이라고 밝힌다. 화면 필터(서비스·IP·응답시간)는 그리기 직전에 걸리므로,
+    // «화면에 4천 건인데 왜 10만이 넘느냐» 가 나온다 — 버퍼에는 거르기 전의 것이 들어 있다.
+    return `${t('버퍼 상한')} ${store.maxItemCount.toLocaleString()}${t('건(화면 필터 이전, 받은 것 기준) — 오래된 점부터 지웁니다. 왼쪽에서 서버를 좁히거나 설정에서 상한을 올리면 다 보입니다')}`;
   })();
 
   const skewWarning = (() => {
@@ -234,8 +227,10 @@ export const XLogChart = memo(function XLogChart({
           차트의 오른쪽 끝은 이 PC 의 «지금» 이다. 콜렉터 쪽 시각이 앞서면 방금 온 점이
           오른쪽 밖으로, 뒤처지면 오른쪽이 빈 채로 남는다 — 스트림은 멀쩡한데
           화면에서만 사라진 것처럼 보인다. 조용히 두면 원인을 찾을 길이 없다. */}
+      {/* **그림 위에 띄우지 않는다.** 가운데 아래에 뒀더니 점을 가렸다 —
+          안내가 정작 보려던 것을 덮으면 안내가 아니다. 차트 맨 아래 한 줄로 눕힌다. */}
       {!isPast && capWarning !== null && (
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
+        <div className="absolute inset-x-0 bottom-0 truncate border-t border-warn/40 bg-overlay/95 px-2 py-0.5 text-micro text-warn">
           {capWarning}
         </div>
       )}

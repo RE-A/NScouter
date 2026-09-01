@@ -653,16 +653,61 @@ pub fn sha256_with_salt(password: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// 로그인 파라미터에 실어 보내는 이 PC 이름.
+///
+/// **프로세스를 띄우지 않는다.** 예전에는 로그인마다 `hostname` 을 실행했는데,
+/// 이 앱은 접속할 때 연결을 여러 개 연다(스트림 3종 + 단건 조회) — 윈도에서는
+/// 그때마다 **콘솔 창이 깜빡였다.** 현장에서 «앱 켜면 CMD 창이 여러 개 떴다 사라진다» 로 나왔다.
+///
+/// 환경 변수로 먼저 얻는다(윈도 `COMPUTERNAME`, 유닉스 `HOSTNAME`).
+/// 그래도 없으면 명령을 쓰되 **창 없이** 실행한다(윈도 `CREATE_NO_WINDOW`).
+/// 한 번 구하면 캐시한다 — 이름이 앱 실행 중에 바뀔 일은 없다.
 fn get_hostname() -> String {
-    std::process::Command::new("hostname")
-        .output()
+    static HOSTNAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HOSTNAME
+        .get_or_init(|| {
+            for key in ["COMPUTERNAME", "HOSTNAME"] {
+                if let Ok(name) = std::env::var(key) {
+                    let name = name.trim().to_string();
+                    if !name.is_empty() {
+                        return name;
+                    }
+                }
+            }
+            hostname_from_command()
+        })
+        .clone()
+}
+
+/// 환경 변수가 없을 때만. 리눅스에서는 `HOSTNAME` 이 자식 프로세스에 안 오는 일이 흔하다.
+fn hostname_from_command() -> String {
+    let mut cmd = std::process::Command::new("hostname");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        /// `CREATE_NO_WINDOW` — 콘솔 창을 만들지 않는다 (winbase.h)
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|_| "unknown".to_string())
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 호스트명은_프로세스를_띄우지_않고_구한다() {
+        // 로그인마다 hostname 을 실행하면 윈도에서 콘솔 창이 깜빡인다.
+        // 환경 변수에서 얻고, 한 번 구한 값을 다시 쓴다.
+        let first = get_hostname();
+        assert!(!first.is_empty());
+        assert_eq!(first, get_hostname(), "두 번째 호출은 캐시여야 한다");
+    }
 
     #[test]
     fn test_sha256_with_salt_length() {

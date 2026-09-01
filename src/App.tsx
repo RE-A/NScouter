@@ -50,6 +50,7 @@ import {
   searchXLogList,
   saveXLogProfile,
   saveConfig,
+  startXLogStream,
 } from './features/xlog/api/scouterApi';
 import { subscribe } from './features/xlog/api/subscribe';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
@@ -628,6 +629,48 @@ export default function App() {
     return () => clearTimeout(id);
   }, [saveNote]);
 
+  /**
+   * 실시간 스트림 대상을 **고른 서버로 좁힌다.**
+   *
+   * 지금까지는 접속할 때 받은 전체 오브젝트로 스트림을 열고, 화면에서 걸러 그렸다.
+   * 서버가 스무 대 넘는 환경에서는 **보지도 않을 열아홉 대의 XLog 를 계속 받아**
+   * 버퍼가 그것들로 차고(상한이 금방 걸린다), 직렬화·전송도 그만큼 든다.
+   *
+   * 콜렉터는 objHash 목록으로 걸러 준다 — 실시간 스트림이 원래 그 파라미터를 받는다.
+   * 고른 것이 없으면 전체다.
+   *
+   * **같은 목록이면 다시 열지 않는다.** 스트림을 다시 열면 최신 10,000건을 새로 받으므로,
+   * 렌더마다 열면 그것만으로 앱이 바쁘다.
+   */
+  const streamHashesRef = useRef<string>('');
+  useEffect(() => {
+    if (!isConnected) { streamHashesRef.current = ''; return; }
+    const hashes = filter.objHashSet.size > 0 ? [...filter.objHashSet] : [...agentMap.keys()];
+    if (hashes.length === 0) return;
+
+    const key = hashes.slice().sort((a, b) => a - b).join(',');
+    if (key === streamHashesRef.current) return;
+    streamHashesRef.current = key;
+    startXLogStream(hashes).catch(() => {});
+  }, [isConnected, filter.objHashSet, agentMap]);
+
+  /**
+   * 과거 조회 대상.
+   *
+   * **`counterHashes.javaee` 를 쓰고 있었다.** 그 목록은 objType 이
+   * `tomcat`·`java`·`jboss`·`jetty`·`resin` 인 것만 담는데, 운영에서는 objType 이
+   * 시스템 이름(`CJFW`·`PRD-ORD`…)으로 쓰인다(B-7). 그래서 목록이 비고,
+   * 대상이 0개면 조회 자체를 건너뛰어 **과거 조회가 통째로 안 먹었다.**
+   * 로컬 테스트 환경은 `tomcat` 이라 드러나지 않았다.
+   *
+   * XLog 가 보는 것은 Family 가 아니라 **지금 고른 서버**다. 아무것도 안 골랐으면
+   * 전체다 — 실시간 스트림도 그렇게 받는다.
+   */
+  const pastObjHashes = useMemo(
+    () => (filter.objHashSet.size > 0 ? [...filter.objHashSet] : [...agentMap.keys()]),
+    [filter.objHashSet, agentMap],
+  );
+
   /** Ctrl+F 로 옮겨 갈 자리 */
   const searchInputRef = useRef<HTMLInputElement>(null);
   /** F5 — 값이 바뀌면 차트가 같은 구간을 다시 받는다 */
@@ -824,7 +867,7 @@ export default function App() {
                     clearSignal={clearSignal}
                     pastRange={pastRange}
                     refreshSignal={refreshSignal}
-                    pastObjHashes={counterHashes.javaee}
+                    pastObjHashes={pastObjHashes}
                     onPastRangeChange={setPastRange}
                   />
                 </div>

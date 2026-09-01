@@ -10,7 +10,6 @@ import {
   fromLocalInput,
   MAX_PAST_SPAN_MS,
   MIN_PAST_SPAN_MS,
-  needsRefetch,
   panRange,
   toLocalInput,
   yyyymmdd,
@@ -176,26 +175,3 @@ describe('panRange', () => {
 });
 
 // 확대는 이미 받아둔 데이터 안에서 일어난다. 휠마다 수만 건을 다시 받으면 못 쓴다.
-describe('needsRefetch', () => {
-  const loaded = { stime: 1000, etime: 2000 };
-
-  it('받아온 게 없으면 받아야 한다', () => {
-    expect(needsRefetch({ stime: 1000, etime: 2000 }, null)).toBe(true);
-  });
-
-  it('안쪽으로 확대하면 다시 받지 않는다', () => {
-    expect(needsRefetch({ stime: 1200, etime: 1800 }, loaded)).toBe(false);
-  });
-
-  it('경계까지 같으면 다시 받지 않는다', () => {
-    expect(needsRefetch({ stime: 1000, etime: 2000 }, loaded)).toBe(false);
-  });
-
-  it('왼쪽으로 벗어나면 받아야 한다', () => {
-    expect(needsRefetch({ stime: 999, etime: 1500 }, loaded)).toBe(true);
-  });
-
-  it('오른쪽으로 벗어나면 받아야 한다', () => {
-    expect(needsRefetch({ stime: 1500, etime: 2001 }, loaded)).toBe(true);
-  });
-});

@@ -128,13 +128,3 @@ export function panRange(range: PastRange, deltaRatio: number): PastRange {
   return clampToDay(shifted, span, range.stime + span / 2);
 }
 
-/**
- * 보는 창이 받아온 구간을 벗어났는가.
- *
- * 확대는 이미 받아둔 데이터 안에서 일어나므로 **재조회가 필요 없다.**
- * 벗어날 때만 다시 받는다 — 휠을 굴릴 때마다 수만 건을 다시 받으면 못 쓴다.
- */
-export function needsRefetch(view: PastRange, loaded: PastRange | null): boolean {
-  if (!loaded) return true;
-  return view.stime < loaded.stime || view.etime > loaded.etime;
-}

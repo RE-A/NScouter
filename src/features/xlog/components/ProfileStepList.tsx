@@ -286,6 +286,39 @@ function Affected({ updated }: { updated: number }) {
   );
 }
 
+/**
+ * 눌러서 클립보드로. 복사했다는 것을 **버튼 자신이** 잠깐 말한다.
+ *
+ * 토스트를 띄우지 않는 이유: 프로파일 한 판에 스텝이 수백 개라 어느 줄에서 눌렀는지가
+ * 중요한데, 화면 한가운데 뜨는 알림은 그걸 말해 주지 못한다.
+ */
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!done) return;
+    const id = setTimeout(() => setDone(false), 1200);
+    return () => clearTimeout(id);
+  }, [done]);
+
+  return (
+    <button
+      type="button"
+      onClick={e => {
+        // 행 클릭(상세 열기)까지 번지면 복사하려다 다른 창이 뜬다.
+        e.stopPropagation();
+        // 클립보드는 거절될 수 있다(권한·포커스). 실패하면 조용히 둔다 —
+        // 여기서 에러를 띄우면 프로파일 읽기가 끊긴다.
+        void navigator.clipboard?.writeText(text).then(() => setDone(true)).catch(() => {});
+      }}
+      title={t('이 문장을 클립보드로 복사합니다')}
+      className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+    >
+      {done ? t('복사됨') : t('복사')}
+    </button>
+  );
+}
+
 function SqlBody({
   sql,
   params,
@@ -387,6 +420,10 @@ function SqlBody({
             {expanded ? t('접기') : `${t('펼치기')} (${filled.length.toLocaleString()}${t('자')})`}
           </button>
         )}
+        {/* **채운 문장을 복사한다.** 이 화면을 여는 이유의 절반은 «이 쿼리를 DB 에 붙여
+            돌려 보는 것» 이다. 값이 들어간 문장이라 그대로 실행된다.
+            펼침 여부와 무관하게 **전문**을 복사한다 — 접혀 있다고 세 줄만 주면 안 된다. */}
+        <CopyButton text={filled} />
         <Affected updated={updated} />
       </div>
 

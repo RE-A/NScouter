@@ -11,6 +11,7 @@ import { useViewOptions } from './useViewOptions';
 import { xlogPackToSXLog } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
 import { yyyymmdd } from '../types/timeRange';
+import { planFetch } from '../types/pastWindow';
 
 export interface UsePastXLogResult {
   store: XLogDataStore;
@@ -47,37 +48,72 @@ export function usePastXLog(
   // objHashes 는 매 렌더 새 배열이라 그대로 의존성에 넣으면 무한 재조회가 된다.
   const hashKey = objHashes.join(',');
 
+  /**
+   * 이미 받아 둔 구간.
+   *
+   * **좌우로 옮길 때마다 창 전체를 다시 받지 않기 위해** 들고 있는다.
+   * 대상 오브젝트가 바뀌거나 다시 받기(F5)를 누르면 비운다 — 그때는 갖고 있는 것이
+   * 다른 조건의 결과라 이어 붙이면 안 된다.
+   */
+  const loadedRef = useRef<PastRange | null>(null);
+
+  useEffect(() => {
+    // 대상이 바뀌면 갖고 있는 것은 다른 조건의 결과다.
+    loadedRef.current = null;
+  }, [hashKey, nonce]);
+
   useEffect(() => {
     if (!range || objHashes.length === 0) {
       storeRef.current.clear();
+      loadedRef.current = null;
       setProgress(null);
       setError(null);
       return;
     }
 
-    // 구간이 바뀌면 이전 결과가 섞이면 안 된다.
-    storeRef.current.clear();
+    const plan = planFetch(range, loadedRef.current);
+    if (plan.reset) {
+      // 이어 붙일 수 없는 자리 — 처음 받거나, 멀리 뛰어 사이가 빈 경우다.
+      storeRef.current.clear();
+    }
+    if (plan.fetch.length === 0) {
+      // 이미 받아 둔 구간 안이다(확대·축소). 다시 받을 이유가 없다.
+      loadedRef.current = plan.loaded;
+      return;
+    }
+
     setLoading(true);
     setError(null);
-    setProgress(null);
+    if (plan.reset) setProgress(null);
 
     const ac = new AbortController();
-    loadPastXLogs(
-      {
-        objHashes,
-        date: yyyymmdd(range.stime),
-        stime: range.stime,
-        etime: range.etime,
-      },
-      (rows, p) => {
+    // 모자란 쪽만 차례로 받는다. 둘일 수 있다(양쪽으로 넓힌 경우).
+    const run = async () => {
+      for (const part of plan.fetch) {
         if (ac.signal.aborted) return;
-        for (const pack of rows) {
-          storeRef.current.add(xlogPackToSXLog(pack));
-        }
-        setProgress(p);
-      },
-      ac.signal,
-    )
+        await loadPastXLogs(
+          {
+            objHashes,
+            date: yyyymmdd(part.stime),
+            stime: part.stime,
+            etime: part.etime,
+          },
+          (rows, p) => {
+            if (ac.signal.aborted) return;
+            for (const pack of rows) {
+              storeRef.current.add(xlogPackToSXLog(pack));
+            }
+            setProgress(p);
+          },
+          ac.signal,
+        );
+      }
+    };
+
+    run()
+      .then(() => {
+        if (!ac.signal.aborted) loadedRef.current = plan.loaded;
+      })
       .catch(e => {
         if (!ac.signal.aborted) setError(String(e));
       })

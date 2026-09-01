@@ -488,6 +488,11 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 클립보드 ──────────────────────────────────────────
+  '복사': 'Copy',
+  '복사됨': 'Copied',
+  '이 문장을 클립보드로 복사합니다': 'Copy this statement to the clipboard',
+
   // ── 서버 갈아타기 ─────────────────────────────────────
   '서버 고르기': 'Choose server',
   '붙을 서버를 고릅니다': 'Choose which collector to connect to',
@@ -498,8 +503,8 @@ export const EN: Record<string, string> = {
 
   // ── 버퍼 상한 ─────────────────────────────────────────
   '버퍼 상한': 'Buffer limit',
-  '건 — 오래된 점부터 지웁니다. 범위를 좁히거나 설정에서 상한을 올리면 다 보입니다':
-    ' — dropping the oldest dots. Narrow the range, or raise the limit in Settings',
+  '건(화면 필터 이전, 받은 것 기준) — 오래된 점부터 지웁니다. 왼쪽에서 서버를 좁히거나 설정에서 상한을 올리면 다 보입니다':
+    ' received (before screen filters) — dropping the oldest. Narrow the servers on the left, or raise the limit in Settings',
   'XLog 버퍼 상한': 'XLog buffer limit',
   '차트가 들고 있을 최대 건수입니다. 넘으면 오래된 점부터 버립니다 — 창(범위)은 30분인데 화면에는 그보다 짧은 구간만 남는다면 이 값이 먼저 걸린 것입니다. 올릴수록 메모리를 씁니다.':
     'How many transactions the chart keeps. Past this, the oldest dots are dropped — if the range says 30 minutes but the chart shows less, this limit hit first. Higher costs memory.',

@@ -6,8 +6,8 @@
 // 프로시저 OUT 파라미터는 에이전트가 기록하지 않아 애초에 채울 값이 없다 —
 // 그때 채운 문장만 보여 주면 무엇이 빠졌는지 확인할 방법이 없다.
 
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { ProfileStepList } from './ProfileStepList';
 import type { ProfileStep } from '../types/profile';
 
@@ -93,5 +93,29 @@ describe('ProfileStepList — SQL 값 채우기', () => {
     );
     expect(screen.getByText(/쓰이지 않은 값/)).toBeTruthy();
     expect(screen.getByText(/바인딩/)).toBeTruthy();
+  });
+});
+
+describe('ProfileStepList — 쿼리 복사', () => {
+  it('값이 채워진 문장을 클립보드로 준다', async () => {
+    // 이 화면을 여는 이유의 절반은 «이 쿼리를 DB 에 붙여 돌려 보는 것» 이다.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(
+      <ProfileStepList
+        steps={[sqlStep(7, '126')]}
+        texts={{ 7: 'select * from t where id = ?' }}
+        totalElapsed={100}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '복사' }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    // 바인딩 값이 채워진 문장이어야 한다 — `?` 를 복사하면 붙여 넣어도 안 돈다
+    expect(writeText.mock.calls[0][0]).toContain('select * from t');
+    expect(await screen.findByText('복사됨')).toBeTruthy();
   });
 });
