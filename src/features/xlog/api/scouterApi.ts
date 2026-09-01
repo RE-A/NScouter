@@ -552,6 +552,8 @@ export interface AppConfig {
   last_server?: string;
   /** 이름 붙여 담아 둔 조회 조건들 */
   saved_filters?: SavedFilterPrefs[];
+  /** 껐을 때 열려 있던 상세 탭들 */
+  open_details?: OpenDetailPrefs[];
 }
 
 /** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
@@ -616,6 +618,13 @@ export interface XLogFilterPrefs {
   patterns: PatternPrefs[];
   /** 'live' | 'past' */
   mode: string;
+}
+
+/** 껐을 때 열려 있던 상세 탭. Rust `OpenDetailPrefs` 와 짝이다 */
+export interface OpenDetailPrefs {
+  txid: string;
+  /** `yyyyMMdd` */
+  date: string;
 }
 
 /** 이름 붙여 담아 둔 조회 조건. Rust `SavedFilterPrefs` 와 짝이다 */

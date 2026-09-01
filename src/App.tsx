@@ -63,7 +63,12 @@ import {
 import { subscribe } from './features/xlog/api/subscribe';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
 import { useAlertStream } from './features/xlog/hooks/useAlertStream';
-import { useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
+import { MAX_DETAIL_TABS, useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
+import {
+  fromTabs as detailsFromTabs,
+  normalize as normalizeOpenDetails,
+  type OpenDetail,
+} from './features/xlog/hooks/openDetails';
 import { DetailTabBar } from './features/xlog/components/DetailTabBar';
 import { useShortcuts } from './features/xlog/hooks/useShortcuts';
 import {
@@ -262,6 +267,7 @@ export default function App() {
         setServers(list.length > 0 ? list : fromLegacy(cfg));
         if (cfg.last_server) setCurrentServer(cfg.last_server);
         setSavedFilters(normalizeSavedFilters(cfg.saved_filters));
+        setPendingDetails(normalizeOpenDetails(cfg.open_details, MAX_DETAIL_TABS));
       })
       // 못 읽어도 기본값으로 뜬다. 다만 그 기본값으로 파일을 덮지는 않는다 —
       // 읽기가 실패한 이유가 «잠깐 못 읽었다» 일 수도 있다.
@@ -289,6 +295,18 @@ export default function App() {
           datasource: [...counterPicks.datasource],
         },
       ).catch(() => {});
+      // 열어 둔 탭은 별도 저장이다 — save_ui_state 는 배치·차트·조건만 맡는다.
+      void (async () => {
+        try {
+          const cfg = await getConfig();
+          await saveConfig({
+            ...cfg,
+            open_details: detailsFromTabs(detail.tabs, toDateString),
+          });
+        } catch {
+          // 탭 저장 실패가 화면을 되돌릴 이유는 없다
+        }
+      })();
     }, 600);
     return () => clearTimeout(id);
   }, [
@@ -302,6 +320,7 @@ export default function App() {
     filter,
     xlogMode,
     counterPicks,
+    detail.tabs,
   ]);
 
   useEffect(() => {
@@ -484,6 +503,17 @@ export default function App() {
   // 이 콜백이 계속 새로 만들어지고, memo 로 막아 둔 상세 패널이 매번 다시 그려진다.
   // 안정적인 `open` 하나만 잡는다.
   const openDetailTab = detail.open;
+  /**
+   * 되살릴 상세 탭들. 접속이 끝난 뒤에 연다 — 연결 전에는 콜렉터에 물을 수 없다.
+   *
+   * 한 번만 시도한다. 못 연 것을 계속 다시 물으면, 밀려난 트랜잭션 때문에
+   * 접속할 때마다 조용한 실패가 반복된다.
+   */
+  const [pendingDetails, setPendingDetails] = useState<OpenDetail[]>([]);
+  const restoredRef = useRef(false);
+  /** 못 되살린 탭 수. 아무 말 없이 사라지면 «복원이 안 되는 앱» 으로 읽힌다 */
+  const [restoreMissed, setRestoreMissed] = useState(0);
+
   const openByTxid = useCallback((txid: string, date: string) => {
     getXLogDetail(txid, date)
       .then(pack => openDetailTab(xlogPackToSXLog(pack)))
@@ -688,6 +718,33 @@ export default function App() {
   }, [saveNote]);
 
   /**
+   * 껐을 때 열려 있던 상세 탭을 되살린다.
+   *
+   * **트랜잭션은 콜렉터에서 밀려난다.** 어제 열어 둔 것이 오늘 없을 수 있고 그건
+   * 고장이 아니다 — 못 연 것은 건너뛰되 몇 개인지는 말한다.
+   */
+  useEffect(() => {
+    if (!isConnected || restoredRef.current || pendingDetails.length === 0) return;
+    restoredRef.current = true;
+
+    let missed = 0;
+    void Promise.all(
+      pendingDetails.map(d =>
+        getXLogDetail(d.txid, d.date)
+          .then(pack => openDetailTab(xlogPackToSXLog(pack)))
+          .catch(() => { missed += 1; }),
+      ),
+    ).then(() => setRestoreMissed(missed));
+  }, [isConnected, pendingDetails, openDetailTab]);
+
+  // 안내는 읽을 시간만 남긴다.
+  useEffect(() => {
+    if (restoreMissed === 0) return;
+    const id = setTimeout(() => setRestoreMissed(0), 6000);
+    return () => clearTimeout(id);
+  }, [restoreMissed]);
+
+  /**
    * 실시간 스트림 대상을 **고른 서버로 좁힌다.**
    *
    * 지금까지는 접속할 때 받은 전체 오브젝트로 스트림을 열고, 화면에서 걸러 그렸다.
@@ -862,6 +919,13 @@ export default function App() {
           onOpen={detail.openSaved}
           onClose={() => setShowSaved(false)}
         />
+      )}
+      {/* 되살리지 못한 탭이 있으면 말한다. 조용히 사라지면 «복원이 안 되는 앱» 으로 읽힌다 —
+          트랜잭션이 콜렉터에서 밀려나는 것은 고장이 아니다 */}
+      {restoreMissed > 0 && (
+        <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded border border-line-strong bg-surface px-3 py-1.5 text-micro text-fg-muted shadow">
+          {t('열어 두었던 상세')} {restoreMissed}{t('개는 콜렉터에 남아 있지 않아 열지 못했습니다')}
+        </div>
       )}
       {saveNote && (
         <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded border border-line-strong bg-surface px-3 py-1.5 text-micro text-fg-muted shadow">

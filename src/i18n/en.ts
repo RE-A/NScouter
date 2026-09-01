@@ -503,6 +503,11 @@ export const EN: Record<string, string> = {
   '조건 모두 지우기': 'Clear all rules',
   '줄 걸려 있음': ' rule(s) active',
 
+  // ── 상세 탭 되살리기 ──────────────────────────────────
+  '열어 두었던 상세': 'Could not reopen',
+  '개는 콜렉터에 남아 있지 않아 열지 못했습니다':
+    ' detail tab(s) — those transactions are no longer on the collector',
+
   // ── 담아 둔 조건 ──────────────────────────────────────
   '담아 둔 조건': 'Saved filters',
   '아직 없습니다. 지금 조건에 이름을 붙여 담아 두면 다음에 한 번에 불러옵니다.':

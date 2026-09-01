@@ -73,6 +73,9 @@ pub struct AppConfig {
     /// 이름 붙여 담아 둔 조회 조건들
     #[serde(default)]
     pub saved_filters: Vec<SavedFilterPrefs>,
+    /// 껐을 때 열려 있던 상세 탭들
+    #[serde(default)]
+    pub open_details: Vec<OpenDetailPrefs>,
 }
 
 /// 끌어서 정한 패널 크기. 픽셀이다.
@@ -130,6 +133,18 @@ pub struct ServerProfile {
     pub user: String,
     /// 저장하지 않으면 빈 문자열
     pub pass: String,
+}
+
+/// 껐을 때 열려 있던 상세 탭 하나.
+///
+/// 프로파일까지 담지 않는다 — 다시 열 때 받으면 된다. **날짜가 반드시 필요하다:**
+/// 콜렉터는 XLog 를 날짜별로 저장해서, 날짜가 없으면 에러가 아니라 빈 결과가 온다.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OpenDetailPrefs {
+    pub txid: String,
+    /// `yyyyMMdd`
+    pub date: String,
 }
 
 /// 이름 붙여 담아 둔 조회 조건 한 벌.
@@ -284,6 +299,7 @@ impl Default for AppConfig {
             xlog_filter: XLogFilterPrefs::default(),
             counter_picks: CounterPickPrefs::default(),
             saved_filters: Vec::new(),
+            open_details: Vec::new(),
         }
     }
 }
