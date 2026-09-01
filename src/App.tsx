@@ -21,6 +21,13 @@ import { XLogSearchBar } from './features/xlog/components/XLogSearchBar';
 import { WideSearchDialog, type WideSearchValues } from './features/xlog/components/WideSearchDialog';
 import { SavedProfileDialog } from './features/xlog/components/SavedProfileDialog';
 import { FilterDialog } from './features/xlog/components/FilterDialog';
+import {
+  fromFilter as filterToSaved,
+  normalize as normalizeSavedFilters,
+  remove as removeSavedFilter,
+  upsert as upsertSavedFilter,
+  type SavedFilter,
+} from './features/xlog/components/savedFilters';
 import { ServerSwitcher } from './features/xlog/components/ServerSwitcher';
 import {
   displayName,
@@ -254,6 +261,7 @@ export default function App() {
         const list = normalize(cfg.servers);
         setServers(list.length > 0 ? list : fromLegacy(cfg));
         if (cfg.last_server) setCurrentServer(cfg.last_server);
+        setSavedFilters(normalizeSavedFilters(cfg.saved_filters));
       })
       // 못 읽어도 기본값으로 뜬다. 다만 그 기본값으로 파일을 덮지는 않는다 —
       // 읽기가 실패한 이유가 «잠깐 못 읽었다» 일 수도 있다.
@@ -603,6 +611,53 @@ export default function App() {
   const [showSaved, setShowSaved] = useState(false);
   /** 조회 조건 창. 툴바 한 줄로는 두 줄짜리 조건을 못 만든다 */
   const [showFilters, setShowFilters] = useState(false);
+  /**
+   * 이름 붙여 담아 둔 조건들.
+   *
+   * 장애를 볼 때 거는 조건은 매번 새로 짜는 것이 아니라 몇 벌이 돌아가며 쓰인다.
+   * **조건만** 담는다 — 서버 해시는 콜렉터마다 다르다(savedFilters).
+   */
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
+
+  const persistSavedFilters = useCallback(async (list: SavedFilter[]) => {
+    try {
+      const cfg = await getConfig();
+      await saveConfig({
+        ...cfg,
+        saved_filters: list.map(f => ({
+          name: f.name,
+          patterns: f.patterns.map(r => ({ field: r.field, text: r.text, exclude: r.exclude })),
+          error_only: f.errorOnly,
+          elapsed_ms: f.elapsedMs,
+          elapsed_exclude: f.elapsedExclude,
+        })),
+      });
+    } catch {
+      // 담기 실패가 보던 화면을 되돌릴 이유는 없다. 이번 세션에서는 그대로 쓴다.
+    }
+  }, []);
+
+  const saveCurrentFilter = useCallback(
+    (name: string) => {
+      setSavedFilters(prev => {
+        const next = upsertSavedFilter(prev, filterToSaved(name, filter));
+        void persistSavedFilters(next);
+        return next;
+      });
+    },
+    [filter, persistSavedFilters],
+  );
+
+  const deleteSavedFilter = useCallback(
+    (name: string) => {
+      setSavedFilters(prev => {
+        const next = removeSavedFilter(prev, name);
+        void persistSavedFilters(next);
+        return next;
+      });
+    },
+    [persistSavedFilters],
+  );
   /** 방금 저장한 결과. 잠깐 띄우고 지운다 — 저장은 조용히 끝나면 됐는지 알 수 없다 */
   const [saveNote, setSaveNote] = useState<string | null>(null);
 
@@ -797,6 +852,9 @@ export default function App() {
           onChange={handleFilterChange}
           onClose={() => setShowFilters(false)}
           selectedServers={filter.objHashSet.size}
+          saved={savedFilters}
+          onSave={saveCurrentFilter}
+          onDelete={deleteSavedFilter}
         />
       )}
       {showSaved && (

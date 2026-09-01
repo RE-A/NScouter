@@ -70,6 +70,9 @@ pub struct AppConfig {
     /// 카운터에서 그리기로 고른 서버
     #[serde(default)]
     pub counter_picks: CounterPickPrefs,
+    /// 이름 붙여 담아 둔 조회 조건들
+    #[serde(default)]
+    pub saved_filters: Vec<SavedFilterPrefs>,
 }
 
 /// 끌어서 정한 패널 크기. 픽셀이다.
@@ -127,6 +130,20 @@ pub struct ServerProfile {
     pub user: String,
     /// 저장하지 않으면 빈 문자열
     pub pass: String,
+}
+
+/// 이름 붙여 담아 둔 조회 조건 한 벌.
+///
+/// **조건만 담는다.** 대상 서버(objHash)는 콜렉터마다 달라 다른 서버에서 불러오면
+/// 아무것도 안 걸리고, 실시간/과거 모드는 조건이 아니라 «지금 무엇을 보고 있나» 다.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedFilterPrefs {
+    pub name: String,
+    pub patterns: Vec<PatternPrefs>,
+    pub error_only: bool,
+    pub elapsed_ms: i64,
+    pub elapsed_exclude: bool,
 }
 
 /// 마지막으로 걸어 두었던 XLog 조회 조건.
@@ -266,6 +283,7 @@ impl Default for AppConfig {
             last_server: String::new(),
             xlog_filter: XLogFilterPrefs::default(),
             counter_picks: CounterPickPrefs::default(),
+            saved_filters: Vec::new(),
         }
     }
 }

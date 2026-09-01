@@ -12,6 +12,7 @@
 
 import { memo, useState } from 'react';
 import type { FilterField, PatternRule, XLogFilterState } from '../types/xlog';
+import { isSame, toPatch, type SavedFilter } from './savedFilters';
 import { t } from '../../../i18n';
 
 interface FilterDialogProps {
@@ -20,6 +21,11 @@ interface FilterDialogProps {
   onClose: () => void;
   /** 지금 고른 서버 수 — 여기서는 바꾸지 않고 어디서 바꾸는지만 알려 준다 */
   selectedServers: number;
+  /** 담아 둔 조건들 */
+  saved: readonly SavedFilter[];
+  /** 지금 조건을 이 이름으로 담는다 (같은 이름이면 덮어쓴다) */
+  onSave: (name: string) => void;
+  onDelete: (name: string) => void;
 }
 
 const FIELDS: { field: FilterField; label: string; placeholder: string }[] = [
@@ -32,7 +38,12 @@ export const FilterDialog = memo(function FilterDialog({
   onChange,
   onClose,
   selectedServers,
+  saved,
+  onSave,
+  onDelete,
 }: FilterDialogProps) {
+  /** 담을 이름. 불러온 뒤 그 이름을 채워 두면 «고쳐서 다시 담기» 가 한 번에 된다 */
+  const [saveName, setSaveName] = useState('');
   /** 방금 추가한 줄에 바로 칠 수 있게, 마지막에 넣은 자리를 기억한다 */
   const [focusIdx, setFocusIdx] = useState<number | null>(null);
 
@@ -192,6 +203,79 @@ export const FilterDialog = memo(function FilterDialog({
             ? t('전체 — 왼쪽 목록에서 고릅니다')
             : `${selectedServers}${t('개 — 왼쪽 목록에서 바꿉니다')}`}
         </p>
+
+        {/* 담아 두기 — 장애를 볼 때 거는 조건은 매번 새로 짜는 것이 아니라
+            «결제만»·«헬스체크 빼고» 처럼 몇 벌이 돌아가며 쓰인다 */}
+        <section className="mb-3 border-t border-line pt-3">
+          <div className="mb-1 text-micro tracking-wide text-fg-dim uppercase">{t('담아 둔 조건')}</div>
+
+          {saved.length === 0 ? (
+            <p className="mb-2 px-1 text-micro text-fg-faint">
+              {t('아직 없습니다. 지금 조건에 이름을 붙여 담아 두면 다음에 한 번에 불러옵니다.')}
+            </p>
+          ) : (
+            <ul className="mb-2 max-h-40 space-y-0.5 overflow-y-auto">
+              {saved.map(f => {
+                const on = isSame(f, filter);
+                return (
+                  <li key={f.name} className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        onChange(toPatch(f));
+                        // 이름을 채워 둔다 — 고쳐서 같은 이름으로 다시 담는 흐름이 잦다
+                        setSaveName(f.name);
+                      }}
+                      className={`min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-micro hover:bg-hover ${
+                        on ? 'text-fg' : 'text-fg-muted'
+                      }`}
+                    >
+                      {/* **지금 걸린 것과 같으면 표시한다.** 목록만 보면 무엇이 걸려 있는지 모른다 */}
+                      {on ? '● ' : ''}
+                      {f.name}
+                      <span className="ml-2 text-fg-faint">
+                        {f.patterns.length}
+                        {t('줄')}
+                        {f.errorOnly ? ` · ${t('에러만')}` : ''}
+                        {f.elapsedMs > 0
+                          ? ` · ${f.elapsedExclude ? '<' : '≥'}${(f.elapsedMs / 1000).toLocaleString()}s`
+                          : ''}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => onDelete(f.name)}
+                      aria-label={`${f.name} ${t('지우기')}`}
+                      className="shrink-0 rounded px-1 text-micro text-fg-faint hover:text-danger"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              value={saveName}
+              spellCheck={false}
+              placeholder={t('이름 (예: 결제만)')}
+              onChange={e => setSaveName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && saveName.trim() !== '') onSave(saveName);
+              }}
+              className="min-w-0 flex-1 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
+            />
+            <button
+              onClick={() => onSave(saveName)}
+              disabled={saveName.trim() === ''}
+              title={t('같은 이름이면 덮어씁니다')}
+              className="shrink-0 rounded border border-accent px-2 py-0.5 text-micro text-accent hover:bg-hover disabled:cursor-not-allowed disabled:border-line disabled:text-fg-faint"
+            >
+              {saved.some(f => f.name === saveName.trim()) ? t('덮어쓰기') : t('담기')}
+            </button>
+          </div>
+        </section>
 
         <div className="flex items-center justify-between border-t border-line pt-3">
           <button

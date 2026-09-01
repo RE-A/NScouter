@@ -550,6 +550,8 @@ export interface AppConfig {
   servers?: ServerProfile[];
   /** 마지막으로 고른 서버 이름 */
   last_server?: string;
+  /** 이름 붙여 담아 둔 조회 조건들 */
+  saved_filters?: SavedFilterPrefs[];
 }
 
 /** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
@@ -614,6 +616,15 @@ export interface XLogFilterPrefs {
   patterns: PatternPrefs[];
   /** 'live' | 'past' */
   mode: string;
+}
+
+/** 이름 붙여 담아 둔 조회 조건. Rust `SavedFilterPrefs` 와 짝이다 */
+export interface SavedFilterPrefs {
+  name: string;
+  patterns: PatternPrefs[];
+  error_only: boolean;
+  elapsed_ms: number;
+  elapsed_exclude: boolean;
 }
 
 /** 카운터에서 그리기로 고른 서버. 비어 있으면 전부 */

@@ -503,6 +503,15 @@ export const EN: Record<string, string> = {
   '조건 모두 지우기': 'Clear all rules',
   '줄 걸려 있음': ' rule(s) active',
 
+  // ── 담아 둔 조건 ──────────────────────────────────────
+  '담아 둔 조건': 'Saved filters',
+  '아직 없습니다. 지금 조건에 이름을 붙여 담아 두면 다음에 한 번에 불러옵니다.':
+    'None yet. Name the current rules and they come back in one click.',
+  '이름 (예: 결제만)': 'Name (e.g. payments only)',
+  '담기': 'Save',
+  '같은 이름이면 덮어씁니다': 'Same name overwrites',
+  // '줄' 은 위(요약 표)에 이미 있다. 같은 말을 두 번 적으면 사전이 갈린다.
+
   // ── 클립보드 ──────────────────────────────────────────
   '복사': 'Copy',
   '복사됨': 'Copied',
