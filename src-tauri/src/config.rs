@@ -134,6 +134,15 @@ pub struct ServerProfile {
 /// **껐다 켜면 다 날아간다** 는 것이 현장에서 가장 많이 나온 말이다.
 /// 필터를 다시 채우는 데 드는 시간보다, 어제 보던 자리로 바로 돌아가는 것이 훨씬 낫다.
 /// 화면 값과 1:1 이라 화면 타입이 바뀌면 여기도 바뀐다.
+/// 문자열 조건 한 줄. `field` 는 `"service"` 또는 `"ip"`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PatternPrefs {
+    pub field: String,
+    pub text: String,
+    pub exclude: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct XLogFilterPrefs {
@@ -148,6 +157,9 @@ pub struct XLogFilterPrefs {
     pub service_exclude: bool,
     pub ip_text: String,
     pub ip_exclude: bool,
+    /// 여러 줄짜리 조건. **이쪽이 본판이다** — 위의 `service_*`/`ip_*` 는
+    /// 판이 올라가기 전 파일을 읽기 위해 남겨 둔다(읽고 나면 여기로 옮긴다).
+    pub patterns: Vec<PatternPrefs>,
     /// `"live"` 또는 `"past"`
     pub mode: String,
 }
@@ -163,6 +175,7 @@ impl Default for XLogFilterPrefs {
             service_exclude: false,
             ip_text: String::new(),
             ip_exclude: false,
+            patterns: Vec::new(),
             // **과거 구간은 복원하지 않는다.** 어제 보던 «최근 1시간» 은 오늘 열면
             // 남의 시간이다. 조건은 남기고 시점만 지금으로 되돌린다.
             mode: "live".to_string(),

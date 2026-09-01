@@ -127,42 +127,42 @@ describe('passesFilter', () => {
   });
 
   it('IP 를 부분 일치로 거른다', () => {
-    const f = { ...DEFAULT_FILTER, ip: { text: '10.89.2', exclude: false } };
+    const f = { ...DEFAULT_FILTER, patterns: [{ field: 'ip' as const, text: '10.89.2', exclude: false }] };
     expect(passesFilter(xlog({ ipAddr: '10.89.2.13' }), f)).toBe(true);
     expect(passesFilter(xlog({ ipAddr: '192.168.0.1' }), f)).toBe(false);
   });
 
   it('IP 제외는 그 IP 만 뺀다', () => {
-    const f = { ...DEFAULT_FILTER, ip: { text: '10.89.2.13', exclude: true } };
+    const f = { ...DEFAULT_FILTER, patterns: [{ field: 'ip' as const, text: '10.89.2.13', exclude: true }] };
     expect(passesFilter(xlog({ ipAddr: '10.89.2.13' }), f)).toBe(false);
     expect(passesFilter(xlog({ ipAddr: '10.89.2.14' }), f)).toBe(true);
   });
 
   it('빈 조건은 제외로 걸어도 전부 통과다', () => {
     // 빈 제외 조건이 전부를 지우면 칸을 비우는 순간 화면이 사라진다.
-    const f = { ...DEFAULT_FILTER, ip: { text: '  ', exclude: true } };
+    const f = { ...DEFAULT_FILTER, patterns: [{ field: 'ip' as const, text: '  ', exclude: true }] };
     expect(passesFilter(xlog({ ipAddr: '10.89.2.13' }), f)).toBe(true);
   });
 
   it('서비스명은 해석된 이름으로 거른다', () => {
     const names = new Map([[7, '/shop/lab/jitter<GET>'], [8, '/order/list<GET>']]);
     const name = (h: number) => names.get(h);
-    const f = { ...DEFAULT_FILTER, service: { text: 'shop', exclude: false } };
+    const f = { ...DEFAULT_FILTER, patterns: [{ field: 'service' as const, text: 'shop', exclude: false }] };
     expect(passesFilter(xlog({ service: 7 }), f, name)).toBe(true);
     expect(passesFilter(xlog({ service: 8 }), f, name)).toBe(false);
   });
 
   it('대소문자를 가리지 않는다', () => {
     const name = () => '/Shop/Lab/Jitter';
-    const f = { ...DEFAULT_FILTER, service: { text: 'SHOP', exclude: false } };
+    const f = { ...DEFAULT_FILTER, patterns: [{ field: 'service' as const, text: 'SHOP', exclude: false }] };
     expect(passesFilter(xlog({ service: 7 }), f, name)).toBe(true);
   });
 
   it('아직 못 푼 해시는 이름 없음으로 본다', () => {
     // 판단을 보류하고 통과시키면 포함 조건인데 엉뚱한 점이 섞여 보인다.
     const none = () => undefined;
-    const include = { ...DEFAULT_FILTER, service: { text: 'shop', exclude: false } };
-    const exclude = { ...DEFAULT_FILTER, service: { text: 'shop', exclude: true } };
+    const include = { ...DEFAULT_FILTER, patterns: [{ field: 'service' as const, text: 'shop', exclude: false }] };
+    const exclude = { ...DEFAULT_FILTER, patterns: [{ field: 'service' as const, text: 'shop', exclude: true }] };
     expect(passesFilter(xlog({ service: 7 }), include, none)).toBe(false);
     expect(passesFilter(xlog({ service: 7 }), exclude, none)).toBe(true);
   });
@@ -188,12 +188,78 @@ describe('hasActiveFilter', () => {
 
   it('공백만 든 조건은 조건이 아니다', () => {
     // 공백을 조건으로 세면 "필터 때문에 비었다"는 잘못된 안내가 뜬다.
-    expect(hasActiveFilter({ ...DEFAULT_FILTER, ip: { text: '   ', exclude: true } })).toBe(false);
+    expect(hasActiveFilter({ ...DEFAULT_FILTER, patterns: [{ field: 'ip' as const, text: '   ', exclude: true }] })).toBe(false);
   });
 
   it('하나라도 걸리면 true 다', () => {
     expect(hasActiveFilter({ ...DEFAULT_FILTER, errorOnly: true })).toBe(true);
     expect(hasActiveFilter({ ...DEFAULT_FILTER, elapsedMs: 1 })).toBe(true);
-    expect(hasActiveFilter({ ...DEFAULT_FILTER, service: { text: 'a', exclude: false } })).toBe(true);
+    expect(hasActiveFilter({ ...DEFAULT_FILTER, patterns: [{ field: 'service' as const, text: 'a', exclude: false }] })).toBe(true);
+  });
+});
+
+describe('passesFilter — 조건 여러 줄', () => {
+  const name = (h: number) => ({ 7: '/shop/order', 8: '/health', 9: '/shop/cart' }[h]);
+
+  it('같은 자리의 포함은 **하나만 맞아도** 통과한다', () => {
+    // 둘 다 만족해야 한다면 «이 URL 과 저 URL» 은 늘 0건이 된다.
+    const f = {
+      ...DEFAULT_FILTER,
+      patterns: [
+        { field: 'service' as const, text: '/shop/order', exclude: false },
+        { field: 'service' as const, text: '/shop/cart', exclude: false },
+      ],
+    };
+    expect(passesFilter(xlog({ service: 7 }), f, name)).toBe(true);
+    expect(passesFilter(xlog({ service: 9 }), f, name)).toBe(true);
+    expect(passesFilter(xlog({ service: 8 }), f, name)).toBe(false);
+  });
+
+  it('제외는 하나라도 맞으면 뺀다', () => {
+    const f = {
+      ...DEFAULT_FILTER,
+      patterns: [
+        { field: 'service' as const, text: '/health', exclude: true },
+        { field: 'service' as const, text: '/cart', exclude: true },
+      ],
+    };
+    expect(passesFilter(xlog({ service: 7 }), f, name)).toBe(true);
+    expect(passesFilter(xlog({ service: 8 }), f, name)).toBe(false);
+    expect(passesFilter(xlog({ service: 9 }), f, name)).toBe(false);
+  });
+
+  it('제외는 포함보다 세다', () => {
+    // «이 묶음만 보되 그중 헬스체크는 빼고» 가 되어야 한다.
+    const f = {
+      ...DEFAULT_FILTER,
+      patterns: [
+        { field: 'service' as const, text: '/shop', exclude: false },
+        { field: 'service' as const, text: '/cart', exclude: true },
+      ],
+    };
+    expect(passesFilter(xlog({ service: 7 }), f, name)).toBe(true);
+    expect(passesFilter(xlog({ service: 9 }), f, name)).toBe(false);
+  });
+
+  it('서비스와 IP 는 둘 다 만족해야 한다', () => {
+    const f = {
+      ...DEFAULT_FILTER,
+      patterns: [
+        { field: 'service' as const, text: '/shop', exclude: false },
+        { field: 'ip' as const, text: '10.89.', exclude: false },
+      ],
+    };
+    expect(passesFilter(xlog({ service: 7, ipAddr: '10.89.2.13' }), f, name)).toBe(true);
+    expect(passesFilter(xlog({ service: 7, ipAddr: '10.1.1.1' }), f, name)).toBe(false);
+    expect(passesFilter(xlog({ service: 8, ipAddr: '10.89.2.13' }), f, name)).toBe(false);
+  });
+
+  it('빈 줄은 조건이 아니다', () => {
+    // 빈 제외 줄로 전부를 지우면 안 된다. 창에서 «+ 제외» 를 누르면 빈 줄이 먼저 생긴다.
+    const f = {
+      ...DEFAULT_FILTER,
+      patterns: [{ field: 'service' as const, text: '   ', exclude: true }],
+    };
+    expect(passesFilter(xlog({ service: 7 }), f, name)).toBe(true);
   });
 });

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import type { TextFilter, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
-import { Y_AXIS_CONFIGS } from '../types/xlog';
+import { firstRule, setFirstRule, Y_AXIS_CONFIGS } from '../types/xlog';
 import type { PastRange, XLogMode } from '../types/timeRange';
 import {
   checkRange,
@@ -31,6 +31,8 @@ interface XLogToolbarProps {
   onWideSearch: () => void;
   /** 저장해 둔 프로파일 목록을 연다 */
   onOpenSaved: () => void;
+  /** 필터 창을 연다 */
+  onOpenFilters: () => void;
 }
 
 const Y_AXIS_OPTIONS: YAxisMode[] = [
@@ -58,7 +60,10 @@ export function XLogToolbar({
   onPastRangeChange,
   onWideSearch,
   onOpenSaved,
+  onOpenFilters,
 }: XLogToolbarProps) {
+  /** 인라인 칸에 안 보이는 조건 수. 창을 열지 않고도 «더 걸려 있다» 를 안다 */
+  const extraRules = Math.max(0, filter.patterns.filter(r => r.text.trim() !== '').length - 2);
   // 입력 중인 값. **조회를 눌러야** 실제 구간이 된다 —
   // 타이핑할 때마다 수만 건을 다시 받으면 안 된다.
   const [draft, setDraft] = useState<PastRange>(() => defaultPastRange(Date.now()));
@@ -229,18 +234,30 @@ export function XLogToolbar({
         <span className="text-micro text-fg-faint">{t('초')}</span>
       </Field>
 
+      {/* 인라인 칸은 **첫 줄짜리 뷰**다. 팝업에서 여러 줄을 걸어 둔 사람이 여기서
+          글자를 고쳤다고 나머지 줄이 사라지면 안 된다(setFirstRule). */}
       <TextCond
         label={t('서비스')}
-        value={filter.service}
+        value={firstRule(filter, 'service')}
         placeholder={t('URL 일부')}
-        onChange={v => onFilterChange({ service: v })}
+        onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'service', v) })}
       />
       <TextCond
         label="IP"
-        value={filter.ip}
+        value={firstRule(filter, 'ip')}
         placeholder="10.89."
-        onChange={v => onFilterChange({ ip: v })}
+        onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'ip', v) })}
       />
+
+      {/* 조건이 두 줄을 넘어가면 인라인으로는 못 다룬다 — 거기서부터는 창이 맡는다 */}
+      <button
+        onClick={onOpenFilters}
+        title={t('포함·제외를 여러 줄로 겁니다')}
+        className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
+      >
+        {t('필터')}
+        {extraRules > 0 ? ` +${extraRules}` : ''}
+      </button>
     </div>
   );
 }

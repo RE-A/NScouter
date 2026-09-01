@@ -594,6 +594,13 @@ export interface ServerProfile {
  * **과거 구간(stime/etime)은 담지 않는다.** 어제 보던 «최근 1시간» 은 오늘 열면
  * 남의 시간이다 — 조건만 남기고 시점은 지금으로 되돌린다.
  */
+/** 문자열 조건 한 줄. Rust `PatternPrefs` 와 짝이다 */
+export interface PatternPrefs {
+  field: string;
+  text: string;
+  exclude: boolean;
+}
+
 export interface XLogFilterPrefs {
   elapsed_ms: number;
   elapsed_exclude: boolean;
@@ -603,6 +610,8 @@ export interface XLogFilterPrefs {
   service_exclude: boolean;
   ip_text: string;
   ip_exclude: boolean;
+  /** 여러 줄짜리 조건. 위의 한 칸짜리 두 개는 예전 파일을 읽기 위해 남겨 둔 자리다 */
+  patterns: PatternPrefs[];
   /** 'live' | 'past' */
   mode: string;
 }

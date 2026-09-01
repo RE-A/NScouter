@@ -488,6 +488,21 @@ export const EN: Record<string, string> = {
   '자동 연결': 'Auto connect',
   '연결 중…': 'Connecting…',
 
+  // ── 조회 조건 창 ──────────────────────────────────────
+  '필터': 'Filters',
+  '조회 조건': 'Filters',
+  '포함·제외를 여러 줄로 겁니다': 'Set multiple include / exclude rules',
+  '같은 자리의 포함은 하나만 맞아도 통과, 제외는 하나라도 맞으면 뺍니다. 서비스와 IP 는 둘 다 만족해야 합니다.':
+    'Within a field, any include matches; any exclude removes. Service and IP must both match.',
+  '조건 없음 — 전부 통과합니다': 'No rules — everything passes',
+  '포함과 제외를 바꿉니다': 'Switch between include and exclude',
+  '응답시간·에러': 'Elapsed · errors',
+  '대상 서버': 'Servers',
+  '전체 — 왼쪽 목록에서 고릅니다': 'all — choose them in the list on the left',
+  '개 — 왼쪽 목록에서 바꿉니다': ' — change them in the list on the left',
+  '조건 모두 지우기': 'Clear all rules',
+  '줄 걸려 있음': ' rule(s) active',
+
   // ── 클립보드 ──────────────────────────────────────────
   '복사': 'Copy',
   '복사됨': 'Copied',

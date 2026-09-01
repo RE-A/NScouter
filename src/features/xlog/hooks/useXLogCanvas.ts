@@ -59,8 +59,12 @@ export function useXLogCanvas(
    * 안 풀린 해시는 이름 없음으로 취급되어 포함 조건에서 통째로 빠진다.
    * 서로 다른 서비스는 실측에서 열 몇 개 수준이라 주기적으로 훑어도 싸다.
    */
+  // 서비스 조건은 여러 줄일 수 있다. 한 줄이라도 걸려 있으면 이름이 필요하다.
+  const serviceFiltered = filter.patterns.some(
+    r => r.field === 'service' && r.text.trim() !== '',
+  );
   useEffect(() => {
-    if (filter.service.text.trim() === '') return;
+    if (!serviceFiltered) return;
     let alive = true;
 
     const fill = () => {
@@ -81,7 +85,7 @@ export function useXLogCanvas(
       alive = false;
       clearInterval(id);
     };
-  }, [filter.service.text, store, getCached, resolve]);
+  }, [serviceFiltered, store, getCached, resolve]);
 
   // 렌더러 초기화
   useEffect(() => {

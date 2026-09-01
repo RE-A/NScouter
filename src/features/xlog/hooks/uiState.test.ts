@@ -177,6 +177,7 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
       service_exclude: false,
       ip_text: '10.0.',
       ip_exclude: true,
+      patterns: [],
       mode: 'live',
     });
 
@@ -184,8 +185,11 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
     expect(filter.elapsedExclude).toBe(true);
     expect(filter.errorOnly).toBe(true);
     expect([...filter.objHashSet]).toEqual([11, 22]);
-    expect(filter.service).toEqual({ text: '/shop', exclude: false });
-    expect(filter.ip).toEqual({ text: '10.0.', exclude: true });
+    // 예전 판(한 칸짜리)으로 저장된 파일도 잃지 않는다 — 줄로 옮겨 온다
+    expect(filter.patterns).toEqual([
+      { field: 'service', text: '/shop', exclude: false },
+      { field: 'ip', text: '10.0.', exclude: true },
+    ]);
     expect(mode).toBe('live');
   });
 
@@ -202,7 +206,7 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
     const { mode } = toFilterState({
       elapsed_ms: 0, elapsed_exclude: false, error_only: false, obj_hashes: [],
       service_text: '', service_exclude: false, ip_text: '', ip_exclude: false,
-      mode: 'past',
+      patterns: [], mode: 'past',
     });
     expect(mode).toBe('past');
   });
@@ -212,14 +216,14 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
     const { filter } = toFilterState({
       elapsed_ms: 'abc', elapsed_exclude: 'yes', error_only: 1, obj_hashes: 'nope',
       service_text: 42, service_exclude: null, ip_text: undefined, ip_exclude: 0,
-      mode: 7,
+      patterns: 'nope', mode: 7,
     } as never);
 
     expect(filter.elapsedMs).toBe(0);
     expect(filter.elapsedExclude).toBe(false);
     expect(filter.errorOnly).toBe(false);
     expect(filter.objHashSet.size).toBe(0);
-    expect(filter.service.text).toBe('');
+    expect(filter.patterns).toEqual([]);
   });
 
   it('넣었다 뺐을 때 값이 같다', () => {
@@ -228,8 +232,10 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
       elapsedExclude: false,
       errorOnly: true,
       objHashSet: new Set([7]),
-      service: { text: 'a', exclude: true },
-      ip: { text: 'b', exclude: false },
+      patterns: [
+        { field: 'service' as const, text: 'a', exclude: true },
+        { field: 'ip' as const, text: 'b', exclude: false },
+      ],
     };
     const back = toFilterState(fromFilterState(filter, 'past'));
     expect(back.filter).toEqual(filter);

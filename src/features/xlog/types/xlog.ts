@@ -271,6 +271,22 @@ export interface TextFilter {
   exclude: boolean;
 }
 
+/** 패턴을 걸 수 있는 자리. 늘릴 때 여기만 늘리면 된다 */
+export type FilterField = 'service' | 'ip';
+
+/**
+ * 문자열 조건 한 줄.
+ *
+ * **여러 줄을 건다.** 운영에서 «이 두 URL 만» 이나 «헬스체크·모니터링은 빼고» 는
+ * 한 칸으로 표현할 수 없다 — 한 칸이면 정규식을 배우게 하거나 매번 고쳐 쓰게 된다.
+ */
+export interface PatternRule {
+  field: FilterField;
+  text: string;
+  /** true 면 **일치하지 않는 것만** 통과 */
+  exclude: boolean;
+}
+
 export interface XLogFilterState {
   /**
    * 응답시간 임계(ms). **0 이면 방향과 무관하게 조건이 없다** —
@@ -281,10 +297,15 @@ export interface XLogFilterState {
   elapsedExclude: boolean;
   errorOnly: boolean;
   objHashSet: Set<number>;
-  /** 서비스명(URL) 부분 일치. 대소문자를 가리지 않는다 */
-  service: TextFilter;
-  /** 호출자 IP 부분 일치 */
-  ip: TextFilter;
+  /**
+   * 서비스·IP 조건들. **순서는 뜻이 없다** — 전부 만족해야 통과한다(AND).
+   *
+   * 포함이 여럿이면 그중 하나만 맞아도 되는가? **아니다, 자리마다 OR 다** —
+   * 같은 자리(service)의 포함 조건끼리는 «하나라도 맞으면», 제외 조건은 «하나라도 맞으면 뺀다».
+   * 서로 다른 자리(service vs ip)는 AND 다. 그래야 «이 두 URL 중 하나이면서 이 IP 대역» 이
+   * 표현된다.
+   */
+  patterns: PatternRule[];
 }
 
 export const DEFAULT_FILTER: XLogFilterState = {
@@ -292,8 +313,7 @@ export const DEFAULT_FILTER: XLogFilterState = {
   elapsedExclude: false,
   errorOnly: false,
   objHashSet: new Set(),
-  service: { text: '', exclude: false },
-  ip: { text: '', exclude: false },
+  patterns: [],
 };
 
 /** 조건이 하나라도 걸려 있는가 — "왜 비었지"를 화면이 설명할 근거 */
@@ -301,10 +321,43 @@ export function hasActiveFilter(f: XLogFilterState): boolean {
   return (
     f.errorOnly ||
     f.elapsedMs > 0 ||
-    f.service.text.trim() !== '' ||
-    f.ip.text.trim() !== '' ||
+    f.patterns.some(r => r.text.trim() !== '') ||
     f.objHashSet.size > 0
   );
+}
+
+/** 이 자리의 조건들. 툴바의 한 칸짜리 입력이 첫 줄을 읽고 쓰는 데 쓴다 */
+export function rulesOf(f: XLogFilterState, field: FilterField): PatternRule[] {
+  return f.patterns.filter(r => r.field === field);
+}
+
+/**
+ * 그 자리의 **첫 줄만** 갈아 끼운다.
+ *
+ * 툴바의 인라인 칸은 한 줄짜리 뷰다 — 팝업에서 세 줄을 걸어 둔 사람이 툴바에서
+ * 글자를 고쳤다고 나머지 두 줄이 사라지면 안 된다. 빈 글자는 그 줄을 지운다.
+ */
+export function setFirstRule(
+  f: XLogFilterState,
+  field: FilterField,
+  next: TextFilter,
+): PatternRule[] {
+  const idx = f.patterns.findIndex(r => r.field === field);
+  const text = next.text;
+
+  if (idx < 0) {
+    return text.trim() === '' ? f.patterns : [...f.patterns, { field, ...next }];
+  }
+  if (text.trim() === '') {
+    return f.patterns.filter((_, i) => i !== idx);
+  }
+  return f.patterns.map((r, i) => (i === idx ? { ...r, ...next } : r));
+}
+
+/** 첫 줄을 한 칸짜리 조건으로 읽는다. 없으면 빈 조건 */
+export function firstRule(f: XLogFilterState, field: FilterField): TextFilter {
+  const found = f.patterns.find(r => r.field === field);
+  return found ? { text: found.text, exclude: found.exclude } : { text: '', exclude: false };
 }
 
 // ─── 에이전트(Object) ─────────────────────────────────────────

@@ -4,10 +4,16 @@
 // 그렇다). 그래서 **읽어 온 값을 그대로 믿지 않는다** — 못 쓸 값이면 기본값으로 돌린다.
 // 배치가 0 이면 패널이 사라진 채로 뜨고, 그게 왜 그런지는 화면만 봐서는 모른다.
 
-import type { CounterPickPrefs, UiLayout, XLogChartPrefs, XLogFilterPrefs } from '../api/scouterApi';
+import type {
+  CounterPickPrefs,
+  PatternPrefs,
+  UiLayout,
+  XLogChartPrefs,
+  XLogFilterPrefs,
+} from '../api/scouterApi';
 import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
-import type { XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
+import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
 import type { XLogMode } from '../types/timeRange';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
@@ -129,7 +135,6 @@ export function toFilterState(p: XLogFilterPrefs | undefined): {
     const n = typeof v === 'number' ? v : Number(v);
     return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
   };
-  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
   const flag = (v: unknown): boolean => v === true;
 
   return {
@@ -140,8 +145,7 @@ export function toFilterState(p: XLogFilterPrefs | undefined): {
       objHashSet: new Set(
         Array.isArray(p?.obj_hashes) ? p.obj_hashes.filter(h => Number.isInteger(h)) : [],
       ),
-      service: { text: text(p?.service_text), exclude: flag(p?.service_exclude) },
-      ip: { text: text(p?.ip_text), exclude: flag(p?.ip_exclude) },
+      patterns: toPatterns(p),
     },
     // **과거 모드로는 되돌리지 않는다.** 어제 보던 구간은 오늘 열면 남의 시간이고,
     // 켜자마자 옛날 구간을 다시 받아 오면 «지금» 이 안 보인다.
@@ -149,17 +153,54 @@ export function toFilterState(p: XLogFilterPrefs | undefined): {
   };
 }
 
+/**
+ * 저장해 둔 조건 줄들 → 화면 값.
+ *
+ * **예전 파일을 잃지 않는다.** 조건이 한 칸씩(`service_text`/`ip_text`)이던 판으로 저장된
+ * 파일이 그대로 있다 — `patterns` 가 비어 있으면 그 한 칸을 한 줄로 옮긴다.
+ */
+function toPatterns(p: XLogFilterPrefs | undefined): PatternRule[] {
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const flag = (v: unknown): boolean => v === true;
+
+  const rows = Array.isArray(p?.patterns) ? p.patterns : [];
+  const parsed: PatternRule[] = [];
+  for (const r of rows) {
+    if (typeof r !== 'object' || r === null) continue;
+    const field = text((r as PatternPrefs).field);
+    if (field !== 'service' && field !== 'ip') continue;
+    const body = text((r as PatternPrefs).text);
+    if (body.trim() === '') continue;
+    parsed.push({ field, text: body, exclude: flag((r as PatternPrefs).exclude) });
+  }
+  if (parsed.length > 0) return parsed;
+
+  const legacy: PatternRule[] = [];
+  if (text(p?.service_text).trim() !== '') {
+    legacy.push({ field: 'service', text: text(p?.service_text), exclude: flag(p?.service_exclude) });
+  }
+  if (text(p?.ip_text).trim() !== '') {
+    legacy.push({ field: 'ip', text: text(p?.ip_text), exclude: flag(p?.ip_exclude) });
+  }
+  return legacy;
+}
+
 /** 화면 값 → 저장할 조건 */
 export function fromFilterState(filter: XLogFilterState, mode: XLogMode): XLogFilterPrefs {
+  const first = (field: 'service' | 'ip') =>
+    filter.patterns.find(r => r.field === field) ?? { text: '', exclude: false };
+
   return {
     elapsed_ms: filter.elapsedMs,
     elapsed_exclude: filter.elapsedExclude,
     error_only: filter.errorOnly,
     obj_hashes: [...filter.objHashSet],
-    service_text: filter.service.text,
-    service_exclude: filter.service.exclude,
-    ip_text: filter.ip.text,
-    ip_exclude: filter.ip.exclude,
+    // 예전 판으로 되돌아가도 **첫 줄만은 살아 있게** 남겨 둔다.
+    service_text: first('service').text,
+    service_exclude: first('service').exclude,
+    ip_text: first('ip').text,
+    ip_exclude: first('ip').exclude,
+    patterns: filter.patterns.map(r => ({ field: r.field, text: r.text, exclude: r.exclude })),
     mode,
   };
 }

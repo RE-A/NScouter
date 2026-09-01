@@ -13,7 +13,13 @@
 
 import type { CoordinateMapper } from './CoordinateMapper';
 import type { SelectionRect } from './XLogChartRenderer';
-import type { SXLog, TextFilter, XLogFilterState } from '../types/xlog';
+import type {
+  FilterField,
+  PatternRule,
+  SXLog,
+  TextFilter,
+  XLogFilterState,
+} from '../types/xlog';
 
 /**
  * 부분 일치 (대소문자 무시) + 포함/제외.
@@ -51,13 +57,41 @@ export function passesFilter(
 
   if (filter.objHashSet.size > 0 && !filter.objHashSet.has(xlog.objHash)) return false;
 
-  if (filter.service.text.trim() !== '') {
-    const name = serviceName?.(xlog.service) ?? '';
-    if (!matchesText(name, filter.service)) return false;
+  // 자리마다 값이 다르다. 서비스명은 해시를 풀어야 하고 IP 는 그대로 있다.
+  const valueOf = (field: FilterField): string =>
+    field === 'service' ? (serviceName?.(xlog.service) ?? '') : xlog.ipAddr;
+
+  return passesPatterns(filter.patterns, valueOf);
+}
+
+/**
+ * 패턴들을 판정한다.
+ *
+ * **자리 안에서는 OR, 자리끼리는 AND** 다.
+ *   · 같은 자리의 포함 조건이 여럿이면 «하나라도 맞으면» 통과 —
+ *     아니면 «이 URL 과 저 URL» 을 동시에 만족할 수 없어 늘 0건이 된다
+ *   · 제외 조건은 «하나라도 맞으면» 뺀다
+ *   · 서비스 조건과 IP 조건은 둘 다 만족해야 한다
+ * 빈 글자는 조건이 아니다 — 빈 제외 조건으로 전부를 지우면 안 된다.
+ */
+export function passesPatterns(
+  patterns: readonly PatternRule[],
+  valueOf: (field: FilterField) => string,
+): boolean {
+  const fields = new Set(patterns.filter(r => r.text.trim() !== '').map(r => r.field));
+
+  for (const field of fields) {
+    const value = valueOf(field).toLowerCase();
+    const rules = patterns.filter(r => r.field === field && r.text.trim() !== '');
+
+    const excludes = rules.filter(r => r.exclude);
+    if (excludes.some(r => value.includes(r.text.trim().toLowerCase()))) return false;
+
+    const includes = rules.filter(r => !r.exclude);
+    if (includes.length > 0 && !includes.some(r => value.includes(r.text.trim().toLowerCase()))) {
+      return false;
+    }
   }
-
-  if (filter.ip.text.trim() !== '' && !matchesText(xlog.ipAddr, filter.ip)) return false;
-
   return true;
 }
 

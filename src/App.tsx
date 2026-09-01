@@ -20,6 +20,7 @@ import { ServiceGroupPanel } from './features/xlog/components/ServiceGroupPanel'
 import { XLogSearchBar } from './features/xlog/components/XLogSearchBar';
 import { WideSearchDialog, type WideSearchValues } from './features/xlog/components/WideSearchDialog';
 import { SavedProfileDialog } from './features/xlog/components/SavedProfileDialog';
+import { FilterDialog } from './features/xlog/components/FilterDialog';
 import { ServerSwitcher } from './features/xlog/components/ServerSwitcher';
 import {
   displayName,
@@ -600,6 +601,8 @@ export default function App() {
    * 사전이 풀린 채로 들어가야 나중에 접속 없이도 이름이 나온다.
    */
   const [showSaved, setShowSaved] = useState(false);
+  /** 조회 조건 창. 툴바 한 줄로는 두 줄짜리 조건을 못 만든다 */
+  const [showFilters, setShowFilters] = useState(false);
   /** 방금 저장한 결과. 잠깐 띄우고 지운다 — 저장은 조용히 끝나면 됐는지 알 수 없다 */
   const [saveNote, setSaveNote] = useState<string | null>(null);
 
@@ -788,6 +791,14 @@ export default function App() {
 
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showFilters && (
+        <FilterDialog
+          filter={filter}
+          onChange={handleFilterChange}
+          onClose={() => setShowFilters(false)}
+          selectedServers={filter.objHashSet.size}
+        />
+      )}
       {showSaved && (
         <SavedProfileDialog
           onOpen={detail.openSaved}
@@ -822,6 +833,7 @@ export default function App() {
             onPastRangeChange={handlePastRangeChange}
             onWideSearch={() => setShowWideSearch(true)}
             onOpenSaved={() => setShowSaved(true)}
+            onOpenFilters={() => setShowFilters(true)}
           />
           {/* 분할 배치.
               이전에는 워크스페이스를 재서 패널을 절대 좌표로 놓았다. 측정값이 실제
