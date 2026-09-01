@@ -169,6 +169,61 @@ mod tests {
     use super::*;
 
     // 실서버 GET_TEXT_100 응답에서 그대로 가져온 값이다.
+    // ─ TextCache ─────────────────────────────────────────────
+    //
+    // 캐시가 틀리면 **화면에 해시가 그대로 남거나**, 같은 해시를 매 프레임 다시 묻는다.
+    // 둘 다 조용해서 눈으로는 안 잡힌다.
+
+    #[test]
+    fn 타입이_다르면_다른_값이다() {
+        // service 의 7 과 sql 의 7 은 남남이다. 한 칸에 넣으면 SQL 자리에 URL 이 뜬다.
+        let mut c = TextCache::new();
+        c.insert("service", 7, "/shop/order");
+        c.insert("sql", 7, "select 1");
+
+        assert_eq!(c.get("service", 7), Some("/shop/order"));
+        assert_eq!(c.get("sql", 7), Some("select 1"));
+        assert_eq!(c.get("error", 7), None);
+    }
+
+    #[test]
+    fn 나중에_넣은_것이_이긴다() {
+        // 사전은 콜렉터가 다시 만들 수 있다(Reset Text Cache). 옛 값을 붙들면 안 된다.
+        let mut c = TextCache::new();
+        c.insert("service", 7, "old");
+        c.insert("service", 7, "new");
+        assert_eq!(c.get("service", 7), Some("new"));
+    }
+
+    #[test]
+    fn 있는_것은_다시_묻지_않는다() {
+        let mut c = TextCache::new();
+        c.insert("service", 7, "/shop/order");
+        assert_eq!(c.missing("service", &[7, 8, 9]), vec![8, 9]);
+    }
+
+    #[test]
+    fn 해시_0은_묻지_않는다() {
+        // 0 은 «없음» 이다. 물어보면 콜렉터가 빈 값을 주고, 그 빈 값을 캐시에 넣으면
+        // 다음부터 «있는데 빈 이름» 이 된다.
+        let c = TextCache::new();
+        assert_eq!(c.missing("service", &[0, 0]), Vec::<i32>::new());
+    }
+
+    #[test]
+    fn 같은_해시가_여러_번_와도_목록에_그대로_남는다() {
+        // 여기서 중복을 지우지 않는다 — 부르는 쪽이 이미 모아서 준다.
+        // 지운다고 착각하면 «100개씩 나눠 묻기» 의 셈이 어긋난다.
+        let c = TextCache::new();
+        assert_eq!(c.missing("service", &[8, 8]), vec![8, 8]);
+    }
+
+    #[test]
+    fn 캐시가_비어_있으면_전부_물어야_한다() {
+        let c = TextCache::new();
+        assert_eq!(c.missing("sql", &[1, 2, 3]), vec![1, 2, 3]);
+    }
+
     #[test]
     fn 실서버_응답_키를_해석한다() {
         assert_eq!(hexa32_to_i64("z1pa9p0"), Some(-60106528));

@@ -103,11 +103,12 @@ cargo test --test live_collector <name> -- --ignored --nocapture
 ## 현재 상태
 
 ```
-L1  570건 / 54개 파일 — 렌더러 엔진(좌표·그리드·PointMap·픽셀 조회·영역 선택),
-                       스토어, 훅, 컴포넌트, i18n 사전, parity(이관율)
-L2  152건 — codec 경계값, sha256, 팩·요청 파라미터 파서
-L3  4건 — connect/login, object list, xlog stream roundtrip, 모르는 팩 타입
-L4  85건 — 실서버 프로토콜 전반 (기본 ignore)
+L1  709건 / 70개 파일 — 렌더러 엔진(좌표·그리드·PointMap·픽셀 조회·영역 선택),
+                       스토어, 훅, 컴포넌트(필터 창·알림·서버 전환·저장본),
+                       i18n 사전, parity(이관율)
+L2  178건 — codec 경계값, sha256, 팩·요청 파라미터 파서, 저장본·내보내기, TextCache
+L3  5건 — connect/login, object list, xlog stream, 모르는 팩 타입, PerfCounterPack
+L4  88건 — 실서버 프로토콜 전반 (기본 ignore)
 ```
 
 이관율은 `src/features/parity/`에 있다. 기능을 옮기면 `inventory.ts`의 status 와
@@ -122,10 +123,7 @@ L4  85건 — 실서버 프로토콜 전반 (기본 ignore)
 |---|---|---|
 | `XLogChartRenderer` 렌더 파이프라인 | L1 | Canvas mock 필요 |
 | `DotImageCache` | L1 | OffscreenCanvas mock 필요 |
-| `useXLogStream` 훅 | L1 | `useXLogCanvas` 는 채웠다 |
-| `TextCache` 적중·갱신 (`dictionary.rs`) | L2 | 키 해석(`hexa32_to_i64`)만 있다 |
 | 스텝 파싱 — 값을 꺼내 쓰는 6종 | L2 | ThreadCall 만 합성 blob 으로 검증. 나머지는 L4 에 기댄다.<br>SUM·Span 계열은 **자리만** 검증했다(내용은 화면에 안 쓴다) |
-| 알람 화면 표시 (`AlertPanel`) | L1 | 파싱은 L4로 검증됨. UI 계약 테스트 없음 |
 
 > 카운터·알람 프로토콜은 L4로 검증 완료다 (N-6/N-8 수정).
 > 알람을 만들려면 `podman stop/start order-app` (F-16).
