@@ -61,6 +61,13 @@ export interface BackfillInput {
   covered: BackfillCoverage | null;
   /** 저장소에 있는 **가장 오래된 점.** 이 왼쪽이 아직 못 받은 구간이다 */
   oldest: number | null;
+  /**
+   * **새로 고른 서버들만** 놓고 봤을 때 가장 오래된 점.
+   *
+   * 서버를 새로 고르면 스트림이 다시 열리면서 그 서버의 최근 것을 한 묶음 준다.
+   * 그것도 «갖고 있는 것» 이라 그 왼쪽만 받아야 겹치지 않는다.
+   */
+  oldestFresh: number | null;
 }
 
 /**
@@ -71,7 +78,7 @@ export interface BackfillInput {
  * 어제 몫은 비워 둔다 — 조용히 엉뚱한 날짜를 받아 오는 것보다 낫다.
  */
 export function planBackfill(input: BackfillInput): BackfillPlan {
-  const { now, timeRangeMs, hashes, covered, oldest } = input;
+  const { now, timeRangeMs, hashes, covered, oldest, oldestFresh } = input;
 
   const start = Math.max(now - timeRangeMs, dayStart(now));
 
@@ -88,10 +95,12 @@ export function planBackfill(input: BackfillInput): BackfillPlan {
 
   const jobs: BackfillJob[] = [];
 
-  // 1. 새로 고른 서버 — 창 전체가 비어 있다.
-  //    저장소의 «가장 오래된 점» 은 다른 서버 것이라 이 서버의 경계가 못 된다.
-  if (fresh.length > 0 && now - start >= MIN_BACKFILL_MS) {
-    jobs.push({ stime: start, etime: now, objHashes: fresh });
+  // 1. 새로 고른 서버 — 창이 거의 통째로 비어 있다.
+  //    저장소 전체의 «가장 오래된 점» 은 다른 서버 것이라 경계가 못 된다.
+  //    스트림이 방금 준 이 서버의 묶음만이 경계다.
+  const freshEdge = oldestFresh ?? now;
+  if (fresh.length > 0 && freshEdge - start >= MIN_BACKFILL_MS) {
+    jobs.push({ stime: start, etime: freshEdge, objHashes: fresh });
   }
 
   // 2. 보던 서버 — 갖고 있는 것 왼쪽으로 모자란 만큼만.

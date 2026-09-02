@@ -76,6 +76,8 @@ export function useLiveBackfill(
 
     const ac = new AbortController();
     const start = () => {
+      const known = new Set(coveredRef.current?.hashes ?? []);
+      const freshSet = new Set(objHashes.filter(h => !known.has(h)));
       const plan = planBackfill({
         now: Date.now(),
         timeRangeMs,
@@ -83,6 +85,8 @@ export function useLiveBackfill(
         covered: coveredRef.current,
         // **저장소에 있는 것이 곧 갖고 있는 것이다.** 여기 왼쪽이 아직 못 받은 구간.
         oldest: store.oldestEndTime,
+        // 새로 고른 서버는 스트림이 다시 열리며 최근 것을 한 묶음 준다. 그 왼쪽만 받는다.
+        oldestFresh: freshSet.size > 0 ? store.oldestEndTimeOf(freshSet) : null,
       });
 
       coveredRef.current = plan.next;

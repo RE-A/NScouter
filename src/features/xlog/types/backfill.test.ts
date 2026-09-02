@@ -12,6 +12,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [1, 2],
       covered: null,
+      oldestFresh: null,
       oldest: null,
     });
     expect(plan.jobs).toEqual([
@@ -27,6 +28,7 @@ describe('planBackfill', () => {
       hashes: [1],
       covered: null,
       // 붙자마자 온 묶음이 5분치를 줬다
+      oldestFresh: null,
       oldest: NOW - 5 * MIN,
     });
     expect(plan.jobs).toEqual([
@@ -41,6 +43,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [1],
       covered,
+      oldestFresh: null,
       oldest: NOW - 30 * MIN,
     });
     expect(plan.jobs).toEqual([]);
@@ -53,10 +56,27 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [1, 2],
       covered,
+      oldestFresh: null,
       oldest: NOW - 5 * MIN,
     });
     expect(plan.jobs).toEqual([
       { stime: NOW - 30 * MIN, etime: NOW - 5 * MIN, objHashes: [1, 2] },
+    ]);
+  });
+
+  it('새로 고른 서버도 스트림이 방금 준 묶음 왼쪽만 받는다', () => {
+    const covered: BackfillCoverage = { hashes: [1] };
+    const plan = planBackfill({
+      now: NOW,
+      timeRangeMs: 30 * MIN,
+      hashes: [1, 2],
+      covered,
+      oldest: NOW - 30 * MIN,
+      // 스트림이 다시 열리면서 2번 서버의 최근 3분치를 줬다
+      oldestFresh: NOW - 3 * MIN,
+    });
+    expect(plan.jobs).toEqual([
+      { stime: NOW - 30 * MIN, etime: NOW - 3 * MIN, objHashes: [2] },
     ]);
   });
 
@@ -67,6 +87,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [1, 2],
       covered,
+      oldestFresh: null,
       oldest: NOW - 30 * MIN,
     });
     expect(plan.jobs).toEqual([
@@ -82,6 +103,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [2],
       covered,
+      oldestFresh: null,
       oldest: NOW - 30 * MIN,
     });
     expect(plan.jobs).toEqual([]);
@@ -94,6 +116,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [1, 2],
       covered,
+      oldestFresh: null,
       oldest: NOW - 5 * MIN,
     });
     expect(plan.jobs).toEqual([
@@ -108,6 +131,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [1],
       covered: { hashes: [1] },
+      oldestFresh: null,
       oldest: NOW - 30 * MIN + (MIN_BACKFILL_MS - 1),
     });
     expect(plan.jobs).toEqual([]);
@@ -120,6 +144,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [1],
       covered: null,
+      oldestFresh: null,
       oldest: null,
     });
     expect(plan.jobs[0].stime).toBe(new Date(2026, 0, 15, 0, 0, 0).getTime());
@@ -131,6 +156,7 @@ describe('planBackfill', () => {
       timeRangeMs: 30 * MIN,
       hashes: [],
       covered: null,
+      oldestFresh: null,
       oldest: null,
     });
     expect(plan.jobs).toEqual([]);

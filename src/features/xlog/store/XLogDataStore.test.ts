@@ -94,6 +94,15 @@ describe('XLogDataStore', () => {
     expect(store.oldestEndTime).toBe(3_000);
   });
 
+  it('oldestEndTimeOf: 고른 서버 것만 본다', () => {
+    const a = { ...makeSXLog(1_000), objHash: 7 };
+    const b = { ...makeSXLog(5_000), objHash: 9 };
+    store.addBatch([a, b]);
+    expect(store.oldestEndTimeOf(new Set([9]))).toBe(5_000);
+    expect(store.oldestEndTimeOf(new Set([7, 9]))).toBe(1_000);
+    expect(store.oldestEndTimeOf(new Set([11]))).toBeNull();
+  });
+
   it('addBatch: 빈 배열은 dirty 변경 없음', () => {
     store.addBatch([]);
     expect(store.isDirty()).toBe(false);

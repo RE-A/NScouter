@@ -194,6 +194,22 @@ export class XLogDataStore {
     return oldest;
   }
 
+  /**
+   * **고른 서버들만 놓고 봤을 때** 가장 오래된 시각. 하나도 없으면 null.
+   *
+   * 서버를 새로 고르면 스트림이 다시 열리면서 그 서버의 최근 것을 한 묶음 준다.
+   * 그걸 모르고 창 전체를 다시 받으면 겹친다 — 새 서버의 경계는 **그 서버의**
+   * 가장 오래된 점이지, 저장소 전체의 것이 아니다(다른 서버 것이라 상관이 없다).
+   */
+  oldestEndTimeOf(hashes: ReadonlySet<number>): number | null {
+    let oldest: number | null = null;
+    for (const x of this.items) {
+      if (!hashes.has(x.objHash)) continue;
+      if (oldest === null || x.endTime < oldest) oldest = x.endTime;
+    }
+    return oldest;
+  }
+
   getAll(): SXLog[] {
     return this.items;
   }
