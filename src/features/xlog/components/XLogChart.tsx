@@ -8,6 +8,7 @@ import { usePastXLog } from '../hooks/usePastXLog';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
 import { panRange, zoomRange } from '../types/timeRange';
+import { stepYMax } from '../engine/yScale';
 import { T, F } from '../../../styles/tokens';
 import { t } from '../../../i18n';
 
@@ -34,6 +35,13 @@ interface XLogChartProps {
   pastRange?: PastRange | null;
   /** 과거 조회 대상. pastRange 가 있을 때만 쓴다 */
   pastObjHashes?: number[];
+  /**
+   * 차트 설정을 바꾼다. **Ctrl+휠(세로축 확대·축소)에 쓴다.**
+   *
+   * 시간축은 과거 구간에서만 움직이지만 세로축은 실시간에서도 움직여야 한다 —
+   * 축이 낮으면 큰 점이 한 개도 안 보인다.
+   */
+  onConfigChange?: (patch: Partial<XLogChartConfig>) => void;
   /**
    * 휠로 구간이 바뀌었을 때. 툴바의 입력값도 따라가야 하므로 위로 올린다.
    *
@@ -75,12 +83,20 @@ export const XLogChart = memo(function XLogChart({
   clearSignal,
   pastRange = null,
   pastObjHashes = [],
+  onConfigChange,
   onPastRangeChange,
   refreshSignal = 0,
 }: XLogChartProps) {
   const { store: liveStore, streamError, clearError } = useXLogStream(config);
 
   const isPast = pastRange !== null;
+  /**
+   * Ctrl+휠이 딛고 설 값.
+   *
+   * 자동이던 중에 휠을 굴리면 «지금 화면의 축» 에서 한 칸 움직여야 자연스러운데,
+   * 그 값은 렌더러 안에 있다. 설정값에서 출발한다 — 한 번 더 굴리면 곧 맞는다.
+   */
+  const yMaxNow = config.yMax;
 
   // **보는 창을 그대로 넘긴다.**
   // 무엇을 더 받을지는 훅이 정한다 — 안쪽으로 확대하면 받을 것이 없고,
@@ -111,6 +127,18 @@ export const XLogChart = memo(function XLogChart({
    */
   const handleWheel = React.useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
+      // **Ctrl+휠은 세로축이다.** 실시간에서도 된다 — 시간축은 실시간에서 흐르는 창이라
+      // 건드릴 수 없지만, 세로축은 언제든 늘리고 줄일 수 있어야 한다.
+      // (축이 낮아 30초짜리가 한 점도 안 보이던 것이 현장에서 나온 문제다.)
+      if (e.ctrlKey && onConfigChange) {
+        e.preventDefault();
+        onConfigChange({
+          yAutoScale: false,
+          yMax: stepYMax(yMaxNow, e.deltaY > 0 ? 1 : -1),
+        });
+        return;
+      }
+
       if (!pastRange || !onPastRangeChange) return;
       e.preventDefault();
 
@@ -123,7 +151,7 @@ export const XLogChart = memo(function XLogChart({
         onPastRangeChange(zoomRange(pastRange, ratio, e.deltaY > 0 ? 1.25 : 0.8));
       }
     },
-    [pastRange, onPastRangeChange],
+    [pastRange, onPastRangeChange, onConfigChange, yMaxNow],
   );
 
   const { canvasRef, selectedXLogs, clearSelection } = useXLogCanvas(
@@ -191,7 +219,7 @@ export const XLogChart = memo(function XLogChart({
   return (
     <div
       style={{ position: 'relative', width: '100%', height: '100%' }}
-      onWheel={isPast ? handleWheel : undefined}
+      onWheel={handleWheel}
     >
       <canvas
         ref={canvasRef}

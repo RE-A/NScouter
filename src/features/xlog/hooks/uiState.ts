@@ -100,6 +100,9 @@ export function toChartConfig(saved: XLogChartPrefs | undefined): XLogChartConfi
     yAxisMode: Y_MODES.includes(mode) ? mode : DEFAULT_CHART_CONFIG.yAxisMode,
     timeRangeMs: positive(saved.time_range_ms, DEFAULT_CHART_CONFIG.timeRangeMs),
     yMax: positive(saved.y_max, DEFAULT_CHART_CONFIG.yMax),
+    // 항목이 없는 예전 파일은 **자동으로 본다** — 그게 새 기본값이고,
+    // 축이 낮아 점이 사라지는 쪽보다 낫다.
+    yAutoScale: saved.y_auto_scale !== false,
     showIgnoreArea: saved.show_ignore_area === true,
     // 0 은 «무시 안 함» 이라 정상값이다. positive() 를 쓰면 0 이 기본값으로 튄다.
     ignoreThresholdMs:
@@ -114,6 +117,7 @@ export function fromChartConfig(c: XLogChartConfig): XLogChartPrefs {
     y_axis_mode: c.yAxisMode,
     time_range_ms: c.timeRangeMs,
     y_max: c.yMax,
+    y_auto_scale: c.yAutoScale,
     show_ignore_area: c.showIgnoreArea,
     ignore_threshold_ms: c.ignoreThresholdMs,
   };

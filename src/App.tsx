@@ -1002,6 +1002,7 @@ export default function App() {
                     pastRange={pastRange}
                     refreshSignal={refreshSignal}
                     pastObjHashes={pastObjHashes}
+                    onConfigChange={handleConfigChange}
                     onPastRangeChange={setPastRange}
                   />
                 </div>

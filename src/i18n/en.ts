@@ -503,6 +503,12 @@ export const EN: Record<string, string> = {
   '조건 모두 지우기': 'Clear all rules',
   '줄 걸려 있음': ' rule(s) active',
 
+  // ── 세로축 ────────────────────────────────────────────
+  'Y최대': 'Y max',
+  '자동': 'auto',
+  '세로축의 최대값. 자동이면 화면에 보이는 가장 큰 값에 맞춥니다':
+    'Top of the vertical axis. Auto fits the largest value in view',
+
   // ── 상세 탭 되살리기 ──────────────────────────────────
   '열어 두었던 상세': 'Could not reopen',
   '개는 콜렉터에 남아 있지 않아 열지 못했습니다':

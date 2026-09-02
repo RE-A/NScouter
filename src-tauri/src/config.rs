@@ -236,6 +236,10 @@ pub struct XLogChartPrefs {
     pub time_range_ms: i64,
     /// Y축 최대값(초)
     pub y_max: f32,
+    /// 세로축을 데이터에 맞춰 늘릴지. 기본 켜짐 —
+    /// 축보다 큰 점은 한 개도 안 그려져서, 30초짜리 타임아웃이 9초 축에서 통째로 사라졌다.
+    #[serde(default = "default_true")]
+    pub y_auto_scale: bool,
     /// 무시 구간을 칠할지
     pub show_ignore_area: bool,
     /// 그 아래는 무시로 보는 응답시간(ms)
@@ -248,6 +252,7 @@ impl Default for XLogChartPrefs {
             y_axis_mode: "elapsed".to_string(),
             time_range_ms: 300_000,
             y_max: 9.0,
+            y_auto_scale: true,
             show_ignore_area: false,
             ignore_threshold_ms: 0,
         }

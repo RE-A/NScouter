@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import type { TextFilter, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
 import { firstRule, setFirstRule, Y_AXIS_CONFIGS } from '../types/xlog';
+import { Y_MAX_PRESETS_SEC } from '../engine/yScale';
 import type { PastRange, XLogMode } from '../types/timeRange';
 import {
   checkRange,
@@ -176,6 +177,29 @@ export function XLogToolbar({
           {Y_AXIS_OPTIONS.map(mode => (
             <option key={mode} value={mode}>
               {Y_AXIS_CONFIGS[mode].label}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {/* **축보다 큰 점은 한 점도 안 보인다.** 기본이 9초라 30초짜리 타임아웃이
+          통째로 사라졌다(현장 보고). 기본은 자동이고, 튀는 값에 축이 끌려가는 것이
+          싫으면 고정값을 고른다. */}
+      <Field label={t('Y최대')}>
+        <select
+          className={CONTROL}
+          title={t('세로축의 최대값. 자동이면 화면에 보이는 가장 큰 값에 맞춥니다')}
+          value={config.yAutoScale ? 'auto' : String(config.yMax)}
+          onChange={e => {
+            const v = e.target.value;
+            if (v === 'auto') onConfigChange({ yAutoScale: true });
+            else onConfigChange({ yAutoScale: false, yMax: Number(v) });
+          }}
+        >
+          <option value="auto">{t('자동')}</option>
+          {Y_MAX_PRESETS_SEC.map(sec => (
+            <option key={sec} value={sec}>
+              {sec}{t('초')}
             </option>
           ))}
         </select>

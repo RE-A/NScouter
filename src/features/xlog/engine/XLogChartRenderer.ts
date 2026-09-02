@@ -9,6 +9,7 @@ import { GridCalculator } from './GridCalculator';
 import { PointMap } from './PointMap';
 import { findNearestPixel } from './pixelQuery';
 import { passesFilter, selectInRect } from './rectSelect';
+import { autoYMax } from './yScale';
 import type { StreamStatus } from '../utils/streamStatus';
 // Canvas 는 var() 를 못 읽으므로 실제 색 상수를 쓴다.
 import { CANVAS } from '../../../styles/tokens';
@@ -44,6 +45,16 @@ export class XLogChartRenderer {
    */
   private serviceName: ((hash: number) => string | undefined) | undefined;
 
+  /**
+   * 이번 프레임에 실제로 쓴 축 최대.
+   *
+   * 자동이면 데이터에서 정하므로 `config.yMax` 와 다르다 — 눈금·좌표·«넘침» 판정이
+   * **모두 같은 수를 봐야 한다.** 하나라도 config 를 보면 축과 점이 어긋난다.
+   */
+  private effectiveYMax = 0;
+  /** 축 위로 나가 못 그린 건수. 조용히 빠지면 «없는 것» 으로 읽힌다 */
+  private overflowCount = 0;
+
   constructor(canvas: HTMLCanvasElement, config: XLogChartConfig) {
     this.ctx = canvas.getContext('2d')!;
     this.config = config;
@@ -72,7 +83,14 @@ export class XLogChartRenderer {
     selection: SelectionRect | null,
     status?: StreamStatus,
   ): void {
-    const mapper = new CoordinateMapper(this.layout, this.config, window);
+    // **축보다 큰 점은 그려지지 않는다.** 30초짜리 타임아웃이 9초 축에서 한 점도
+    // 안 보였다 — 자동이면 창 안 최댓값에 맞춰 늘린다.
+    const effective = this.config.yAutoScale
+      ? autoYMax(this.windowValues(data, filter, window), this.config.yMax)
+      : this.config.yMax;
+    this.effectiveYMax = effective;
+    const scaled = effective === this.config.yMax ? this.config : { ...this.config, yMax: effective };
+    const mapper = new CoordinateMapper(this.layout, scaled, window);
     this.lastMapper = mapper;
     this.lastFilter = filter;
 
@@ -89,6 +107,23 @@ export class XLogChartRenderer {
     if (selection) {
       this.drawSelectionRect(selection);
     }
+  }
+
+  /**
+   * 창 안에서 필터를 통과한 값들.
+   *
+   * 자동 축은 **보이는 것** 기준이어야 한다 — 버퍼 전체로 잡으면 창 밖의 옛 타임아웃
+   * 하나 때문에 축이 늘어난 채로 굳는다.
+   */
+  private windowValues(data: SXLog[], filter: XLogFilterState, window: TimeWindow): number[] {
+    const extract = Y_AXIS_CONFIGS[this.config.yAxisMode].valueExtractor;
+    const out: number[] = [];
+    for (const x of data) {
+      if (x.endTime < window.start || x.endTime > window.end) continue;
+      if (!this.passesFilter(x, filter)) continue;
+      out.push(extract(x));
+    }
+    return out;
   }
 
   /** 1단계: 배경 */
@@ -113,7 +148,7 @@ export class XLogChartRenderer {
   /** 3단계: Y축 그리드 */
   private drawYGrid(): void {
     const { plotAreaX, plotAreaY, plotAreaWidth, plotAreaHeight } = this.layout;
-    const grid = GridCalculator.calcValueGrid(0, this.config.yMax, plotAreaHeight);
+    const grid = GridCalculator.calcValueGrid(0, this.effectiveYMax, plotAreaHeight);
 
     this.ctx.save();
     this.ctx.strokeStyle = this.config.gridColor;
@@ -175,6 +210,7 @@ export class XLogChartRenderer {
   ): number {
     this.pointMap.clear();
     this.pixelToXLogIndex.clear();
+    this.overflowCount = 0;
 
     const half = Math.floor(DOT_SIZE / 2);
     let visible = 0;
@@ -188,8 +224,19 @@ export class XLogChartRenderer {
       const value = mapper.extractValue(xlog);
       const { x, y } = mapper.dataToPixel(xlog.endTime, value);
 
-      // 플롯 영역 밖이면 스킵
-      if (!mapper.isInPlotArea(x, y)) continue;
+      // 플롯 영역 밖이면 스킵.
+      // **축 위로 나간 것은 따로 센다** — 창 안에 있는데 축이 낮아서 못 그린 것이고,
+      // 조용히 빠지면 «없는 것» 으로 읽힌다(30초짜리 타임아웃이 그랬다).
+      if (!mapper.isInPlotArea(x, y)) {
+        if (
+          y < this.layout.plotAreaY &&
+          x >= this.layout.plotAreaX &&
+          x <= this.layout.plotAreaX + this.layout.plotAreaWidth
+        ) {
+          this.overflowCount += 1;
+        }
+        continue;
+      }
 
       // 겹쳐서 안 그려지는 것도 **이 구간에 있는 트랜잭션**이다. 세기는 여기서 한다.
       visible += 1;
@@ -240,6 +287,17 @@ export class XLogChartRenderer {
 
     this.ctx.textAlign = 'left';
     this.ctx.fillText(`${visible.toLocaleString()} dots`, plotAreaX + 4, plotAreaY + 4);
+
+    // 축 위로 나간 것이 있으면 **몇 개인지** 말한다. 축을 올리면 보인다는 뜻이다.
+    if (this.overflowCount > 0) {
+      this.ctx.fillStyle = CANVAS.warn;
+      this.ctx.fillText(
+        `▲ ${this.overflowCount.toLocaleString()} (축 위)`,
+        plotAreaX + 4 + this.ctx.measureText(`${visible.toLocaleString()} dots  `).width,
+        plotAreaY + 4,
+      );
+      this.ctx.fillStyle = XLOG_COLORS.META_TEXT;
+    }
 
     this.ctx.textAlign = 'right';
     const { plotAreaWidth } = this.layout;
