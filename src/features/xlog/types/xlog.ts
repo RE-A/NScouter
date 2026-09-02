@@ -206,16 +206,13 @@ export function yAxisShortLabel(mode: YAxisMode): string {
 export interface XLogChartConfig {
   yAxisMode: YAxisMode;
   timeRangeMs: number;        // 기본 300_000 (5분)
-  /** Y축 최대. `yAutoScale` 이 켜져 있으면 **데이터에 맞춰 늘어난다** */
-  yMax: number;
   /**
-   * 창 안 최댓값에 맞춰 Y축을 늘릴지.
+   * Y축 최대. **사람이 정한다** — 데이터에 맞춰 늘리지 않는다.
    *
-   * **축보다 큰 점은 한 점도 안 보인다.** 기본 축이 9초라 30초짜리 타임아웃이
-   * 통째로 사라졌다(현장 보고). 기본을 자동으로 두고, 튀는 값에 축이 끌려가는 것이
-   * 싫으면 툴바에서 고정값을 고른다.
+   * 튀는 것 하나에 축이 늘어나면 나머지가 바닥에 깔려 서로 구별되지 않는다.
+   * 이보다 큰 값은 **천장에 붙여** 그리고, 몇 개인지 화면이 말한다.
    */
-  yAutoScale: boolean;
+  yMax: number;
   showIgnoreArea: boolean;
   ignoreThresholdMs: number;
   backgroundColor: string;
@@ -226,7 +223,6 @@ export const DEFAULT_CHART_CONFIG: XLogChartConfig = {
   yAxisMode: 'elapsed',
   timeRangeMs: 300_000,
   yMax: 9,
-  yAutoScale: true,
   showIgnoreArea: false,
   ignoreThresholdMs: 0,
   // 값은 colorPalette.ts 하나에만 둔다 (여기와 두 벌이 되면 그리드만 흰 배경용으로 남는다).

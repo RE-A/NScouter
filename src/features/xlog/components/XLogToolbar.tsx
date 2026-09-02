@@ -182,26 +182,27 @@ export function XLogToolbar({
         </select>
       </Field>
 
-      {/* **축보다 큰 점은 한 점도 안 보인다.** 기본이 9초라 30초짜리 타임아웃이
-          통째로 사라졌다(현장 보고). 기본은 자동이고, 튀는 값에 축이 끌려가는 것이
-          싫으면 고정값을 고른다. */}
+      {/* 축보다 큰 점은 **천장에 붙어** 그려진다(예전에는 통째로 사라졌다).
+          축은 사람이 정한다 — 자동으로 늘리면 튀는 것 하나에 나머지가 바닥에 깔린다.
+          Ctrl+휠로도 움직인다. */}
       <Field label={t('Y최대')}>
         <select
           className={CONTROL}
-          title={t('세로축의 최대값. 자동이면 화면에 보이는 가장 큰 값에 맞춥니다')}
-          value={config.yAutoScale ? 'auto' : String(config.yMax)}
-          onChange={e => {
-            const v = e.target.value;
-            if (v === 'auto') onConfigChange({ yAutoScale: true });
-            else onConfigChange({ yAutoScale: false, yMax: Number(v) });
-          }}
+          title={t('세로축의 최대값. 이보다 큰 것은 맨 위에 붙습니다 (Ctrl+휠로도 조절)')}
+          value={String(config.yMax)}
+          onChange={e => onConfigChange({ yMax: Number(e.target.value) })}
         >
-          <option value="auto">{t('자동')}</option>
           {Y_MAX_PRESETS_SEC.map(sec => (
             <option key={sec} value={sec}>
               {sec}{t('초')}
             </option>
           ))}
+          {/* 프리셋에 없는 값(Ctrl+휠로 만든 것)도 목록에 보여야 «지금 얼마인지» 를 안다 */}
+          {!Y_MAX_PRESETS_SEC.includes(config.yMax as (typeof Y_MAX_PRESETS_SEC)[number]) && (
+            <option value={config.yMax}>
+              {config.yMax}{t('초')}
+            </option>
+          )}
         </select>
       </Field>
 

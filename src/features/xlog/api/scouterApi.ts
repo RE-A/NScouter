@@ -575,8 +575,6 @@ export interface XLogChartPrefs {
   y_axis_mode: string;
   time_range_ms: number;
   y_max: number;
-  /** 세로축을 데이터에 맞춰 늘릴지 */
-  y_auto_scale: boolean;
   show_ignore_area: boolean;
   ignore_threshold_ms: number;
 }

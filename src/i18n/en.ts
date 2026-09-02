@@ -505,9 +505,8 @@ export const EN: Record<string, string> = {
 
   // ── 세로축 ────────────────────────────────────────────
   'Y최대': 'Y max',
-  '자동': 'auto',
-  '세로축의 최대값. 자동이면 화면에 보이는 가장 큰 값에 맞춥니다':
-    'Top of the vertical axis. Auto fits the largest value in view',
+  '세로축의 최대값. 이보다 큰 것은 맨 위에 붙습니다 (Ctrl+휠로도 조절)':
+    'Top of the vertical axis. Larger values pin to the top (Ctrl+wheel also adjusts)',
 
   // ── 상세 탭 되살리기 ──────────────────────────────────
   '열어 두었던 상세': 'Could not reopen',

@@ -90,12 +90,7 @@ export const XLogChart = memo(function XLogChart({
   const { store: liveStore, streamError, clearError } = useXLogStream(config);
 
   const isPast = pastRange !== null;
-  /**
-   * Ctrl+휠이 딛고 설 값.
-   *
-   * 자동이던 중에 휠을 굴리면 «지금 화면의 축» 에서 한 칸 움직여야 자연스러운데,
-   * 그 값은 렌더러 안에 있다. 설정값에서 출발한다 — 한 번 더 굴리면 곧 맞는다.
-   */
+  /** Ctrl+휠이 딛고 설 값 */
   const yMaxNow = config.yMax;
 
   // **보는 창을 그대로 넘긴다.**
@@ -132,10 +127,7 @@ export const XLogChart = memo(function XLogChart({
       // (축이 낮아 30초짜리가 한 점도 안 보이던 것이 현장에서 나온 문제다.)
       if (e.ctrlKey && onConfigChange) {
         e.preventDefault();
-        onConfigChange({
-          yAutoScale: false,
-          yMax: stepYMax(yMaxNow, e.deltaY > 0 ? 1 : -1),
-        });
+        onConfigChange({ yMax: stepYMax(yMaxNow, e.deltaY > 0 ? 1 : -1) });
         return;
       }
 

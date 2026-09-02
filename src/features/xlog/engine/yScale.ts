@@ -32,21 +32,18 @@ export function niceCeil(v: number): number {
 }
 
 /**
- * 자동 축 최대.
+ * 축 위로 넘친 점을 어디에 그릴지.
  *
- * **가장 큰 값이 들어가야 한다.** 백분위로 자르면 «튀는 것 하나» 가 안 보이는데,
- * 이 화면에서 찾는 것이 대개 그 하나다(타임아웃·행). 대신 여백을 조금 둬서
- * 맨 위 점이 축선에 겹치지 않게 한다.
+ * **버리지 않는다.** 예전에는 축보다 크면 그림 밖이라 렌더러가 건너뛰었고,
+ * 30초짜리 타임아웃이 9초 축에서 한 점도 안 보였다.
  *
- * 값이 없으면 `fallback` 을 그대로 쓴다 — 빈 구간마다 축이 튀면 눈이 피로하다.
+ * **축을 자동으로 늘리지도 않는다.** 튀는 것 하나에 축이 45초까지 늘어나면
+ * 나머지 99%가 바닥에 깔려 서로 구별되지 않는다 — 축은 사람이 정하고,
+ * 넘친 것은 **천장에 붙여** 그린다. 천장에 붙은 점은 «이 축보다 크다» 는 뜻이지
+ * 정확한 높이가 아니므로, 화면이 그렇다고 따로 말해 준다.
  */
-export function autoYMax(values: readonly number[], fallback: number): number {
-  let max = 0;
-  for (const v of values) {
-    if (Number.isFinite(v) && v > max) max = v;
-  }
-  if (max <= 0) return fallback;
-  return niceCeil(max * 1.05);
+export function clampToCeiling(value: number, yMax: number): { value: number; over: boolean } {
+  return value > yMax ? { value: yMax, over: true } : { value, over: false };
 }
 
 /** 고를 수 있는 고정 최대(초). 자동이 싫을 때 쓴다 */

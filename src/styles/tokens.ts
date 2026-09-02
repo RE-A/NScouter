@@ -91,6 +91,13 @@ export const CANVAS = {
   success: '#3dd68c',
   warn: '#f5a623',
   error: '#ff4d4f',
+  /**
+   * 천장에 붙은 점이 앉는 띠.
+   *
+   * 옅어야 한다 — 점을 덮으면 어느 서버인지 못 읽는다. «여기는 눈금이 아니다» 만
+   * 말하면 된다. Canvas 는 CSS 변수를 못 읽으므로 실제 색 문자열이어야 한다.
+   */
+  overflowBand: 'rgba(245, 166, 35, 0.12)',
 } as const;
 
 /**

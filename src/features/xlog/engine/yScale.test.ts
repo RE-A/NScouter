@@ -4,7 +4,7 @@
 // 축이 그것보다 낮으면 **한 점도 안 보인다** — 현장에서 30초짜리가 그랬다.
 
 import { describe, expect, it } from 'vitest';
-import { autoYMax, niceCeil, stepYMax } from './yScale';
+import { clampToCeiling, niceCeil, stepYMax } from './yScale';
 
 describe('niceCeil', () => {
   it('보기 좋은 수로 올린다', () => {
@@ -27,25 +27,20 @@ describe('niceCeil', () => {
   });
 });
 
-describe('autoYMax', () => {
-  it('가장 큰 값이 축 안에 들어온다', () => {
-    // 30초짜리 타임아웃이 9초 축에서는 한 점도 안 보였다.
-    const max = autoYMax([0.2, 1.5, 30], 9);
-    expect(max).toBeGreaterThanOrEqual(30);
+describe('clampToCeiling', () => {
+  it('축보다 큰 값은 천장에 붙는다', () => {
+    // 예전에는 그림 밖이라 렌더러가 건너뛰었고, 30초짜리가 한 점도 안 보였다.
+    expect(clampToCeiling(30, 9)).toEqual({ value: 9, over: true });
   });
 
-  it('맨 위 점이 축선에 겹치지 않게 여백을 둔다', () => {
-    expect(autoYMax([9], 9)).toBeGreaterThan(9);
+  it('축 안이면 그대로 둔다', () => {
+    expect(clampToCeiling(3, 9)).toEqual({ value: 3, over: false });
+    // 딱 맞는 값은 넘친 것이 아니다 — 축선 위에 정확히 앉는다
+    expect(clampToCeiling(9, 9)).toEqual({ value: 9, over: false });
   });
 
-  it('값이 없으면 쓰던 축을 그대로 둔다', () => {
-    // 빈 구간마다 축이 튀면 눈이 피로하다.
-    expect(autoYMax([], 9)).toBe(9);
-    expect(autoYMax([0, 0], 5)).toBe(5);
-  });
-
-  it('이상한 값은 세지 않는다', () => {
-    expect(autoYMax([NaN, Infinity, 2], 9)).toBe(3);
+  it('0 과 음수도 그대로 — 축을 건드리지 않는다', () => {
+    expect(clampToCeiling(0, 9)).toEqual({ value: 0, over: false });
   });
 });
 

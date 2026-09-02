@@ -9,7 +9,7 @@ import { GridCalculator } from './GridCalculator';
 import { PointMap } from './PointMap';
 import { findNearestPixel } from './pixelQuery';
 import { passesFilter, selectInRect } from './rectSelect';
-import { autoYMax } from './yScale';
+import { clampToCeiling } from './yScale';
 import type { StreamStatus } from '../utils/streamStatus';
 // Canvas 는 var() 를 못 읽으므로 실제 색 상수를 쓴다.
 import { CANVAS } from '../../../styles/tokens';
@@ -25,6 +25,13 @@ export interface SelectionRect {
   x2: number;
   y2: number;
 }
+
+/**
+ * 천장에 붙은 점을 담는 띠의 두께(px).
+ *
+ * 점 크기(5px)보다 조금 두껍게 — 점이 띠 밖으로 삐져나오면 띠가 무슨 뜻인지 흐려진다.
+ */
+const CEILING_BAND_PX = 7;
 
 export class XLogChartRenderer {
   private ctx: CanvasRenderingContext2D;
@@ -83,14 +90,8 @@ export class XLogChartRenderer {
     selection: SelectionRect | null,
     status?: StreamStatus,
   ): void {
-    // **축보다 큰 점은 그려지지 않는다.** 30초짜리 타임아웃이 9초 축에서 한 점도
-    // 안 보였다 — 자동이면 창 안 최댓값에 맞춰 늘린다.
-    const effective = this.config.yAutoScale
-      ? autoYMax(this.windowValues(data, filter, window), this.config.yMax)
-      : this.config.yMax;
-    this.effectiveYMax = effective;
-    const scaled = effective === this.config.yMax ? this.config : { ...this.config, yMax: effective };
-    const mapper = new CoordinateMapper(this.layout, scaled, window);
+    this.effectiveYMax = this.config.yMax;
+    const mapper = new CoordinateMapper(this.layout, this.config, window);
     this.lastMapper = mapper;
     this.lastFilter = filter;
 
@@ -107,23 +108,6 @@ export class XLogChartRenderer {
     if (selection) {
       this.drawSelectionRect(selection);
     }
-  }
-
-  /**
-   * 창 안에서 필터를 통과한 값들.
-   *
-   * 자동 축은 **보이는 것** 기준이어야 한다 — 버퍼 전체로 잡으면 창 밖의 옛 타임아웃
-   * 하나 때문에 축이 늘어난 채로 굳는다.
-   */
-  private windowValues(data: SXLog[], filter: XLogFilterState, window: TimeWindow): number[] {
-    const extract = Y_AXIS_CONFIGS[this.config.yAxisMode].valueExtractor;
-    const out: number[] = [];
-    for (const x of data) {
-      if (x.endTime < window.start || x.endTime > window.end) continue;
-      if (!this.passesFilter(x, filter)) continue;
-      out.push(extract(x));
-    }
-    return out;
   }
 
   /** 1단계: 배경 */
@@ -221,22 +205,14 @@ export class XLogChartRenderer {
       // 필터링
       if (!this.passesFilter(xlog, filter)) continue;
 
-      const value = mapper.extractValue(xlog);
+      const raw = mapper.extractValue(xlog);
+      // **축보다 큰 값은 버리지 않고 천장에 붙인다.** 예전에는 그림 밖이라 건너뛰었고,
+      // 30초짜리 타임아웃이 9초 축에서 한 점도 안 보였다.
+      const { value, over } = clampToCeiling(raw, this.config.yMax);
       const { x, y } = mapper.dataToPixel(xlog.endTime, value);
 
-      // 플롯 영역 밖이면 스킵.
-      // **축 위로 나간 것은 따로 센다** — 창 안에 있는데 축이 낮아서 못 그린 것이고,
-      // 조용히 빠지면 «없는 것» 으로 읽힌다(30초짜리 타임아웃이 그랬다).
-      if (!mapper.isInPlotArea(x, y)) {
-        if (
-          y < this.layout.plotAreaY &&
-          x >= this.layout.plotAreaX &&
-          x <= this.layout.plotAreaX + this.layout.plotAreaWidth
-        ) {
-          this.overflowCount += 1;
-        }
-        continue;
-      }
+      if (!mapper.isInPlotArea(x, y)) continue;
+      if (over) this.overflowCount += 1;
 
       // 겹쳐서 안 그려지는 것도 **이 구간에 있는 트랜잭션**이다. 세기는 여기서 한다.
       visible += 1;
@@ -288,8 +264,16 @@ export class XLogChartRenderer {
     this.ctx.textAlign = 'left';
     this.ctx.fillText(`${visible.toLocaleString()} dots`, plotAreaX + 4, plotAreaY + 4);
 
-    // 축 위로 나간 것이 있으면 **몇 개인지** 말한다. 축을 올리면 보인다는 뜻이다.
+    // 천장에 붙은 점이 있으면 **그 줄이 축 밖이라는 것**을 보여 준다.
+    //
+    // 점만 맨 위에 찍으면 «9초짜리» 와 «30초짜리» 가 같은 줄에 섞여, 그 줄의 높이를
+    // 값으로 읽게 된다. 옅은 띠를 깔아 «여기는 눈금이 아니다» 를 표시하고
+    // 몇 개인지 적는다 — 축을 올리면 제 높이로 흩어진다는 뜻이다.
     if (this.overflowCount > 0) {
+      const { plotAreaWidth } = this.layout;
+      this.ctx.fillStyle = CANVAS.overflowBand;
+      this.ctx.fillRect(plotAreaX, plotAreaY, plotAreaWidth, CEILING_BAND_PX);
+
       this.ctx.fillStyle = CANVAS.warn;
       this.ctx.fillText(
         `▲ ${this.overflowCount.toLocaleString()} (축 위)`,
