@@ -201,8 +201,9 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
     expect(mode).toBe('live');
   });
 
-  it('과거 모드는 되살리지 않는다', () => {
-    // 어제 보던 «최근 1시간» 은 오늘 열면 남의 시간이다. 조건만 남기고 시점은 지금으로.
+  it('과거 모드는 되살리되 구간은 새로 잡는다', () => {
+    // 모드는 «어디를 보고 있었나» 라서 되살린다. 다만 **구간은 담지 않는다** —
+    // 어제 보던 «최근 1시간» 은 오늘 열면 남의 시간이라, 열 때 지금 기준으로 다시 잡힌다.
     const { mode } = toFilterState({
       elapsed_ms: 0, elapsed_exclude: false, error_only: false, obj_hashes: [],
       service_text: '', service_exclude: false, ip_text: '', ip_exclude: false,

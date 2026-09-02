@@ -373,6 +373,13 @@ export default function App() {
         // 타입이 섞여 있으면 첫 번째만 쓴다. 실환경에서 javaee 타입이 여럿인 경우는 드물다.
         setJavaeeType(javaee[0]?.obj_type ?? '');
         setHostType(host[0]?.obj_type ?? '');
+        // **이름도 여기서 채운다.** 예전에는 AgentSelectorPanel(XLog 탭)만 채웠는데,
+        // 그 패널은 XLog 탭에서만 마운트된다 — 카운터 탭으로 시작하면(마지막에 보던 탭이
+        // 복원되면 흔하다) 차트 범례와 서버 고르기가 **해시 숫자로** 남았다.
+        setAgentMap(prev => {
+          if (prev.size === list.length && list.every(a => prev.has(a.obj_hash))) return prev;
+          return new Map(list.map(a => [a.obj_hash, a.obj_name]));
+        });
       })
       .catch(() => {});
     return () => { cancelled = true; };

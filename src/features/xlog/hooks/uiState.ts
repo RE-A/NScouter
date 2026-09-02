@@ -151,8 +151,9 @@ export function toFilterState(p: XLogFilterPrefs | undefined): {
       ),
       patterns: toPatterns(p),
     },
-    // **과거 모드로는 되돌리지 않는다.** 어제 보던 구간은 오늘 열면 남의 시간이고,
-    // 켜자마자 옛날 구간을 다시 받아 오면 «지금» 이 안 보인다.
+    // 모드는 «어디를 보고 있었나» 라서 되살린다.
+    // **구간(stime/etime)은 담지 않는다** — 어제 보던 «최근 1시간» 은 오늘 열면 남의
+    // 시간이라, 과거 모드로 떠도 구간은 지금 기준으로 새로 잡힌다.
     mode: p?.mode === 'past' ? 'past' : 'live',
   };
 }
