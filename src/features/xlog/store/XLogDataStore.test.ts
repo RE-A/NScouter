@@ -59,6 +59,41 @@ describe('XLogDataStore', () => {
     expect(store.isDirty()).toBe(true);
   });
 
+  it('addHistory: 담기고 다시 그리게 표시한다', () => {
+    store.addHistory([makeSXLog(1000), makeSXLog(2000)]);
+    expect(store.size).toBe(2);
+    expect(store.isDirty()).toBe(true);
+  });
+
+  it('addHistory: 수신 시각과 시계 차를 건드리지 않는다', () => {
+    // 30분 전 데이터로 시계 차를 재면 «30분 뒤처짐» 경고가 뜬다.
+    store.addHistory([makeSXLog(Date.now() - 30 * 60_000)]);
+    expect(store.lastReceivedAt).toBeNull();
+    expect(store.clockSkewMs).toBeNull();
+  });
+
+  it('addHistory: 뒤에 붙은 창 밖 데이터도 prune 이 지운다', () => {
+    // 최신 것이 앞에 있으면 앞부분만 훑는 방식으로는 뒤에 붙은 옛 데이터가 안 지워진다.
+    store.addBatch([makeSXLog(10_000)]);
+    store.addHistory([makeSXLog(1_000), makeSXLog(2_000)]);
+    store.prune(10_000, 5_000);
+    expect(store.size).toBe(1);
+    expect(store.getAll()[0].endTime).toBe(10_000);
+  });
+
+  it('addHistory: 빈 배열은 아무 일도 하지 않는다', () => {
+    store.addHistory([]);
+    expect(store.size).toBe(0);
+    expect(store.isDirty()).toBe(false);
+  });
+
+  it('oldestEndTime: 과거를 뒤에 담아도 가장 오래된 것을 찾는다', () => {
+    expect(store.oldestEndTime).toBeNull();
+    store.addBatch([makeSXLog(10_000)]);
+    store.addHistory([makeSXLog(3_000), makeSXLog(5_000)]);
+    expect(store.oldestEndTime).toBe(3_000);
+  });
+
   it('addBatch: 빈 배열은 dirty 변경 없음', () => {
     store.addBatch([]);
     expect(store.isDirty()).toBe(false);

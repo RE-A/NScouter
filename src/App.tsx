@@ -1008,7 +1008,7 @@ export default function App() {
                     clearSignal={clearSignal}
                     pastRange={pastRange}
                     refreshSignal={refreshSignal}
-                    pastObjHashes={pastObjHashes}
+                    objHashes={pastObjHashes}
                     onConfigChange={handleConfigChange}
                     onPastRangeChange={setPastRange}
                   />

@@ -46,6 +46,8 @@ export class XLogDataStore {
   private skewMs: number | null = null;
   private droppedByCap = 0;
   private lastDropAt: number | null = null;
+  /** 과거 데이터를 섞어 담았는가. 담았으면 배열이 시간순이 아니다 (`addHistory`) */
+  private hasHistory = false;
 
   constructor(maxItems: number = DEFAULT_MAX_ITEMS) {
     this.maxItems = clampMaxItems(maxItems);
@@ -109,16 +111,46 @@ export class XLogDataStore {
     }
   }
 
+  /**
+   * **화면 왼쪽의 빈 구간을 메우려고 뒤늦게 받아 온 과거 XLog.**
+   *
+   * `addBatch` 와 두 가지가 다르다:
+   *   · 수신 시각을 갱신하지 않는다 — 이건 «방금 들어온 것» 이 아니다.
+   *     여기서 갱신하면 스트림이 끊겼는데도 «수신 중» 으로 보인다
+   *   · 시계 차를 재지 않는다 — 30분 전 데이터로 재면 «30분 뒤처짐» 이 되어
+   *     엉뚱한 경고가 뜬다
+   *
+   * 담기는 자리는 배열 **뒤**다. 시간순으로는 앞이지만, 페이지가 오래된 것부터
+   * 오므로 앞에 밀어 넣으면 페이지끼리 순서가 뒤집힌다. 대신 `prune` 에게
+   * «앞부분만 보면 안 된다» 고 알린다.
+   */
+  addHistory(xlogs: SXLog[]): void {
+    if (xlogs.length === 0) return;
+    for (const x of xlogs) this.items.push(x);
+    this.hasHistory = true;
+    this.dirty = true;
+  }
+
   /** 시간 윈도우 밖 데이터 제거 + 상한 초과 시 오래된 항목 제거 */
   prune(now: number, timeRangeMs: number): void {
     const cutoff = now - timeRangeMs;
     const before = this.items.length;
 
-    // 시간 기준 필터 (items는 endTime 순으로 추가되므로 앞부분 제거)
-    let i = 0;
-    while (i < this.items.length && this.items[i].endTime < cutoff) i++;
-    if (i > 0) {
-      this.items = this.items.slice(i);
+    if (this.hasHistory) {
+      // **과거를 뒤에 붙였으므로 앞부분만 보면 안 된다.** 앞이 최신이면 스캔이 0에서
+      // 멈춰, 뒤에 있는 창 밖 데이터가 한 창(최대 30분) 내내 남는다 —
+      // 그리지도 않을 것이 상한만 잡아먹는다.
+      // 훑는 것은 싸다(30만 건 1ms). 버릴 게 없으면 새 배열도 만들지 않는다.
+      if (this.items.some(x => x.endTime < cutoff)) {
+        this.items = this.items.filter(x => x.endTime >= cutoff);
+      }
+    } else {
+      // 시간 기준 필터 (items는 endTime 순으로 추가되므로 앞부분 제거)
+      let i = 0;
+      while (i < this.items.length && this.items[i].endTime < cutoff) i++;
+      if (i > 0) {
+        this.items = this.items.slice(i);
+      }
     }
 
     // MAX_ITEMS 초과 시 앞부분 제거.
@@ -144,6 +176,24 @@ export class XLogDataStore {
     return this.lastDropAt;
   }
 
+  /**
+   * 갖고 있는 것 중 **가장 오래된 시각.** 비었으면 null.
+   *
+   * 실시간 화면의 왼쪽을 얼마나 채워야 하는지가 이 값이다 — «어디까지 받았다» 를 따로
+   * 기억하면 그 기억과 저장소가 어긋난다(창을 좁히면 prune 이 지우고, 과거 모드를
+   * 다녀오면 기억만 초기화된다). **저장소에 있는 것이 곧 갖고 있는 것이다.**
+   *
+   * 전부 훑는다. 과거를 섞어 담으면(`addHistory`) 앞이 가장 오래된 것이라는 보장이
+   * 없기 때문이다. 계획을 세울 때만 부르므로 30만 건이어도 1ms 다.
+   */
+  get oldestEndTime(): number | null {
+    let oldest: number | null = null;
+    for (const x of this.items) {
+      if (oldest === null || x.endTime < oldest) oldest = x.endTime;
+    }
+    return oldest;
+  }
+
   getAll(): SXLog[] {
     return this.items;
   }
@@ -159,6 +209,7 @@ export class XLogDataStore {
   clear(): void {
     this.items = [];
     this.dirty = true;
+    this.hasHistory = false;
   }
 
   get size(): number {

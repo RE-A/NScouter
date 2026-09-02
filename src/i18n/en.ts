@@ -284,6 +284,10 @@ export const EN: Record<string, string> = {
   '너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요':
     'Too many to draw — narrow the range',
   '불러오는 중…': 'Loading…',
+  '과거 구간 채우는 중…': 'Filling in earlier range…',
+  '과거 구간을 채우지 못했습니다': 'Could not fill the earlier range',
+  '과거 구간을 다 채우지 못했습니다 — 창을 좁히거나 왼쪽에서 서버를 좁혀 주세요':
+    'Could not fill the whole range — narrow the window or pick fewer servers',
   '느린': 'slowest',
   '느린 순': 'slowest first',
   '건만 표시 · 전체': ' shown · total',

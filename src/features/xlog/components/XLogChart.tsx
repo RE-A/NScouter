@@ -5,6 +5,7 @@ import { useXLogCanvas } from '../hooks/useXLogCanvas';
 import { useXLogStream } from '../hooks/useXLogStream';
 
 import { usePastXLog } from '../hooks/usePastXLog';
+import { useLiveBackfill } from '../hooks/useLiveBackfill';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
 import { panRange, zoomRange } from '../types/timeRange';
@@ -33,8 +34,13 @@ interface XLogChartProps {
    * 과거 구간은 시간이 흘러도 그대로 있어야 한다.
    */
   pastRange?: PastRange | null;
-  /** 과거 조회 대상. pastRange 가 있을 때만 쓴다 */
-  pastObjHashes?: number[];
+  /**
+   * 조회 대상 오브젝트 — 지금 고른 서버(없으면 전체)다.
+   *
+   * 과거 구간 조회에도, **실시간 화면의 왼쪽을 메우는 데도** 같은 목록을 쓴다.
+   * 실시간 스트림이 받는 것과 같아야 한다 — 다르면 화면 왼쪽과 오른쪽의 대상이 다르다.
+   */
+  objHashes?: number[];
   /**
    * 차트 설정을 바꾼다. **Ctrl+휠(세로축 확대·축소)에 쓴다.**
    *
@@ -82,7 +88,7 @@ export const XLogChart = memo(function XLogChart({
   connected,
   clearSignal,
   pastRange = null,
-  pastObjHashes = [],
+  objHashes = [],
   onConfigChange,
   onPastRangeChange,
   refreshSignal = 0,
@@ -97,7 +103,16 @@ export const XLogChart = memo(function XLogChart({
   // 무엇을 더 받을지는 훅이 정한다 — 안쪽으로 확대하면 받을 것이 없고,
   // 좌우로 옮기면 **모자란 쪽만** 받는다(planFetch). 예전에는 창이 벗어날 때마다
   // 구간 전체를 다시 받아서, 조금만 옮겨도 수만 건을 처음부터 끌어왔다.
-  const past = usePastXLog(pastRange, pastObjHashes);
+  const past = usePastXLog(pastRange, objHashes);
+
+  /**
+   * **실시간에서도 과거를 받는다.**
+   *
+   * 스트림은 «지금부터» 만 주므로, 켜자마자 보이는 것은 오른쪽 끝 한 줄뿐이고
+   * 30분 창이 차려면 30분이 걸린다. 창의 왼쪽(= 아직 못 받은 과거)을 같은 저장소에
+   * 뒤늦게 부어 넣는다 — 겹치지 않게 무엇을 받을지는 훅이 정한다.
+   */
+  const backfill = useLiveBackfill(liveStore, config.timeRangeMs, objHashes, connected && !isPast);
 
   // **처음 마운트될 때는 다시 받지 않는다.** 이미 위에서 받고 있다.
   const pastReload = past.reload;
@@ -199,6 +214,17 @@ export const XLogChart = memo(function XLogChart({
     return `${t('버퍼 상한')} ${store.maxItemCount.toLocaleString()}${t('건(화면 필터 이전, 받은 것 기준) — 오래된 점부터 지웁니다. 왼쪽에서 서버를 좁히거나 설정에서 상한을 올리면 다 보입니다')}`;
   })();
 
+  /** 왼쪽을 다 못 채웠을 때 할 말. 채우는 중이거나 다 찼으면 없다 */
+  const backfillNotice = (() => {
+    if (backfill.error !== null) {
+      return `${t('과거 구간을 채우지 못했습니다')} — ${backfill.error}`;
+    }
+    if (backfill.truncated) {
+      return t('과거 구간을 다 채우지 못했습니다 — 창을 좁히거나 왼쪽에서 서버를 좁혀 주세요');
+    }
+    return null;
+  })();
+
   const skewWarning = (() => {
     const skew = store.clockSkewMs;
     if (skew === null || Math.abs(skew) < SKEW_WARN_MS) return null;
@@ -237,6 +263,16 @@ export const XLogChart = memo(function XLogChart({
           )}
         </div>
       )}
+      {/* **뒤늦게 차오르는 중이라고 말한다.** 아무 말이 없으면 왼쪽이 빈 것을 보고
+          «데이터가 없다» 로 읽고, 다 찬 뒤에 다시 보면 «없다더니 있네» 가 된다. */}
+      {!isPast && backfill.loading && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-line-strong bg-overlay px-3 py-1 text-micro text-fg-muted shadow-lg">
+          {t('과거 구간 채우는 중…')} <span className="tnum font-mono text-fg">
+            {backfill.loaded.toLocaleString()}
+          </span>{t('건')}
+        </div>
+      )}
+
       {isPast && !past.loading && past.progress?.truncated && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-warn/50 bg-overlay px-3 py-1 text-body text-warn shadow-lg">
           {t('너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요')}
@@ -252,6 +288,15 @@ export const XLogChart = memo(function XLogChart({
       {!isPast && capWarning !== null && (
         <div className="absolute inset-x-0 bottom-0 truncate border-t border-warn/40 bg-overlay/95 px-2 py-0.5 text-micro text-warn">
           {capWarning}
+        </div>
+      )}
+
+      {/* 왼쪽을 덜 채웠다(상한에 걸렸거나 조회가 실패했다). 조용히 두면
+          «그 시간대에 트래픽이 없었다» 로 읽힌다.
+          상한 안내가 떠 있으면 그쪽이 먼저다 — 같은 자리에 두 줄을 겹칠 수 없다. */}
+      {!isPast && capWarning === null && !backfill.loading && backfillNotice !== null && (
+        <div className="absolute inset-x-0 bottom-0 truncate border-t border-warn/40 bg-overlay/95 px-2 py-0.5 text-micro text-warn">
+          {backfillNotice}
         </div>
       )}
 
