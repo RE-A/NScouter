@@ -73,6 +73,19 @@ describe('GridCalculator.calcValueGrid', () => {
     }
   });
 
+  it('라벨이 겹치지 않는다 — 간격이 정하는 자리까지 적는다', () => {
+    // Y최대 1초일 때 간격이 0.05초다. 소수 한 자리로 적으면 «1.0 · 1.0 · 0.9 · 0.9» 가 되어
+    // 어느 줄이 무슨 값인지 못 읽는다 (화면에서 실제로 그랬다).
+    const { lines } = GridCalculator.calcValueGrid(0, 1, 1000);
+    const labels = lines.map(l => l.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('간격이 1 이상이면 소수점을 붙이지 않는다', () => {
+    const { lines } = GridCalculator.calcValueGrid(0, 9, 500);
+    expect(lines.every(l => !l.label.includes('.'))).toBe(true);
+  });
+
   it('value=0이면 position이 plotHeight에 가까움 (Y반전)', () => {
     const { lines } = GridCalculator.calcValueGrid(0, 9, 500);
     const zeroLine = lines.find(l => l.value === 0);

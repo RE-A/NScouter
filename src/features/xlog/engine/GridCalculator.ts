@@ -60,6 +60,18 @@ export class GridCalculator {
     return { interval, lines };
   }
 
+  /**
+   * 눈금 값을 몇 자리까지 적을 것인가.
+   *
+   * **간격보다 굵게 반올림하면 같은 라벨이 두 번 나온다.** Y최대 1초에서 간격이
+   * 0.05초인데 소수 한 자리로 적으면 `1.0 · 1.0 · 0.9 · 0.9 …` 가 되어
+   * 어느 줄이 무슨 값인지 못 읽는다. 간격이 정하는 자리까지 적는다.
+   */
+  static decimalsFor(interval: number): number {
+    if (!Number.isFinite(interval) || interval <= 0) return 0;
+    return Math.max(0, Math.ceil(-Math.log10(interval)));
+  }
+
   /** Y축(값) 그리드 */
   static calcValueGrid(
     minValue: number,
@@ -72,6 +84,7 @@ export class GridCalculator {
 
     const lines: GridLine[] = [];
     const firstTick = Math.ceil(minValue / interval) * interval;
+    const decimals = GridCalculator.decimalsFor(interval);
 
     for (let v = firstTick; v <= maxValue + interval * 0.01; v += interval) {
       const ratio = (v - minValue) / range;
@@ -79,7 +92,8 @@ export class GridCalculator {
       lines.push({
         value: v,
         position,
-        label: Number.isInteger(v) ? String(v) : v.toFixed(1),
+        // 더하기를 되풀이한 값이라 0.30000000000000004 같은 것이 온다 — toFixed 가 다듬는다.
+        label: v.toFixed(decimals),
       });
     }
 
