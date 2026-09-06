@@ -465,6 +465,16 @@ export async function startCounterStream(
   await invoke<void>('start_counter_stream', { objHashes, counters });
 }
 
+/**
+ * 실시간 카운터 스트리밍 중지.
+ *
+ * 고른 서버를 모두 풀었을 때 부른다 — 화면이 아무것도 안 그리는데 폴링만 돌면
+ * 콜렉터에 아무도 안 보는 요청이 2초마다 나간다.
+ */
+export async function stopCounterStream(): Promise<void> {
+  await invoke<void>('stop_counter_stream');
+}
+
 // ─── 알림 스트리밍 ────────────────────────────────────────────
 
 /** 실시간 알림 스트리밍 시작 (2초 폴링) */
@@ -544,8 +554,6 @@ export interface AppConfig {
   xlog_chart?: XLogChartPrefs;
   /** 마지막으로 걸어 두었던 조회 조건 */
   xlog_filter?: XLogFilterPrefs;
-  /** 카운터에서 그리기로 고른 서버 */
-  counter_picks?: CounterPickPrefs;
   /** Visualize 탭의 지표 임계값 */
   kpi_thresholds?: KpiThresholdPrefs[];
   /** 갈아 가며 볼 서버들 */
@@ -611,6 +619,7 @@ export interface XLogFilterPrefs {
   elapsed_ms: number;
   elapsed_exclude: boolean;
   error_only: boolean;
+  /** **보기로 고른 오브젝트.** 비어 있으면 «아직 안 골랐다» 다 (`agentFilter.ts`) */
   obj_hashes: number[];
   service_text: string;
   service_exclude: boolean;
@@ -636,13 +645,6 @@ export interface SavedFilterPrefs {
   error_only: boolean;
   elapsed_ms: number;
   elapsed_exclude: boolean;
-}
-
-/** 카운터에서 그리기로 고른 서버. 비어 있으면 전부 */
-export interface CounterPickPrefs {
-  javaee: number[];
-  host: number[];
-  datasource: number[];
 }
 
 /**
@@ -726,9 +728,8 @@ export async function saveUiState(
   layout: UiLayout,
   chart: XLogChartPrefs,
   filter: XLogFilterPrefs,
-  picks: CounterPickPrefs,
 ): Promise<void> {
-  return invoke<void>('save_ui_state', { layout, chart, filter, picks });
+  return invoke<void>('save_ui_state', { layout, chart, filter });
 }
 
 

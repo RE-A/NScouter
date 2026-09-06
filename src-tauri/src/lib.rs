@@ -60,6 +60,7 @@ pub fn run() {
             disconnect_scouter,
             start_xlog_stream,
             stop_xlog_stream,
+            stop_counter_stream,
             resolve_texts,
             get_object_list,
             get_object_env,

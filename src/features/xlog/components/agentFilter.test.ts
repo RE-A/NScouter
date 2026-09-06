@@ -1,37 +1,86 @@
-// 에이전트 필터의 행 상태
-//
-// `objHashSet` 은 **화이트리스트**다 — 비어 있으면 필터가 없다는 뜻이고 전부 보인다
-// (XLogChartRenderer.passesFilter: `size > 0 && !has(hash)` 일 때만 거른다).
-//
-// 이전 UI 는 "필터 없음"을 "전부 선택됨"으로 그렸다. 모든 행이 파랗게 칠해지는데,
-// 전부를 강조하는 건 아무것도 강조하지 않는 것과 같다.
-
-import { describe, it, expect } from 'vitest';
-import { agentRowState } from './agentFilter';
+import { describe, expect, it } from 'vitest';
+import {
+  agentRowState,
+  groupCheck,
+  prunePicked,
+  toggleGroupPick,
+} from './agentFilter';
 
 describe('agentRowState', () => {
-  it('빈 집합은 필터가 없다는 뜻이라 아무 행도 강조하지 않는다', () => {
-    const none = new Set<number>();
-    expect(agentRowState(none, 1)).toBe('plain');
-    expect(agentRowState(none, 999)).toBe('plain');
+  it('아무도 안 골랐으면 강조하지 않는다', () => {
+    // 전 행을 «빠짐» 으로 칠하면 목록이 통째로 죽은 것처럼 보인다.
+    expect(agentRowState(new Set(), 11)).toBe('plain');
   });
 
-  it('필터 중이면 포함된 행만 강조한다', () => {
-    const sel = new Set([1, 2]);
-    expect(agentRowState(sel, 1)).toBe('picked');
-    expect(agentRowState(sel, 2)).toBe('picked');
+  it('고른 것과 빠진 것을 가른다', () => {
+    const picked = new Set([11]);
+    expect(agentRowState(picked, 11)).toBe('picked');
+    expect(agentRowState(picked, 22)).toBe('excluded');
+  });
+});
+
+describe('groupCheck', () => {
+  it('하나도 안 골랐으면 none', () => {
+    expect(groupCheck(new Set(), [11, 22])).toBe('none');
   });
 
-  // 빠진 행을 그냥 두면 필터가 걸렸는지 알 수 없다. 제외됐다고 보여야 한다.
-  it('필터 중에 빠진 행은 제외 상태다', () => {
-    expect(agentRowState(new Set([1]), 2)).toBe('excluded');
+  it('일부만 골랐으면 some', () => {
+    expect(groupCheck(new Set([11]), [11, 22])).toBe('some');
   });
 
-  // 모든 해시를 담는 것과 비우는 것은 결과가 같다(전부 표시).
-  // 하지만 전자는 "필터가 걸려 있다"고 표시돼야 한다 — 사용자가 직접 고른 상태다.
-  it('전부 담긴 집합은 필터 없음이 아니라 전부 선택이다', () => {
-    const all = new Set([1, 2, 3]);
-    expect(agentRowState(all, 1)).toBe('picked');
-    expect(agentRowState(all, 3)).toBe('picked');
+  it('다 골랐으면 all', () => {
+    expect(groupCheck(new Set([11, 22]), [11, 22])).toBe('all');
+  });
+
+  it('다른 묶음의 선택은 세지 않는다', () => {
+    expect(groupCheck(new Set([99]), [11, 22])).toBe('none');
+  });
+
+  it('빈 묶음은 none', () => {
+    expect(groupCheck(new Set([11]), [])).toBe('none');
+  });
+});
+
+describe('toggleGroupPick', () => {
+  it('안 골랐으면 통째로 켠다', () => {
+    // 100대짜리 목록에서 한 대씩 누르게 두지 않으려는 자리다.
+    expect([...toggleGroupPick(new Set(), [11, 22])].sort()).toEqual([11, 22]);
+  });
+
+  it('다 골랐으면 통째로 끈다', () => {
+    expect([...toggleGroupPick(new Set([11, 22]), [11, 22])]).toEqual([]);
+  });
+
+  it('일부만 골라 뒀으면 끄지 않고 마저 켠다', () => {
+    // 여기서 끄면 애써 고른 몇 대가 사라지고, 무엇을 골랐었는지는 잊는다.
+    expect([...toggleGroupPick(new Set([11]), [11, 22])].sort()).toEqual([11, 22]);
+  });
+
+  it('다른 묶음의 선택은 건드리지 않는다', () => {
+    expect([...toggleGroupPick(new Set([99]), [11, 22])].sort()).toEqual([11, 22, 99]);
+  });
+
+  it('원본을 건드리지 않는다', () => {
+    const picked = new Set([11]);
+    toggleGroupPick(picked, [11, 22]);
+    expect([...picked]).toEqual([11]);
+  });
+});
+
+describe('prunePicked', () => {
+  it('사라진 오브젝트를 지운다', () => {
+    // 남겨 두면 «3대 골랐는데 화면은 비어 있다» 로 굳는다.
+    expect([...prunePicked(new Set([11, 22]), [11])]).toEqual([11]);
+  });
+
+  it('바뀐 게 없으면 같은 객체를 돌려준다', () => {
+    // 새 Set 을 만들면 리렌더가 끝없이 돈다.
+    const picked = new Set([11]);
+    expect(prunePicked(picked, [11, 22])).toBe(picked);
+  });
+
+  it('빈 선택은 그대로다', () => {
+    const picked = new Set<number>();
+    expect(prunePicked(picked, [11])).toBe(picked);
   });
 });

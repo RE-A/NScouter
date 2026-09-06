@@ -43,16 +43,17 @@ import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
 import { durationTone } from './features/xlog/components/durationTone';
-import { nextPicked, prunePicked } from './features/xlog/components/counterPick';
 // ko-KR 로케일은 "4시 36분 18초" 를 낸다 — 폭을 먹고 줄바꿈되며 차트 X축(04:36:18)과도 어긋난다.
 import { formatTime, formatTimeMs } from './features/xlog/utils/colorPalette';
 import { AlertPanel } from './features/xlog/components/AlertPanel';
+import { prunePicked } from './features/xlog/components/agentFilter';
 import {
   onConnected,
   onDisconnected,
   getObjectList,
   getXLogDetail,
   startCounterStream,
+  stopCounterStream,
   startAlertStream,
   getConfig,
   saveUiState,
@@ -60,6 +61,7 @@ import {
   saveXLogProfile,
   saveConfig,
   startXLogStream,
+  stopXLogStream,
 } from './features/xlog/api/scouterApi';
 import { subscribe } from './features/xlog/api/subscribe';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
@@ -79,7 +81,6 @@ import {
   fromChartConfig,
   toFilterState,
   fromFilterState,
-  toCounterPicks,
 } from './features/xlog/hooks/uiState';
 import type { GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
@@ -227,18 +228,6 @@ export default function App() {
   /** 서비스 목록을 무엇으로 묶는가. 껐다 켜도 남는다 */
   const [agentGroupBy, setAgentGroupBy] = useState<GroupBy>('type');
   /**
-   * 카운터 화면에서 그리기로 고른 서버. Family 별로 따로 고른다.
-   *
-   * 여기(App)에 두는 이유는 **저장하기 위해서**다 — 구역 안에 두면 탭을 옮길 때마다
-   * 초기화되고, 껐다 켜면 통째로 날아간다.
-   */
-  const [counterPicks, setCounterPicks] = useState<{
-    javaee: Set<number>;
-    host: Set<number>;
-    datasource: Set<number>;
-  }>({ javaee: new Set(), host: new Set(), datasource: new Set() });
-
-  /**
    * 저장해 둔 배치·차트 설정을 한 번 읽어 온다.
    *
    * **다 읽기 전에는 저장하지 않는다.** 켜자마자 화면의 기본값이 파일을 덮으면
@@ -261,7 +250,6 @@ export default function App() {
         const f = toFilterState(cfg.xlog_filter);
         setFilter(f.filter);
         setXLogMode(f.mode);
-        setCounterPicks(toCounterPicks(cfg.counter_picks));
         // 프로필 목록이 없으면 **예전 설정에서 하나 만든다** — 앱을 올리자마자
         // «어제까지 붙던 서버» 를 다시 쳐야 하는 것은 퇴보다.
         const list = normalize(cfg.servers);
@@ -290,11 +278,6 @@ export default function App() {
         fromLayout({ servicesW, detailW, tableH, activeTab, agentGroupBy }),
         fromChartConfig(config),
         fromFilterState(filter, xlogMode),
-        {
-          javaee: [...counterPicks.javaee],
-          host: [...counterPicks.host],
-          datasource: [...counterPicks.datasource],
-        },
       ).catch(() => {});
       // 열어 둔 탭은 별도 저장이다 — save_ui_state 는 배치·차트·조건만 맡는다.
       void (async () => {
@@ -320,7 +303,6 @@ export default function App() {
     config,
     filter,
     xlogMode,
-    counterPicks,
     detail.tabs,
   ]);
 
@@ -386,12 +368,30 @@ export default function App() {
     return () => { cancelled = true; };
   }, [isConnected]);
 
+  /**
+   * 카운터도 **고른 서버 것만** 받는다.
+   *
+   * 예전에는 붙어 있는 오브젝트 전부를 요청했다. 서버가 100대면 2초마다 오브젝트
+   * 100개짜리 요청이 나가고, 화면은 그중 몇 대만 그린다 — 나머지는 받아서 버린다.
+   */
+  const counterStreamRef = useRef<string>('');
   useEffect(() => {
-    if (!isConnected) return;
-    const hashes = [...counterHashes.javaee, ...counterHashes.host, ...counterHashes.datasource];
-    if (hashes.length === 0) return;
+    if (!isConnected) { counterStreamRef.current = ''; return; }
+    const hashes = [...filter.objHashSet];
+
+    if (hashes.length === 0) {
+      if (counterStreamRef.current !== '') {
+        counterStreamRef.current = '';
+        stopCounterStream().catch(() => {});
+      }
+      return;
+    }
+
+    const key = hashes.slice().sort((a, b) => a - b).join(',');
+    if (key === counterStreamRef.current) return;
+    counterStreamRef.current = key;
     startCounterStream(hashes, ALL_CHART_COUNTERS).catch(() => {});
-  }, [isConnected, counterHashes]);
+  }, [isConnected, filter.objHashSet]);
 
   useEffect(() => {
     if (!isConnected) return;
@@ -497,6 +497,14 @@ export default function App() {
   }, [clearDetail]);
   const handleAgentsLoaded = useCallback((agents: AgentObject[]) => {
     setAgentMap(new Map(agents.map(a => [a.obj_hash, a.obj_name])));
+    // **목록에서 사라진 서버는 선택에서도 뺀다.** 남겨 두면 «3대 골랐는데 화면은
+    // 비어 있다» 로 굳고, 다른 콜렉터로 갈아탄 뒤에는 그 해시가 영영 안 온다.
+    // 내려간(alive=false) 서버는 목록에 남으므로 지우지 않는다 — 잠깐 멈춘 것일 수 있다.
+    const listed = agents.map(a => a.obj_hash);
+    setFilter(prev => {
+      const kept = prunePicked(prev.objHashSet, listed);
+      return kept === prev.objHashSet ? prev : { ...prev, objHashSet: new Set(kept) };
+    });
   }, []);
   // 분할 배치라 패널이 겹치지 않는다 — z 순서를 조정할 일이 없다.
   const openDetail = detail.open;
@@ -768,14 +776,25 @@ export default function App() {
   const streamHashesRef = useRef<string>('');
   useEffect(() => {
     if (!isConnected) { streamHashesRef.current = ''; return; }
-    const hashes = filter.objHashSet.size > 0 ? [...filter.objHashSet] : [...agentMap.keys()];
-    if (hashes.length === 0) return;
+    // **고른 것이 곧 받는 것이다.** 예전에는 빈 선택을 «전부» 로 읽어 접속하자마자
+    // 100대의 XLog 를 받았다 (agentFilter.ts 머리말).
+    const hashes = [...filter.objHashSet];
+
+    if (hashes.length === 0) {
+      // 고르기를 다 풀었으면 받던 것도 멈춘다. 화면은 비어 있는데 트래픽만 도는 상태가
+      // 남으면, 다시 골랐을 때 지난 것이 섞여 들어온다.
+      if (streamHashesRef.current !== '') {
+        streamHashesRef.current = '';
+        stopXLogStream().catch(() => {});
+      }
+      return;
+    }
 
     const key = hashes.slice().sort((a, b) => a - b).join(',');
     if (key === streamHashesRef.current) return;
     streamHashesRef.current = key;
     startXLogStream(hashes).catch(() => {});
-  }, [isConnected, filter.objHashSet, agentMap]);
+  }, [isConnected, filter.objHashSet]);
 
   /**
    * 과거 조회 대상.
@@ -787,12 +806,27 @@ export default function App() {
    * 로컬 테스트 환경은 `tomcat` 이라 드러나지 않았다.
    *
    * XLog 가 보는 것은 Family 가 아니라 **지금 고른 서버**다. 아무것도 안 골랐으면
-   * 전체다 — 실시간 스트림도 그렇게 받는다.
+   * 조회할 것도 없다 — 실시간 스트림과 같은 규칙이다.
    */
-  const pastObjHashes = useMemo(
-    () => (filter.objHashSet.size > 0 ? [...filter.objHashSet] : [...agentMap.keys()]),
-    [filter.objHashSet, agentMap],
-  );
+  const pastObjHashes = useMemo(() => [...filter.objHashSet], [filter.objHashSet]);
+
+  /**
+   * 지금 그릴 오브젝트를 Family 로 나눈 것.
+   *
+   * `counterHashes` 는 **붙어 있는 것 전부**이고, 화면에 올릴 것은 그중 고른 것뿐이다.
+   * 둘을 섞어 쓰면 «3대 골랐는데 차트에는 100줄» 이 된다.
+   */
+  const shownHashes = useMemo(() => {
+    const picked = filter.objHashSet;
+    return {
+      javaee: counterHashes.javaee.filter(h => picked.has(h)),
+      host: counterHashes.host.filter(h => picked.has(h)),
+      datasource: counterHashes.datasource.filter(h => picked.has(h)),
+    };
+  }, [counterHashes, filter.objHashSet]);
+
+  /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
+  const nothingPicked = filter.objHashSet.size === 0;
 
   /** Ctrl+F 로 옮겨 갈 자리 */
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -962,6 +996,40 @@ export default function App() {
         />
       )}
 
+      {/* ── 서버 고르기는 탭 바깥이다 ──
+          세 화면이 **같은 선택**을 쓴다. 탭마다 따로 고르게 두면 서버가 100대인 곳에서
+          같은 일을 세 번 해야 하고, 화면을 옮길 때마다 무엇을 보고 있는지가 달라진다.
+          알림은 여기 걸리지 않는다 — 안 보기로 한 서버가 죽는 것이야말로 알아야 한다. */}
+      <div ref={xlogWsRef} className="flex min-h-0 flex-1 overflow-hidden bg-base p-1">
+        <Pane title="Services" className="shrink-0" style={{ width: servicesW }}>
+          <AgentSelectorPanel
+            isConnected={isConnected}
+            selectedHashes={filter.objHashSet}
+            onSelectionChange={handleAgentSelectionChange}
+            onAgentsLoaded={handleAgentsLoaded}
+            groupBy={agentGroupBy}
+            onGroupByChange={setAgentGroupBy}
+          />
+        </Pane>
+
+        <Divider
+          orientation="vertical"
+          label={t('서비스 목록 너비')}
+          onDrag={d =>
+            setServicesW(w =>
+              isMeasured(wsSize)
+                ? clampPane(
+                    w + d,
+                    PANE.servicesMin,
+                    sideRoom(wsSize.w, hasDetail ? detailW : 0, hasDetail ? 2 : 1),
+                  )
+                : w,
+            )
+          }
+        />
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+
       {/* ── XLog 탭 ── */}
       {activeTab === 'xlog' && (
         <div style={tabBodyStyle}>
@@ -983,36 +1051,14 @@ export default function App() {
               가용 공간과 어긋나면 패널 아래가 창 밖으로 나가 **하단 목록이 잘렸다.**
               flex 로 두면 넘칠 수가 없고, 경계를 끌어 크기를 바꿀 수 있다.
               wsSize 는 이제 배치가 아니라 **끌기 한계 계산에만** 쓴다. */}
-          <div ref={xlogWsRef} className="flex min-h-0 flex-1 overflow-hidden bg-base p-1">
-            <Pane title="Services" className="shrink-0" style={{ width: servicesW }}>
-              <AgentSelectorPanel
-                isConnected={isConnected}
-                selectedHashes={filter.objHashSet}
-                onSelectionChange={handleAgentSelectionChange}
-                onAgentsLoaded={handleAgentsLoaded}
-                groupBy={agentGroupBy}
-                onGroupByChange={setAgentGroupBy}
-              />
-            </Pane>
-
-            <Divider
-              orientation="vertical"
-              label={t('서비스 목록 너비')}
-              onDrag={d =>
-                setServicesW(w =>
-                  isMeasured(wsSize)
-                    ? clampPane(
-                        w + d,
-                        PANE.servicesMin,
-                        sideRoom(wsSize.w, hasDetail ? detailW : 0, hasDetail ? 2 : 1),
-                      )
-                    : w,
-                )
-              }
-            />
-
+          <div className="flex min-h-0 flex-1 overflow-hidden">
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <Pane title="XLog" className="min-h-0 flex-1">
+                {/* **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
+                    트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다. */}
+                {nothingPicked && isConnected ? (
+                  <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+                ) : (
                 <div className="h-full p-2">
                   <XLogChart
                     config={config}
@@ -1027,6 +1073,7 @@ export default function App() {
                     onPastRangeChange={setPastRange}
                   />
                 </div>
+                )}
               </Pane>
 
               {/* 목록은 **항상 자리를 지킨다.**
@@ -1156,16 +1203,19 @@ export default function App() {
           여기는 «지금 정상인가», 저기는 «무엇이 어떻게 변했나» 다. */}
       {activeTab === 'visualize' && (
         <div style={tabBodyStyle}>
-          {isConnected ? (
+          {!isConnected ? (
+            <EmptyState text={t('연결 후 사용 가능합니다.')} />
+          ) : nothingPicked ? (
+            <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+          ) : (
             <VisualizeTab
               enabled={activeTab === 'visualize'}
               javaeeType={javaeeType}
-              javaeeHashes={counterHashes.javaee}
+              picked={filter.objHashSet}
+              javaeeHashes={shownHashes.javaee}
               agentMap={agentMap}
               onDrill={drillToXLog}
             />
-          ) : (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
           )}
         </div>
       )}
@@ -1173,7 +1223,11 @@ export default function App() {
       {/* ── Counter 탭 ── */}
       {activeTab === 'counter' && (
         <div style={tabBodyStyle}>
-          {isConnected ? (
+          {!isConnected ? (
+            <EmptyState text={t('연결 후 사용 가능합니다.')} />
+          ) : nothingPicked ? (
+            <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+          ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {/* 추세(카운터 차트)보다 **지금**이 먼저다. 장애 중이면 여기부터 본다. */}
               <ActiveServicePanel
@@ -1194,37 +1248,33 @@ export default function App() {
               {/* 카운터가 "서버가 견디는가"라면 이건 "무엇이 들어오는가"다.
                   objType 이 아니라 objHash 목록으로 묻는다 (F-44). */}
               <ServiceGroupPanel
-                objHashes={counterHashes.javaee}
-                enabled={activeTab === 'counter' && counterHashes.javaee.length > 0}
+                objHashes={shownHashes.javaee}
+                enabled={activeTab === 'counter' && shownHashes.javaee.length > 0}
               />
 
               {/* Family 를 섞으면 CPU 와 TPS 가 같은 줄에 놓여 읽히지 않는다.
                   요청은 한 번에 보내지만(실측 확인) 화면은 나눈다. */}
               <CounterSection
                 title={t('애플리케이션')}
-                subtitle={`${counterHashes.javaee.length}${t('개 오브젝트')} · javaee`}
+                subtitle={`${shownHashes.javaee.length}${t('개 오브젝트')} · javaee`}
                 counters={JAVAEE_CHARTS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
-                hashes={counterHashes.javaee}
-                picked={counterPicks.javaee}
-                onPickedChange={next => setCounterPicks(p => ({ ...p, javaee: next }))}
-                empty={counterHashes.javaee.length === 0 ? t('자바 에이전트가 없습니다.') : null}
+                hashes={shownHashes.javaee}
+                empty={shownHashes.javaee.length === 0 ? t('고른 서버 중 자바 에이전트가 없습니다.') : null}
                 // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
                 footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
               />
               <CounterSection
                 title={t('호스트')}
-                subtitle={`${counterHashes.host.length}${t('개 오브젝트')} · host`}
+                subtitle={`${shownHashes.host.length}${t('개 오브젝트')} · host`}
                 counters={HOST_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
-                hashes={counterHashes.host}
-                picked={counterPicks.host}
-                onPickedChange={next => setCounterPicks(p => ({ ...p, host: next }))}
+                hashes={shownHashes.host}
                 empty={
-                  counterHashes.host.length === 0
-                    ? t('호스트 에이전트가 없습니다. scouter.host 를 콜렉터에 붙이면 CPU·메모리·네트워크가 표시됩니다.')
+                  shownHashes.host.length === 0
+                    ? t('고른 것 중 호스트 에이전트가 없습니다. 왼쪽 목록에서 linux · windows 오브젝트를 함께 고르면 CPU·메모리·네트워크가 표시됩니다.')
                     : null
                 }
               />
@@ -1237,23 +1287,19 @@ export default function App() {
               />
               <CounterSection
                 title={t('커넥션 풀')}
-                subtitle={`${counterHashes.datasource.length}${t('개 풀')} · datasource`}
+                subtitle={`${shownHashes.datasource.length}${t('개 풀')} · datasource`}
                 counters={DATASOURCE_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
-                hashes={counterHashes.datasource}
-                picked={counterPicks.datasource}
-                onPickedChange={next => setCounterPicks(p => ({ ...p, datasource: next }))}
+                hashes={shownHashes.datasource}
                 empty={
-                  counterHashes.datasource.length === 0
+                  shownHashes.datasource.length === 0
                     ? // 두 관문이 모두 닫혀 있으면 0건이다. 어느 쪽인지 말해 주지 않으면 고장으로 읽힌다 (F-41).
-                      t('커넥션 풀이 수집되지 않았습니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')
+                      t('고른 것 중 커넥션 풀이 없습니다. 풀이 아예 안 잡힌다면 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')
                     : null
                 }
               />
             </div>
-          ) : (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
           )}
         </div>
       )}
@@ -1269,6 +1315,9 @@ export default function App() {
           />
         </div>
       )}
+
+        </div>
+      </div>
     </div>
   );
 }
@@ -1326,8 +1375,6 @@ function CounterSection({
   isStreaming,
   agentMap,
   hashes,
-  picked,
-  onPickedChange,
   empty,
   footnote,
 }: {
@@ -1336,11 +1383,13 @@ function CounterSection({
   counters: readonly CounterName[];
   isStreaming: boolean;
   agentMap: Map<number, string>;
-  /** 이 구역이 받는 오브젝트. 여기서 골라 그린다 */
+  /**
+   * 이 구역이 그릴 오브젝트.
+   *
+   * **여기서 다시 고르지 않는다.** 서버를 고르는 곳은 왼쪽 목록 하나뿐이라,
+   * 이 값은 이미 «고른 것 중 이 Family» 다 (App 의 `shownHashes`).
+   */
   hashes: readonly number[];
-  /** 그릴 서버. 빈 집합이면 전부다. **App 이 들고 있다** — 저장해야 하기 때문이다 */
-  picked: Set<number>;
-  onPickedChange: (next: Set<number>) => void;
   /** 이 Family 의 오브젝트가 없을 때 보여줄 안내. 없으면 null */
   empty: string | null;
   /** 이 구역에서 **영영 못 받는** 카운터에 대한 각주. 없으면 생략 */
@@ -1356,32 +1405,12 @@ function CounterSection({
   const [total, setTotal] = useState(false);
 
   /**
-   * 그릴 서버. 빈 집합이면 **전부**다.
+   * 차트에 넘길 «그릴 서버».
    *
-   * 운영에서는 한 타입에 서버가 10대씩 붙는다. 차트 하나에 선 열 개가 겹치면
-   * 색으로도 못 가르고, 정작 보려던 한 대의 모양이 나머지에 묻힌다.
-   * 그렇다고 기본을 «하나만» 으로 두면 처음 연 사람이 나머지를 없는 것으로 읽는다 —
-   * 기본은 전부, 고르는 건 사용자 몫이다.
+   * 스트림은 고른 것만 주므로 사실상 전부지만, 고르기를 바꾼 직후에는 이전 서버의
+   * 값이 한 폴링 더 들어온다 — 그것까지 그리면 방금 뺀 서버가 잠깐 되살아난다.
    */
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const visible = picked.size === 0 ? null : picked;
-
-  // 에이전트가 죽으면 그 해시는 더 이상 오지 않는다. 선택에 남겨 두면
-  // «3대 중 0대» 처럼 아무것도 안 그려지는 상태로 굳는다.
-  useEffect(() => {
-    const alive = prunePicked(picked, hashes);
-    if (alive !== picked) onPickedChange(new Set(alive));
-    // picked 를 넣으면 onPickedChange 가 새 객체를 줄 때마다 다시 돈다. 목록이 기준이다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hashes]);
-
-  // 규칙은 counterPick.ts 에 있다 — 빈 집합이 «전부» 라서 체크 동작이 한 번 꼬인다.
-  const toggle = (hash: number) => onPickedChange(nextPicked(picked, hashes, hash));
-
-  const shortName = (hash: number) => {
-    const name = agentMap.get(hash) ?? String(hash);
-    return name.split('/').filter(Boolean).pop() ?? name;
-  };
+  const visible = useMemo(() => new Set(hashes), [hashes]);
 
   return (
     <section className="mb-4 last:mb-0">
@@ -1389,45 +1418,6 @@ function CounterSection({
         <h2 className="text-body font-medium text-fg">{title}</h2>
         <span className="text-micro text-fg-faint">{subtitle}</span>
         <div className="flex-1" />
-        {/* counters.xml 이 합계를 허용한 카운터가 하나도 없는 구역(host)에는
-            토글 자체를 두지 않는다. 눌러도 아무것도 안 바뀌는 버튼은 고장으로 읽힌다. */}
-        {!empty && hashes.length > 1 && (
-          <div className="relative">
-            <button
-              onClick={() => setPickerOpen(o => !o)}
-              aria-expanded={pickerOpen}
-              title={t('그릴 서버를 고릅니다')}
-              className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-            >
-              {t('서버')} {picked.size === 0 ? t('전체') : `${picked.size}/${hashes.length}`}
-            </button>
-            {pickerOpen && (
-              <div className="absolute right-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded border border-line-strong bg-surface p-1 shadow">
-                <button
-                  onClick={() => onPickedChange(new Set())}
-                  className="mb-1 w-full rounded px-2 py-0.5 text-left text-micro text-fg-dim hover:bg-hover hover:text-fg"
-                >
-                  {t('전체 보기')}
-                </button>
-                {hashes.map(h => (
-                  <label
-                    key={h}
-                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-0.5 text-micro text-fg-muted hover:bg-hover"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={picked.size === 0 || picked.has(h)}
-                      onChange={() => toggle(h)}
-                    />
-                    <span className="truncate" title={agentMap.get(h) ?? String(h)}>
-                      {shortName(h)}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
         {!empty && counters.some(isTotalCapable) && (
           <div className="flex gap-0.5">
             {([false, true] as const).map(v => (

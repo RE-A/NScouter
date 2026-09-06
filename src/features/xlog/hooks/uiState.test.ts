@@ -11,7 +11,6 @@ import {
   fromChartConfig,
   toFilterState,
   fromFilterState,
-  toCounterPicks,
   DEFAULT_LAYOUT,
 } from './uiState';
 import { DEFAULT_CHART_CONFIG } from '../types/xlog';
@@ -241,22 +240,5 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
     const back = toFilterState(fromFilterState(filter, 'past'));
     expect(back.filter).toEqual(filter);
     expect(back.mode).toBe('past');
-  });
-});
-
-describe('toCounterPicks', () => {
-  it('Family 별로 나눠 되살린다', () => {
-    const p = toCounterPicks({ javaee: [1, 2], host: [3], datasource: [] });
-    expect([...p.javaee]).toEqual([1, 2]);
-    expect([...p.host]).toEqual([3]);
-    expect(p.datasource.size).toBe(0);
-  });
-
-  it('없거나 이상한 값이면 빈 집합 — 빈 집합이 곧 전부다', () => {
-    const p = toCounterPicks(undefined);
-    expect(p.javaee.size).toBe(0);
-    const q = toCounterPicks({ javaee: 'x', host: [1.5, 'y', 3], datasource: null } as never);
-    expect(q.javaee.size).toBe(0);
-    expect([...q.host]).toEqual([3]);
   });
 });

@@ -5,7 +5,6 @@
 // 배치가 0 이면 패널이 사라진 채로 뜨고, 그게 왜 그런지는 화면만 봐서는 모른다.
 
 import type {
-  CounterPickPrefs,
   PatternPrefs,
   UiLayout,
   XLogChartPrefs,
@@ -204,15 +203,4 @@ export function fromFilterState(filter: XLogFilterState, mode: XLogMode): XLogFi
     patterns: filter.patterns.map(r => ({ field: r.field, text: r.text, exclude: r.exclude })),
     mode,
   };
-}
-
-/** 저장해 둔 카운터 서버 고르기 → 화면 값 */
-export function toCounterPicks(p: CounterPickPrefs | undefined): {
-  javaee: Set<number>;
-  host: Set<number>;
-  datasource: Set<number>;
-} {
-  const set = (v: unknown): Set<number> =>
-    new Set(Array.isArray(v) ? v.filter((h): h is number => Number.isInteger(h)) : []);
-  return { javaee: set(p?.javaee), host: set(p?.host), datasource: set(p?.datasource) };
 }

@@ -3,7 +3,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getObjectList } from '../api/scouterApi';
 import type { AgentObject } from '../types/xlog';
-import { agentRowState } from './agentFilter';
+import { agentRowState, groupCheck, toggleGroupPick } from './agentFilter';
 import { groupAgents, shortName, type GroupBy } from './agentTree';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
@@ -61,8 +61,14 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
     onSelectionChange(next);
   }, [selectedHashes, onSelectionChange]);
 
-  /** 필터 해제 — 빈 집합이 곧 "전부 표시"다 */
+  /** 고른 것을 전부 푼다. **«전부 표시» 가 아니라 «아무것도 안 봄» 이다** (agentFilter.ts) */
   const handleClearFilter = useCallback(() => onSelectionChange(new Set()), [onSelectionChange]);
+
+  /** 묶음을 통째로. 100대짜리 목록에서 한 대씩 누르게 두지 않는다 */
+  const handleToggleGroup = useCallback(
+    (hashes: readonly number[]) => onSelectionChange(toggleGroupPick(selectedHashes, hashes)),
+    [selectedHashes, onSelectionChange],
+  );
 
   const filtering = selectedHashes.size > 0;
   const aliveCount = agents.filter(a => a.alive).length;
@@ -108,20 +114,19 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
           )}
           {loading && <span className="ml-1 animate-pulse text-accent">•</span>}
         </span>
-        {/* All/None 쌍은 뺐다. `objHashSet` 은 화이트리스트라 "None"(모든 해시를 담음)이
-            "All"(빈 집합)과 결과가 똑같았다 — 눌러도 아무 변화가 없는 버튼이었다.
-            표현할 수 있는 상태는 "전체" 와 "N개만" 둘뿐이므로 컨트롤도 하나면 된다. */}
+        {/* **«전부» 라는 상태는 없다.** 고른 것이 곧 보는 것이라, 여기 적히는 수가
+            화면에 그려지는 서버 수와 같다. 0 이면 화면도 비어 있다. */}
         {filtering ? (
           <button
             onClick={handleClearFilter}
-            title={t('필터 해제 — 전부 표시')}
+            title={t('고른 서버를 모두 풉니다')}
             className="rounded px-1.5 py-0.5 text-micro text-accent hover:bg-hover"
           >
             <span className="tnum font-mono">{selectedHashes.size}</span>
-            {t('개만 · 전체로')}
+            {t('대 선택 · 해제')}
           </button>
         ) : (
-          <span className="px-1.5 text-micro text-fg-faint">{t('전체')}</span>
+          <span className="px-1.5 text-micro text-fg-faint">{t('고른 서버 없음')}</span>
         )}
       </div>
 
@@ -189,24 +194,44 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         )}
         {groups.map(group => {
           const open = searching || !collapsed.has(group.type);
+          // **보이는 것만 고른다.** 검색으로 걸러 낸 상태에서 묶음을 켜면
+          // 안 보이는 서버까지 딸려 오는데, 그건 무엇을 골랐는지 알 수 없게 만든다.
+          const groupHashes = group.agents.map(a => a.obj_hash);
           return (
             <div key={group.type}>
-              {/* 묶음 머리 — 접혀 있어도 **살아 있는 수**는 보여야 한다 */}
-              <button
-                onClick={() => toggleGroup(group.type)}
-                aria-expanded={open}
-                className="flex w-full items-center gap-1.5 border-b border-line/60 bg-surface/60 px-2 py-1 text-left hover:bg-hover/50"
-              >
-                <span className={`shrink-0 text-micro text-fg-dim ${open ? '' : '-rotate-90'}`}>
-                  ▾
-                </span>
-                <span className="min-w-0 flex-1 truncate text-micro font-medium text-fg-muted">
-                  {group.type}
-                </span>
+              {/* 묶음 머리 — 접혀 있어도 **살아 있는 수**는 보여야 한다.
+                  체크와 접기는 **다른 버튼**이다. 한 버튼에 묶으면 목록을 펼치려다
+                  100대가 통째로 켜진다. */}
+              <div className="flex items-center gap-1.5 border-b border-line/60 bg-surface/60 px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={groupCheck(selectedHashes, groupHashes) === 'all'}
+                  ref={el => {
+                    // 일부만 고른 묶음은 «켜짐» 도 «꺼짐» 도 아니다. 둘 중 하나로 그리면
+                    // 눌렀을 때 무슨 일이 날지 화면이 말해 주지 못한다.
+                    if (el) el.indeterminate = groupCheck(selectedHashes, groupHashes) === 'some';
+                  }}
+                  onChange={() => handleToggleGroup(groupHashes)}
+                  title={t('이 묶음을 통째로 고릅니다')}
+                  aria-label={group.type}
+                  className="shrink-0 cursor-pointer"
+                />
+                <button
+                  onClick={() => toggleGroup(group.type)}
+                  aria-expanded={open}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                >
+                  <span className={`shrink-0 text-micro text-fg-dim ${open ? '' : '-rotate-90'}`}>
+                    ▾
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-micro font-medium text-fg-muted">
+                    {group.type}
+                  </span>
+                </button>
                 <span className="tnum shrink-0 font-mono text-micro text-fg-faint">
                   {group.aliveCount}/{group.agents.length}
                 </span>
-              </button>
+              </div>
 
               {open && (
                 <div className="divide-y divide-line/40">

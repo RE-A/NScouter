@@ -147,6 +147,20 @@ pub async fn stop_xlog_stream(state: State<'_, AppState>) -> Result<(), String> 
     Ok(())
 }
 
+// ─── stop_counter_stream ─────────────────────────────────────
+
+/// 실시간 카운터 스트리밍 중지.
+///
+/// 고른 서버를 모두 풀면 화면은 아무것도 그리지 않는다. 그때 폴링만 계속 돌면
+/// 콜렉터에 2초마다 **아무도 안 보는 요청**이 나간다 — 서버가 100대인 환경에서는
+/// 그 요청 하나가 오브젝트 100개짜리다.
+#[tauri::command]
+pub async fn stop_counter_stream(state: State<'_, AppState>) -> Result<(), String> {
+    log::info!("stop_counter_stream: 스트리밍 중지");
+    state.streams.stop(StreamKind::Counter).await;
+    Ok(())
+}
+
 // ─── resolve_texts ───────────────────────────────────────────
 
 /// hash → text 일괄 조회
@@ -1827,7 +1841,6 @@ pub async fn save_ui_state(
     layout: crate::config::UiLayout,
     chart: crate::config::XLogChartPrefs,
     filter: crate::config::XLogFilterPrefs,
-    picks: crate::config::CounterPickPrefs,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = state.config_path.clone();
@@ -1835,7 +1848,6 @@ pub async fn save_ui_state(
     cfg.ui_layout = layout;
     cfg.xlog_chart = chart;
     cfg.xlog_filter = filter;
-    cfg.counter_picks = picks;
     cfg.save(&path)
 }
 

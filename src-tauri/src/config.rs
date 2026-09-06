@@ -67,9 +67,6 @@ pub struct AppConfig {
     /// 마지막으로 걸어 두었던 조회 조건
     #[serde(default)]
     pub xlog_filter: XLogFilterPrefs,
-    /// 카운터에서 그리기로 고른 서버
-    #[serde(default)]
-    pub counter_picks: CounterPickPrefs,
     /// Visualize 탭의 지표 임계값
     #[serde(default)]
     pub kpi_thresholds: Vec<KpiThresholdPrefs>,
@@ -95,7 +92,7 @@ pub struct UiLayout {
     pub detail_w: f32,
     /// 아래 트랜잭션 표 높이
     pub table_h: f32,
-    /// 마지막에 보던 탭. `"xlog"` · `"counter"` · `"alert"`
+    /// 마지막에 보던 탭. `"xlog"` · `"visualize"` · `"counter"` · `"alert"`
     pub active_tab: String,
     /// 서비스 목록을 무엇으로 묶는가. `"type"`(오브젝트 종류) 또는 `"group"`(이름의 부모 경로)
     pub agent_group_by: String,
@@ -186,7 +183,9 @@ pub struct XLogFilterPrefs {
     /// true 면 임계 **미만**만 통과
     pub elapsed_exclude: bool,
     pub error_only: bool,
-    /// 고른 오브젝트. 비어 있으면 전부
+    /// **보기로 고른 오브젝트.** 비어 있으면 «아직 안 골랐다» 이고, 그때 화면은
+    /// 아무것도 그리지 않는다 (`src/features/xlog/components/agentFilter.ts`).
+    /// 예전 판은 이걸 «전부» 로 읽었다 — 서버가 100대인 곳에서는 켜자마자 100줄이었다.
     pub obj_hashes: Vec<i32>,
     pub service_text: String,
     pub service_exclude: bool,
@@ -216,18 +215,6 @@ impl Default for XLogFilterPrefs {
             mode: "live".to_string(),
         }
     }
-}
-
-/// 카운터 화면에서 그리기로 고른 서버.
-///
-/// Family 마다 따로 고른다 — 앱과 호스트는 대수도 다르고 보는 이유도 다르다.
-/// 비어 있으면 **전부**다(고르지 않은 것과 «하나도 안 고른 것» 을 가르지 않는다).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CounterPickPrefs {
-    pub javaee: Vec<i32>,
-    pub host: Vec<i32>,
-    pub datasource: Vec<i32>,
 }
 
 /// Visualize 탭 지표 하나의 임계값.
@@ -318,7 +305,6 @@ impl Default for AppConfig {
             servers: Vec::new(),
             last_server: String::new(),
             xlog_filter: XLogFilterPrefs::default(),
-            counter_picks: CounterPickPrefs::default(),
             // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)
             // 여기서 같은 수를 한 벌 더 적으면 두 곳이 갈린다.
             kpi_thresholds: Vec::new(),

@@ -614,6 +614,16 @@ export const EN: Record<string, string> = {
   '대': '',
   '누르면 이 서버의 XLog 를 봅니다': 'Click to see this server’s XLog',
   '아직 받은 지표가 없습니다.': 'No metrics received yet.',
+  '왼쪽에서 볼 서버를 고르세요.': 'Pick the servers you want to watch, on the left.',
+  '고른 서버 없음': 'No server picked',
+  '대 선택 · 해제': ' picked · clear',
+  '고른 서버를 모두 풉니다': 'Unpick every server',
+  '이 묶음을 통째로 고릅니다': 'Pick this whole group',
+  '고른 서버 중 자바 에이전트가 없습니다.': 'None of the picked servers is a Java agent.',
+  '고른 것 중 호스트 에이전트가 없습니다. 왼쪽 목록에서 linux · windows 오브젝트를 함께 고르면 CPU·메모리·네트워크가 표시됩니다.':
+    'None of the picked objects is a host agent. Pick a linux or windows object on the left to see CPU, memory and network.',
+  '고른 것 중 커넥션 풀이 없습니다. 풀이 아예 안 잡힌다면 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.':
+    'None of the picked objects is a connection pool. If no pool shows up at all, turn on both spring.datasource.hikari.register-mbeans in the app and jmx_counter_enabled in the agent.',
   '기본값으로': 'Reset to defaults',
   // '저장'·'저장 중…'·'닫기' 는 위에 이미 있다. 같은 말을 두 번 적으면 사전이 갈린다.
   'config.json 의': 'Saved to',

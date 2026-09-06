@@ -24,6 +24,8 @@ interface VisualizeTabProps {
   enabled: boolean;
   /** javaee 오브젝트의 objType. 액티브 서비스는 objHash 로는 못 묻는다 */
   javaeeType: string;
+  /** 지금 보기로 고른 오브젝트. 여기 없는 서버는 그리지 않는다 */
+  picked: ReadonlySet<number>;
   /** 트랜잭션이 있는 오브젝트들. 격자에서 파고들 수 있는 칸을 가른다 */
   javaeeHashes: readonly number[];
   agentMap: Map<number, string>;
@@ -34,12 +36,13 @@ interface VisualizeTabProps {
 export const VisualizeTab = memo(function VisualizeTab({
   enabled,
   javaeeType,
+  picked,
   javaeeHashes,
   agentMap,
   onDrill,
 }: VisualizeTabProps) {
-  const { kpis, lastReceivedAt } = useKpiSamples(enabled);
-  const { samples } = useInstanceKpis(enabled);
+  const { kpis, lastReceivedAt } = useKpiSamples(enabled, picked);
+  const { samples } = useInstanceKpis(enabled, picked);
   const [thresholds, setThresholds] = useState<ThresholdMap>(DEFAULT_THRESHOLDS);
   const [showThresholds, setShowThresholds] = useState(false);
 

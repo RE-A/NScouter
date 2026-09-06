@@ -42,12 +42,20 @@ function emptyKpis(): KpiSamples {
 /**
  * @param enabled 접속돼 있고 이 탭을 보고 있을 때만. 끄면 쌓아 둔 것을 버린다 —
  *   끊긴 동안의 값을 이어 두면 다시 붙었을 때 없던 계단이 생긴다.
+ * @param visible 접을 대상. 스트림은 고른 것만 주지만, 고르기를 바꾼 직후에는
+ *   이전 서버의 값이 한 폴링 더 들어온다 — 그것까지 접으면 방금 뺀 서버가
+ *   접은 값 안에서 한 번 더 살아난다.
  */
-export function useKpiSamples(enabled: boolean): UseKpiSamplesResult {
+export function useKpiSamples(
+  enabled: boolean,
+  visible: ReadonlySet<number>,
+): UseKpiSamplesResult {
   const [state, setState] = useState<UseKpiSamplesResult>(() => ({
     kpis: emptyKpis(),
     lastReceivedAt: null,
   }));
+
+  const visibleKey = [...visible].sort((a, b) => a - b).join(',');
 
   useEffect(() => {
     if (!enabled) {
@@ -60,7 +68,8 @@ export function useKpiSamples(enabled: boolean): UseKpiSamplesResult {
         const def = kpiByCounter(update.counter);
         if (!def) return;
 
-        const folded = foldKpi(def, update.values);
+        const rows = update.values.filter(v => visible.has(v.obj_hash));
+        const folded = foldKpi(def, rows);
         const at = Date.now();
 
         setState(prev => {
@@ -78,7 +87,9 @@ export function useKpiSamples(enabled: boolean): UseKpiSamplesResult {
         });
       }),
     );
-  }, [enabled]);
+    // visible 은 내용이 같아도 매번 새 Set 일 수 있다. 내용으로 견준다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, visibleKey]);
 
   return state;
 }
