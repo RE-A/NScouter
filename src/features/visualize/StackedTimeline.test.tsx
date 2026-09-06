@@ -4,7 +4,7 @@
 // (`src/test/fakeCanvas.ts`, `XLogChartRenderer.test.ts` 와 같은 방식).
 // 자(눈금·좌표)는 `timelineScale.test.ts` 가 맡는다 — 여기서는 **무엇을 적는가** 만 본다.
 
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeCanvasContext, textsOf } from '../../test/fakeCanvas';
 import { StackedTimeline } from './StackedTimeline';
@@ -56,8 +56,12 @@ const series = (obj_hash: number, values: (number | null)[]) => ({
   values,
 });
 
-async function draw(rows: CounterRow[]) {
-  render(<StackedTimeline rows={rows} range={RANGE} agentMap={agentMap} />);
+/** `asked` 는 대개 true 다 — 안 물은 경우만 따로 적는다 */
+type Row = Omit<CounterRow, 'asked'> & { asked?: boolean };
+const rowsOf = (rows: Row[]): CounterRow[] => rows.map(r => ({ asked: true, ...r }));
+
+async function draw(rows: Row[]) {
+  render(<StackedTimeline rows={rowsOf(rows)} range={RANGE} agentMap={agentMap} />);
   await frame();
   return textsOf(ctx);
 }
@@ -78,10 +82,17 @@ describe('StackedTimeline', () => {
     expect(texts).toContain('50tps');
   });
 
-  it('값이 없는 줄은 비었다고 말한다', async () => {
+  it('물었는데 값이 없으면 그렇다고 말한다', async () => {
     // 빈 줄만 두면 «수집이 안 된다» 로 읽힌다.
-    const texts = await draw([{ counter: 'Cpu', series: [] }]);
+    const texts = await draw([{ counter: 'Cpu', series: [], asked: true }]);
     expect(texts).toContain('이 구간에 값이 없습니다');
+  });
+
+  it('안 물은 줄은 «안 골랐다» 고 말한다', async () => {
+    // «안 물었다» 와 «물었는데 없다» 는 다른 말이다. 지표 줄의 타일과 같은 문구를 쓴다.
+    const texts = await draw([{ counter: 'Cpu', series: [], asked: false }]);
+    expect(texts).toContain('이 지표를 주는 서버를 안 골랐습니다');
+    expect(texts).not.toContain('이 구간에 값이 없습니다');
   });
 
   it('시각 눈금을 적는다', async () => {
@@ -98,7 +109,7 @@ describe('StackedTimeline', () => {
   it('줄 하나가 늘면 캔버스도 그만큼 높아진다', async () => {
     const { container, rerender } = render(
       <StackedTimeline
-        rows={[{ counter: 'TPS', series: [series(11, [1])] }]}
+        rows={rowsOf([{ counter: 'TPS', series: [series(11, [1])] }])}
         range={RANGE}
         agentMap={agentMap}
       />,
@@ -108,10 +119,10 @@ describe('StackedTimeline', () => {
 
     rerender(
       <StackedTimeline
-        rows={[
+        rows={rowsOf([
           { counter: 'TPS', series: [series(11, [1])] },
           { counter: 'Cpu', series: [series(22, [1])] },
-        ]}
+        ])}
         range={RANGE}
         agentMap={agentMap}
       />,
@@ -134,5 +145,37 @@ describe('StackedTimeline — 값이 없는 자리', () => {
     // 줄을 통째로 빼면 옆 줄과 시간축이 어긋난다.
     const texts = await draw([{ counter: 'TPS', series: [series(11, [null, null])] }]);
     expect(texts).toContain('TPS');
+  });
+});
+
+describe('StackedTimeline — 다시 그리는 때', () => {
+  it('아무것도 안 바뀌면 다시 그리지 않는다', async () => {
+    // 예전에는 rAF 로 매 프레임 전부 다시 그렸다. 서버 2대·1시간만 해도
+    // 프레임당 lineTo 가 14,400번이고 100대면 80만번이다 —
+    // 아무것도 안 바뀌는 동안에도 초당 그만큼을 태운다.
+    await draw([{ counter: 'TPS', series: [series(11, [1, 2, 3])] }]);
+    const before = ctx.ops.length;
+    await frame();
+    await frame();
+    expect(ctx.ops.length).toBe(before);
+  });
+
+  it('마우스가 움직이면 다시 그린다', async () => {
+    const { container } = render(
+      <StackedTimeline
+        rows={rowsOf([{ counter: 'TPS', series: [series(11, [1, 2, 3])] }])}
+        range={RANGE}
+        agentMap={agentMap}
+      />,
+    );
+    await frame();
+    const before = ctx.ops.length;
+
+    fireEvent.mouseMove(container.querySelector('canvas') as HTMLCanvasElement, {
+      clientX: 400,
+      clientY: 20,
+    });
+    await frame();
+    expect(ctx.ops.length).toBeGreaterThan(before);
   });
 });

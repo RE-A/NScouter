@@ -83,4 +83,11 @@ describe('prunePicked', () => {
     const picked = new Set<number>();
     expect(prunePicked(picked, [11])).toBe(picked);
   });
+
+  it('목록이 통째로 비면 지우지 않는다', () => {
+    // 콜렉터 재시작이나 일시적인 빈 응답으로 골라 둔 것이 사라지면,
+    // 보고 있던 화면이 갑자기 «서버를 고르세요» 가 된다.
+    const picked = new Set([11, 22]);
+    expect(prunePicked(picked, [])).toBe(picked);
+  });
 });

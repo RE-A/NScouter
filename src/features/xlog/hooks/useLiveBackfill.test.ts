@@ -52,6 +52,10 @@ describe('useLiveBackfill', () => {
   beforeEach(() => {
     calls.list = [];
     vi.useFakeTimers();
+    // **시각을 박아 둔다.** `planBackfill` 은 하루를 넘지 않으려고 구간 시작을
+    // 그날 자정으로 자른다(콜렉터가 날짜별로 담기 때문, F-18). 실제 시각에 기대면
+    // **자정 직후에만** 창이 통째로 잘려 이 테스트가 깨진다 — 실제로 그렇게 드러났다.
+    vi.setSystemTime(new Date(2026, 8, 6, 12, 0, 0));
   });
   afterEach(() => {
     vi.useRealTimers();

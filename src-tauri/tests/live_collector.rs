@@ -378,8 +378,10 @@ fn live_host_five_min_counters() {
             if let AnyPack::Map(map) = pack {
                 let s = nscouter_lib::scouter::objtype::parse_counter_series(&map);
                 points += s.times.len();
-                nonzero += s.values.iter().filter(|v| **v != 0.0).count();
-                for v in &s.values {
+                // `None` 은 «그 시각에 수집이 없었다» 다. 0 과 섞어 세면
+                // «그때 0 이었다» 와 구별되지 않는다 (objtype::CounterSeries).
+                nonzero += s.values.iter().filter(|v| matches!(v, Some(x) if *x != 0.0)).count();
+                for v in s.values.iter().flatten() {
                     if *v > max {
                         max = *v;
                     }
@@ -3132,9 +3134,9 @@ fn probe_today_service_count_values() {
         while let Some(p) = c.read_next_pack().expect("수신 실패") {
             if let AnyPack::Map(m) = p {
                 let sr = parse_counter_series(&m);
-                let sum: f32 = sr.values.iter().sum();
-                let nonzero = sr.values.iter().filter(|v| **v != 0.0).count();
-                let max = sr.values.iter().cloned().fold(f32::MIN, f32::max);
+                let sum: f32 = sr.values.iter().flatten().sum();
+                let nonzero = sr.values.iter().filter(|v| matches!(v, Some(x) if *x != 0.0)).count();
+                let max = sr.values.iter().flatten().cloned().fold(f32::MIN, f32::max);
                 println!(
                     "{counter} objHash={} 포인트={} 0이_아닌값={} 합={} 최대={}",
                     sr.obj_hash,
@@ -3148,7 +3150,11 @@ fn probe_today_service_count_values() {
                     .iter()
                     .rev()
                     .take(8)
-                    .map(|v| format!("{v:.1}"))
+                    // 수집이 없던 시각은 «—» 다. 0 으로 적으면 화면과 같은 거짓말을 한다.
+                    .map(|v| match v {
+                        Some(x) => format!("{x:.1}"),
+                        None => "—".to_string(),
+                    })
                     .collect();
                 println!("   마지막 8개(역순): {}", tail.join(", "));
             }
@@ -6674,7 +6680,7 @@ fn live_past_date_counter() {
         while let Some(pack) = c.read_next_pack().expect("수신 실패") {
             if let AnyPack::Map(m) = pack {
                 let sr = parse_counter_series(&m);
-                let sum: f32 = sr.values.iter().sum();
+                let sum: f32 = sr.values.iter().flatten().sum();
                 rows.push((sr.obj_hash, sr.values.len(), sum));
             }
         }

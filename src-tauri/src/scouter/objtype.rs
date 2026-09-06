@@ -129,6 +129,59 @@ pub fn split_by_day(stime: i64, etime: i64, tz_offset_ms: i64) -> Vec<(i64, i64)
     out
 }
 
+/// 화면이 그릴 수 있는 만큼으로 줄인다.
+///
+/// **콜렉터는 2초 간격 원본을 준다.** 6시간이면 오브젝트 하나에 10,800점이고,
+/// 서버가 100대면 백만 점이 넘는다 — 실측: 2대·6시간·카운터 3개에 65,298점(약 1.1MB).
+/// 100대로 환산하면 56MB 를 IPC 한 번에 실어 나르는 셈이다
+/// (CLAUDE.md 3.3: «크거나 잦은 페이로드 지양»).
+/// 게다가 화면 폭은 2,000픽셀 남짓이라 그 점들은 **그릴 자리도 없다.**
+///
+/// 버킷마다 **최댓값과 그 값이 난 시각**을 남긴다.
+///   · 평균이 아닌 이유: 이 화면은 «언제 튀었나» 를 보는 곳이다. 평균은 스파이크를
+///     뭉개는데, 뭉개고 나면 이 화면을 볼 이유가 없다.
+///   · 버킷 중앙 시각이 아닌 이유: 피크가 실제보다 앞뒤로 밀려, 옆 줄과 «같은 순간» 을
+///     맞추려는 이 화면의 목적이 무너진다.
+///
+/// 값이 하나도 없는 버킷은 `None` 으로 남긴다 — 자리를 없애면 시간축이 뭉개진다.
+pub fn downsample(series: CounterSeries, max_points: usize) -> CounterSeries {
+    let n = series.times.len().min(series.values.len());
+    if max_points == 0 || n <= max_points {
+        return series;
+    }
+
+    let mut times = Vec::with_capacity(max_points);
+    let mut values = Vec::with_capacity(max_points);
+
+    for b in 0..max_points {
+        // 나눗셈을 곱셈으로 미리 하면 마지막 버킷이 남는 점을 다 가져간다.
+        let lo = b * n / max_points;
+        let hi = ((b + 1) * n / max_points).max(lo + 1).min(n);
+
+        let mut best: Option<(i64, f32)> = None;
+        for i in lo..hi {
+            let Some(v) = series.values[i] else { continue };
+            if best.is_none_or(|(_, bv)| v > bv) {
+                best = Some((series.times[i], v));
+            }
+        }
+
+        match best {
+            Some((t, v)) => {
+                times.push(t);
+                values.push(Some(v));
+            }
+            // 값이 하나도 없던 버킷. 자리는 남겨 선이 여기서 끊기게 한다.
+            None => {
+                times.push(series.times[lo]);
+                values.push(None);
+            }
+        }
+    }
+
+    CounterSeries { obj_hash: series.obj_hash, times, values }
+}
+
 /// 같은 오브젝트의 조각들을 하나로 잇는다.
 ///
 /// 조각은 **시간순으로 들어와야 한다** — 뒤섞이면 선이 되돌아간다.
@@ -232,7 +285,7 @@ mod tests {
         assert!(matches!(p.entries.get("objType"), Some(ScouterValue::Text(t)) if t == "tomcat"));
         assert!(matches!(p.entries.get("counter"), Some(ScouterValue::Text(t)) if t == "TPS"));
         // date 를 같이 넣으면 안 된다 — 커맨드가 다르다.
-        assert!(p.entries.get("date").is_none());
+        assert!(!p.entries.contains_key("date"));
     }
 
     #[test]
@@ -271,6 +324,74 @@ mod tests {
         for w in parts.windows(2) {
             assert_eq!(w[0].1, w[1].0, "조각 사이가 벌어졌다");
         }
+    }
+
+    fn ser(values: Vec<Option<f32>>) -> CounterSeries {
+        CounterSeries {
+            obj_hash: 11,
+            times: (0..values.len() as i64).map(|i| i * 2_000).collect(),
+            values,
+        }
+    }
+
+    #[test]
+    fn downsample_leaves_short_series_alone() {
+        // 1시간(1,800점)은 화면 폭 안이라 줄일 이유가 없다.
+        let s = ser(vec![Some(1.0), Some(2.0), Some(3.0)]);
+        assert_eq!(downsample(s.clone(), 10), s);
+        assert_eq!(downsample(s.clone(), 3), s);
+    }
+
+    #[test]
+    fn downsample_keeps_the_peak_not_the_average() {
+        // **평균은 스파이크를 뭉갠다.** 뭉개고 나면 이 화면을 볼 이유가 없다.
+        let s = ser(vec![Some(1.0), Some(9.0), Some(1.0), Some(1.0)]);
+        let out = downsample(s, 2);
+        assert_eq!(out.values, vec![Some(9.0), Some(1.0)]);
+    }
+
+    #[test]
+    fn downsample_keeps_the_time_the_peak_happened() {
+        // 버킷 중앙 시각을 쓰면 피크가 앞뒤로 밀려, 옆 줄과 «같은 순간» 을 못 맞춘다.
+        let s = ser(vec![Some(1.0), Some(9.0), Some(1.0), Some(1.0)]);
+        let out = downsample(s, 2);
+        assert_eq!(out.times[0], 2_000, "9.0 이 난 시각이어야 한다");
+    }
+
+    #[test]
+    fn downsample_hits_the_requested_size() {
+        let s = ser((0..1_000).map(|i| Some(i as f32)).collect());
+        assert_eq!(downsample(s, 100).times.len(), 100);
+    }
+
+    #[test]
+    fn downsample_marks_empty_buckets_as_missing() {
+        // 값이 하나도 없던 구간을 0 으로 채우면 없던 골짜기가 생긴다.
+        let s = ser(vec![Some(1.0), None, None, Some(4.0)]);
+        let out = downsample(s, 2);
+        assert_eq!(out.values, vec![Some(1.0), Some(4.0)]);
+
+        let s2 = ser(vec![None, None, Some(4.0), Some(5.0)]);
+        let out2 = downsample(s2, 2);
+        assert_eq!(out2.values, vec![None, Some(5.0)]);
+        // 자리는 남긴다 — 없애면 시간축이 뭉개진다.
+        assert_eq!(out2.times.len(), 2);
+    }
+
+    #[test]
+    fn downsample_covers_every_point() {
+        // 버킷이 겹치거나 벌어지면 마지막 몇 점이 통째로 사라진다.
+        let s = ser((0..7).map(|i| Some(i as f32)).collect());
+        let out = downsample(s, 3);
+        // 마지막 버킷이 남는 점을 가져가므로 최댓값 6 이 살아야 한다.
+        assert_eq!(out.values.last(), Some(&Some(6.0)));
+    }
+
+    #[test]
+    fn downsample_ignores_zero_size() {
+        // 0 으로 나누면 패닉이다. 줄이지 않는 쪽이 안전하다.
+        let s = ser(vec![Some(1.0), Some(2.0)]);
+        assert_eq!(downsample(s.clone(), 0), s);
     }
 
     #[test]

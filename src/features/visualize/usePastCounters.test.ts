@@ -5,9 +5,15 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { usePastCounters, type CounterQuery } from './usePastCounters';
+import { MAX_POINTS, usePastCounters, type CounterQuery } from './usePastCounters';
 
-interface Call { counter: string; objType: string; stime: number; etime: number }
+interface Call {
+  counter: string;
+  objType: string;
+  stime: number;
+  etime: number;
+  maxPoints: number;
+}
 
 const api = vi.hoisted(() => ({
   calls: [] as Call[],
@@ -16,8 +22,14 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock('../xlog/api/scouterApi', () => ({
-  getPastCounter: (counter: string, objType: string, stime: number, etime: number) => {
-    api.calls.push({ counter, objType, stime, etime });
+  getPastCounter: (
+    counter: string,
+    objType: string,
+    stime: number,
+    etime: number,
+    maxPoints: number,
+  ) => {
+    api.calls.push({ counter, objType, stime, etime, maxPoints });
     return api.fail ? Promise.reject(new Error(api.fail)) : Promise.resolve(api.rows);
   },
 }));
@@ -59,6 +71,14 @@ describe('usePastCounters', () => {
     expect(api.calls[0]).toMatchObject({ stime: 1_000, etime: 2_000 });
   });
 
+  it('그릴 수 있는 만큼만 달라고 한다', async () => {
+    // 콜렉터는 2초 간격 원본을 준다. 6시간이면 오브젝트 하나에 10,800점인데
+    // 화면 폭은 2,000픽셀 남짓이라 그릴 자리가 없다 (실측: 2대·6시간에 약 1.1MB).
+    const { result } = mount(true, Q, RANGE, [11]);
+    await waitFor(() => expect(result.current.rows.length).toBe(2));
+    expect(api.calls.every(c => c.maxPoints === MAX_POINTS)).toBe(true);
+  });
+
   it('줄 순서는 물은 순서 그대로다', async () => {
     // 순서가 뒤바뀌면 화면의 줄과 이름이 어긋난다.
     const { result } = mount(true, Q, RANGE, [11]);
@@ -74,10 +94,21 @@ describe('usePastCounters', () => {
   });
 
   it('objType 을 모르는 줄은 묻지 않는다', async () => {
-    // 호스트 에이전트가 없는 곳에서는 CPU 를 물을 데가 없다.
+    // 호스트 에이전트가 없거나 안 골랐으면 물을 데가 없다.
+    // **받아 봐야 전부 걸러진다** — 100대짜리 환경에서 6시간치를 통째로 버리는 셈이다.
     const { result } = mount(true, [{ counter: 'Cpu', objType: '' }], RANGE, [11]);
     await waitFor(() => expect(result.current.rows.length).toBe(1));
     expect(api.calls).toEqual([]);
+    expect(result.current.rows[0].series).toEqual([]);
+    // «안 물었다» 와 «물었는데 없다» 는 화면에서 다른 말이 되어야 한다.
+    expect(result.current.rows[0].asked).toBe(false);
+  });
+
+  it('물어본 줄은 그렇다고 표시한다', async () => {
+    api.rows = [];
+    const { result } = mount(true, [{ counter: 'TPS', objType: 'tomcat' }], RANGE, [11]);
+    await waitFor(() => expect(result.current.rows.length).toBe(1));
+    expect(result.current.rows[0].asked).toBe(true);
     expect(result.current.rows[0].series).toEqual([]);
   });
 
@@ -114,6 +145,32 @@ describe('usePastCounters', () => {
     rerender();
     rerender();
     expect(api.calls.length).toBe(before);
+  });
+
+  it('서버를 더 고른다고 다시 묻지 않는다', async () => {
+    // 콜렉터는 objHash 목록을 안 받아 어차피 타입 전체를 준다 — 같은 구간이면
+    // 누구를 골랐든 응답이 같다. 다시 물으면 100대짜리 목록에서 400연결이 된다.
+    const { result, rerender } = renderHook(
+      ({ p }: { p: number[] }) => usePastCounters(true, Q, RANGE, new Set(p)),
+      { initialProps: { p: [11] } },
+    );
+    await waitFor(() => expect(result.current.rows.length).toBe(2));
+    const before = api.calls.length;
+
+    rerender({ p: [11, 22] });
+    await waitFor(() => expect(result.current.rows[0].series.length).toBe(2));
+    expect(api.calls.length).toBe(before);
+  });
+
+  it('고르기를 바꾸면 받아 둔 것에서 다시 거른다', async () => {
+    const { result, rerender } = renderHook(
+      ({ p }: { p: number[] }) => usePastCounters(true, Q, RANGE, new Set(p)),
+      { initialProps: { p: [11, 22] } },
+    );
+    await waitFor(() => expect(result.current.rows[0].series.length).toBe(2));
+
+    rerender({ p: [11] });
+    expect(result.current.rows[0].series.map(s => s.obj_hash)).toEqual([11]);
   });
 
   it('reload 하면 다시 묻는다', async () => {

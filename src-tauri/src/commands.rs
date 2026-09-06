@@ -25,8 +25,9 @@ use crate::scouter::object::{
 use crate::scouter::objtype::{
     build_active_service_param, build_objtype_param, build_past_date_counter_param,
     build_past_time_counter_param, build_service_group_param, build_today_counter_param,
-    is_complete, merge_series, parse_active_speed, parse_counter_series, parse_service_group,
-    split_by_day, ActiveSpeed, CounterSeries, ServiceGroupRow, TypeActiveServices,
+    downsample, is_complete, merge_series, parse_active_speed, parse_counter_series,
+    parse_service_group, split_by_day, ActiveSpeed, CounterSeries, ServiceGroupRow,
+    TypeActiveServices,
 };
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
 use crate::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
@@ -1481,6 +1482,8 @@ pub async fn get_today_counter(
 /// @param tz_offset_ms 화면이 있는 곳의 시간대(분 단위 오프셋 × 60,000).
 ///   **Rust 쪽에서 구하지 않는다** — 앱과 콜렉터가 다른 시간대에 있을 수 있고,
 ///   자정이 언제인지는 «보고 있는 사람» 기준이어야 한다.
+/// @param max_points 오브젝트당 넘길 점의 최대 수. 화면 폭보다 촘촘한 점은 그릴 자리가
+///   없고, 그대로 실어 나르면 페이로드만 커진다 (`downsample` 주석의 실측 참고).
 #[tauri::command]
 pub async fn get_past_counter(
     state: State<'_, AppState>,
@@ -1489,6 +1492,7 @@ pub async fn get_past_counter(
     stime: i64,
     etime: i64,
     tz_offset_ms: i64,
+    max_points: usize,
 ) -> Result<Vec<CounterSeries>, String> {
     let mut parts = Vec::new();
     for (s, e) in split_by_day(stime, etime, tz_offset_ms) {
@@ -1501,9 +1505,16 @@ pub async fn get_past_counter(
         parts.push(maps.iter().map(parse_counter_series).collect::<Vec<_>>());
     }
 
-    let series = merge_series(parts);
+    // **합친 뒤에 줄인다.** 조각마다 줄이면 조각 경계에서 버킷 크기가 달라져
+    // 자정 근처만 유독 성기게 그려진다.
+    let raw = merge_series(parts);
+    let before: usize = raw.iter().map(|s| s.times.len()).sum();
+    let series: Vec<CounterSeries> =
+        raw.into_iter().map(|s| downsample(s, max_points)).collect();
+    let after: usize = series.iter().map(|s| s.times.len()).sum();
+
     log::debug!(
-        "get_past_counter: {counter}/{obj_type} {stime}~{etime} → 오브젝트 {}개",
+        "get_past_counter: {counter}/{obj_type} {stime}~{etime} → 오브젝트 {}개 · 점 {before}→{after}",
         series.len()
     );
     Ok(series)

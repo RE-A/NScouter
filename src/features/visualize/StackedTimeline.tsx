@@ -7,7 +7,7 @@
 // **캔버스다.** 한 줄에 서버 수만큼 선이 겹치고 마우스를 따라 매 프레임 다시 그린다.
 // 자는 `timelineScale.ts` 에 있다 — 화면을 띄우지 않고도 확인할 수 있어야 하는 부분이다.
 
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { counterMeta } from '../xlog/types/counter';
 import { CANVAS, SERIES } from '../../styles/tokens';
 import { t } from '../../i18n';
@@ -52,19 +52,24 @@ export const StackedTimeline = memo(function StackedTimeline({
   const hoverRef = useRef<number | null>(null);
   const [height, setHeight] = useState(0);
 
-  // rAF 클로저에서 읽는다 — deps 에 넣어 루프를 다시 세우면 프레임이 한 번 끊긴다.
+  // 그리는 클로저에서 읽는다 — 그려야 할 때마다 함수를 새로 만들면
+  // 마우스 이벤트 핸들러도 매번 갈린다.
   const dataRef = useRef({ rows, range, agentMap });
   dataRef.current = { rows, range, agentMap };
 
   useEffect(() => setHeight(rows.length * ROW_H + AXIS_H), [rows.length]);
 
-  useEffect(() => {
-    let rafId: number;
-
-    const render = () => {
+  /**
+   * **바뀔 때만 그린다.**
+   *
+   * 예전에는 rAF 로 매 프레임 전부 다시 그렸다. 서버 2대·1시간만 해도 프레임당
+   * `lineTo` 가 14,400번이고, 100대면 80만번이다 — 아무것도 안 바뀌는 동안에도
+   * 초당 그만큼을 태운다. 바뀌는 것은 데이터(30초에 한 번)와 마우스뿐이다.
+   */
+  const draw = useCallback(() => {
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx) { rafId = requestAnimationFrame(render); return; }
+      if (!canvas || !ctx) return;
 
       const { rows: data, range: r, agentMap: names } = dataRef.current;
       const dpr = window.devicePixelRatio || 1;
@@ -127,9 +132,15 @@ export const StackedTimeline = memo(function StackedTimeline({
         ctx.fillText(`${formatKpi(max, max < 10 ? 1 : 0)}${meta.unit}`, 6, box.y + 26);
 
         if (row.series.length === 0) {
+          // **«안 물었다» 와 «물었는데 없다» 를 가른다.** 지표 줄의 타일과 같은 말을
+          // 써야 두 화면이 같은 상황을 두 가지로 설명하지 않는다.
           ctx.fillStyle = CANVAS.textDim;
           ctx.font = '10px sans-serif';
-          ctx.fillText(t('이 구간에 값이 없습니다'), plotX + 6, box.y + box.height / 2);
+          ctx.fillText(
+            row.asked ? t('이 구간에 값이 없습니다') : t('이 지표를 주는 서버를 안 골랐습니다'),
+            plotX + 6,
+            box.y + box.height / 2,
+          );
           return;
         }
 
@@ -203,12 +214,38 @@ export const StackedTimeline = memo(function StackedTimeline({
         }
       }
 
-      rafId = requestAnimationFrame(render);
-    };
-
-    rafId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(rafId);
   }, []);
+
+  /**
+   * 다음 프레임에 한 번만 그린다.
+   *
+   * 마우스는 프레임보다 잦게 움직인다 — 이벤트마다 바로 그리면 한 프레임 안에
+   * 같은 그림을 여러 번 그린다.
+   */
+  const rafRef = useRef(0);
+  const schedule = useCallback(() => {
+    if (rafRef.current !== 0) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      draw();
+    });
+  }, [draw]);
+
+  // 데이터가 바뀌면 다시 그린다.
+  useEffect(() => {
+    schedule();
+  }, [rows, range, agentMap, height, schedule]);
+
+  // 창 크기가 바뀌면 캔버스 폭이 달라진다. **다시 안 그리면 늘어난 자리가 빈 채로 남는다.**
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => schedule());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [schedule]);
+
+  useEffect(() => () => { if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current); }, []);
 
   return (
     <canvas
@@ -216,8 +253,9 @@ export const StackedTimeline = memo(function StackedTimeline({
       onMouseMove={e => {
         const rect = e.currentTarget.getBoundingClientRect();
         hoverRef.current = e.clientX - rect.left;
+        schedule();
       }}
-      onMouseLeave={() => { hoverRef.current = null; }}
+      onMouseLeave={() => { hoverRef.current = null; schedule(); }}
       style={{ display: 'block', width: '100%', height }}
     />
   );

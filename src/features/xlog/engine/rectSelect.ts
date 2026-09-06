@@ -55,6 +55,9 @@ export function passesFilter(
     if (!pass) return false;
   }
 
+  // **여기서 빈 집합은 «거를 것이 없다» 로 둔다.** 서버 고르기 쪽에서 빈 집합은
+  // «아직 안 골랐다» 지만(`agentFilter.ts`), 그때는 스트림이 돌지 않아 저장소가 비어
+  // 있고 화면도 «고르세요» 만 띄운다 — 여기까지 오는 점이 없다.
   if (filter.objHashSet.size > 0 && !filter.objHashSet.has(xlog.objHash)) return false;
 
   // 자리마다 값이 다르다. 서비스명은 해시를 풀어야 하고 IP 는 그대로 있다.

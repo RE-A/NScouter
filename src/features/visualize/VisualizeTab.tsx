@@ -111,18 +111,21 @@ export const VisualizeTab = memo(function VisualizeTab({
    * 답하는 질문이 없고, 여섯 줄이면 한 줄이 너무 납작해진다.
    */
   const queries = useMemo<CounterQuery[]>(() => {
-    const pick = (id: string) => KPI_DEFS.find(d => d.id === id);
+    // **고른 Family 만 묻는다.** objType 은 «붙어 있는 종류» 지 «고른 것» 이 아니다 —
+    // 호스트를 안 골랐는데 CPU 를 물으면 타입 전체를 받아 통째로 버린다.
+    const typeOf = (counter: CounterQuery['counter']): string => {
+      const family = counterFamily(counter);
+      if (family === 'host') return families.has('host') ? hostType : '';
+      return families.has('javaee') ? javaeeType : '';
+    };
     const rowsOf: CounterQuery[] = [];
     for (const id of ['tps', 'elapsed', 'error', 'cpu'] as const) {
-      const def = pick(id);
+      const def = KPI_DEFS.find(d => d.id === id);
       if (!def) continue;
-      rowsOf.push({
-        counter: def.counter,
-        objType: counterFamily(def.counter) === 'host' ? hostType : javaeeType,
-      });
+      rowsOf.push({ counter: def.counter, objType: typeOf(def.counter) });
     }
     return rowsOf;
-  }, [javaeeType, hostType]);
+  }, [javaeeType, hostType, families]);
 
   const past = usePastCounters(enabled, queries, range, picked);
 
@@ -132,9 +135,12 @@ export const VisualizeTab = memo(function VisualizeTab({
   // 단위가 다른 두 수를 나란히 적으면 74% 옆에 «어제 88» 이 붙는다.
   const yesterdayQueries = useMemo(
     () => queries.concat(
-      KPI_DEFS.filter(d => d.id === 'active').map(d => ({ counter: d.counter, objType: javaeeType })),
+      KPI_DEFS.filter(d => d.id === 'active').map(d => ({
+        counter: d.counter,
+        objType: families.has('javaee') ? javaeeType : '',
+      })),
     ),
-    [queries, javaeeType],
+    [queries, javaeeType, families],
   );
   const yesterdayRaw = useYesterday(enabled, yesterdayQueries);
 

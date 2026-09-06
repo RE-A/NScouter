@@ -351,18 +351,24 @@ export async function getActiveSpeedByObject(objType: string): Promise<ActiveSpe
  *
  * 대상은 **objType 하나**다. 콜렉터가 objHash 목록을 안 받으므로 타입 전체가 오고,
  * 고른 서버만 쓰는 것은 화면 몫이다.
+ *
+ * @param maxPoints 오브젝트당 받을 점의 최대 수. 콜렉터는 2초 간격 원본을 주는데
+ *   6시간이면 오브젝트 하나에 10,800점이고, 화면 폭은 2,000픽셀 남짓이라 **그릴 자리가
+ *   없다.** Rust 가 버킷 최댓값으로 줄여 보낸다.
  */
 export async function getPastCounter(
   counter: string,
   objType: string,
   stime: number,
   etime: number,
+  maxPoints: number,
 ): Promise<CounterSeries[]> {
   return invoke<CounterSeries[]>('get_past_counter', {
     counter,
     objType,
     stime,
     etime,
+    maxPoints,
     // **자정이 언제인지는 보고 있는 사람 기준이어야 한다.** 앱과 콜렉터가 다른
     // 시간대에 있을 수 있어 Rust 쪽에서 구하지 않는다.
     tzOffsetMs: -new Date().getTimezoneOffset() * 60_000,

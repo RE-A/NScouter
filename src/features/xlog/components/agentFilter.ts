@@ -67,6 +67,12 @@ export function prunePicked(
   selected: ReadonlySet<number>,
   alive: readonly number[],
 ): ReadonlySet<number> {
+  // **빈 목록으로는 지우지 않는다.** 콜렉터가 재시작 중이거나 에이전트가 한꺼번에
+  // 내려간 순간에 골라 둔 것을 지우면, 보고 있던 화면이 갑자기 «서버를 고르세요» 가
+  // 되고 다시 올라온 뒤에도 처음부터 골라야 한다.
+  // «하나도 없다» 는 선택을 버릴 만큼 믿을 만한 근거가 아니다.
+  if (alive.length === 0) return selected;
+
   const live = new Set(alive);
   const kept = new Set([...selected].filter(h => live.has(h)));
   return kept.size === selected.size ? selected : kept;
