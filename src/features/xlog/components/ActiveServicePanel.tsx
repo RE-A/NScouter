@@ -241,17 +241,26 @@ function SpeedBar({
  * 오늘 누적 곡선. 오브젝트를 합쳐 하나로 그린다 —
  * 여기서 알고 싶은 건 "오늘 얼마나 들어왔나"이지 서버별 분포가 아니다.
  */
-function TodaySpark({ series }: { series: { times: number[]; values: number[] }[] }) {
+function TodaySpark({ series }: { series: { times: number[]; values: (number | null)[] }[] }) {
   const W = 240;
   const H = 28;
 
   if (series.length === 0) return <div className="mt-2 h-7" />;
 
   // 시각이 같은 지점끼리 더한다. 길이가 다를 수 있으므로 가장 긴 것을 기준으로 둔다.
+  //
+  // **어느 오브젝트에도 값이 없는 슬롯은 null 이다.** 0 으로 두면 수집이 없던 시간대가
+  // 바닥에 붙어 «그때 아무도 안 왔다» 로 읽힌다 — 그건 에이전트가 없던 것과 다른 말이다.
   const len = Math.max(...series.map(s => s.values.length));
-  const summed = Array.from({ length: len }, (_, i) =>
-    series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0),
-  );
+  const summed = Array.from({ length: len }, (_, i) => {
+    let sum: number | null = null;
+    for (const s of series) {
+      const v = s.values[i];
+      if (v === null || v === undefined) continue;
+      sum = (sum ?? 0) + v;
+    }
+    return sum;
+  });
 
   const points = sparklinePoints(summed, W, H);
   if (points.length < 2) return <div className="mt-2 h-7" />;

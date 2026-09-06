@@ -120,6 +120,12 @@ describe('maxOf', () => {
   it('못 쓸 수는 세지 않는다', () => {
     expect(maxOf([{ values: [1, NaN, Infinity, 3] }])).toBe(3);
   });
+
+  it('null 은 세지 않는다', () => {
+    // null 은 «그 시각에 수집이 없었다» 다. 0 으로 세면 축이 엉뚱하게 낮아진다.
+    expect(maxOf([{ values: [null, 7, null] }])).toBe(7);
+    expect(maxOf([{ values: [null, null] }])).toBe(0);
+  });
 });
 
 describe('timeTicks', () => {

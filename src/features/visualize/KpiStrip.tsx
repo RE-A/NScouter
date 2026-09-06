@@ -6,7 +6,7 @@
 import { memo, useEffect, useState } from 'react';
 import { counterFamily } from '../xlog/types/counter';
 import { deriveStreamStatus } from '../xlog/utils/streamStatus';
-import { KPI_DEFS } from './kpi';
+import { KPI_DEFS, type KpiId } from './kpi';
 import { KpiTile } from './KpiTile';
 import type { ThresholdMap } from './threshold';
 import type { KpiSamples } from './useKpiSamples';
@@ -27,6 +27,8 @@ interface KpiStripProps {
    * 타일은 «값이 안 온다» 가 아니라 «안 골랐다» 라고 말해야 한다.
    */
   families: ReadonlySet<string>;
+  /** 지표별 «어제 이 시각» 값. 견줄 것이 없으면 빠져 있다 */
+  yesterday: ReadonlyMap<KpiId, number | null>;
 }
 
 export const KpiStrip = memo(function KpiStrip({
@@ -35,6 +37,7 @@ export const KpiStrip = memo(function KpiStrip({
   connected,
   thresholds,
   families,
+  yesterday,
 }: KpiStripProps) {
   // **값이 끊기면 이 컴포넌트도 다시 그려지지 않는다.** 그러면 «수신 없음» 이
   // 영영 안 뜬다 — 스트림이 멈춘 바로 그때 화면이 마지막 값을 정상인 척 붙들고 있게 된다.
@@ -64,6 +67,7 @@ export const KpiStrip = memo(function KpiStrip({
             samples={kpis[def.id].samples}
             threshold={thresholds[def.id]}
             available={families.has(counterFamily(def.counter) ?? '')}
+            yesterday={yesterday.get(def.id) ?? null}
           />
         ))}
       </div>

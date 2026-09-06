@@ -148,11 +148,16 @@ function draw(
     ctx.beginPath();
     ctx.strokeStyle = SERIES[i % SERIES.length];
     ctx.lineWidth = 1.5;
+    // **값이 없는 슬롯에서는 선을 끊는다.** 이어 버리면 수집이 없던 구간이
+    // «서서히 변했다» 로 그려진다.
+    let pen = false;
     s.times.forEach((t, j) => {
+      const v = s.values[j];
+      if (v === null || v === undefined) { pen = false; return; }
       const x = ((t - t0) / span) * w;
-      const y = usable - (s.values[j] / max) * usable + 4;
-      if (j === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      const y = usable - (v / max) * usable + 4;
+      if (pen) ctx.lineTo(x, y);
+      else { ctx.moveTo(x, y); pen = true; }
     });
     ctx.stroke();
   });

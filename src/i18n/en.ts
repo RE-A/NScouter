@@ -623,6 +623,7 @@ export const EN: Record<string, string> = {
   '3시간': '3 hours',
   '이 지표를 주는 서버를 안 골랐습니다': 'No server that reports this metric is picked',
   '미선택': 'not picked',
+  '어제': 'yesterday',
   '고른 서버 없음': 'No server picked',
   '대 선택 · 해제': ' picked · clear',
   '고른 서버를 모두 풉니다': 'Unpick every server',

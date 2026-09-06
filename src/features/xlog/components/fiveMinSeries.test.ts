@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasAnyValue, seriesMax, SLOT_MS, trimAll, trimFuture } from './fiveMinSeries';
+import { hasAnyValue, seriesMax, SLOT_MS, trimAll, trimFuture, type TrimmedSeries } from './fiveMinSeries';
 import type { CounterSeries } from '../api/scouterApi';
 
 /** 2026-08-22 00:00 KST */
@@ -76,5 +76,47 @@ describe('hasAnyValue', () => {
 
   it('하나라도 0이 아니면 true', () => {
     expect(hasAnyValue([{ obj_hash: 1, times: [], values: [0, 0.5] }])).toBe(true);
+  });
+});
+
+describe('값이 없는 슬롯 (null)', () => {
+  // 콜렉터는 하루 288칸을 늘 채워 보내고 **수집이 없던 시각은 null 로** 준다
+  // (실측: 288칸 중 값 있는 것 17칸). 0 으로 읽으면 «그때 0 이었다» 가 되는데,
+  // 그건 에이전트가 안 붙어 있던 것과 전혀 다른 말이다.
+  const s = (values: (number | null)[]): TrimmedSeries => ({
+    obj_hash: 11,
+    times: values.map((_, i) => i * SLOT_MS),
+    values,
+  });
+
+  it('축 상한을 셀 때 null 은 빼놓는다', () => {
+    expect(seriesMax([s([null, 7, null])])).toBe(7);
+  });
+
+  it('전부 null 이면 상한은 1 이다', () => {
+    // 0 으로 나누면 선이 NaN 이 되어 아무것도 안 그려진다.
+    expect(seriesMax([s([null, null])])).toBe(1);
+  });
+
+  it('null 뿐이면 «그릴 값이 있다» 가 아니다', () => {
+    expect(hasAnyValue([s([null, null])])).toBe(false);
+  });
+
+  it('null 사이에 값이 하나라도 있으면 그릴 값이 있다', () => {
+    expect(hasAnyValue([s([null, 3, null])])).toBe(true);
+  });
+
+  it('0 만 있는 것과 null 만 있는 것을 똑같이 «없음» 으로 본다', () => {
+    // 둘 다 그릴 것이 없다 — 다만 뜻이 다르므로 값 자체는 섞지 않는다.
+    expect(hasAnyValue([s([0, 0])])).toBe(false);
+  });
+
+  it('미래 슬롯을 자를 때 null 자리도 그대로 옮긴다', () => {
+    // 여기서 0 으로 메우면 없던 골짜기가 생긴다.
+    const trimmed = trimFuture(
+      { obj_hash: 11, times: [0, SLOT_MS, 2 * SLOT_MS], values: [1, null, 3] },
+      2 * SLOT_MS,
+    );
+    expect(trimmed.values).toEqual([1, null, 3]);
   });
 });

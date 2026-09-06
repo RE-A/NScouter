@@ -74,12 +74,12 @@ export function niceMax(value: number): number {
   return 10 * base;
 }
 
-/** 여러 시계열의 최댓값. 없으면 0 */
-export function maxOf(series: readonly { values: readonly number[] }[]): number {
+/** 여러 시계열의 최댓값. 없으면 0. `null`(그 시각 수집 없음)은 세지 않는다 */
+export function maxOf(series: readonly { values: readonly (number | null)[] }[]): number {
   let max = 0;
   for (const s of series) {
     for (const v of s.values) {
-      if (Number.isFinite(v) && v > max) max = v;
+      if (v !== null && Number.isFinite(v) && v > max) max = v;
     }
   }
   return max;

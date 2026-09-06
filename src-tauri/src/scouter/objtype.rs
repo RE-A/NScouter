@@ -51,7 +51,14 @@ pub struct CounterSeries {
     pub obj_hash: i32,
     /// epoch ms. `values` 와 길이가 같다
     pub times: Vec<i64>,
-    pub values: Vec<f32>,
+    /// **`None` 은 «그 시각에 값이 없다» 다. 0 이 아니다.**
+    ///
+    /// 5분 집계(`COUNTER_PAST_DATE_ALL`)는 하루 288칸을 늘 채워 보내고, 수집이 없던
+    /// 시각은 Null 로 온다(실측: 오늘 288칸 중 값 있는 것 17칸). 이걸 0 으로 바꾸면
+    /// «그때 0 TPS 였다» 가 되는데, 그건 에이전트가 안 붙어 있던 것과 전혀 다른 말이다.
+    ///
+    /// 구간 조회(`COUNTER_PAST_TIME_ALL`)는 Null 없이 2초 간격 실제 값만 온다(실측).
+    pub values: Vec<Option<f32>>,
 }
 
 /// objType 하나만 넣는 요청
@@ -188,13 +195,15 @@ pub fn parse_counter_series(map: &MapPack) -> CounterSeries {
         }
         _ => Vec::new(),
     };
-    let values: Vec<f32> = match map.entries.get("value") {
+    let values: Vec<Option<f32>> = match map.entries.get("value") {
         Some(ScouterValue::List(items)) => items
             .iter()
             .map(|v| match v {
-                ScouterValue::Float(f) => *f,
-                ScouterValue::Double(d) => *d as f32,
-                other => other.as_decimal().unwrap_or(0) as f32,
+                // **Null 을 0 으로 바꾸지 않는다.** 없는 것과 0 은 다른 말이다.
+                ScouterValue::Null => None,
+                ScouterValue::Float(f) => Some(*f),
+                ScouterValue::Double(d) => Some(*d as f32),
+                other => other.as_decimal().map(|d| d as f32),
             })
             .collect(),
         _ => Vec::new(),
@@ -266,18 +275,18 @@ mod tests {
 
     #[test]
     fn merge_joins_pieces_of_the_same_object() {
-        let a = CounterSeries { obj_hash: 11, times: vec![1, 2], values: vec![1.0, 2.0] };
-        let b = CounterSeries { obj_hash: 11, times: vec![3], values: vec![3.0] };
+        let a = CounterSeries { obj_hash: 11, times: vec![1, 2], values: vec![Some(1.0), Some(2.0)] };
+        let b = CounterSeries { obj_hash: 11, times: vec![3], values: vec![Some(3.0)] };
         let out = merge_series(vec![vec![a], vec![b]]);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].times, vec![1, 2, 3]);
-        assert_eq!(out[0].values, vec![1.0, 2.0, 3.0]);
+        assert_eq!(out[0].values, vec![Some(1.0), Some(2.0), Some(3.0)]);
     }
 
     #[test]
     fn merge_keeps_the_order_it_received() {
         // HashMap 순회 순서로 내보내면 같은 화면을 두 번 열 때 선 색이 뒤바뀐다.
-        let mk = |h: i32| CounterSeries { obj_hash: h, times: vec![1], values: vec![1.0] };
+        let mk = |h: i32| CounterSeries { obj_hash: h, times: vec![1], values: vec![Some(1.0)] };
         let out = merge_series(vec![vec![mk(22), mk(11), mk(33)]]);
         assert_eq!(out.iter().map(|s| s.obj_hash).collect::<Vec<_>>(), vec![22, 11, 33]);
     }
@@ -285,7 +294,7 @@ mod tests {
     #[test]
     fn merge_keeps_objects_that_appear_late() {
         // 새 서버가 구간 중간에 올라오면 뒷 조각에만 있다. 버리면 그 선이 통째로 사라진다.
-        let mk = |h: i32| CounterSeries { obj_hash: h, times: vec![1], values: vec![1.0] };
+        let mk = |h: i32| CounterSeries { obj_hash: h, times: vec![1], values: vec![Some(1.0)] };
         let out = merge_series(vec![vec![mk(11)], vec![mk(11), mk(22)]]);
         assert_eq!(out.len(), 2);
     }
@@ -375,8 +384,30 @@ mod tests {
         ]);
         let s = parse_counter_series(&m);
         assert_eq!(s.times, vec![1_000, 2_000]);
-        assert_eq!(s.values, vec![1.5, 2.5]);
+        assert_eq!(s.values, vec![Some(1.5), Some(2.5)]);
         assert_eq!(s.obj_hash, 16367847);
+    }
+
+    #[test]
+    fn counter_series_keeps_null_as_missing() {
+        // 5분 집계는 하루 288칸을 늘 채워 보내고 수집이 없던 시각은 Null 로 온다
+        // (실측: 오늘 288칸 중 값 있는 것 17칸). **0 으로 바꾸면 «그때 0 TPS 였다» 가 된다** —
+        // 에이전트가 안 붙어 있던 것과 전혀 다른 말이다.
+        let m = map(vec![
+            ("objHash", ScouterValue::Decimal(11)),
+            (
+                "time",
+                ScouterValue::List(vec![ScouterValue::Decimal(1_000), ScouterValue::Decimal(2_000)]),
+            ),
+            (
+                "value",
+                ScouterValue::List(vec![ScouterValue::Null, ScouterValue::Float(2.5)]),
+            ),
+        ]);
+        let s = parse_counter_series(&m);
+        assert_eq!(s.values, vec![None, Some(2.5)]);
+        // 자리는 지킨다 — 빼 버리면 시각과 값이 어긋난다.
+        assert_eq!(s.times.len(), s.values.len());
     }
 
     #[test]

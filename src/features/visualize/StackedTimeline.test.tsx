@@ -50,7 +50,7 @@ async function frame() {
   });
 }
 
-const series = (obj_hash: number, values: number[]) => ({
+const series = (obj_hash: number, values: (number | null)[]) => ({
   obj_hash,
   times: values.map((_, i) => RANGE.stime + i * 60_000),
   values,
@@ -120,5 +120,19 @@ describe('StackedTimeline', () => {
     const two = (container.querySelector('canvas') as HTMLCanvasElement).style.height;
 
     expect(parseInt(two, 10)).toBeGreaterThan(parseInt(one, 10));
+  });
+});
+
+describe('StackedTimeline — 값이 없는 자리', () => {
+  it('null 은 축 상한에 넣지 않는다', async () => {
+    // 없는 것을 0 으로 세면 축이 엉뚱하게 낮아진다.
+    const texts = await draw([{ counter: 'TPS', series: [series(11, [null, 23, null])] }]);
+    expect(texts).toContain('50tps');
+  });
+
+  it('값이 전부 없어도 줄은 그린다', async () => {
+    // 줄을 통째로 빼면 옆 줄과 시간축이 어긋난다.
+    const texts = await draw([{ counter: 'TPS', series: [series(11, [null, null])] }]);
+    expect(texts).toContain('TPS');
   });
 });

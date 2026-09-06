@@ -138,11 +138,16 @@ export const StackedTimeline = memo(function StackedTimeline({
           ctx.beginPath();
           ctx.strokeStyle = SERIES[si % SERIES.length];
           ctx.lineWidth = 1.3;
+          // **값이 없는 자리에서는 선을 끊는다.** 이어 버리면 «그 사이 서서히 변했다» 가
+          // 되는데, 실제로는 아무것도 모르는 구간이다.
+          let pen = false;
           for (let k = 0; k < s.times.length; k++) {
+            const v = s.values[k];
+            if (v === null) { pen = false; continue; }
             const x = timeToX(s.times[k], r, plotX, plotW);
-            const y = valueToY(s.values[k], max, box, ROW_PAD);
-            if (k === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+            const y = valueToY(v, max, box, ROW_PAD);
+            if (pen) ctx.lineTo(x, y);
+            else { ctx.moveTo(x, y); pen = true; }
           }
           ctx.stroke();
         });
@@ -157,6 +162,7 @@ export const StackedTimeline = memo(function StackedTimeline({
             const idx = nearestIndex(s.times, hoverT);
             if (idx < 0) continue;
             const name = (names.get(s.obj_hash) ?? String(s.obj_hash)).split('/').pop() ?? '';
+            // 값이 없는 자리는 «—» 다. 0 을 적으면 그 순간 멈춘 것으로 읽힌다.
             text += `${text ? '  ' : ''}${name} ${formatKpi(s.values[idx], max < 10 ? 2 : 0)}`;
           }
           if (text) {

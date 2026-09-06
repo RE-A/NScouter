@@ -112,6 +112,10 @@ export function barFillPct(total: number, max: number): number {
  * 아직 안 채워져 0으로 온다. 마지막 값만 보면 "오늘 0건" 이 되어 버린다.
  * ASIS 도 시간대별로 버킷을 더한다 (CounterTodayCountView).
  */
-export function todayTotal(series: readonly { values: number[] }[]): number {
-  return series.reduce((sum, s) => sum + s.values.reduce((a, v) => a + v, 0), 0);
+export function todayTotal(series: readonly { values: readonly (number | null)[] }[]): number {
+  // null 은 «그 시각에 수집이 없었다» 다. 더할 것이 없을 뿐이라 합계에는 영향이 없다.
+  return series.reduce(
+    (sum, s) => sum + s.values.reduce((a: number, v) => a + (v ?? 0), 0),
+    0,
+  );
 }

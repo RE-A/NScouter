@@ -26,6 +26,7 @@ function draw(
     lastReceivedAt?: number | null;
     thresholds?: ThresholdMap;
     families?: ReadonlySet<string>;
+    yesterday?: ReadonlyMap<KpiId, number | null>;
   } = {},
 ) {
   return render(
@@ -35,6 +36,7 @@ function draw(
       connected
       thresholds={opts.thresholds ?? DEFAULT_THRESHOLDS}
       families={opts.families ?? ALL_FAMILIES}
+      yesterday={opts.yesterday ?? new Map()}
     />,
   );
 }
@@ -140,5 +142,30 @@ describe('KpiStrip — 안 고른 Family', () => {
   it('고른 Family 의 타일은 그대로다', () => {
     draw({ tps: { value: 10, samples: [10] } }, { families: new Set(['javaee']) });
     expect(screen.getByTitle('TPS — 임계 없음')).toBeTruthy();
+  });
+});
+
+describe('KpiStrip — 어제 이 시각', () => {
+  it('어제 값을 값 아래에 적는다', () => {
+    // %가 아니라 값 자체를 적는다 — 기준이 눈에 보여야 «평소가 저 정도였구나» 를 읽는다.
+    draw({ tps: { value: 23, samples: [23] } }, { yesterday: new Map([['tps', 18.5]]) });
+    expect(screen.getByText('어제 18.5')).toBeTruthy();
+  });
+
+  it('지표마다 정해진 자릿수를 지킨다', () => {
+    draw({ elapsed: { value: 100, samples: [100] } }, { yesterday: new Map([['elapsed', 320.7]]) });
+    expect(screen.getByText('어제 321')).toBeTruthy();
+  });
+
+  it('견줄 것이 없으면 적지 않는다', () => {
+    // 0을 적으면 «어제는 놀았다» 로 읽힌다.
+    draw({ tps: { value: 23, samples: [23] } }, { yesterday: new Map([['tps', null]]) });
+    expect(screen.queryByText(/어제/)).toBeNull();
+  });
+
+  it('안 고른 Family 의 타일에는 적지 않는다', () => {
+    // 값 자리가 «—» 인데 어제 수만 붙어 있으면 무엇과 견주라는 것인지 알 수 없다.
+    draw({}, { families: new Set(['javaee']), yesterday: new Map([['cpu', 40]]) });
+    expect(screen.queryByText('어제 40.0')).toBeNull();
   });
 });

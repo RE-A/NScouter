@@ -16,11 +16,13 @@ import { KpiStrip } from './KpiStrip';
 import { StackedTimeline } from './StackedTimeline';
 import { ThresholdDialog } from './ThresholdDialog';
 import { buildRows } from './instanceRows';
-import { KPI_DEFS } from './kpi';
+import { KPI_DEFS, type KpiId } from './kpi';
 import { DEFAULT_THRESHOLDS, toThresholds, type ThresholdMap } from './threshold';
 import { useInstanceKpis } from './useInstanceKpis';
 import { useKpiSamples } from './useKpiSamples';
 import { usePastCounters, type CounterQuery } from './usePastCounters';
+import { useYesterday } from './useYesterday';
+import { sameTimeYesterday, yesterdayValue } from './yesterday';
 import { t } from '../../i18n';
 
 /**
@@ -124,6 +126,28 @@ export const VisualizeTab = memo(function VisualizeTab({
 
   const past = usePastCounters(enabled, queries, range, picked);
 
+  // ── 어제 이 시각 ────────────────────────────────────────
+  //
+  // **Heap 은 뺀다.** 어제 누적에는 상한이 없어 사용량(MB)만 오는데, 지금 값은 %다 —
+  // 단위가 다른 두 수를 나란히 적으면 74% 옆에 «어제 88» 이 붙는다.
+  const yesterdayQueries = useMemo(
+    () => queries.concat(
+      KPI_DEFS.filter(d => d.id === 'active').map(d => ({ counter: d.counter, objType: javaeeType })),
+    ),
+    [queries, javaeeType],
+  );
+  const yesterdayRaw = useYesterday(enabled, yesterdayQueries);
+
+  const yesterday = useMemo(() => {
+    const at = sameTimeYesterday(anchor);
+    const out = new Map<KpiId, number | null>();
+    for (const def of KPI_DEFS) {
+      const series = yesterdayRaw.get(def.counter);
+      out.set(def.id, series ? yesterdayValue(series, picked, def.counter, at) : null);
+    }
+    return out;
+  }, [yesterdayRaw, picked, anchor]);
+
   // 2초마다 오는 값으로 매번 줄을 세우면 칸이 수십 개일 때 정렬이 렌더마다 돈다.
   const rows = useMemo(
     () => buildRows({ samples, agentMap, javaeeHashes, thresholds }),
@@ -151,6 +175,7 @@ export const VisualizeTab = memo(function VisualizeTab({
         connected={enabled}
         thresholds={thresholds}
         families={families}
+        yesterday={yesterday}
       />
 
       {/* 줄이 «전체가 견디고 있나» 라면 격자는 «어느 대가 이상한가» 다.

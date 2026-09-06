@@ -322,7 +322,15 @@ export interface ActiveSpeed {
 export interface CounterSeries {
   obj_hash: number;
   times: number[];
-  values: number[];
+  /**
+   * **`null` 은 «그 시각에 값이 없다» 다. 0 이 아니다.**
+   *
+   * 5분 집계는 하루 288칸을 늘 채워 보내고 수집이 없던 시각은 null 로 온다
+   * (실측: 288칸 중 값 있는 것 17칸). 0 으로 읽으면 «그때 0 TPS 였다» 가 되는데,
+   * 그건 에이전트가 안 붙어 있던 것과 전혀 다른 말이다.
+   * 구간 조회(`getPastCounter`)는 null 없이 실제 값만 온다.
+   */
+  values: (number | null)[];
 }
 
 /** 타입 전체 합계 + TPS */

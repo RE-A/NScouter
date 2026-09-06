@@ -170,3 +170,36 @@ describe('barFillPct', () => {
     expect(barFillPct(200, 100)).toBe(100);
   });
 });
+
+describe('todayTotal — 값이 없는 슬롯', () => {
+  it('null 은 더할 것이 없을 뿐이다', () => {
+    // 콜렉터는 수집이 없던 시각을 null 로 준다. 합계에는 영향이 없어야 한다.
+    expect(todayTotal([{ values: [1, null, 2] }])).toBe(3);
+  });
+
+  it('전부 null 이면 0 이다', () => {
+    expect(todayTotal([{ values: [null, null] }])).toBe(0);
+  });
+});
+
+describe('sparklinePoints — 값이 없는 슬롯', () => {
+  it('null 자리에는 점을 만들지 않는다', () => {
+    // 0 으로 두면 없던 골짜기가 생긴다.
+    expect(sparklinePoints([10, null, 20], 100, 10).length).toBe(2);
+  });
+
+  it('x 는 자리(인덱스)로 잡는다', () => {
+    // 빼 버리고 다시 세면 시간축이 뭉개져 «언제쯤» 이 통째로 틀린다.
+    const pts = sparklinePoints([10, null, 20], 100, 10);
+    expect(pts[0].x).toBe(0);
+    expect(pts[1].x).toBe(100);
+  });
+
+  it('전부 null 이면 아무 점도 없다', () => {
+    expect(sparklinePoints([null, null], 100, 10)).toEqual([]);
+  });
+
+  it('값이 하나뿐이면 가운데 한 점이다', () => {
+    expect(sparklinePoints([null, 5, null], 100, 10)).toEqual([{ x: 0, y: 5 }]);
+  });
+});

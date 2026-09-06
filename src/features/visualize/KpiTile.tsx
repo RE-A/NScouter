@@ -41,6 +41,13 @@ interface KpiTileProps {
    * 줄표만 띄우면 **고장으로 읽힌다** — 안 고른 것과 안 오는 것은 다르다.
    */
   available: boolean;
+  /**
+   * 어제 이 시각의 값. 견줄 것이 없으면 null.
+   *
+   * **%가 아니라 값 자체를 적는다.** «▲30%» 는 무엇에서 30% 인지 말하지 않는다 —
+   * 기준이 눈에 보여야 «평소가 저 정도였구나» 를 같이 읽는다.
+   */
+  yesterday: number | null;
 }
 
 export const KpiTile = memo(function KpiTile({
@@ -49,6 +56,7 @@ export const KpiTile = memo(function KpiTile({
   samples,
   threshold,
   available,
+  yesterday,
 }: KpiTileProps) {
   const g = grade(value, threshold);
   const trend = formatTrend(trendPct(samples));
@@ -84,6 +92,13 @@ export const KpiTile = memo(function KpiTile({
           {formatKpi(value, def.digits)}
         </span>
         {def.unit && <span className="text-micro text-fg-dim">{def.unit}</span>}
+      </div>
+
+      {/* **자리는 늘 잡아 둔다.** 어제 것이 있는 타일만 높아지면 줄이 들쭉날쭉해진다 */}
+      <div className="h-3 truncate text-micro text-fg-faint">
+        {available && yesterday !== null
+          ? `${t('어제')} ${formatKpi(yesterday, def.digits)}`
+          : ''}
       </div>
 
       {/* 점이 둘 미만이면 선이 안 그려진다. 자리는 그대로 둔다 — 타일마다 높이가
