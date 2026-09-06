@@ -47,9 +47,9 @@ describe('setLang', () => {
 
 describe('사전', () => {
   it('영어 번역이 비어 있지 않다', () => {
-    // 조사·단위는 영어에서 사라진다 — '356건' 은 '356' 이다. 그 셋만 비울 수 있고
-    // 나머지가 비면 번역을 하다 만 것이다.
-    const DROPPED = ['건', '개', '가'];
+    // 조사·단위는 영어에서 사라진다 — '356건' 은 '356' 이고 '3대' 는 '3' 이다.
+    // 이 넷만 비울 수 있고 나머지가 비면 번역을 하다 만 것이다.
+    const DROPPED = ['건', '개', '가', '대'];
     const empty = Object.entries(EN).filter(([k, v]) => v.trim() === '' && !DROPPED.includes(k));
     expect(empty).toEqual([]);
   });

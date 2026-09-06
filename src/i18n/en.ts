@@ -610,6 +610,10 @@ export const EN: Record<string, string> = {
   '0 이상의 수를 넣어 주세요': 'Enter a number of 0 or more',
   '주의가 위험보다 클 수 없습니다': 'Warn cannot be greater than Danger',
   '켜 둔 지표 중 빈 칸이 있습니다': 'Some enabled metrics still have empty fields',
+  '서버별': 'By server',
+  '대': '',
+  '누르면 이 서버의 XLog 를 봅니다': 'Click to see this server’s XLog',
+  '아직 받은 지표가 없습니다.': 'No metrics received yet.',
   '기본값으로': 'Reset to defaults',
   // '저장'·'저장 중…'·'닫기' 는 위에 이미 있다. 같은 말을 두 번 적으면 사전이 갈린다.
   'config.json 의': 'Saved to',

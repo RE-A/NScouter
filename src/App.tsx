@@ -799,6 +799,18 @@ export default function App() {
   /** F5 — 값이 바뀌면 차트가 같은 구간을 다시 받는다 */
   const [refreshSignal, setRefreshSignal] = useState(0);
 
+  /**
+   * 격자에서 서버 한 대를 눌렀을 때.
+   *
+   * **조건을 갈아 끼운다.** 기존 조건에 더하면 «한 대만 보려고 눌렀는데 두 대가 나온다» 가
+   * 된다. 응답시간·에러 조건은 그대로 두는데, 그건 «무엇을 보려던 참인가» 라서
+   * 서버를 바꿔도 유지되는 편이 맞다.
+   */
+  const drillToXLog = useCallback((objHash: number) => {
+    setFilter(prev => ({ ...prev, objHashSet: new Set([objHash]) }));
+    setActiveTab('xlog');
+  }, []);
+
   useShortcuts({
     // Esc 는 **지금 보는 탭 하나만** 닫는다. 전부 닫으면 되돌릴 방법이 없다.
     'close-detail': detail.closeActive,
@@ -1148,7 +1160,9 @@ export default function App() {
             <VisualizeTab
               enabled={activeTab === 'visualize'}
               javaeeType={javaeeType}
+              javaeeHashes={counterHashes.javaee}
               agentMap={agentMap}
+              onDrill={drillToXLog}
             />
           ) : (
             <EmptyState text={t('연결 후 사용 가능합니다.')} />
