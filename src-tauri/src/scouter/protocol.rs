@@ -125,6 +125,9 @@ pub const CMD_REALTIME_SERVICE_GROUP: &str = "REALTIME_SERVICE_GROUP";
 pub const CMD_COUNTER_TODAY_ALL: &str = "COUNTER_TODAY_ALL";
 /// 지정 날짜 누적 카운터
 pub const CMD_COUNTER_PAST_DATE_ALL: &str = "COUNTER_PAST_DATE_ALL";
+/// **임의 구간** 카운터. `stime`/`etime`(ms) + `objType` + `counter`.
+/// 응답은 `COUNTER_TODAY_ALL` 과 같은 모양(오브젝트당 `objHash`/`time[]`/`value[]`)이다.
+pub const CMD_COUNTER_PAST_TIME_ALL: &str = "COUNTER_PAST_TIME_ALL";
 /// 오늘 방문자 수. **Pack 이 아니라 Value 하나가 온다** (F-32)
 pub const CMD_VISITOR_REALTIME_TOTAL: &str = "VISITOR_REALTIME_TOTAL";
 

@@ -335,6 +335,32 @@ export async function getActiveSpeedByObject(objType: string): Promise<ActiveSpe
   return invoke<ActiveSpeed[]>('get_active_speed_by_object', { objType });
 }
 
+/**
+ * 임의 구간의 카운터 시계열.
+ *
+ * **오늘 누적(`getTodayCounter`)으로는 «최근 1시간» 을 못 그린다** — 그건 자정부터
+ * 지금까지의 5분 버킷이라 한 시간만 떼어 보려면 288개를 받아 12개만 쓴다.
+ *
+ * 대상은 **objType 하나**다. 콜렉터가 objHash 목록을 안 받으므로 타입 전체가 오고,
+ * 고른 서버만 쓰는 것은 화면 몫이다.
+ */
+export async function getPastCounter(
+  counter: string,
+  objType: string,
+  stime: number,
+  etime: number,
+): Promise<CounterSeries[]> {
+  return invoke<CounterSeries[]>('get_past_counter', {
+    counter,
+    objType,
+    stime,
+    etime,
+    // **자정이 언제인지는 보고 있는 사람 기준이어야 한다.** 앱과 콜렉터가 다른
+    // 시간대에 있을 수 있어 Rust 쪽에서 구하지 않는다.
+    tzOffsetMs: -new Date().getTimezoneOffset() * 60_000,
+  });
+}
+
 /** 오늘 누적 카운터. date 를 주면 그날 것 */
 export async function getTodayCounter(
   counter: string,

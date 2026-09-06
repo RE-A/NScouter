@@ -828,6 +828,20 @@ export default function App() {
   /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
   const nothingPicked = filter.objHashSet.size === 0;
 
+  /**
+   * 고른 서버들이 속한 Family.
+   *
+   * 지표마다 주는 Family 가 정해져 있다 — CPU 는 host 만 준다. tomcat 만 골라 두면
+   * CPU 값이 영영 안 오는데, 그걸 «수집이 안 된다» 로 읽으면 엉뚱한 데를 뒤진다.
+   */
+  const pickedFamilies = useMemo(() => {
+    const out = new Set<string>();
+    if (shownHashes.javaee.length > 0) out.add('javaee');
+    if (shownHashes.host.length > 0) out.add('host');
+    if (shownHashes.datasource.length > 0) out.add('datasource');
+    return out;
+  }, [shownHashes]);
+
   /** Ctrl+F 로 옮겨 갈 자리 */
   const searchInputRef = useRef<HTMLInputElement>(null);
   /** F5 — 값이 바뀌면 차트가 같은 구간을 다시 받는다 */
@@ -1211,8 +1225,10 @@ export default function App() {
             <VisualizeTab
               enabled={activeTab === 'visualize'}
               javaeeType={javaeeType}
+              hostType={hostType}
               picked={filter.objHashSet}
               javaeeHashes={shownHashes.javaee}
+              families={pickedFamilies}
               agentMap={agentMap}
               onDrill={drillToXLog}
             />

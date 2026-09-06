@@ -34,6 +34,13 @@ interface KpiTileProps {
   /** 최근 표본. 스파크라인과 추세에 쓴다 */
   samples: readonly number[];
   threshold: Threshold | null;
+  /**
+   * 이 지표를 주는 서버를 골랐는가.
+   *
+   * CPU 는 host 오브젝트만 준다. tomcat 만 골라 두면 값이 영영 안 오는데,
+   * 줄표만 띄우면 **고장으로 읽힌다** — 안 고른 것과 안 오는 것은 다르다.
+   */
+  available: boolean;
 }
 
 export const KpiTile = memo(function KpiTile({
@@ -41,6 +48,7 @@ export const KpiTile = memo(function KpiTile({
   value,
   samples,
   threshold,
+  available,
 }: KpiTileProps) {
   const g = grade(value, threshold);
   const trend = formatTrend(trendPct(samples));
@@ -48,8 +56,9 @@ export const KpiTile = memo(function KpiTile({
 
   // 임계를 화면에 상설로 적으면 여섯 칸이 숫자 투성이가 된다. 다만 **어디에도 없으면
   // 노란색이 왜 노란지 알 수 없으므로** 마우스를 올렸을 때는 말해 준다.
-  const hint =
-    threshold === null
+  const hint = !available
+    ? t('이 지표를 주는 서버를 안 골랐습니다')
+    : threshold === null
       ? t('임계 없음')
       : `${t('주의')} ${formatKpi(threshold.warn, def.digits)} · ${t('위험')} ${formatKpi(threshold.danger, def.digits)}`;
 
@@ -65,7 +74,9 @@ export const KpiTile = memo(function KpiTile({
         <div className="flex-1" />
         {/* 오르내림에는 색을 쓰지 않는다 — TPS 가 오르는 것은 나쁜 일이 아니다.
             좋고 나쁨은 임계가 말한다. */}
-        {trend && <span className="shrink-0 text-micro text-fg-faint">{trend}</span>}
+        {available
+          ? trend && <span className="shrink-0 text-micro text-fg-faint">{trend}</span>
+          : <span className="shrink-0 text-micro text-fg-faint">{t('미선택')}</span>}
       </div>
 
       <div className={`flex items-baseline gap-1 ${TONE[g]}`}>

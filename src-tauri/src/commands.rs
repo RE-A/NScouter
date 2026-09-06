@@ -24,9 +24,9 @@ use crate::scouter::object::{
 };
 use crate::scouter::objtype::{
     build_active_service_param, build_objtype_param, build_past_date_counter_param,
-    build_service_group_param, build_today_counter_param, is_complete, parse_active_speed,
-    parse_counter_series, parse_service_group, ActiveSpeed, CounterSeries, ServiceGroupRow,
-    TypeActiveServices,
+    build_past_time_counter_param, build_service_group_param, build_today_counter_param,
+    is_complete, merge_series, parse_active_speed, parse_counter_series, parse_service_group,
+    split_by_day, ActiveSpeed, CounterSeries, ServiceGroupRow, TypeActiveServices,
 };
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
 use crate::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
@@ -1463,6 +1463,47 @@ pub async fn get_today_counter(
     let series: Vec<CounterSeries> = maps.iter().map(parse_counter_series).collect();
     log::debug!(
         "get_today_counter: {counter}/{obj_type} → 오브젝트 {}개",
+        series.len()
+    );
+    Ok(series)
+}
+
+/// 임의 구간의 카운터 시계열.
+///
+/// **오늘 누적(`COUNTER_TODAY_ALL`)으로는 «최근 1시간» 을 못 그린다** — 그건 자정부터
+/// 지금까지의 5분 버킷 288개라, 한 시간만 떼어 보려면 288개를 받아 12개만 쓴다.
+/// 이건 구간을 그대로 묻는다.
+///
+/// **대상은 objType 하나다.** 파라미터가 그렇게 생겼다(ASIS `CounterPastTimeAllView`) —
+/// 타입 전체가 오고, 고른 서버만 골라 쓰는 것은 화면 몫이다. 오브젝트마다
+/// `COUNTER_PAST_TIME` 을 부르면 F-1(연결당 명령 1개) 때문에 연결이 오브젝트 수만큼 열린다.
+///
+/// @param tz_offset_ms 화면이 있는 곳의 시간대(분 단위 오프셋 × 60,000).
+///   **Rust 쪽에서 구하지 않는다** — 앱과 콜렉터가 다른 시간대에 있을 수 있고,
+///   자정이 언제인지는 «보고 있는 사람» 기준이어야 한다.
+#[tauri::command]
+pub async fn get_past_counter(
+    state: State<'_, AppState>,
+    counter: String,
+    obj_type: String,
+    stime: i64,
+    etime: i64,
+    tz_offset_ms: i64,
+) -> Result<Vec<CounterSeries>, String> {
+    let mut parts = Vec::new();
+    for (s, e) in split_by_day(stime, etime, tz_offset_ms) {
+        let maps = request_objtype_maps(
+            &state,
+            CMD_COUNTER_PAST_TIME_ALL,
+            &build_past_time_counter_param(&counter, &obj_type, s, e),
+        )
+        .await?;
+        parts.push(maps.iter().map(parse_counter_series).collect::<Vec<_>>());
+    }
+
+    let series = merge_series(parts);
+    log::debug!(
+        "get_past_counter: {counter}/{obj_type} {stime}~{etime} → 오브젝트 {}개",
         series.len()
     );
     Ok(series)

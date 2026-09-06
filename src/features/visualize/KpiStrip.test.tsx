@@ -17,9 +17,16 @@ function samples(over: Partial<Record<KpiId, KpiSample>>): KpiSamples {
   return out;
 }
 
+/** 세 Family 를 다 고른 상태. 「안 고른 Family」 는 아래 절에서 따로 본다 */
+const ALL_FAMILIES: ReadonlySet<string> = new Set(['javaee', 'host', 'datasource']);
+
 function draw(
   over: Partial<Record<KpiId, KpiSample>>,
-  opts: { lastReceivedAt?: number | null; thresholds?: ThresholdMap } = {},
+  opts: {
+    lastReceivedAt?: number | null;
+    thresholds?: ThresholdMap;
+    families?: ReadonlySet<string>;
+  } = {},
 ) {
   return render(
     <KpiStrip
@@ -27,6 +34,7 @@ function draw(
       lastReceivedAt={opts.lastReceivedAt === undefined ? Date.now() : opts.lastReceivedAt}
       connected
       thresholds={opts.thresholds ?? DEFAULT_THRESHOLDS}
+      families={opts.families ?? ALL_FAMILIES}
     />,
   );
 }
@@ -113,5 +121,24 @@ describe('KpiStrip', () => {
     // **마지막 값을 정상인 척 붙들고 있으면 안 된다.**
     draw({ tps: { value: 10, samples: [10] } }, { lastReceivedAt: Date.now() - 30_000 });
     expect(screen.getByText(/수신 없음/)).toBeTruthy();
+  });
+});
+
+describe('KpiStrip — 안 고른 Family', () => {
+  it('그 지표를 주는 서버를 안 골랐다고 말한다', () => {
+    // CPU 는 host 만 준다. tomcat 만 골라 두면 값이 영영 안 오는데,
+    // 줄표만 띄우면 고장으로 읽힌다.
+    draw({}, { families: new Set(['javaee']) });
+    expect(screen.getByTitle('CPU — 이 지표를 주는 서버를 안 골랐습니다')).toBeTruthy();
+  });
+
+  it('그런 타일에는 «미선택» 을 적는다', () => {
+    draw({}, { families: new Set(['javaee']) });
+    expect(screen.getByText('미선택')).toBeTruthy();
+  });
+
+  it('고른 Family 의 타일은 그대로다', () => {
+    draw({ tps: { value: 10, samples: [10] } }, { families: new Set(['javaee']) });
+    expect(screen.getByTitle('TPS — 임계 없음')).toBeTruthy();
   });
 });

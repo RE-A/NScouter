@@ -68,6 +68,16 @@ export class FakeCanvasContext {
   drawImage(image: unknown, x: number, y: number): void {
     this.record('drawImage', image, x, y);
   }
+  clearRect(x: number, y: number, w: number, h: number): void {
+    this.record('clearRect', x, y, w, h);
+  }
+  /**
+   * 고해상도 화면 보정. **좌표를 실제로 바꾸지는 않는다** —
+   * 받아 적는 좌표는 CSS 픽셀이어야 «어디에 그렸나» 를 사람이 읽을 수 있다.
+   */
+  scale(x: number, y: number): void {
+    this.record('scale', x, y);
+  }
   measureText(text: string): TextMetrics {
     // 실제 글꼴 폭은 알 수 없다. **자릿수에 비례**하기만 하면 «글자 뒤에 이어 적기» 를 볼 수 있다.
     return { width: text.length * 6 } as TextMetrics;

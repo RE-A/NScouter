@@ -61,6 +61,7 @@ pub fn run() {
             start_xlog_stream,
             stop_xlog_stream,
             stop_counter_stream,
+            get_past_counter,
             resolve_texts,
             get_object_list,
             get_object_env,

@@ -76,6 +76,84 @@ pub fn build_past_date_counter_param(counter: &str, obj_type: &str, date: &str) 
     param
 }
 
+/// 임의 구간 카운터 요청 (`COUNTER_PAST_TIME_ALL`).
+///
+/// **`date` 가 아니라 `stime`/`etime` 이다.** 파라미터 이름과 순서는 ASIS
+/// `CounterPastTimeAllView.load()` 에서 그대로 옮겼다.
+/// 대상은 **objType 하나**다 — objHash 목록은 받지 않는다.
+pub fn build_past_time_counter_param(
+    counter: &str,
+    obj_type: &str,
+    stime: i64,
+    etime: i64,
+) -> MapPack {
+    let mut param = MapPack::new();
+    param.put("stime", ScouterValue::Decimal(stime));
+    param.put("etime", ScouterValue::Decimal(etime));
+    param.put("objType", ScouterValue::Text(obj_type.to_string()));
+    param.put("counter", ScouterValue::Text(counter.to_string()));
+    param
+}
+
+/// 하루(로컬 자정) 경계로 구간을 쪼갠다.
+///
+/// **콜렉터는 XLog 도 카운터도 날짜 디렉토리에 담는다.** ASIS 의 webapp 도 날짜를
+/// 넘는 요청을 일별로 나눠 순차 조회하고 합친다(05-webapp-service-layer.md).
+/// 한 번에 던지면 자정 이전 몫이 조용히 비는데, 그건 «그 시간에 트래픽이 없었다» 로 읽힌다.
+///
+/// **자정을 넘는 경우는 실측하지 못했다** — 테스트 환경에 어제 데이터가 없다.
+/// 하루 안 구간(조각 1개)은 실측했다.
+pub fn split_by_day(stime: i64, etime: i64, tz_offset_ms: i64) -> Vec<(i64, i64)> {
+    if etime <= stime {
+        return Vec::new();
+    }
+    const DAY: i64 = 86_400_000;
+    let mut out = Vec::new();
+    let mut cur = stime;
+    while cur < etime {
+        // 로컬 자정 = UTC 기준 하루 경계에서 시간대만큼 민 자리.
+        let local = cur + tz_offset_ms;
+        let next_local_midnight = (local / DAY + 1) * DAY;
+        let boundary = next_local_midnight - tz_offset_ms;
+        let end = boundary.min(etime);
+        out.push((cur, end));
+        cur = end;
+    }
+    out
+}
+
+/// 같은 오브젝트의 조각들을 하나로 잇는다.
+///
+/// 조각은 **시간순으로 들어와야 한다** — 뒤섞이면 선이 되돌아간다.
+/// `split_by_day` 가 시간순으로 주므로 그 순서대로 부르면 된다.
+pub fn merge_series(parts: Vec<Vec<CounterSeries>>) -> Vec<CounterSeries> {
+    let mut order: Vec<i32> = Vec::new();
+    let mut by_hash: std::collections::HashMap<i32, CounterSeries> =
+        std::collections::HashMap::new();
+
+    for part in parts {
+        for s in part {
+            match by_hash.get_mut(&s.obj_hash) {
+                Some(acc) => {
+                    acc.times.extend(s.times);
+                    acc.values.extend(s.values);
+                }
+                None => {
+                    order.push(s.obj_hash);
+                    by_hash.insert(s.obj_hash, s);
+                }
+            }
+        }
+    }
+
+    // **받은 순서를 지킨다.** HashMap 순회 순서로 내보내면 실행할 때마다
+    // 선 색이 뒤바뀌어, 같은 화면을 두 번 열면 다른 서버가 파란색이 된다.
+    order
+        .into_iter()
+        .filter_map(|h| by_hash.remove(&h))
+        .collect()
+}
+
 fn as_i32(map: &MapPack, key: &str) -> i32 {
     map.get_decimal(key).unwrap_or(0) as i32
 }
@@ -133,6 +211,84 @@ pub fn parse_counter_series(map: &MapPack) -> CounterSeries {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const KST: i64 = 9 * 3_600_000;
+
+    #[test]
+    fn past_time_param_uses_stime_etime() {
+        // ASIS CounterPastTimeAllView.load() 와 같은 네 칸이어야 한다.
+        let p = build_past_time_counter_param("TPS", "tomcat", 100, 200);
+        assert_eq!(p.get_decimal("stime"), Some(100));
+        assert_eq!(p.get_decimal("etime"), Some(200));
+        assert!(matches!(p.entries.get("objType"), Some(ScouterValue::Text(t)) if t == "tomcat"));
+        assert!(matches!(p.entries.get("counter"), Some(ScouterValue::Text(t)) if t == "TPS"));
+        // date 를 같이 넣으면 안 된다 — 커맨드가 다르다.
+        assert!(p.entries.get("date").is_none());
+    }
+
+    #[test]
+    fn split_keeps_one_piece_within_a_day() {
+        // 2026-09-06 10:00 ~ 12:00 KST
+        let s = 1_757_120_400_000;
+        let e = s + 2 * 3_600_000;
+        assert_eq!(split_by_day(s, e, KST), vec![(s, e)]);
+    }
+
+    #[test]
+    fn split_cuts_at_local_midnight() {
+        // 자정 30분 전에서 시작해 30분 뒤에 끝나면 두 조각이다.
+        const DAY: i64 = 86_400_000;
+        let midnight = (1_757_120_400_000 + KST) / DAY * DAY + DAY - KST;
+        let s = midnight - 1_800_000;
+        let e = midnight + 1_800_000;
+        assert_eq!(split_by_day(s, e, KST), vec![(s, midnight), (midnight, e)]);
+    }
+
+    #[test]
+    fn split_rejects_empty_range() {
+        // 요청을 던져 봐야 0건이다. 여기서 걸러 연결을 아낀다.
+        assert!(split_by_day(100, 100, KST).is_empty());
+        assert!(split_by_day(200, 100, KST).is_empty());
+    }
+
+    #[test]
+    fn split_covers_the_whole_range_without_gaps() {
+        // 조각 사이가 벌어지면 그 구간이 조용히 빈다.
+        let s = 1_757_000_000_000;
+        let e = s + 3 * 86_400_000 + 12_345;
+        let parts = split_by_day(s, e, KST);
+        assert_eq!(parts.first().unwrap().0, s);
+        assert_eq!(parts.last().unwrap().1, e);
+        for w in parts.windows(2) {
+            assert_eq!(w[0].1, w[1].0, "조각 사이가 벌어졌다");
+        }
+    }
+
+    #[test]
+    fn merge_joins_pieces_of_the_same_object() {
+        let a = CounterSeries { obj_hash: 11, times: vec![1, 2], values: vec![1.0, 2.0] };
+        let b = CounterSeries { obj_hash: 11, times: vec![3], values: vec![3.0] };
+        let out = merge_series(vec![vec![a], vec![b]]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].times, vec![1, 2, 3]);
+        assert_eq!(out[0].values, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn merge_keeps_the_order_it_received() {
+        // HashMap 순회 순서로 내보내면 같은 화면을 두 번 열 때 선 색이 뒤바뀐다.
+        let mk = |h: i32| CounterSeries { obj_hash: h, times: vec![1], values: vec![1.0] };
+        let out = merge_series(vec![vec![mk(22), mk(11), mk(33)]]);
+        assert_eq!(out.iter().map(|s| s.obj_hash).collect::<Vec<_>>(), vec![22, 11, 33]);
+    }
+
+    #[test]
+    fn merge_keeps_objects_that_appear_late() {
+        // 새 서버가 구간 중간에 올라오면 뒷 조각에만 있다. 버리면 그 선이 통째로 사라진다.
+        let mk = |h: i32| CounterSeries { obj_hash: h, times: vec![1], values: vec![1.0] };
+        let out = merge_series(vec![vec![mk(11)], vec![mk(11), mk(22)]]);
+        assert_eq!(out.len(), 2);
+    }
 
     fn map(pairs: Vec<(&str, ScouterValue)>) -> MapPack {
         let mut m = MapPack::new();

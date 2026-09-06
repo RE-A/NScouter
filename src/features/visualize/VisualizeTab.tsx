@@ -10,14 +10,31 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getConfig } from '../xlog/api/scouterApi';
 import { ActiveServicePanel } from '../xlog/components/ActiveServicePanel';
+import { counterFamily } from '../xlog/types/counter';
 import { InstanceGrid } from './InstanceGrid';
 import { KpiStrip } from './KpiStrip';
+import { StackedTimeline } from './StackedTimeline';
 import { ThresholdDialog } from './ThresholdDialog';
 import { buildRows } from './instanceRows';
+import { KPI_DEFS } from './kpi';
 import { DEFAULT_THRESHOLDS, toThresholds, type ThresholdMap } from './threshold';
 import { useInstanceKpis } from './useInstanceKpis';
 import { useKpiSamples } from './useKpiSamples';
+import { usePastCounters, type CounterQuery } from './usePastCounters';
 import { t } from '../../i18n';
+
+/**
+ * 타임라인이 담는 시간 폭.
+ *
+ * **하루를 넣지 않는다.** 이 화면이 답하는 질문은 «같은 순간에 무엇이 함께
+ * 움직였나» 라서, 한 점이 몇 분씩을 뭉개기 시작하면 «같은 순간» 이 사라진다.
+ * 그날 하루의 모양은 Counter 탭의 오늘 누적이 답한다.
+ */
+const SPANS: readonly { label: string; ms: number }[] = [
+  { label: '1시간', ms: 3_600_000 },
+  { label: '3시간', ms: 3 * 3_600_000 },
+  { label: '6시간', ms: 6 * 3_600_000 },
+];
 
 interface VisualizeTabProps {
   /** 접속돼 있고 이 탭을 보고 있는가 */
@@ -26,8 +43,12 @@ interface VisualizeTabProps {
   javaeeType: string;
   /** 지금 보기로 고른 오브젝트. 여기 없는 서버는 그리지 않는다 */
   picked: ReadonlySet<number>;
+  /** 호스트 오브젝트의 objType. 없으면 CPU 줄을 물을 데가 없다 */
+  hostType: string;
   /** 트랜잭션이 있는 오브젝트들. 격자에서 파고들 수 있는 칸을 가른다 */
   javaeeHashes: readonly number[];
+  /** 고른 서버들이 속한 Family. 안 고른 Family 의 지표는 «안 골랐다» 고 말한다 */
+  families: ReadonlySet<string>;
   agentMap: Map<number, string>;
   /** 이 서버의 트랜잭션을 보러 간다 (XLog 탭으로 데려가며 조건을 건다) */
   onDrill: (objHash: number) => void;
@@ -36,8 +57,10 @@ interface VisualizeTabProps {
 export const VisualizeTab = memo(function VisualizeTab({
   enabled,
   javaeeType,
+  hostType,
   picked,
   javaeeHashes,
+  families,
   agentMap,
   onDrill,
 }: VisualizeTabProps) {
@@ -58,6 +81,48 @@ export const VisualizeTab = memo(function VisualizeTab({
   }, []);
 
   const applyThresholds = useCallback((next: ThresholdMap) => setThresholds(next), []);
+
+  // ── 타임라인 ────────────────────────────────────────────
+  const [spanMs, setSpanMs] = useState(SPANS[0].ms);
+  /**
+   * 구간의 끝.
+   *
+   * **매 렌더 `Date.now()` 를 쓰면 안 된다.** 구간이 조금씩 달라져 조회가 끝없이 다시 나간다.
+   * 30초마다 한 번만 민다 — 그보다 촘촘히 밀 이유가 없다(한 점이 몇 초짜리다).
+   */
+  const [anchor, setAnchor] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(() => setAnchor(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [enabled]);
+
+  const range = useMemo(
+    () => ({ stime: anchor - spanMs, etime: anchor }),
+    [anchor, spanMs],
+  );
+
+  /**
+   * 무엇을 몇 줄로 쌓을지.
+   *
+   * KPI 여섯 중 **네 개**만 쌓는다 — 액티브는 «지금» 만 뜻이 있어 과거 곡선이
+   * 답하는 질문이 없고, 여섯 줄이면 한 줄이 너무 납작해진다.
+   */
+  const queries = useMemo<CounterQuery[]>(() => {
+    const pick = (id: string) => KPI_DEFS.find(d => d.id === id);
+    const rowsOf: CounterQuery[] = [];
+    for (const id of ['tps', 'elapsed', 'error', 'cpu'] as const) {
+      const def = pick(id);
+      if (!def) continue;
+      rowsOf.push({
+        counter: def.counter,
+        objType: counterFamily(def.counter) === 'host' ? hostType : javaeeType,
+      });
+    }
+    return rowsOf;
+  }, [javaeeType, hostType]);
+
+  const past = usePastCounters(enabled, queries, range, picked);
 
   // 2초마다 오는 값으로 매번 줄을 세우면 칸이 수십 개일 때 정렬이 렌더마다 돈다.
   const rows = useMemo(
@@ -85,6 +150,7 @@ export const VisualizeTab = memo(function VisualizeTab({
         lastReceivedAt={lastReceivedAt}
         connected={enabled}
         thresholds={thresholds}
+        families={families}
       />
 
       {/* 줄이 «전체가 견디고 있나» 라면 격자는 «어느 대가 이상한가» 다.
@@ -92,6 +158,42 @@ export const VisualizeTab = memo(function VisualizeTab({
       <div className="mt-3">
         <InstanceGrid rows={rows} onDrill={onDrill} />
       </div>
+
+      {/* 줄과 격자가 «지금» 이라면 이건 **«같은 순간에 무엇이 함께 움직였나»** 다.
+          Counter 탭의 차트 40장은 저마다 자기 x축이라 이 질문에 답하지 못한다. */}
+      <section className="mb-4">
+        <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
+          <h2 className="text-body font-medium text-fg">{t('같은 시간축')}</h2>
+          <span className="text-micro text-fg-faint">
+            {past.loading ? t('받는 중…') : t('마우스를 올리면 그 시각의 값을 봅니다')}
+          </span>
+          <div className="flex-1" />
+          <div className="flex gap-0.5">
+            {SPANS.map(s => (
+              <button
+                key={s.ms}
+                onClick={() => setSpanMs(s.ms)}
+                className={`rounded px-2 py-0.5 text-micro ${
+                  spanMs === s.ms ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
+                }`}
+              >
+                {t(s.label)}
+              </button>
+            ))}
+          </div>
+        </header>
+        {past.error ? (
+          <p className="px-1 py-3 text-small text-danger">{past.error}</p>
+        ) : past.rows.length === 0 ? (
+          <p className="px-1 py-3 text-small text-fg-faint">
+            {past.loading ? t('받는 중…') : t('이 구간에 값이 없습니다')}
+          </p>
+        ) : (
+          <div className="overflow-hidden rounded border border-line bg-surface">
+            <StackedTimeline rows={past.rows} range={range} agentMap={agentMap} />
+          </div>
+        )}
+      </section>
 
       {/* 지표가 «몇 이다» 라면 이건 «지금 무엇이 밀려 있나» 다.
           숫자가 커진 이유를 바로 옆에서 물을 수 있어야 한 화면이 된다. */}
