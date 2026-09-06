@@ -546,6 +546,8 @@ export interface AppConfig {
   xlog_filter?: XLogFilterPrefs;
   /** 카운터에서 그리기로 고른 서버 */
   counter_picks?: CounterPickPrefs;
+  /** Visualize 탭의 지표 임계값 */
+  kpi_thresholds?: KpiThresholdPrefs[];
   /** 갈아 가며 볼 서버들 */
   servers?: ServerProfile[];
   /** 마지막으로 고른 서버 이름 */
@@ -641,6 +643,20 @@ export interface CounterPickPrefs {
   javaee: number[];
   host: number[];
   datasource: number[];
+}
+
+/**
+ * Visualize 탭 지표 하나의 임계값. Rust `KpiThresholdPrefs` 와 짝이다.
+ *
+ * **줄 단위로 담는다.** 지표마다 칸을 두면 지표를 하나 더할 때 Rust 구조체까지 고쳐야 한다.
+ * `enabled` 가 false 면 색을 쓰지 않는다 — 줄을 빼는 것과 다르다(빠진 줄은 기본값이 산다).
+ */
+export interface KpiThresholdPrefs {
+  /** 'tps' · 'elapsed' · 'error' · 'active' · 'cpu' · 'heap' */
+  id: string;
+  warn: number;
+  danger: number;
+  enabled: boolean;
 }
 
 /** 서버가 한 번에 돌려주는 상한. **찾기 전에 물어본다** — 안 물어보고 단정하면 화면이 거짓말한다 */

@@ -70,6 +70,9 @@ pub struct AppConfig {
     /// 카운터에서 그리기로 고른 서버
     #[serde(default)]
     pub counter_picks: CounterPickPrefs,
+    /// Visualize 탭의 지표 임계값
+    #[serde(default)]
+    pub kpi_thresholds: Vec<KpiThresholdPrefs>,
     /// 이름 붙여 담아 둔 조회 조건들
     #[serde(default)]
     pub saved_filters: Vec<SavedFilterPrefs>,
@@ -227,6 +230,24 @@ pub struct CounterPickPrefs {
     pub datasource: Vec<i32>,
 }
 
+/// Visualize 탭 지표 하나의 임계값.
+///
+/// **줄 단위로 담는다.** 지표마다 칸을 두면 지표를 하나 더할 때 여기까지 고쳐야 한다.
+/// 값을 검증하지 않는 이유는 조회 조건과 같다 — 파일은 사람이 여는 곳이고,
+/// 실제 판정은 화면에서 다시 다듬는다(`threshold.toThresholds`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KpiThresholdPrefs {
+    /// `"tps"` · `"elapsed"` · `"error"` · `"active"` · `"cpu"` · `"heap"`
+    pub id: String,
+    /// 이 값 이상이면 주의
+    pub warn: f64,
+    /// 이 값 이상이면 위험
+    pub danger: f64,
+    /// false 면 색을 쓰지 않는다. **줄을 빼는 것과 다르다** — 빠진 줄은 기본값이 산다
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct XLogChartPrefs {
@@ -298,6 +319,9 @@ impl Default for AppConfig {
             last_server: String::new(),
             xlog_filter: XLogFilterPrefs::default(),
             counter_picks: CounterPickPrefs::default(),
+            // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)
+            // 여기서 같은 수를 한 벌 더 적으면 두 곳이 갈린다.
+            kpi_thresholds: Vec::new(),
             saved_filters: Vec::new(),
             open_details: Vec::new(),
         }

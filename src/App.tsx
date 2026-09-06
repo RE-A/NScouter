@@ -17,6 +17,7 @@ import { SummaryPanel } from './features/xlog/components/SummaryPanel';
 import { TopologyPanel } from './features/xlog/components/TopologyPanel';
 import { FiveMinCounterChart } from './features/xlog/components/FiveMinCounterChart';
 import { ServiceGroupPanel } from './features/xlog/components/ServiceGroupPanel';
+import { VisualizeTab } from './features/visualize/VisualizeTab';
 import { XLogSearchBar } from './features/xlog/components/XLogSearchBar';
 import { WideSearchDialog, type WideSearchValues } from './features/xlog/components/WideSearchDialog';
 import { SavedProfileDialog } from './features/xlog/components/SavedProfileDialog';
@@ -119,7 +120,7 @@ const C = {
   success: T.success, warn: T.warn, error: T.error,
 };
 
-type TabId = 'xlog' | 'counter' | 'alert';
+type TabId = 'xlog' | 'visualize' | 'counter' | 'alert';
 
 /** 열린 탭이 하나도 없을 때 상세 패널에 줄 빈 상태 */
 const EMPTY_DETAIL = {
@@ -814,6 +815,7 @@ export default function App() {
       });
     },
     'tab-xlog': () => setActiveTab('xlog'),
+    'tab-visualize': () => setActiveTab('visualize'),
     'tab-counter': () => setActiveTab('counter'),
     'tab-alert': () => setActiveTab('alert'),
     'open-settings': () => setShowSettings(true),
@@ -853,7 +855,7 @@ export default function App() {
 
         {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다 */}
         <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
-          {(['xlog', 'counter', 'alert'] as TabId[]).map(tab => {
+          {(['xlog', 'visualize', 'counter', 'alert'] as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
               <button
@@ -1134,6 +1136,23 @@ export default function App() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Visualize 탭 ── */}
+      {/* Counter 탭과 나눠 둔 이유는 VisualizeTab.tsx 머리말 참고 —
+          여기는 «지금 정상인가», 저기는 «무엇이 어떻게 변했나» 다. */}
+      {activeTab === 'visualize' && (
+        <div style={tabBodyStyle}>
+          {isConnected ? (
+            <VisualizeTab
+              enabled={activeTab === 'visualize'}
+              javaeeType={javaeeType}
+              agentMap={agentMap}
+            />
+          ) : (
+            <EmptyState text={t('연결 후 사용 가능합니다.')} />
+          )}
         </div>
       )}
 
@@ -1685,7 +1704,12 @@ function EmptyState({ text }: { text: string }) {
 
 // ─── 상수 ─────────────────────────────────────────────────────
 
-const TAB_LABELS: Record<TabId, string> = { xlog: 'XLog', counter: 'Counter', alert: 'Alert' };
+const TAB_LABELS: Record<TabId, string> = {
+  xlog: 'XLog',
+  visualize: 'Visualize',
+  counter: 'Counter',
+  alert: 'Alert',
+};
 
 // ─── 스타일 ────────────────────────────────────────────────────
 

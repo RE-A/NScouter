@@ -409,6 +409,7 @@ export const EN: Record<string, string> = {
   '보고 있는 상세 닫기': 'Close the transaction you are viewing',
   '프로파일 검색으로 이동': 'Jump to profile search',
   'XLog 탭': 'XLog tab',
+  'Visualize 탭': 'Visualize tab',
   'Counter 탭': 'Counter tab',
   'Alert 탭': 'Alert tab',
   '상세 탭 닫기': 'Close detail tab',
@@ -590,4 +591,28 @@ export const EN: Record<string, string> = {
   '서비스 목록 너비': 'Service list width',
   '상세 패널 너비': 'Detail panel width',
   '트랜잭션 목록 높이': 'Transaction list height',
+
+  // ── Visualize ─────────────────────────────────────────
+  // 지표 이름은 타일이 좁아 짧게 쓴다 — 카운터 표시명(Elapsed Time 등)과 다르다.
+  '응답시간': 'Elapsed',
+  '에러율': 'Errors',
+  '액티브': 'Active',
+  '지금': 'Now',
+  '2초마다 갱신': 'refreshes every 2s',
+  '임계값': 'Thresholds',
+  '지표 임계값': 'Metric thresholds',
+  '어떤 수부터 노랗고 빨간지 정합니다': 'Set where yellow and red begin',
+  '값이 주의 이상이면 노랑, 위험 이상이면 빨강으로 표시합니다. 끄면 색을 쓰지 않습니다 — 사이트마다 정상 범위가 달라 TPS·액티브는 기본이 꺼져 있습니다.':
+    'Values at or above Warn turn yellow, at or above Danger turn red. Turn a metric off to use no color — TPS and Active start off because a normal range differs from site to site.',
+  '주의': 'Warn',
+  '위험': 'Danger',
+  '임계 없음': 'No threshold',
+  '0 이상의 수를 넣어 주세요': 'Enter a number of 0 or more',
+  '주의가 위험보다 클 수 없습니다': 'Warn cannot be greater than Danger',
+  '켜 둔 지표 중 빈 칸이 있습니다': 'Some enabled metrics still have empty fields',
+  '기본값으로': 'Reset to defaults',
+  // '저장'·'저장 중…'·'닫기' 는 위에 이미 있다. 같은 말을 두 번 적으면 사전이 갈린다.
+  'config.json 의': 'Saved to',
+  '에 저장됩니다.': 'in config.json.',
+  '수신 대기 중…': 'Waiting for data…',
 };

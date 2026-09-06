@@ -22,6 +22,7 @@ export const SHORTCUT_LABEL: Record<ShortcutAction, string> = {
   'close-detail': '보고 있는 상세 닫기',
   'focus-search': '프로파일 검색으로 이동',
   'tab-xlog': 'XLog 탭',
+  'tab-visualize': 'Visualize 탭',
   'tab-counter': 'Counter 탭',
   'tab-alert': 'Alert 탭',
   'close-detail-tab': '상세 탭 닫기',

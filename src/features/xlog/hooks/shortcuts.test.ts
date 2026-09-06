@@ -11,13 +11,30 @@ const key = (over: Partial<KeyEventLike>): KeyEventLike => ({
   ...over,
 });
 
+/**
+ * 도움말에 적힌 표기(`'Ctrl+Shift+Tab'`)를 실제 키 이벤트로 되돌린다.
+ *
+ * 한 글자짜리는 소문자로 온다(`'F'` → `'f'`), `'Esc'` 는 브라우저에서 `'Escape'` 다.
+ */
+const pressed = (keys: string): KeyEventLike => {
+  const parts = keys.split('+');
+  const last = parts[parts.length - 1];
+  return key({
+    key: last === 'Esc' ? 'Escape' : last.length === 1 ? last.toLowerCase() : last,
+    ctrlKey: parts.includes('Ctrl'),
+    shiftKey: parts.includes('Shift'),
+  });
+};
+
 describe('matchShortcut', () => {
   it('제안한 조합을 전부 알아본다', () => {
     expect(matchShortcut(key({ key: 'Escape' }))).toBe('close-detail');
     expect(matchShortcut(key({ key: 'f', ctrlKey: true }))).toBe('focus-search');
+    // 숫자는 탭이 놓인 순서다 — 탭이 늘면 뒤가 밀린다.
     expect(matchShortcut(key({ key: '1', ctrlKey: true }))).toBe('tab-xlog');
-    expect(matchShortcut(key({ key: '2', ctrlKey: true }))).toBe('tab-counter');
-    expect(matchShortcut(key({ key: '3', ctrlKey: true }))).toBe('tab-alert');
+    expect(matchShortcut(key({ key: '2', ctrlKey: true }))).toBe('tab-visualize');
+    expect(matchShortcut(key({ key: '3', ctrlKey: true }))).toBe('tab-counter');
+    expect(matchShortcut(key({ key: '4', ctrlKey: true }))).toBe('tab-alert');
     expect(matchShortcut(key({ key: 'w', ctrlKey: true }))).toBe('close-detail-tab');
     expect(matchShortcut(key({ key: 'Tab', ctrlKey: true }))).toBe('cycle-detail-next');
     expect(matchShortcut(key({ key: 'Tab', ctrlKey: true, shiftKey: true }))).toBe(
@@ -72,25 +89,12 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key({ key: 'F1' }))).toBeNull();
   });
 
-  it('도움말 목록의 동작이 실제 판정과 어긋나지 않는다', () => {
-    // **두 벌이 되면 설정 창이 거짓말을 한다.** 목록에 적힌 동작이 전부 실제로 나오는지 본다.
-    const reachable = new Set(
-      [
-        matchShortcut(key({ key: 'Escape' })),
-        matchShortcut(key({ key: 'f', ctrlKey: true })),
-        matchShortcut(key({ key: '1', ctrlKey: true })),
-        matchShortcut(key({ key: '2', ctrlKey: true })),
-        matchShortcut(key({ key: '3', ctrlKey: true })),
-        matchShortcut(key({ key: 'w', ctrlKey: true })),
-        matchShortcut(key({ key: 'Tab', ctrlKey: true })),
-        matchShortcut(key({ key: 'Tab', ctrlKey: true, shiftKey: true })),
-        matchShortcut(key({ key: ',', ctrlKey: true })),
-        matchShortcut(key({ key: 'r', ctrlKey: true })),
-        matchShortcut(key({ key: 'F5' })),
-      ].filter(a => a !== null),
-    );
+  it('도움말에 적힌 조합을 누르면 적힌 동작이 나온다', () => {
+    // **두 벌이 되면 설정 창이 거짓말을 한다.** 조합을 손으로 다시 적지 않고
+    // 목록의 `keys` 를 그대로 눌러 본다 — 손으로 적으면 목록이 바뀔 때마다
+    // 여기를 같이 고쳐야 하고, 못 고치면 이 검사가 통과한 채로 어긋난다.
     for (const row of SHORTCUT_HELP) {
-      expect(reachable.has(row.action), `${row.keys} 는 실제로 나오지 않는다`).toBe(true);
+      expect(matchShortcut(pressed(row.keys)), `${row.keys} 가 어긋났다`).toBe(row.action);
     }
   });
 });
