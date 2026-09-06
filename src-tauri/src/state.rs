@@ -68,9 +68,28 @@ impl StreamTokens {
     }
 }
 
+/// 놀고 있는 조회용 연결을 몇 개까지 들고 있을지.
+///
+/// 동시에 도는 주기 조회는 액티브 서비스(2초)·서비스 그룹(10초)·토폴로지(15초)·
+/// 타임라인(30초, 카운터 4개) 정도다. 겹쳐도 서넛이라 이만큼이면 기다릴 일이 없고,
+/// 더 들고 있어 봐야 콜렉터 쪽 소켓만 잡아 둔다.
+const MAX_IDLE_QUERY_CONNS: usize = 4;
+
 pub struct AppState {
     /// TCP 연결 (None이면 미연결) - profile/dictionary 전용
     pub connection: Mutex<Option<ScouterConnection>>,
+    /**
+     * 조회용 연결 풀.
+     *
+     * **긴 조회가 짧은 폴링을 막지 않게 한다.** 예전에는 objType 조회가 전부
+     * `connection` 하나를 나눠 써서, 6시간짜리 카운터 조회(오브젝트 2대에 856ms,
+     * 100대면 그 몇 배) 동안 액티브 서비스 2초 폴링과 토폴로지가 통째로 멈췄다.
+     * 화면에는 «지금 이 순간» 이 몇 초씩 얼어붙은 채로 남는다.
+     *
+     * ASIS 도 같은 이유로 `TcpProxy` 풀을 쓴다.
+     * 비어 있으면 새로 붙는다 — 연결 하나가 곧 명령 하나이므로(F-1) 빌려 쓰고 돌려준다.
+     */
+    query_pool: Mutex<Vec<ScouterConnection>>,
     /// 텍스트 딕셔너리 캐시
     pub text_cache: Mutex<TextCache>,
     /// 스트림별 중지 토큰
@@ -98,6 +117,7 @@ impl AppState {
 
         Self {
             connection: Mutex::new(None),
+            query_pool: Mutex::new(Vec::new()),
             text_cache: Mutex::new(TextCache::new()),
             streams: StreamTokens::default(),
             log_level: Arc::new(AtomicU8::new(default_level)),
@@ -108,6 +128,49 @@ impl AppState {
             config: Mutex::new(config),
             config_path,
         }
+    }
+
+    /// 조회용 연결 하나를 빌린다. 놀고 있는 것이 없으면 새로 붙는다.
+    ///
+    /// **`connection` 을 잠그지 않는다** — 그게 이 풀을 두는 이유다.
+    /// 접속 여부만 그쪽에서 확인하고, 실제 요청은 빌린 연결로 보낸다.
+    pub async fn acquire_query_conn(&self) -> Result<ScouterConnection, String> {
+        if let Some(conn) = self.query_pool.lock().await.pop() {
+            return Ok(conn);
+        }
+
+        // 접속 정보는 스트림이 쓰는 것과 같다. 여기서 새로 붙는다.
+        let host = self.conn_host.lock().await.clone();
+        let port = *self.conn_port.lock().await;
+        let user = self.conn_user.lock().await.clone();
+        let pass = self.conn_pass.lock().await.clone();
+        if host.is_empty() {
+            return Err("연결되지 않음".to_string());
+        }
+
+        let mut conn = ScouterConnection::connect(&host, port)
+            .map_err(|e| format!("조회용 연결 실패: {e}"))?;
+        conn.login(&user, &pass)
+            .map_err(|e| format!("조회용 로그인 실패: {e}"))?;
+        Ok(conn)
+    }
+
+    /// 다 쓴 연결을 돌려준다.
+    ///
+    /// **오류가 난 연결은 돌려주지 말 것.** 응답을 끝까지 못 읽은 소켓에는 다음 응답의
+    /// 앞부분이 남아 있어, 다음 조회가 남의 답을 자기 것으로 읽는다.
+    pub async fn release_query_conn(&self, conn: ScouterConnection) {
+        let mut pool = self.query_pool.lock().await;
+        if pool.len() < MAX_IDLE_QUERY_CONNS {
+            pool.push(conn);
+        }
+    }
+
+    /// 풀을 비운다. 접속을 끊거나 서버를 갈아탈 때.
+    ///
+    /// 안 비우면 이전 서버로 붙은 연결이 남아, 새 서버를 보는 중에 옛 서버의 답이 온다.
+    pub async fn clear_query_pool(&self) {
+        self.query_pool.lock().await.clear();
     }
 
     /// 데이터 폴더 아래의 한 자리.

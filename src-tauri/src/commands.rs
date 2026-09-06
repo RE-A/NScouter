@@ -65,6 +65,9 @@ pub async fn connect_scouter(
 
     let server_id = conn.server_id.clone();
     *state.connection.lock().await = Some(conn);
+    // **서버를 갈아탈 때 옛 연결을 버린다.** 남겨 두면 새 서버를 보는 중에
+    // 이전 서버로 붙은 연결이 풀에서 나와 남의 답을 준다.
+    state.clear_query_pool().await;
 
     // 재연결용 파라미터 저장 (streaming 전용 connection 생성에 사용)
     *state.conn_host.lock().await = host.clone();
@@ -98,6 +101,9 @@ pub async fn disconnect_scouter(app: AppHandle, state: State<'_, AppState>) -> R
     log::info!("disconnect_scouter: 연결 종료");
     state.streams.stop_all().await;
     *state.connection.lock().await = None;
+    // **조회용 연결도 버린다.** 안 버리면 이전 서버로 붙은 연결이 풀에 남아,
+    // 다른 서버로 갈아탄 뒤에도 옛 서버의 답이 온다.
+    state.clear_query_pool().await;
     let _ = app.emit("scouter-disconnected", ());
     Ok(())
 }
@@ -1357,22 +1363,40 @@ async fn request_objtype_maps(
     cmd: &str,
     param: &MapPack,
 ) -> Result<Vec<MapPack>, String> {
-    let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
-
-    let session = conn.session;
-    conn.send_request(cmd, session, param)
-        .map_err(|e| format!("{cmd} 요청 실패: {e}"))?;
-
-    let mut out = Vec::new();
-    loop {
-        match conn.read_next_pack().map_err(|e| format!("{cmd} 수신 실패: {e}"))? {
-            Some(AnyPack::Map(m)) => out.push(m),
-            Some(_) => {}
-            None => break,
-        }
+    // **공용 연결을 잠그지 않는다.** 6시간짜리 카운터 조회가 몇 초씩 걸리는 동안
+    // 액티브 서비스 2초 폴링이 통째로 멈추던 자리다 (`AppState::query_pool`).
+    // 접속 여부만 확인하고 요청은 빌린 연결로 보낸다.
+    if state.connection.lock().await.is_none() {
+        return Err("연결되지 않음".to_string());
     }
-    Ok(out)
+
+    let mut conn = state.acquire_query_conn().await?;
+    let session = conn.session;
+
+    let result = (|| -> Result<Vec<MapPack>, String> {
+        conn.send_request(cmd, session, param)
+            .map_err(|e| format!("{cmd} 요청 실패: {e}"))?;
+
+        let mut out = Vec::new();
+        loop {
+            match conn.read_next_pack().map_err(|e| format!("{cmd} 수신 실패: {e}"))? {
+                Some(AnyPack::Map(m)) => out.push(m),
+                Some(_) => {}
+                None => break,
+            }
+        }
+        Ok(out)
+    })();
+
+    match result {
+        Ok(out) => {
+            state.release_query_conn(conn).await;
+            Ok(out)
+        }
+        // **돌려주지 않는다.** 응답을 끝까지 못 읽은 소켓에는 남은 조각이 있어,
+        // 다음 조회가 남의 답을 자기 것으로 읽는다.
+        Err(e) => Err(e),
+    }
 }
 
 /// 타입 전체의 액티브 서비스 합계와 TPS.
