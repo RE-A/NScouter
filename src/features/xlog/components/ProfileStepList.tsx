@@ -107,6 +107,15 @@ function StepRow({
   let detail: string | null = null;
   let elapsed = 0;
   let errorHash = 0;
+  /**
+   * 시간을 **재는** 스텝인가.
+   *
+   * `elapsed > 0` 으로 가르면 안 된다. 1ms 미만은 0 으로 오는데(에이전트가 ms 로 잰다),
+   * 그걸 빈칸으로 두면 «SQL 만 시간이 나오고 나머지 호출은 소요시간이 안 보인다» 가 된다 —
+   * 실제로 그렇게 읽혔다. 재지 않은 것(0 이 없는 것)과 재서 0 인 것은 다른 말이다.
+   * ASIS `ProfileText` 도 이 다섯 종은 언제나 `0 ms` 를 적는다.
+   */
+  let timed = true;
 
   switch (step.kind) {
     case 'Method':
@@ -128,6 +137,8 @@ function StepRow({
       break;
     case 'Message':
       label = step.message || (step.hash !== 0 ? text(step.hash) : '');
+      // 메시지는 «찍힌 순간» 만 있고 걸린 시간이라는 개념이 없다.
+      timed = false;
       break;
     case 'Socket':
       label = `${step.ipaddr}:${step.port}`;
@@ -228,7 +239,7 @@ function StepRow({
       {/* 시간축 위의 막대 + 소요 시간 */}
       <div className="flex flex-col items-end gap-0.5">
         <span className={`tnum font-mono text-micro ${durationTone(elapsed)}`}>
-          {elapsed > 0 ? `${elapsed}ms` : ''}
+          {timed ? `${elapsed.toLocaleString()}ms` : ''}
         </span>
         <div className="relative h-[3px] w-full rounded-full bg-line">
           <div

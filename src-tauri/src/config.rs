@@ -435,6 +435,49 @@ mod bind_default_tests {
     }
 
     #[test]
+    fn 서버_목록이_없는_예전_설정도_읽힌다() {
+        // 목록이 생기기 전에 저장된 config.json 이 그대로 남아 있다.
+        let old = r#"{"auto_connect":false,"last_host":"10.0.0.1"}"#;
+        let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
+        assert!(cfg.servers.is_empty());
+        assert_eq!(cfg.last_server, "");
+        // 예전 접속 정보는 살아 있어야 한다 — 화면이 이걸로 첫 프로필을 만든다.
+        assert_eq!(cfg.last_host.as_deref(), Some("10.0.0.1"));
+    }
+
+    #[test]
+    fn 서버의_비밀번호가_저장되고_그대로_읽힌다() {
+        // **이 왕복이 깨지면 갈아탈 때마다 비밀번호를 다시 묻는다.**
+        let cfg = AppConfig {
+            servers: vec![ServerProfile {
+                name: "운영".to_string(),
+                host: "10.0.0.1".to_string(),
+                port: 6100,
+                user: "admin".to_string(),
+                pass: "secret".to_string(),
+            }],
+            last_server: "운영".to_string(),
+            ..AppConfig::default()
+        };
+
+        let json = serde_json::to_string(&cfg).expect("직렬화 실패");
+        let back: AppConfig = serde_json::from_str(&json).expect("파싱 실패");
+        assert_eq!(back.servers.len(), 1);
+        assert_eq!(back.servers[0].pass, "secret");
+        assert_eq!(back.servers[0].name, "운영");
+        assert_eq!(back.last_server, "운영");
+    }
+
+    #[test]
+    fn 비밀번호를_안_담은_프로필도_읽힌다() {
+        // 빈 문자열이 «저장 안 함» 이다. 항목이 아예 없는 줄도 같은 뜻이어야 한다.
+        let saved = r#"{"servers":[{"host":"a","port":6100,"user":"u"}]}"#;
+        let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");
+        assert_eq!(cfg.servers[0].pass, "");
+        assert_eq!(cfg.servers[0].name, "");
+    }
+
+    #[test]
     fn 저장된_글자_배율은_유지된다() {
         let saved = r#"{"ui_font_scale":1.3}"#;
         let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");

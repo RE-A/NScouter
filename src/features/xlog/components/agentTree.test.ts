@@ -90,6 +90,30 @@ describe('groupAgents', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].type).toBe('(unknown)');
   });
+
+  it('종류로 거른다 — 그룹으로 묶어 놓아도 듣는다', () => {
+    // 묶기와 다른 축이다. «호스트별로 쌓되 WAS 만 본다» 가 실제로 하고 싶은 일이다.
+    const groups = groupAgents(list, '', 'group', new Set(['linux', 'datasource']));
+    const names = groups.flatMap(g => g.agents.map(a => a.obj_type));
+    expect(new Set(names)).toEqual(new Set(['linux', 'datasource']));
+  });
+
+  it('종류를 하나도 안 켜면 «거를 것이 없다» 다', () => {
+    // 서버 고르기의 빈 집합(«아직 안 골랐다»)과 반대다. 이건 보이는 것을 줄이는
+    // 찾기라서, 다 끄면 목록이 통째로 비는 편이 오히려 고장으로 읽힌다.
+    const all = groupAgents(list, '', 'type', new Set());
+    expect(all.reduce((n, g) => n + g.agents.length, 0)).toBe(list.length);
+  });
+
+  it('종류 거르기는 검색어와 함께 걸린다', () => {
+    const groups = groupAgents(list, 'cjfw', 'type', new Set(['CJFW']));
+    expect(groups.map(g => g.type)).toEqual(['CJFW']);
+  });
+
+  it('타입이 비어 온 오브젝트도 종류로 고를 수 있다', () => {
+    const groups = groupAgents([agent('/x/y', '')], '', 'type', new Set(['(unknown)']));
+    expect(groups).toHaveLength(1);
+  });
 });
 
 describe('groupNameOf', () => {

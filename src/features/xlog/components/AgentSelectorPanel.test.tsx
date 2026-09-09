@@ -100,3 +100,75 @@ describe('AgentSelectorPanel — 머리글', () => {
     expect(screen.getByText(/선택 · 해제/)).toBeTruthy();
   });
 });
+
+describe('AgentSelectorPanel — 종류 식별', () => {
+  it('그룹으로 묶으면 줄마다 종류를 적는다', async () => {
+    // 그룹(호스트)으로 묶으면 묶음 머리가 종류를 말해 주지 않는다. WAS 와
+    // 커넥션 풀이 한 호스트 아래 나란히 있는데 이름만으로는 가를 수 없다.
+    render(
+      <AgentSelectorPanel
+        isConnected
+        selectedHashes={new Set()}
+        onSelectionChange={() => {}}
+        groupBy="group"
+        onGroupByChange={() => {}}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText('shop-app')).toBeTruthy());
+    expect(screen.getAllByTitle(/오브젝트 종류 — tomcat/)).toHaveLength(2);
+    expect(screen.getAllByTitle(/오브젝트 종류 — linux/)).toHaveLength(1);
+  });
+
+  it('타입으로 묶으면 줄에 되풀이하지 않는다', async () => {
+    draw();
+    await waitFor(() => expect(groupBox('tomcat')).toBeTruthy());
+    // 묶음 머리가 이미 그 말을 하고 있다.
+    expect(screen.queryByTitle(/오브젝트 종류 —/)).toBeNull();
+  });
+
+  it('종류 칩으로 목록을 줄인다', async () => {
+    draw();
+    await waitFor(() => expect(groupBox('linux')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /^tomcat/ }));
+
+    await waitFor(() => expect(screen.queryByLabelText('linux')).toBeNull());
+    expect(groupBox('tomcat')).toBeTruthy();
+  });
+
+  it('칩을 도로 끄면 전부 돌아온다', async () => {
+    draw();
+    await waitFor(() => expect(groupBox('linux')).toBeTruthy());
+
+    const chip = screen.getByRole('button', { name: /^tomcat/ });
+    fireEvent.click(chip);
+    await waitFor(() => expect(screen.queryByLabelText('linux')).toBeNull());
+    fireEvent.click(chip);
+
+    // 다 끈 상태는 «아무것도 안 봄» 이 아니라 «거를 것이 없다» 다.
+    await waitFor(() => expect(groupBox('linux')).toBeTruthy());
+  });
+});
+
+describe('AgentSelectorPanel — 종류가 하나뿐이면', () => {
+  it('칩도 배지도 뜨지 않는다', async () => {
+    // 모든 줄에 `tomcat` 이 붙는 건 정보가 아니라 여백을 먹는 글자다.
+    vi.resetModules();
+    const only = agents.filter(a => a.obj_type === 'tomcat');
+    vi.doMock('../api/scouterApi', () => ({ getObjectList: () => Promise.resolve(only) }));
+    const { AgentSelectorPanel: Panel } = await import('./AgentSelectorPanel');
+
+    render(
+      <Panel
+        isConnected
+        selectedHashes={new Set()}
+        onSelectionChange={() => {}}
+        groupBy="group"
+        onGroupByChange={() => {}}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText('shop-app')).toBeTruthy());
+    expect(screen.queryByTitle(/오브젝트 종류 —/)).toBeNull();
+    expect(screen.queryByText('종류')).toBeNull();
+  });
+});

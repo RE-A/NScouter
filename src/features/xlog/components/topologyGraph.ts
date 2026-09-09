@@ -20,6 +20,13 @@ export interface GraphNode {
   /** 이 노드로 들어오거나 나간 호출 수 */
   calls: number;
   errors: number;
+  /**
+   * 이 노드에 걸린 소요 시간 합(ms). **평균은 화면에서 나눈다.**
+   *
+   * 호출 수만 있으면 «많이 불리는 곳» 밖에 못 찾는다. 지도에서 정작 찾고 싶은 것은
+   * «적게 불리는데 한 번이 비싼 곳» 이고, 그건 합계와 횟수가 같이 있어야 나온다.
+   */
+  elapsed: number;
 }
 
 export interface GraphEdge {
@@ -81,7 +88,7 @@ export function buildGraph(rows: readonly InteractionRow[], agentHashes: readonl
   const touch = (hash: number, layer: NodeLayer): GraphNode => {
     let n = nodeMap.get(hash);
     if (!n) {
-      n = { hash, layer, label: '', calls: 0, errors: 0 };
+      n = { hash, layer, label: '', calls: 0, errors: 0, elapsed: 0 };
       nodeMap.set(hash, n);
     }
     // **에이전트 판정이 언제나 이긴다.** 같은 노드가 부르기도 하고 불리기도 하는데,
@@ -95,8 +102,10 @@ export function buildGraph(rows: readonly InteractionRow[], agentHashes: readonl
     const to = touch(e.to, isAgent(e.to) ? 'agent' : 'resource');
     from.calls += e.count;
     from.errors += e.errors;
+    from.elapsed += e.elapsed;
     to.calls += e.count;
     to.errors += e.errors;
+    to.elapsed += e.elapsed;
   }
 
   // 층 순서대로, 층 안에서는 호출이 많은 것부터. 그래야 굵은 선이 위에 모인다.
@@ -122,4 +131,35 @@ export function edgeWidth(count: number, max: number): number {
 /** 에러가 섞인 간선은 눈에 띄어야 한다 */
 export function edgeTone(edge: GraphEdge): 'error' | 'normal' {
   return edge.errors > 0 ? 'error' : 'normal';
+}
+
+/**
+ * 한 번에 얼마나 걸렸나 (ms).
+ *
+ * **0 으로 나누지 않는다.** 호출 수가 0 인 노드는 화면에 있을 수 있고
+ * (양쪽 다 0 인 구간), Infinity 를 적으면 그 칸이 통째로 읽히지 않는다.
+ * 셀 것이 없으면 `null` 이다 — 0 을 적으면 «순식간에 끝났다» 로 읽힌다.
+ */
+export function avgElapsed(of: { calls?: number; count?: number; elapsed: number }): number | null {
+  const n = of.calls ?? of.count ?? 0;
+  return n > 0 ? Math.round(of.elapsed / n) : null;
+}
+
+/** 실패 비율 (0~1). 셀 것이 없으면 `null` */
+export function errorRate(of: { calls?: number; count?: number; errors: number }): number | null {
+  const n = of.calls ?? of.count ?? 0;
+  return n > 0 ? of.errors / n : null;
+}
+
+/**
+ * 간선의 등급.
+ *
+ * **실패가 느림을 이긴다.** 둘 다면 빨간 쪽이 급한 이야기다.
+ * 느림의 경계는 `durationTone` 과 같은 자(300ms · 1초)를 쓴다 —
+ * 화면마다 자가 다르면 주황색이 화면을 옮길 때마다 다른 뜻이 된다.
+ */
+export function edgeGrade(edge: GraphEdge): 'ok' | 'warn' | 'danger' {
+  if (edge.errors > 0) return 'danger';
+  const avg = avgElapsed(edge);
+  return avg !== null && avg >= 300 ? 'warn' : 'ok';
 }

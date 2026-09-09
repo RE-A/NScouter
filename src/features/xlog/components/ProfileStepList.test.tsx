@@ -119,3 +119,34 @@ describe('ProfileStepList — 쿼리 복사', () => {
     expect(await screen.findByText('복사됨')).toBeTruthy();
   });
 });
+
+describe('ProfileStepList — 소요 시간 표기', () => {
+  const base = { parent: -1, index: 0, start_time: 0, start_cpu: 0 };
+
+  it('SQL 이 아닌 호출도 0ms 를 적는다', () => {
+    // «SQL 말고 다른 호출은 소요시간이 안 나온다» 의 실체는 파싱이 아니라 표기였다.
+    // 에이전트는 ms 로 재므로 1ms 미만이 전부 0 으로 오는데, 0 을 빈칸으로 두면
+    // 시간을 잰 적이 없는 것처럼 읽힌다.
+    const steps: ProfileStep[] = [
+      { ...base, kind: 'Method', index: 0, hash: 1, elapsed: 0, cputime: 0 },
+      { ...base, kind: 'ApiCall', index: 1, hash: 2, elapsed: 0, error: 0, txid: '0', address: 'http://a/b' },
+      { ...base, kind: 'Socket', index: 2, ipaddr: '10.0.0.1', port: 5432, elapsed: 0, error: 0 },
+      { ...base, kind: 'ThreadCall', index: 3, hash: 3, elapsed: 0, threaded: false, txid: '0' },
+    ];
+
+    render(<ProfileStepList steps={steps} texts={{ 1: 'doWork', 2: 'api', 3: 'thr' }} totalElapsed={10} />);
+
+    expect(screen.getAllByText('0ms')).toHaveLength(4);
+  });
+
+  it('메시지 스텝에는 시간을 적지 않는다', () => {
+    // 걸린 시간이라는 개념이 없다. 0ms 라고 적으면 «순식간에 끝난 작업» 으로 읽힌다.
+    const steps: ProfileStep[] = [
+      { ...base, kind: 'Message', message: 'cache miss', hash: 0 },
+    ];
+    render(<ProfileStepList steps={steps} texts={{}} totalElapsed={10} />);
+
+    expect(screen.getByText('cache miss')).toBeTruthy();
+    expect(screen.queryByText('0ms')).toBeNull();
+  });
+});

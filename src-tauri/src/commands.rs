@@ -2,7 +2,7 @@
 // Tauri Command 정의
 // 참조: docs/plans/tauri-backend-scouter-client.md
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Emitter, State};
@@ -22,11 +22,12 @@ use crate::scouter::object::{
     parse_thread_detail, parse_thread_list, ActiveService, ThreadDetail,
     ClassListPage, DumpFile, EnvEntry, HeapHistoRow, SocketInfo, ThreadInfo,
 };
+use crate::scouter::distribution::{Accumulator, ElapsedDistribution};
 use crate::scouter::objtype::{
     build_active_service_param, build_objtype_param, build_past_date_counter_param,
     build_past_time_counter_param, build_service_group_param, build_today_counter_param,
     downsample, is_complete, merge_series, parse_active_speed, parse_counter_series,
-    parse_service_group, split_by_day, ActiveSpeed, CounterSeries, ServiceGroupRow,
+    date_key, parse_service_group, split_by_day, ActiveSpeed, CounterSeries, ServiceGroupRow,
     TypeActiveServices,
 };
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
@@ -538,6 +539,106 @@ pub async fn load_past_xlog(
         next.last_xlog_time
     );
     Ok(PastXLogPage { xlogs, cursor: next })
+}
+
+/// 분포를 셀 때 한 번에 받아 오는 페이지 크기.
+///
+/// 화면이 쓰는 500(`pastXLog.PAGE_COUNT`)보다 크게 잡는다. 저쪽은 페이지마다 점을
+/// 그려 줘야 해서 첫 응답이 빠른 편이 낫지만, 여기서는 **다 세기 전에는 보여줄 것이
+/// 없다** — 왕복 수를 줄이는 편이 낫다. 연결당 명령이 하나라(F-1) 왕복 하나가 곧
+/// TCP 연결 하나다.
+const DISTRIBUTION_PAGE_COUNT: i32 = 5_000;
+
+/// 분포를 세는 데 쓰는 트랜잭션 수의 상한.
+///
+/// 실측으로 10분이 13,000건이니 1시간이 8만 건 남짓이다. 6시간·서버 100대면
+/// 그 수십 배가 되는데, **분포를 그리는 데 그만큼이 필요하지는 않다.**
+/// 상한에 닿으면 `truncated` 로 말한다 — 조용히 적게 세면 «이 구간에 이만큼뿐» 이 된다.
+const DISTRIBUTION_MAX_ROWS: i64 = 200_000;
+
+/// 커서가 전진하지 않을 때를 대비한 빗장. `pastXLog.MAX_PAGES` 와 같은 이유다.
+const DISTRIBUTION_MAX_PAGES: u32 = 200;
+
+/// 구간의 응답시간 분포.
+///
+/// **콜렉터에는 분포를 주는 커맨드가 없다** — 트랜잭션을 직접 세는 수밖에 없다.
+/// 1시간이 실측 8만 건이라 그대로 웹뷰로 넘기면 CLAUDE.md 3.3 이 말하는 페이로드가
+/// 되므로, 여기서 페이지를 넘겨 가며 세고 **버킷과 숫자 몇 개만** 돌려준다
+/// (`scouter::distribution` 머리말).
+///
+/// 무거운 조회라 화면이 **사용자가 열었을 때만** 부른다.
+#[tauri::command]
+pub async fn get_xlog_distribution(
+    state: State<'_, AppState>,
+    obj_hashes: Vec<i32>,
+    stime: i64,
+    etime: i64,
+    tz_offset_ms: i64,
+) -> Result<ElapsedDistribution, String> {
+    let mut conn_guard = state.connection.lock().await;
+    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
+
+    let mut acc = Accumulator::new();
+    // 페이지 경계에서 같은 시각의 트랜잭션이 다시 온다 (F-28).
+    // **거르지 않으면 그 건들이 분포에서 두 번 세어진다.**
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut truncated = false;
+
+    'days: for (day_start, day_end) in split_by_day(stime, etime, tz_offset_ms) {
+        let date = date_key(day_start, tz_offset_ms);
+        let mut cursor = PastCursor::default();
+
+        for _ in 0..DISTRIBUTION_MAX_PAGES {
+            let param = build_past_xlog_param(
+                &obj_hashes,
+                &date,
+                day_start,
+                day_end,
+                DISTRIBUTION_PAGE_COUNT,
+                &cursor,
+            );
+            let session = conn.session;
+            conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param)
+                .map_err(|e| format!("분포 조회 요청 실패: {e}"))?;
+
+            let mut next = PastCursor::default();
+            let mut rows = 0u32;
+            loop {
+                match conn.read_next_pack().map_err(|e| format!("분포 조회 수신 실패: {e}"))? {
+                    Some(AnyPack::XLog(x)) => {
+                        rows += 1;
+                        if seen.insert(x.txid) {
+                            acc.add(x.elapsed, x.error != 0);
+                        }
+                    }
+                    Some(AnyPack::Map(m)) => next = parse_past_cursor(&m),
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+
+            if acc.count() >= DISTRIBUTION_MAX_ROWS {
+                truncated = true;
+                break 'days;
+            }
+            // 서버가 `hasMore` 를 계속 주면서 커서를 안 밀면 같은 페이지를 영원히 받는다.
+            if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
+                break;
+            }
+            cursor = next;
+        }
+    }
+
+    let out = acc.finish(truncated);
+    log::debug!(
+        "get_xlog_distribution: {}~{} → {}건 (p90={}ms, truncated={})",
+        stime,
+        etime,
+        out.total,
+        out.p90_ms,
+        out.truncated
+    );
+    Ok(out)
 }
 
 /// 넓은 구간 검색 결과.
@@ -1924,6 +2025,26 @@ pub async fn save_ui_state(
     cfg.ui_layout = layout;
     cfg.xlog_chart = chart;
     cfg.xlog_filter = filter;
+    cfg.save(&path)
+}
+
+/// 서버 목록만 갈아 끼운다.
+///
+/// **`save_ui_state` 와 같은 이유로 있다.** 화면에서 `get_config` → 고쳐서 →
+/// `save_config` 로 하면 그 사이에 끼어든 저장이 되돌려진다. 접속 한 번에
+/// 설정 파일을 쓰는 곳이 셋이라(자동 연결 저장 · `connect_scouter` 의 `last_*` ·
+/// 서버 목록) 그 사이가 실제로 벌어진다 — 방금 기억한 비밀번호가 옛 사본에
+/// 덮여 사라지면 **다음 전환에서 비밀번호를 다시 묻는다.**
+#[tauri::command]
+pub async fn save_servers(
+    servers: Vec<crate::config::ServerProfile>,
+    last_server: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let path = state.config_path.clone();
+    let mut cfg = state.config.lock().await;
+    cfg.servers = servers;
+    cfg.last_server = last_server;
     cfg.save(&path)
 }
 

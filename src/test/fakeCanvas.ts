@@ -20,6 +20,7 @@ export class FakeCanvasContext {
   fillStyle = '#000000';
   strokeStyle = '#000000';
   lineWidth = 1;
+  globalAlpha = 1;
   font = '10px sans-serif';
   textAlign = 'left';
   textBaseline = 'alphabetic';
@@ -46,6 +47,19 @@ export class FakeCanvasContext {
   }
   stroke(): void {
     this.record('stroke');
+  }
+  fill(): void {
+    this.record('fill');
+  }
+  /** 고해상도 보정. `scale` 과 같은 이유로 좌표를 바꾸지 않는다 */
+  setTransform(): void {
+    this.record('setTransform');
+  }
+  roundRect(x: number, y: number, w: number, h: number, r: number): void {
+    this.record('roundRect', x, y, w, h, r);
+  }
+  bezierCurveTo(x1: number, y1: number, x2: number, y2: number, x: number, y: number): void {
+    this.record('bezierCurveTo', x1, y1, x2, y2, x, y);
   }
   setLineDash(pattern: number[]): void {
     this.record('setLineDash', pattern);

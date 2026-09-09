@@ -34,6 +34,7 @@ import {
   displayName,
   fromLegacy,
   normalize,
+  rename,
   sameTarget,
   upsert,
 } from './features/xlog/components/serverProfiles';
@@ -60,6 +61,7 @@ import {
   searchXLogList,
   saveXLogProfile,
   saveConfig,
+  saveServers,
   startXLogStream,
   stopXLogStream,
 } from './features/xlog/api/scouterApi';
@@ -109,6 +111,7 @@ import {
   isTotalCapable,
 } from './features/xlog/types/counter';
 import { T, F, FONT_UI } from './styles/tokens';
+import { SectionHeader } from './components/SectionHeader';
 import { t, useT } from './i18n';
 import { useViewOptions } from './features/xlog/hooks/useViewOptions';
 
@@ -416,11 +419,17 @@ export default function App() {
   /** 비밀번호를 저장 안 한 서버를 골랐을 때, 접속 폼에 채워 줄 값 */
   const [prefill, setPrefill] = useState<ServerProfile | null>(null);
 
-  /** 목록을 config.json 에 남긴다. 화면에는 이미 반영된 뒤다 */
+  /**
+   * 목록을 config.json 에 남긴다. 화면에는 이미 반영된 뒤다.
+   *
+   * **설정 전체를 읽어 고쳐 쓰지 않는다.** 접속 한 번에 설정 파일을 쓰는 곳이 셋이라
+   * (자동 연결 저장 · Rust 의 `last_*` 저장 · 이 목록) 그 사이가 실제로 벌어진다 —
+   * 옛 사본이 덮으면 방금 기억한 비밀번호가 사라지고, 그러면 다음 전환에서
+   * 비밀번호를 다시 묻는다. 병합은 Rust 가 한다 (`saveServers`).
+   */
   const persistServers = useCallback(async (list: ServerProfile[], last: string) => {
     try {
-      const cfg = await getConfig();
-      await saveConfig({ ...cfg, servers: list, last_server: last });
+      await saveServers(list, last);
     } catch {
       // 목록 저장 실패가 접속을 막을 이유는 없다. 이번 세션에서는 그대로 쓴다.
     }
@@ -462,7 +471,13 @@ export default function App() {
       switchToServer(profile)
         .then(hashes => {
           setCurrentServer(label);
-          void persistServers(servers, label);
+          // **콜백이 잡아 둔 `servers` 를 쓰면 안 된다.** 방금 `rememberServer` 가
+          // 목록을 갈아 끼웠다면 그 사본은 이미 옛것이고, 그대로 저장하면
+          // 기억해 둔 비밀번호가 되돌아간다. 최신 목록을 setState 안에서 집는다.
+          setServers(prev => {
+            void persistServers(prev, label);
+            return prev;
+          });
           handleConnected('scouter', hashes);
         })
         .catch(() => {
@@ -472,7 +487,29 @@ export default function App() {
         })
         .finally(() => setSwitching(false));
     },
-    [servers, persistServers, handleConnected],
+    [persistServers, handleConnected],
+  );
+
+  /**
+   * 서버에 이름을 붙인다.
+   *
+   * `10.89.2.18:6100` 셋이 늘어선 목록에서 운영과 QA 를 가르는 유일한 단서다.
+   * **이름이 곧 식별자라서**(`displayName`) 지금 붙어 있는 서버의 이름을 바꾸면
+   * 헤더가 가리키는 이름도 같이 옮겨야 한다 — 안 그러면 «어디에 붙어 있는지»가
+   * 목록에 없는 이름을 가리킨다.
+   */
+  const renameServer = useCallback(
+    (profile: ServerProfile, name: string) => {
+      setServers(prev => {
+        const next = rename(prev, profile, name);
+        const before = displayName(profile);
+        const after = displayName(next.find(x => sameTarget(x, profile)) ?? profile);
+        setCurrentServer(cur => (cur === before ? after : cur));
+        void persistServers(next, after);
+        return next;
+      });
+    },
+    [persistServers],
   );
 
   const removeServer = useCallback(
@@ -942,6 +979,7 @@ export default function App() {
             busy={switching}
             onSwitch={switchServer}
             onRemove={removeServer}
+            onRename={renameServer}
           />
           <ConnectionDialog
             isConnected={isConnected}
@@ -1260,6 +1298,7 @@ export default function App() {
                 objType={javaeeType}
                 agentMap={agentMap}
                 enabled={activeTab === 'counter' && javaeeType !== ''}
+                onDrill={drillToXLog}
               />
               {/* 카운터가 "서버가 견디는가"라면 이건 "무엇이 들어오는가"다.
                   objType 이 아니라 objHash 목록으로 묻는다 (F-44). */}
@@ -1430,26 +1469,28 @@ function CounterSection({
 
   return (
     <section className="mb-4 last:mb-0">
-      <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">{title}</h2>
-        <span className="text-micro text-fg-faint">{subtitle}</span>
-        <div className="flex-1" />
-        {!empty && counters.some(isTotalCapable) && (
-          <div className="flex gap-0.5">
-            {([false, true] as const).map(v => (
-              <button
-                key={String(v)}
-                onClick={() => setTotal(v)}
-                className={`rounded px-2 py-0.5 text-micro ${
-                  total === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
-                }`}
-              >
-                {v ? t('합계') : t('개별')}
-              </button>
-            ))}
-          </div>
-        )}
-      </header>
+      <SectionHeader
+        title={title}
+        subtitle={subtitle}
+        action={
+          !empty && counters.some(isTotalCapable) ? (
+            <div className="flex gap-0.5">
+              {([false, true] as const).map(v => (
+                <button
+                  key={String(v)}
+                  onClick={() => setTotal(v)}
+                  aria-pressed={total === v}
+                  className={`rounded px-2 py-0.5 text-micro ${
+                    total === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
+                  }`}
+                >
+                  {v ? t('합계') : t('개별')}
+                </button>
+              ))}
+            </div>
+          ) : undefined
+        }
+      />
       {empty ? (
         <p className="px-1 py-4 text-small text-fg-faint">{empty}</p>
       ) : (

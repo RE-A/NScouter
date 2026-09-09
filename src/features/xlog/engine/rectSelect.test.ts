@@ -84,6 +84,35 @@ describe('selectInRect', () => {
     expect(selectInRect([old], WHOLE_PLOT, mapper, DEFAULT_FILTER)).toEqual([]);
   });
 
+  it('축 위로 넘친 트랜잭션은 천장에 찍히므로 천장을 끌면 잡힌다', () => {
+    // 렌더러는 yMax(9초)보다 큰 값을 천장에 붙여 그린다. 선택이 원래 값으로
+    // 자리를 잡으면 그림 밖으로 판정돼, **화면에 보이는 점이 안 잡혔다.**
+    const over = xlog({ endTime: now - 30_000, elapsed: 30_000 });
+    const ceiling = mapper.valueToY(config.yMax);
+    const rect = {
+      x1: layout.plotAreaX,
+      y1: ceiling,
+      x2: layout.plotAreaX + layout.plotAreaWidth,
+      y2: ceiling + 20,
+    };
+    expect(selectInRect([over], rect, mapper, DEFAULT_FILTER).map(x => x.txid)).toEqual([
+      over.txid,
+    ]);
+  });
+
+  it('넘친 트랜잭션이 섞여도 천장 아래를 끌면 안 딸려온다', () => {
+    // 천장에 붙였다고 «어디를 끌어도 잡힌다» 가 되면 안 된다.
+    const over = xlog({ endTime: now - 30_000, elapsed: 30_000 });
+    const bottom = mapper.valueToY(0);
+    const rect = {
+      x1: layout.plotAreaX,
+      y1: bottom - 20,
+      x2: layout.plotAreaX + layout.plotAreaWidth,
+      y2: bottom,
+    };
+    expect(selectInRect([over], rect, mapper, DEFAULT_FILTER)).toEqual([]);
+  });
+
   it('원본 순서를 유지한다', () => {
     const rows = [
       xlog({ endTime: now - 40_000, elapsed: 500 }),

@@ -20,6 +20,7 @@
 // 그때도 그룹 쪽이 한 겹 더 잘게 나눈다.
 
 import type { AgentObject } from '../types/xlog';
+import { UNKNOWN_TYPE } from './objectTypes';
 
 /** 무엇으로 묶을 것인가 */
 export type GroupBy = 'type' | 'group';
@@ -50,6 +51,21 @@ function matches(agent: AgentObject, needle: string): boolean {
     agent.obj_name.toLowerCase().includes(needle) ||
     agent.obj_type.toLowerCase().includes(needle)
   );
+}
+
+/**
+ * 종류로 거른다.
+ *
+ * **여기서 빈 집합은 «거를 것이 없다» 다.** 서버 고르기(`agentFilter.ts`)의 빈 집합은
+ * «아직 안 골랐다» 지만, 이건 보이는 것을 줄이는 **찾기**지 무엇을 볼지 고르는 게
+ * 아니다 — 종류 칩을 다 끄면 목록이 통째로 비는 편이 오히려 «고장» 으로 읽힌다.
+ *
+ * `undefined` 도 같다. 종류가 한 가지뿐인 환경에서는 칩 자체를 안 띄우므로
+ * 패널이 이 인자를 아예 넘기지 않는다.
+ */
+function matchesType(agent: AgentObject, types?: ReadonlySet<string>): boolean {
+  if (!types || types.size === 0) return true;
+  return types.has(agent.obj_type || UNKNOWN_TYPE);
 }
 
 /**
@@ -87,13 +103,15 @@ export function groupAgents(
   agents: readonly AgentObject[],
   query: string,
   by: GroupBy = 'type',
+  types?: ReadonlySet<string>,
 ): AgentGroup[] {
   const needle = query.trim().toLowerCase();
   const buckets = new Map<string, AgentObject[]>();
 
   for (const a of agents) {
     if (!matches(a, needle)) continue;
-    const key = by === 'group' ? groupNameOf(a.obj_name) : a.obj_type || '(unknown)';
+    if (!matchesType(a, types)) continue;
+    const key = by === 'group' ? groupNameOf(a.obj_name) : a.obj_type || UNKNOWN_TYPE;
     const list = buckets.get(key);
     if (list) list.push(a);
     else buckets.set(key, [a]);

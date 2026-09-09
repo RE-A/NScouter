@@ -129,6 +129,39 @@ pub fn split_by_day(stime: i64, etime: i64, tz_offset_ms: i64) -> Vec<(i64, i64)
     out
 }
 
+/// 콜렉터의 **날짜 디렉토리 키**(`yyyymmdd`).
+///
+/// XLog 조회는 이 키를 파라미터로 받는다. 틀리면 에러가 아니라 **조용히 0건**이다 —
+/// 이 프로토콜의 실패 방식이다(F-15). 화면 쪽은 `timeRange.yyyymmdd` 가 같은 일을 한다.
+///
+/// **자정이 언제인지는 보는 사람 기준**이므로 시간대를 받아 민다 (F-18).
+/// 시간대를 Rust 에서 구하지 않는 이유는 `get_past_counter` 주석과 같다.
+pub fn date_key(ms: i64, tz_offset_ms: i64) -> String {
+    const DAY: i64 = 86_400_000;
+    // 음수(1970 이전)에서도 «며칠째» 가 내림이어야 한다. `/` 는 0 쪽으로 자른다.
+    let days = (ms + tz_offset_ms).div_euclid(DAY);
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}{m:02}{d:02}")
+}
+
+/// 에폭 기준 며칠째 → (년, 월, 일).
+///
+/// Howard Hinnant 의 `civil_from_days`. **chrono 를 끌어오지 않으려고** 직접 센다 —
+/// 이 앱이 날짜에 대해 알아야 할 것은 이 한 줄뿐이다.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    // 3월을 해의 시작으로 옮기면 윤일이 해의 끝에 와서 분기가 사라진다.
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 /// 화면이 그릴 수 있는 만큼으로 줄인다.
 ///
 /// **콜렉터는 2초 간격 원본을 준다.** 6시간이면 오브젝트 하나에 10,800점이고,
@@ -290,7 +323,7 @@ mod tests {
 
     #[test]
     fn split_keeps_one_piece_within_a_day() {
-        // 2026-09-06 10:00 ~ 12:00 KST
+        // 2025-09-06 10:00 ~ 12:00 KST
         let s = 1_757_120_400_000;
         let e = s + 2 * 3_600_000;
         assert_eq!(split_by_day(s, e, KST), vec![(s, e)]);
@@ -304,6 +337,34 @@ mod tests {
         let s = midnight - 1_800_000;
         let e = midnight + 1_800_000;
         assert_eq!(split_by_day(s, e, KST), vec![(s, midnight), (midnight, e)]);
+    }
+
+    #[test]
+    fn date_key_uses_the_viewers_midnight() {
+        // 2025-09-06 10:00 KST. UTC 로는 아직 09-06 01:00 이라 같은 날이지만,
+        // 자정 직후 30분은 UTC 로 «어제» 다 — 그때 어제 디렉토리를 뒤지면 0건이다.
+        let ten_am = 1_757_120_400_000;
+        assert_eq!(date_key(ten_am, KST), "20250906");
+
+        const DAY: i64 = 86_400_000;
+        let midnight = (ten_am + KST) / DAY * DAY + DAY - KST;
+        assert_eq!(date_key(midnight, KST), "20250907", "자정 이후는 다음 날이다");
+        assert_eq!(date_key(midnight - 1, KST), "20250906");
+        // 같은 순간이라도 시간대가 다르면 날짜가 갈린다.
+        assert_eq!(date_key(midnight, 0), "20250906");
+    }
+
+    #[test]
+    fn date_key_handles_month_and_leap_boundaries() {
+        // 손으로 짠 날짜 계산이라 경계를 박아 둔다.
+        assert_eq!(date_key(0, 0), "19700101");
+        // 2024-02-29 12:00 UTC — 윤일
+        assert_eq!(date_key(1_709_208_000_000, 0), "20240229");
+        // 2023-03-01 00:00 UTC — 윤일 없는 해의 3월 1일
+        assert_eq!(date_key(1_677_628_800_000, 0), "20230301");
+        // 2025-12-31 23:59:59 UTC → 시간대를 밀면 다음 해로 넘어간다
+        assert_eq!(date_key(1_767_225_599_000, 0), "20251231");
+        assert_eq!(date_key(1_767_225_599_000, KST), "20260101");
     }
 
     #[test]

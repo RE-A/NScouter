@@ -169,3 +169,43 @@ describe('KpiStrip — 어제 이 시각', () => {
     expect(screen.queryByText('어제 40.0')).toBeNull();
   });
 });
+
+describe('KpiStrip — 게이지', () => {
+  it('임계가 있는 지표에만 눈금이 선다', () => {
+    // 기본 임계가 있는 넷(응답시간·에러율·CPU·Heap)만. TPS·액티브는 임계도
+    // 표본도 없어서 **자를 만들어 낼 데가 없다** — 없는 자에 바늘을 얹지 않는다.
+    draw({});
+    expect(screen.getAllByRole('img')).toHaveLength(4);
+  });
+
+  it('임계가 없으면 최근 관측이 눈금이 되고, 그렇다고 말한다', () => {
+    // 상대 눈금이라 바늘이 끝에 있어도 «위험» 이 아니라 «최근 중 제일 높다» 다.
+    draw({ tps: { value: 12, samples: [3, 12, 8] } });
+    expect(screen.getByLabelText('최근 최대 20')).toBeTruthy();
+  });
+
+  it('임계 눈금은 0 에서 시작해 끝값을 적는다', () => {
+    // 백분율 지표(CPU·Heap)는 위험 90 × 1.5 = 135 여도 100 에서 멈춘다.
+    draw({ cpu: { value: 40, samples: [40] } });
+    expect(screen.getAllByLabelText('0 ~ 100')).toHaveLength(2);
+    // 응답시간은 백분율이 아니라 위험(3초)의 1.5배까지 간다.
+    expect(screen.getByLabelText('0 ~ 5k')).toBeTruthy();
+  });
+
+  it('안 고른 Family 에는 게이지를 그리지 않는다', () => {
+    // 값이 영영 안 오는 자리에 눈금만 서 있으면 «0 이다» 로 읽힌다.
+    // CPU 만 host 지표다 — Heap 은 javaee 라 그대로 남는다.
+    draw({}, { families: new Set(['javaee']) });
+    expect(screen.getAllByRole('img')).toHaveLength(3);
+    expect(screen.getAllByLabelText('0 ~ 100')).toHaveLength(1);
+  });
+
+  it('임계를 끄면 그 지표의 눈금도 관측으로 돌아간다', () => {
+    // 임계를 껐는데 눈금만 남아 있으면 그 자가 어디서 왔는지 알 수 없다.
+    draw(
+      { cpu: { value: 40, samples: [40] } },
+      { thresholds: { ...DEFAULT_THRESHOLDS, cpu: null } },
+    );
+    expect(screen.getByLabelText('최근 최대 50')).toBeTruthy();
+  });
+});

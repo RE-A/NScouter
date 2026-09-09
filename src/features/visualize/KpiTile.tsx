@@ -5,6 +5,8 @@
 
 import { memo } from 'react';
 import { sparklinePoints, toPolyline } from '../xlog/components/sparkline';
+import { KpiGauge } from './KpiGauge';
+import { gaugeScale } from './gauge';
 import { formatKpi, formatTrend, trendPct, type KpiDef } from './kpi';
 import { grade, type Grade, type Threshold } from './threshold';
 import { t } from '../../i18n';
@@ -27,6 +29,18 @@ const EDGE: Record<Grade, string> = {
 
 const SPARK_W = 120;
 const SPARK_H = 22;
+
+/**
+ * 눈금이 어디서 왔는지.
+ *
+ * **상대 눈금을 절대 눈금인 척하면 안 된다.** 임계가 없는 지표는 «최근 최대» 를
+ * 끝으로 삼는데, 그때 바늘이 끝에 붙은 것은 «위험» 이 아니라 «최근 중 제일 높다» 다.
+ */
+function scaleHint(kind: 'threshold' | 'observed'): string {
+  return kind === 'threshold'
+    ? t('눈금은 정해 둔 임계입니다')
+    : t('임계가 없어 최근 관측 최대를 눈금 끝으로 씁니다');
+}
 
 interface KpiTileProps {
   def: KpiDef;
@@ -62,6 +76,17 @@ export const KpiTile = memo(function KpiTile({
   const trend = formatTrend(trendPct(samples));
   const points = sparklinePoints(samples, SPARK_W, SPARK_H);
 
+  /**
+   * 게이지의 눈금.
+   *
+   * **숫자만으로는 «그게 어디쯤인가» 를 못 읽는다.** 62.4 가 여유인지 코앞인지는
+   * 자를 알아야 답할 수 있다. 자의 출처는 둘뿐이고(`gauge.ts`), 둘 다 없으면
+   * 게이지를 그리지 않는다 — 없는 자를 그려 놓고 바늘을 얹으면 그 자리가 거짓이다.
+   *
+   * 안 고른 Family 는 값이 영영 안 오므로 눈금도 만들지 않는다.
+   */
+  const scale = available ? gaugeScale(threshold, samples, def.unit === '%') : null;
+
   // 임계를 화면에 상설로 적으면 여섯 칸이 숫자 투성이가 된다. 다만 **어디에도 없으면
   // 노란색이 왜 노란지 알 수 없으므로** 마우스를 올렸을 때는 말해 준다.
   const hint = !available
@@ -70,9 +95,11 @@ export const KpiTile = memo(function KpiTile({
       ? t('임계 없음')
       : `${t('주의')} ${formatKpi(threshold.warn, def.digits)} · ${t('위험')} ${formatKpi(threshold.danger, def.digits)}`;
 
+  // 최소 폭: 게이지가 68px 를 먹으므로 그만큼 넓혀 둔다. 안 주면 좁은 창에서 여섯 칸을
+  // 억지로 한 줄에 밀어 넣다가 **숫자가 잘린다** — 그러면 게이지가 값을 가린 셈이 된다.
   return (
     <div
-      className="relative flex-1 overflow-hidden rounded border border-line bg-surface px-3 py-2"
+      className="relative min-w-[188px] flex-1 overflow-hidden rounded border border-line bg-surface px-3 py-2"
       title={`${t(def.label)} — ${hint}`}
     >
       <div className={`absolute inset-y-0 left-0 w-0.5 ${EDGE[g]}`} aria-hidden />
@@ -87,18 +114,30 @@ export const KpiTile = memo(function KpiTile({
           : <span className="shrink-0 text-micro text-fg-faint">{t('미선택')}</span>}
       </div>
 
-      <div className={`flex items-baseline gap-1 ${TONE[g]}`}>
-        <span className="text-title leading-tight font-semibold tabular-nums">
-          {formatKpi(value, def.digits)}
-        </span>
-        {def.unit && <span className="text-micro text-fg-dim">{def.unit}</span>}
-      </div>
+      {/* 게이지는 **왼쪽**에 둔다. 위에 얹으면 타일이 한 뼘 높아져 여섯 칸이
+          화면을 다 먹고, 그러면 «한눈에 훑는 줄» 이라는 이 줄의 이유가 사라진다. */}
+      <div className="flex items-center gap-2">
+        {scale && (
+          <div className="w-[68px] shrink-0" title={scaleHint(scale.kind)}>
+            <KpiGauge value={value} scale={scale} grade={g} />
+          </div>
+        )}
 
-      {/* **자리는 늘 잡아 둔다.** 어제 것이 있는 타일만 높아지면 줄이 들쭉날쭉해진다 */}
-      <div className="h-3 truncate text-micro text-fg-faint">
-        {available && yesterday !== null
-          ? `${t('어제')} ${formatKpi(yesterday, def.digits)}`
-          : ''}
+        <div className="min-w-0 flex-1">
+          <div className={`flex items-baseline gap-1 ${TONE[g]}`}>
+            <span className="text-title leading-tight font-semibold tabular-nums">
+              {formatKpi(value, def.digits)}
+            </span>
+            {def.unit && <span className="text-micro text-fg-dim">{def.unit}</span>}
+          </div>
+
+          {/* **자리는 늘 잡아 둔다.** 어제 것이 있는 타일만 높아지면 줄이 들쭉날쭉해진다 */}
+          <div className="h-3 truncate text-micro text-fg-faint">
+            {available && yesterday !== null
+              ? `${t('어제')} ${formatKpi(yesterday, def.digits)}`
+              : ''}
+          </div>
+        </div>
       </div>
 
       {/* 점이 둘 미만이면 선이 안 그려진다. 자리는 그대로 둔다 — 타일마다 높이가

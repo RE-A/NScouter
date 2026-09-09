@@ -12,6 +12,7 @@
 // mapper 를 쓰므로 눈에 보이는 사각형과 결과가 어긋나지 않는다.
 
 import type { CoordinateMapper } from './CoordinateMapper';
+import { clampToCeiling } from './yScale';
 import type { SelectionRect } from './XLogChartRenderer';
 import type {
   FilterField,
@@ -120,7 +121,11 @@ export function selectInRect(
   for (const xlog of data) {
     if (!passesFilter(xlog, filter, serviceName)) continue;
 
-    const { x, y } = mapper.dataToPixel(xlog.endTime, mapper.extractValue(xlog));
+    // **렌더러와 똑같이 천장에 붙인다.** 축보다 큰 값을 원래 자리로 두면
+    // 그림 밖으로 판정돼, 천장에 찍혀 **눈에 보이는 점이 드래그에서 빠진다** —
+    // 30초짜리가 섞인 구간에서 정작 그 30초짜리들만 조회가 안 됐다.
+    const { value } = clampToCeiling(mapper.extractValue(xlog), mapper.getYMax());
+    const { x, y } = mapper.dataToPixel(xlog.endTime, value);
     // 플롯 영역 밖은 그려지지도 않는다. 축 바깥까지 드래그해도 안 잡혀야 한다.
     if (!mapper.isInPlotArea(x, y)) continue;
     if (x < left || x > right || y < top || y > bottom) continue;

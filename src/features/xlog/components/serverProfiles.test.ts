@@ -7,7 +7,15 @@
 //   · 예전 설정(last_host)으로 붙던 서버를 잃지 않는다
 
 import { describe, expect, it } from 'vitest';
-import { displayName, fromLegacy, normalize, pick, upsert } from './serverProfiles';
+import {
+  displayName,
+  fromLegacy,
+  normalize,
+  pick,
+  rename,
+  uniqueName,
+  upsert,
+} from './serverProfiles';
 import type { ServerProfile } from '../api/scouterApi';
 
 const p = (over: Partial<ServerProfile> = {}): ServerProfile => ({
@@ -102,5 +110,69 @@ describe('fromLegacy', () => {
   it('붙던 곳이 없으면 빈 목록이다', () => {
     expect(fromLegacy({})).toEqual([]);
     expect(fromLegacy({ last_host: '  ' })).toEqual([]);
+  });
+});
+
+describe('uniqueName', () => {
+  it('안 겹치면 그대로 쓴다', () => {
+    expect(uniqueName([p({ name: '운영' })], 'QA')).toBe('QA');
+  });
+
+  it('겹치면 번호를 붙인다', () => {
+    // `displayName` 이 곧 식별자다. 같은 이름 둘이면 어느 것을 고른 건지 알 수 없다.
+    const list = [p({ name: '운영' }), p({ host: '10.0.0.2', name: '운영 (2)' })];
+    expect(uniqueName(list, '운영')).toBe('운영 (3)');
+  });
+
+  it('자기 자신은 겹침이 아니다', () => {
+    // 이름을 그대로 두고 저장했는데 번호가 붙으면 안 된다.
+    const me = p({ name: '운영' });
+    expect(uniqueName([me], '운영', me)).toBe('운영');
+  });
+
+  it('이름 없는 줄의 host:port 와도 겹치지 않게 한다', () => {
+    // 이름이 없는 프로필은 `10.0.0.1:6100` 으로 보이므로 그것도 «쓰인 이름» 이다.
+    expect(uniqueName([p()], '10.0.0.1:6100')).toBe('10.0.0.1:6100 (2)');
+  });
+});
+
+describe('rename', () => {
+  it('이름을 붙인다', () => {
+    // `10.89.2.18:6100` 셋이 늘어선 목록에서 운영과 QA 를 가르는 유일한 단서다.
+    const out = rename([p()], p(), '  운영  ');
+    expect(out[0].name).toBe('운영');
+    expect(displayName(out[0])).toBe('운영');
+  });
+
+  it('빈 이름은 지우는 것이다', () => {
+    // «(이름 없음)» 이라는 이름을 새로 만들지 않는다 — host:port 로 돌아간다.
+    const out = rename([p({ name: '운영' })], p({ name: '운영' }), '   ');
+    expect(out[0].name).toBe('');
+    expect(displayName(out[0])).toBe('10.0.0.1:6100');
+  });
+
+  it('다른 서버와 겹치면 번호를 붙인다', () => {
+    const list = [p({ name: '운영' }), p({ host: '10.0.0.2' })];
+    const out = rename(list, list[1], '운영');
+    expect(out[1].name).toBe('운영 (2)');
+    expect(out[0].name).toBe('운영');
+  });
+
+  it('같은 이름으로 다시 저장해도 번호가 안 붙는다', () => {
+    const list = [p({ name: '운영' })];
+    expect(rename(list, list[0], '운영')[0].name).toBe('운영');
+  });
+
+  it('접속 정보는 건드리지 않는다', () => {
+    // 이름만 바꾸는 일에 비밀번호가 날아가면 다음 전환에서 또 묻는다.
+    const list = [p({ pass: 'secret', user: 'ops' })];
+    const out = rename(list, list[0], '운영');
+    expect(out[0]).toMatchObject({ pass: 'secret', user: 'ops', host: '10.0.0.1' });
+  });
+
+  it('목록에 없는 서버는 되살리지 않는다', () => {
+    const out = rename([p()], p({ host: '10.9.9.9' }), '유령');
+    expect(out).toHaveLength(1);
+    expect(out[0].host).toBe('10.0.0.1');
   });
 });

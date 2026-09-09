@@ -375,6 +375,55 @@ export async function getPastCounter(
   });
 }
 
+/** 응답시간 분포의 구간 하나 (Rust `distribution::ElapsedBucket`) */
+export interface ElapsedBucket {
+  /** 위 경계(ms). `null` 이면 «그 이상» */
+  lt_ms: number | null;
+  count: number;
+  /** 그중 실패한 건수 */
+  error: number;
+}
+
+/** 구간의 응답시간 분포 (Rust `distribution::ElapsedDistribution`) */
+export interface ElapsedDistribution {
+  buckets: ElapsedBucket[];
+  total: number;
+  error: number;
+  /** 소요 시간 합(ms). 평균은 화면에서 나눈다 */
+  sum_ms: number;
+  max_ms: number;
+  p50_ms: number;
+  p90_ms: number;
+  p99_ms: number;
+  /** 백분위를 잰 상한. 이보다 느린 건은 이 값으로 눌러 세었다 */
+  percentile_cap_ms: number;
+  /** 상한에 걸려 다 세지 못했다 — **화면이 반드시 말해야 한다** */
+  truncated: boolean;
+}
+
+/**
+ * 구간의 응답시간 분포.
+ *
+ * **콜렉터에는 분포를 주는 커맨드가 없다.** 트랜잭션을 세는 수밖에 없는데 1시간이
+ * 실측 8만 건이라, Rust 가 페이지를 넘겨 가며 세고 **버킷과 숫자 몇 개만** 돌려준다
+ * (CLAUDE.md 3.3).
+ *
+ * 그만큼 **무거운 조회다** — 화면이 사용자가 열었을 때만 불러야 한다.
+ */
+export async function getXLogDistribution(
+  objHashes: number[],
+  stime: number,
+  etime: number,
+): Promise<ElapsedDistribution> {
+  return invoke<ElapsedDistribution>('get_xlog_distribution', {
+    objHashes,
+    stime,
+    etime,
+    // 자정이 언제인지는 보고 있는 사람 기준이다 (`getPastCounter` 와 같은 이유).
+    tzOffsetMs: -new Date().getTimezoneOffset() * 60_000,
+  });
+}
+
 /** 오늘 누적 카운터. date 를 주면 그날 것 */
 export async function getTodayCounter(
   counter: string,
@@ -755,6 +804,18 @@ export async function getConfig(): Promise<AppConfig> {
 
 export async function saveConfig(newConfig: AppConfig): Promise<void> {
   return invoke<void>('save_config', { newConfig });
+}
+
+/**
+ * 서버 목록만 갈아 끼운다.
+ *
+ * **`saveUiState` 와 같은 이유다.** 접속 한 번에 설정 파일을 쓰는 곳이 셋이라
+ * (자동 연결 저장 · Rust 의 `last_*` 저장 · 이 목록), 화면에서 읽어 고쳐 쓰면
+ * 그 사이에 낀 저장이 되돌려진다 — **방금 기억한 비밀번호가 옛 사본에 덮여 사라지면
+ * 다음 전환에서 비밀번호를 다시 묻는다.** 병합은 Rust 가 한다.
+ */
+export async function saveServers(servers: ServerProfile[], lastServer: string): Promise<void> {
+  return invoke<void>('save_servers', { servers, lastServer });
 }
 
 /**

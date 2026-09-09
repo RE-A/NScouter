@@ -10,6 +10,7 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { getServiceGroup, type ServiceGroupRow } from '../api/scouterApi';
 import { GROUP_WINDOW_SEC, sortGroups, toStats, type GroupStat } from './serviceGroup';
 import { durationTone } from './durationTone';
+import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 
 interface ServiceGroupPanelProps {
@@ -58,22 +59,19 @@ export const ServiceGroupPanel = memo(function ServiceGroupPanel({
 
   return (
     <section className="mb-4">
-      <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">{t('서비스 그룹')}</h2>
-        <span className="text-micro text-fg-faint">{t('최근')} {GROUP_WINDOW_SEC}{t('초')}</span>
-        <div className="flex-1" />
-        {open && stats.length > 0 && (
-          <span className="tnum font-mono text-micro text-fg-dim">
-            {totalTps.toFixed(1)} tps · {stats.length}{t('개 그룹')}
-          </span>
-        )}
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-        >
-          {open ? t('닫기') : t('열기')}
-        </button>
-      </header>
+      <SectionHeader
+        title={t('서비스 그룹')}
+        subtitle={`${t('최근')} ${GROUP_WINDOW_SEC}${t('초')}`}
+        open={open}
+        onToggle={() => setOpen(o => !o)}
+        action={
+          open && stats.length > 0 ? (
+            <span className="tnum font-mono text-micro text-fg-dim">
+              {totalTps.toFixed(1)} tps · {stats.length}{t('개 그룹')}
+            </span>
+          ) : undefined
+        }
+      />
 
       {open && (
         <div className="rounded border border-line bg-surface">

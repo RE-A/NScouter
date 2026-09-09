@@ -50,6 +50,17 @@ export class CoordinateMapper {
     return this.endTime;
   }
 
+  /**
+   * 축의 천장.
+   *
+   * **그리는 쪽과 고르는 쪽이 같은 천장을 봐야 한다.** 렌더러는 이 값으로
+   * 넘친 점을 천장에 붙여 그리는데(`clampToCeiling`), 선택이 원래 값으로
+   * 자리를 잡으면 그림 밖으로 판정돼 **화면에 보이는 점이 안 잡힌다.**
+   */
+  getYMax(): number {
+    return this.config.yMax;
+  }
+
   /** 데이터 좌표 → 캔버스 픽셀 좌표 */
   dataToPixel(time: number, value: number): { x: number; y: number } {
     return {

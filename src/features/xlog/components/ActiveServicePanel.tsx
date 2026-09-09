@@ -18,6 +18,7 @@ import {
 import { sparklinePoints, toPolyline } from './sparkline';
 import { ActiveServiceList } from './ActiveServiceList';
 import { toDateString } from '../utils/xlogDate';
+import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 
 interface ActiveServicePanelProps {
@@ -67,10 +68,10 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
 
   return (
     <section className="mb-4">
-      <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">{t('액티브 서비스')}</h2>
-        <span className="text-micro text-fg-faint">{objType} · {t('지금 이 순간')}</span>
-      </header>
+      <SectionHeader
+        title={t('액티브 서비스')}
+        subtitle={`${objType} · ${t('지금 이 순간')}`}
+      />
 
       {stats.error && (
         <p className="mb-2 rounded border-l-2 border-danger bg-danger/10 px-2 py-1.5 text-small text-danger">

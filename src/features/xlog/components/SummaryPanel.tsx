@@ -15,6 +15,7 @@ import { durationTone } from './durationTone';
 import { errorSummaryCsv, summaryCsv } from './summaryCsv';
 import { saveCsvExport } from '../api/scouterApi';
 import { toFileStamp } from '../utils/xlogDate';
+import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 
 interface SummaryPanelProps {
@@ -170,17 +171,12 @@ export const SummaryPanel = memo(function SummaryPanel({
 
   return (
     <section className="mb-4">
-      <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">{t('요약')}</h2>
-        <span className="text-micro text-fg-faint">{objType} · {t('구간 누적')}</span>
-        <div className="flex-1" />
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-        >
-          {open ? t('닫기') : t('열기')}
-        </button>
-      </header>
+      <SectionHeader
+        title={t('요약')}
+        subtitle={`${objType} · ${t('구간 누적')}`}
+        open={open}
+        onToggle={() => setOpen(o => !o)}
+      />
 
       {open && (
         <div className="rounded border border-line bg-surface">

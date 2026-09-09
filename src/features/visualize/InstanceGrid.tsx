@@ -9,6 +9,7 @@ import { memo } from 'react';
 import { formatKpi } from './kpi';
 import { countByGrade, type InstanceRow } from './instanceRows';
 import type { Grade } from './threshold';
+import { SectionHeader } from '../../components/SectionHeader';
 import { t } from '../../i18n';
 
 /** 칸 왼쪽 띠. 정상은 조용해야 한다 — 색은 주의·위험에만 (`KpiTile` 과 같은 규칙) */
@@ -37,16 +38,18 @@ export const InstanceGrid = memo(function InstanceGrid({ rows, onDrill }: Instan
 
   return (
     <section className="mb-4">
-      <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">{t('서버별')}</h2>
-        <span className="text-micro text-fg-faint">
-          {rows.length}
-          {t('대')}
-          {/* **0 은 적지 않는다.** «위험 0 · 주의 0» 이 늘 붙어 있으면 그 자리를 안 읽게 된다 */}
-          {counts.danger > 0 && ` · ${t('위험')} ${counts.danger}`}
-          {counts.warn > 0 && ` · ${t('주의')} ${counts.warn}`}
-        </span>
-      </header>
+      <SectionHeader
+        title={t('서버별')}
+        subtitle={
+          <>
+            {rows.length}
+            {t('대')}
+            {/* **0 은 적지 않는다.** «위험 0 · 주의 0» 이 늘 붙어 있으면 그 자리를 안 읽게 된다 */}
+            {counts.danger > 0 && ` · ${t('위험')} ${counts.danger}`}
+            {counts.warn > 0 && ` · ${t('주의')} ${counts.warn}`}
+          </>
+        }
+      />
 
       {rows.length === 0 ? (
         <p className="px-1 py-3 text-small text-fg-faint">

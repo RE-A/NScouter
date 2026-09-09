@@ -18,8 +18,11 @@ export interface SummaryView extends SummaryRow {
  *
  * **count 가 0 이면 나누지 않는다.** 0으로 나눈 Infinity 를 표에 그리면
  * 정렬이 통째로 망가지고 "무한히 느린 서비스"가 맨 위에 온다.
+ *
+ * 들어온 행의 **다른 필드는 그대로 들고 나간다** — 이름을 풀어 붙여 둔 행이
+ * 여기를 지나며 이름을 잃으면, 부른 쪽이 해시로 다시 맞춰야 한다.
  */
-export function withAverage(rows: readonly SummaryRow[]): SummaryView[] {
+export function withAverage<T extends SummaryRow>(rows: readonly T[]): (T & { avg: number | null })[] {
   return rows.map(r => ({
     ...r,
     avg: r.elapsed === null || r.count <= 0 ? null : Math.round(r.elapsed / r.count),
@@ -27,7 +30,7 @@ export function withAverage(rows: readonly SummaryRow[]): SummaryView[] {
 }
 
 /** 기준별 내림차순. 값이 없는 행은 항상 뒤로 보낸다 */
-export function sortSummary(rows: readonly SummaryView[], by: SummarySortKey): SummaryView[] {
+export function sortSummary<T extends SummaryView>(rows: readonly T[], by: SummarySortKey): T[] {
   const key = (r: SummaryView): number | null => {
     switch (by) {
       case 'sum': return r.elapsed;

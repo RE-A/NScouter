@@ -92,6 +92,58 @@ export function upsert(
   return next;
 }
 
+/**
+ * 목록에서 겹치지 않는 이름.
+ *
+ * **`displayName` 이 곧 식별자다.** 같은 이름이 둘이면 `pick` 이 엉뚱한 것을 고르고,
+ * «지금 붙어 있는 서버» 표시도 어느 쪽인지 말할 수 없다. 그래서 겹치면 번호를 붙인다 —
+ * `normalize` 가 설정 파일을 읽을 때 쓰는 것과 같은 규칙이다.
+ *
+ * @param exclude 자기 자신은 «겹침» 이 아니다. 이름을 안 바꾸고 저장할 때 번호가 붙는다
+ */
+export function uniqueName(
+  list: readonly ServerProfile[],
+  base: string,
+  exclude?: ServerProfile,
+): string {
+  const used = new Set(
+    list.filter(x => !(exclude && sameTarget(x, exclude))).map(displayName),
+  );
+  if (!used.has(base)) return base;
+  let n = 2;
+  while (used.has(`${base} (${n})`)) n++;
+  return `${base} (${n})`;
+}
+
+/**
+ * 서버에 붙일 이름을 바꾼다.
+ *
+ * 이름은 **사람이 이 서버를 부르는 말**이다. `10.89.2.18:6100` 세 개가 늘어선 목록에서
+ * 운영과 QA 를 가르는 유일한 단서라, 지어 둘 수 있어야 한다.
+ *
+ * **빈 이름은 지우는 것이다.** 그러면 `displayName` 이 `host:port` 로 돌아간다 —
+ * «(이름 없음)» 이라는 이름을 새로 만들지 않는다.
+ *
+ * 대상이 목록에 없으면 원본을 그대로 돌려준다. 지운 서버의 이름을 바꾸려다
+ * 없던 줄이 되살아나면 안 된다.
+ */
+export function rename(
+  list: readonly ServerProfile[],
+  target: ServerProfile,
+  name: string,
+): ServerProfile[] {
+  const idx = list.findIndex(x => sameTarget(x, target));
+  if (idx < 0) return [...list];
+
+  const wanted = name.trim();
+  const next = [...list];
+  next[idx] = {
+    ...next[idx],
+    name: wanted === '' ? '' : uniqueName(list, wanted, target),
+  };
+  return next;
+}
+
 /** 이름으로 고른다. 없으면 첫 번째, 그것도 없으면 null */
 export function pick(
   list: readonly ServerProfile[],

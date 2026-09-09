@@ -11,9 +11,13 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getConfig } from '../xlog/api/scouterApi';
 import { ActiveServicePanel } from '../xlog/components/ActiveServicePanel';
 import { counterFamily } from '../xlog/types/counter';
+import { SectionHeader } from '../../components/SectionHeader';
+import { ElapsedHistogram } from './ElapsedHistogram';
 import { InstanceGrid } from './InstanceGrid';
 import { KpiStrip } from './KpiStrip';
 import { StackedTimeline } from './StackedTimeline';
+import { TopServices } from './TopServices';
+import { useRangeInsight } from './useRangeInsight';
 import { ThresholdDialog } from './ThresholdDialog';
 import { buildRows } from './instanceRows';
 import { KPI_DEFS, type KpiId } from './kpi';
@@ -154,6 +158,19 @@ export const VisualizeTab = memo(function VisualizeTab({
     return out;
   }, [yesterdayRaw, picked, anchor]);
 
+  // ── 이 구간에 무엇이 있었나 ──────────────────────────
+  //
+  // **펼쳤을 때만 받는다.** 분포는 트랜잭션을 세야 나오는데 1시간이 실측 8만 건이라,
+  // 탭을 열 때마다 나가면 이 화면에서 제일 무거운 일이 된다
+  // (`SummaryPanel` 이 «구간 전체를 훑는 무거운 조회» 를 다루는 방식과 같다).
+  const [showInsight, setShowInsight] = useState(false);
+  const insight = useRangeInsight(
+    enabled && showInsight,
+    families.has('javaee') ? javaeeType : '',
+    picked,
+    range,
+  );
+
   // 2초마다 오는 값으로 매번 줄을 세우면 칸이 수십 개일 때 정렬이 렌더마다 돈다.
   const rows = useMemo(
     () => buildRows({ samples, agentMap, javaeeHashes, thresholds }),
@@ -162,57 +179,61 @@ export const VisualizeTab = memo(function VisualizeTab({
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-3">
-      <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-        <h2 className="text-body font-medium text-fg">{t('지금')}</h2>
-        <span className="text-micro text-fg-faint">{t('2초마다 갱신')}</span>
-        <div className="flex-1" />
-        <button
-          onClick={() => setShowThresholds(true)}
-          title={t('어떤 수부터 노랗고 빨간지 정합니다')}
-          className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-        >
-          {t('임계값')}
-        </button>
-      </header>
+      {/* 섹션마다 `mb-4` 하나로 리듬을 맞춘다. 예전에는 지표 줄만 아래 여백이 없고
+          격자만 `mt-3` 을 따로 갖고 있어, 네 덩이의 간격이 세 종류였다. */}
+      <section className="mb-4">
+        <SectionHeader
+          title={t('지금')}
+          subtitle={t('2초마다 갱신')}
+          action={
+            <button
+              onClick={() => setShowThresholds(true)}
+              title={t('어떤 수부터 노랗고 빨간지 정합니다')}
+              className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+            >
+              {t('임계값')}
+            </button>
+          }
+        />
 
-      <KpiStrip
-        kpis={kpis}
-        lastReceivedAt={lastReceivedAt}
-        connected={enabled}
-        thresholds={thresholds}
-        families={families}
-        yesterday={yesterday}
-      />
+        <KpiStrip
+          kpis={kpis}
+          lastReceivedAt={lastReceivedAt}
+          connected={enabled}
+          thresholds={thresholds}
+          families={families}
+          yesterday={yesterday}
+        />
+      </section>
 
       {/* 줄이 «전체가 견디고 있나» 라면 격자는 «어느 대가 이상한가» 다.
-          접은 값은 열 대 중 한 대가 차 있어도 멀쩡해 보인다. */}
-      <div className="mt-3">
-        <InstanceGrid rows={rows} onDrill={onDrill} />
-      </div>
+          접은 값은 열 대 중 한 대가 차 있어도 멀쩡해 보인다.
+          (`InstanceGrid` 가 제 `<section>` 을 갖고 있어 여기서 감싸지 않는다.) */}
+      <InstanceGrid rows={rows} onDrill={onDrill} />
 
       {/* 줄과 격자가 «지금» 이라면 이건 **«같은 순간에 무엇이 함께 움직였나»** 다.
           Counter 탭의 차트 40장은 저마다 자기 x축이라 이 질문에 답하지 못한다. */}
       <section className="mb-4">
-        <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
-          <h2 className="text-body font-medium text-fg">{t('같은 시간축')}</h2>
-          <span className="text-micro text-fg-faint">
-            {past.loading ? t('받는 중…') : t('마우스를 올리면 그 시각의 값을 봅니다')}
-          </span>
-          <div className="flex-1" />
-          <div className="flex gap-0.5">
-            {SPANS.map(s => (
-              <button
-                key={s.ms}
-                onClick={() => setSpanMs(s.ms)}
-                className={`rounded px-2 py-0.5 text-micro ${
-                  spanMs === s.ms ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
-                }`}
-              >
-                {t(s.label)}
-              </button>
-            ))}
-          </div>
-        </header>
+        <SectionHeader
+          title={t('같은 시간축')}
+          subtitle={past.loading ? t('받는 중…') : t('마우스를 올리면 그 시각의 값을 봅니다')}
+          action={
+            <div className="flex gap-0.5">
+              {SPANS.map(s => (
+                <button
+                  key={s.ms}
+                  onClick={() => setSpanMs(s.ms)}
+                  aria-pressed={spanMs === s.ms}
+                  className={`rounded px-2 py-0.5 text-micro ${
+                    spanMs === s.ms ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
+                  }`}
+                >
+                  {t(s.label)}
+                </button>
+              ))}
+            </div>
+          }
+        />
         {past.error ? (
           <p className="px-1 py-3 text-small text-danger">{past.error}</p>
         ) : past.rows.length === 0 ? (
@@ -226,15 +247,64 @@ export const VisualizeTab = memo(function VisualizeTab({
         )}
       </section>
 
+      {/* 지표가 «지금 몇» 이라면 이건 **«그 몇이 어떻게 생긴 몇인가»** 다.
+          평균 320ms 는 전부 320ms 인 것과 95%가 80ms 인데 5%가 5초인 것에서 똑같이 나오는데,
+          **뒤쪽만 장애다.** 분포가 그 둘을 가르고, 순위표가 범인 후보를 준다. */}
+      <section className="mb-4">
+        {/* 부제가 **무거운 조회라는 것을 먼저 말한다.** 눌러 놓고 몇 초를 기다리게 하면
+            고장으로 읽힌다. */}
+        <SectionHeader
+          title={t('이 구간')}
+          open={showInsight}
+          onToggle={() => setShowInsight(v => !v)}
+          subtitle={
+            showInsight
+              ? insight.loading
+                ? t('트랜잭션을 세는 중…')
+                : t('응답시간 분포와 서비스 순위')
+              : t('펼치면 이 구간의 트랜잭션을 세어 분포와 순위를 냅니다')
+          }
+          action={
+            showInsight && !insight.loading ? (
+              <button
+                onClick={insight.reload}
+                title={t('같은 구간을 다시 셉니다')}
+                className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+              >
+                {t('다시')}
+              </button>
+            ) : undefined
+          }
+        />
+
+        {showInsight &&
+          (insight.error ? (
+            <p className="px-1 py-3 text-small text-danger">{insight.error}</p>
+          ) : (
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="rounded border border-line bg-surface p-3">
+                <h3 className="mb-2 text-small font-medium text-fg-muted">{t('응답시간 분포')}</h3>
+                <ElapsedHistogram data={insight.distribution} loading={insight.loading} />
+              </div>
+              <div className="rounded border border-line bg-surface p-3">
+                <h3 className="mb-2 text-small font-medium text-fg-muted">{t('서비스 순위')}</h3>
+                <TopServices
+                  rows={insight.services}
+                  loading={insight.loading}
+                  wholeType={insight.wholeType}
+                />
+              </div>
+            </div>
+          ))}
+      </section>
+
       {/* 지표가 «몇 이다» 라면 이건 «지금 무엇이 밀려 있나» 다.
           숫자가 커진 이유를 바로 옆에서 물을 수 있어야 한 화면이 된다. */}
-      <div>
-        <ActiveServicePanel
-          objType={javaeeType}
-          enabled={enabled && javaeeType !== ''}
-          agentMap={agentMap}
-        />
-      </div>
+      <ActiveServicePanel
+        objType={javaeeType}
+        enabled={enabled && javaeeType !== ''}
+        agentMap={agentMap}
+      />
 
       {showThresholds && (
         <ThresholdDialog

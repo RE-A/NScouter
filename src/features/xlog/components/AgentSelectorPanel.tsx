@@ -5,6 +5,7 @@ import { getObjectList } from '../api/scouterApi';
 import type { AgentObject } from '../types/xlog';
 import { agentRowState, groupCheck, toggleGroupPick } from './agentFilter';
 import { groupAgents, shortName, type GroupBy } from './agentTree';
+import { shouldShowTypes, typeCounts, typeLabel, typeTone } from './objectTypes';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { isJavaeeObjectType } from '../types/counter';
@@ -34,6 +35,14 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   const [query, setQuery] = useState('');
   /** 접어 둔 묶음 이름들 */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * 보기로 켜 둔 종류들. **비어 있으면 «거를 것이 없다»** 다 (`agentTree.matchesType`).
+   *
+   * 서버 고르기(`selectedHashes`)와 **다른 축**이다. 저쪽은 «무엇을 그릴지» 고,
+   * 이건 «목록에서 무엇을 볼지» 다 — 종류를 걸러도 이미 고른 서버는 그대로 그려진다.
+   * 둘을 묶으면 datasource 를 목록에서 잠깐 치우려다 차트가 비어 버린다.
+   */
+  const [pickedTypes, setPickedTypes] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     if (!isConnected) { setAgents([]); return; }
@@ -73,8 +82,39 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   const filtering = selectedHashes.size > 0;
   const aliveCount = agents.filter(a => a.alive).length;
 
-  const groups = useMemo(() => groupAgents(agents, query, groupBy), [agents, query, groupBy]);
+  /**
+   * 종류가 둘 이상일 때만 종류를 말한다.
+   *
+   * 전부 tomcat 인 환경에서 줄마다 `tomcat` 을 붙이면 정보가 아니라 여백을 먹는 글자다
+   * — 칩도 배지도 그때는 통째로 없앤다.
+   */
+  const kinds = useMemo(() => typeCounts(agents), [agents]);
+  const multiType = useMemo(() => shouldShowTypes(agents), [agents]);
+
+  const groups = useMemo(
+    () => groupAgents(agents, query, groupBy, multiType ? pickedTypes : undefined),
+    [agents, query, groupBy, multiType, pickedTypes],
+  );
   const shown = groups.reduce((n, g) => n + g.agents.length, 0);
+  const typeFiltering = multiType && pickedTypes.size > 0;
+
+  const toggleType = useCallback((type: string) => {
+    setPickedTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }, []);
+
+  /**
+   * 줄마다 종류를 적을 것인가.
+   *
+   * 타입으로 묶었을 때는 **묶음 머리가 이미 그 말을 하고 있다.** 같은 말을 두 번 적으면
+   * 줄이 길어질 뿐이라, 그때는 배지를 접는다. 그룹(호스트)으로 묶었을 때가 원래
+   * 종류를 알 데가 없던 자리다 — `/order-app` 아래 WAS 와 커넥션 풀이 섞여 있다.
+   */
+  const showBadge = multiType && groupBy !== 'type';
   /** 검색 중에는 접힘을 무시한다 — 찾은 걸 숨기면 검색이 아니다 */
   const searching = query.trim() !== '';
 
@@ -157,6 +197,42 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               </button>
             ))}
           </div>
+          {/* 종류 거르기 — **묶기와 다른 축이다.** 묶기는 «어떻게 쌓을지» 고
+              이건 «무엇을 볼지» 다. 그룹으로 묶어 놓고 WAS 만 보는 일이 실제로 잦다.
+              종류가 하나뿐인 환경에서는 통째로 안 뜬다. */}
+          {multiType && (
+            <div className="mb-1.5 flex flex-wrap items-center gap-1">
+              <span className="text-micro text-fg-dim">{t('종류')}</span>
+              {kinds.map(k => {
+                const on = pickedTypes.has(k.type);
+                return (
+                  <button
+                    key={k.type}
+                    onClick={() => toggleType(k.type)}
+                    aria-pressed={on}
+                    title={`${k.type} — ${k.aliveCount}/${k.count} ${t('활성')}`}
+                    className={`rounded border px-1.5 py-0.5 font-mono text-micro ${
+                      on
+                        ? `border-accent/60 bg-accent/10 ${typeTone(k.type)}`
+                        : `border-transparent ${typeFiltering ? 'text-fg-faint opacity-60' : typeTone(k.type)} hover:bg-hover`
+                    }`}
+                  >
+                    {k.type}
+                    <span className="tnum ml-1 text-fg-faint">{k.count}</span>
+                  </button>
+                );
+              })}
+              {typeFiltering && (
+                <button
+                  onClick={() => setPickedTypes(new Set())}
+                  title={t('종류 조건을 풉니다')}
+                  className="rounded px-1 py-0.5 text-micro text-accent hover:bg-hover"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-1">
             <input
               value={query}
@@ -175,7 +251,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               </button>
             )}
           </div>
-          {searching && (
+          {(searching || typeFiltering) && (
             <p className="mt-1 text-micro text-fg-faint">
               <span className="tnum font-mono">{shown}</span>
               {t('건 찾음')} · <span className="tnum font-mono">{agents.length}</span>
@@ -262,7 +338,17 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               <span className="min-w-0 flex-1 truncate text-fg">
                 {name || `[${agent.obj_hash}]`}
               </span>
-              {/* 타입은 묶음 머리에 있다. 행마다 되풀이하면 같은 말이 두 번이다. */}
+              {/* 종류. **이름으로 추측한 게 아니라 콜렉터가 준 `objType` 이다.**
+                  색은 Family(javaee · host · datasource)로 준다 — 처음 보는 종류가
+                  와도 이름은 그대로 뜬다. 타입으로 묶었을 때는 묶음 머리와 같은 말이라 접는다. */}
+              {showBadge && (
+                <span
+                  className={`shrink-0 font-mono text-micro ${typeTone(agent.obj_type)}`}
+                  title={`${t('오브젝트 종류')} — ${typeLabel(agent.obj_type)}`}
+                >
+                  {typeLabel(agent.obj_type)}
+                </span>
+              )}
             </div>
                     );
                   })}
