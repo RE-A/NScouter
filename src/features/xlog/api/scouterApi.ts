@@ -675,6 +675,7 @@ export interface XLogChartPrefs {
   time_range_ms: number;
   y_max: number;
   show_ignore_area: boolean;
+  show_density: boolean;
   ignore_threshold_ms: number;
 }
 

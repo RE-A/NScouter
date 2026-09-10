@@ -246,6 +246,11 @@ pub struct XLogChartPrefs {
     pub y_max: f32,
     /// 무시 구간을 칠할지
     pub show_ignore_area: bool,
+    /// 밀집 구간을 밝기로 겹쳐 보일지.
+    ///
+    /// 점 하나가 5x5 를 막아 촘촘한 구간에서는 대부분이 안 그려진다 —
+    /// 켜면 칸마다 건수를 세어 밝기로 얹는다. **기본은 끔** (파생 기본값 false 가 맞다).
+    pub show_density: bool,
     /// 그 아래는 무시로 보는 응답시간(ms)
     pub ignore_threshold_ms: i64,
 }
@@ -257,6 +262,7 @@ impl Default for XLogChartPrefs {
             time_range_ms: 300_000,
             y_max: 9.0,
             show_ignore_area: false,
+            show_density: false,
             ignore_threshold_ms: 0,
         }
     }

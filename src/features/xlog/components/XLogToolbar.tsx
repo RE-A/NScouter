@@ -234,6 +234,21 @@ export function XLogToolbar({
         {t('에러만')}
       </label>
 
+      {/* 점 하나가 5x5 를 막아 촘촘한 구간에서는 대부분이 안 그려진다 —
+          화면은 «여기 좀 있네» 인데 실제로는 한 덩어리다.
+          **늘 켜 두지 않는다**: 열이 깔리면 점 색(어느 서버인가)이 읽기 어려워진다. */}
+      <label
+        className="flex cursor-pointer items-center gap-1.5 text-body text-fg-muted hover:text-fg"
+        title={t('겹쳐서 안 그려진 것까지 세어 붐비는 자리를 밝기로 보여줍니다')}
+      >
+        <input
+          type="checkbox"
+          checked={config.showDensity}
+          onChange={e => onConfigChange({ showDensity: e.target.checked })}
+        />
+        {t('밀집')}
+      </label>
+
       {/* 응답시간은 초로 받는다 — Y축이 Elapsed(sec) 라 눈으로 본 값을 그대로 옮기게 된다.
           내부는 ms 다. 0.2 같은 소수도 받으므로 예전 ms 입력이 하던 일을 잃지 않는다. */}
       <Field label={t('응답')}>

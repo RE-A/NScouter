@@ -18,6 +18,7 @@ import {
   DEFAULT_FILTER,
 } from '../types/xlog';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
+import { XLOG_COLORS } from '../utils/colorPalette';
 import {
   installFakeOffscreenCanvas,
   makeFakeCanvas,
@@ -75,9 +76,13 @@ function expectedY(valueSec: number, yMax = DEFAULT_CHART_CONFIG.yMax): number {
   return LAYOUT.plotAreaY + LAYOUT.plotAreaHeight - (valueSec / yMax) * LAYOUT.plotAreaHeight;
 }
 
-/** 화면 왼쪽 위에 적히는 «N dots» */
+/**
+ * 화면 왼쪽 위에 적히는 «N dots» 줄.
+ *
+ * 겹쳐 못 그린 것이 있으면 뒤에 «(N 겹침)» 이 붙으므로 «끝나는 글자» 로 찾으면 안 된다.
+ */
 function dotsLabel(ctx: FakeCanvasContext): string | undefined {
-  return textsOf(ctx).find(t => t.endsWith('dots'));
+  return textsOf(ctx).find(t => t.includes('dots'));
 }
 
 interface Harness {
@@ -193,13 +198,21 @@ describe('XLogChartRenderer — 점 찍기', () => {
     expect(dotsLabel(h.ctx)).toBe('0 dots');
   });
 
-  it('겹쳐서 못 그린 것도 **창 안에 있으므로** 센다', () => {
+  it('겹쳐서 못 그린 것도 **창 안에 있으므로** 세고, 몇 개가 가렸는지 적는다', () => {
     const h = setup();
     // 같은 시각·같은 소요 — 픽셀이 완전히 겹친다
     draw(h, [xlog({ txid: 'a' }), xlog({ txid: 'b' })]);
 
     expect(opsOf(h.ctx, 'drawImage')).toHaveLength(1);
-    expect(dotsLabel(h.ctx)).toBe('2 dots');
+    // **점 수를 건수로 읽으면 안 된다.** 실측에서 5,000건 남짓한 구간의 점이 339개였다.
+    expect(dotsLabel(h.ctx)).toBe('2 dots  (1 겹침)');
+  });
+
+  it('겹친 것이 없으면 그 말을 붙이지 않는다', () => {
+    // «0 겹침» 이 늘 붙어 있으면 그 자리를 안 읽게 된다.
+    const h = setup();
+    draw(h, [xlog({ txid: 'a' })]);
+    expect(dotsLabel(h.ctx)).toBe('1 dots');
   });
 
   it('필터에 걸린 것은 세지 않는다', () => {
@@ -219,7 +232,7 @@ describe('XLogChartRenderer — 점 찍기', () => {
       xlog({ txid: String(i), endTime: START + (i % SPAN) }),
     );
     draw(h, data);
-    expect(dotsLabel(h.ctx)).toBe('1,200 dots');
+    expect(dotsLabel(h.ctx)).toMatch(/^1,200 dots/);
   });
 });
 
@@ -403,5 +416,118 @@ describe('XLogChartRenderer — 서비스명 필터', () => {
     });
 
     expect(dotsLabel(h.ctx)).toBe('1 dots');
+  });
+});
+
+// ─── 에러 점은 가려지지 않는다 ────────────────────────────────
+//
+// 한 칸에 점을 하나만 그리는 것은 촘촘한 구간에서 그리기가 폭발하지 않게 하려는
+// 것인데, 순서대로 그리면 **먼저 온 정상 점이 에러 점을 지운다.**
+// 에러 하나를 찾으려고 보는 화면에서, 바쁜 구간일수록 그 에러가 잘 사라졌다.
+
+/** 그려진 점들의 색. 가짜 캔버스는 점 이미지를 만들 때 쓴 fillStyle 을 들고 있다 */
+function dotColors(ctx: FakeCanvasContext): string[] {
+  return opsOf(ctx, 'drawImage').map(op => {
+    const img = op.args[0] as { ctx: FakeCanvasContext };
+    return img.ctx.ops[0]?.fillStyle ?? '';
+  });
+}
+
+describe('XLogChartRenderer — 에러 점', () => {
+  /** 정상 점과 에러 점이 **완전히 같은 자리**에 오게 둔다 */
+  const same = { endTime: START + SPAN / 2, elapsed: 1_000 };
+
+  it('먼저 온 정상 점이 에러 점을 지우지 않는다', () => {
+    const h = setup();
+    draw(h, [xlog({ txid: 'ok', ...same, error: 0 }), xlog({ txid: 'bad', ...same, error: 7 })]);
+
+    // 둘 다 그려진다 — 자리는 같아도 층이 다르다.
+    expect(opsOf(h.ctx, 'drawImage')).toHaveLength(2);
+    expect(dotColors(h.ctx)).toContain(XLOG_COLORS.ERROR);
+  });
+
+  it('에러가 나중에 그려져 정상 점 위에 온다', () => {
+    // 순서가 뒤집히면 같은 자리에서 정상 색이 에러를 덮는다.
+    const h = setup();
+    draw(h, [xlog({ txid: 'bad', ...same, error: 7 }), xlog({ txid: 'ok', ...same, error: 0 })]);
+
+    const colors = dotColors(h.ctx);
+    expect(colors[colors.length - 1]).toBe(XLOG_COLORS.ERROR);
+  });
+
+  it('에러끼리는 여전히 한 칸에 하나다', () => {
+    // 자리를 무시하고 다 그리면 에러가 쏟아지는 구간에서 그리기가 폭발한다.
+    const h = setup();
+    draw(h, [
+      xlog({ txid: 'e1', ...same, error: 7 }),
+      xlog({ txid: 'e2', ...same, error: 8 }),
+      xlog({ txid: 'e3', ...same, error: 9 }),
+    ]);
+
+    expect(opsOf(h.ctx, 'drawImage')).toHaveLength(1);
+    // 셋 다 창 안에 있으므로 건수는 셋이고, 둘이 가렸다.
+    expect(dotsLabel(h.ctx)).toBe('3 dots  (2 겹침)');
+  });
+
+  it('그 자리를 짚으면 에러가 나온다', () => {
+    // 보이는 것이 에러인데 짚으면 정상 트랜잭션이 열리면 안 된다.
+    const h = setup();
+    const data = [xlog({ txid: 'ok', ...same, error: 0 }), xlog({ txid: 'bad', ...same, error: 7 })];
+    draw(h, data);
+
+    const x = LAYOUT.plotAreaX + LAYOUT.plotAreaWidth / 2;
+    const y = expectedY(1);
+    expect(h.renderer.getXLogIndexAt(x, y)).toBe(1);
+  });
+});
+
+// ─── 밀집 구간 ────────────────────────────────────────────────
+//
+// 점 하나가 5x5 를 막아 촘촘한 구간에서는 대부분이 안 그려진다.
+// 켜면 겹쳐서 안 그려진 것까지 세어 밝기로 얹는다.
+
+/** 밀도 칸으로 그린 사각형들 */
+function densityRects(ctx: FakeCanvasContext) {
+  return opsOf(ctx, 'fillRect').filter(op => String(op.fillStyle).startsWith('rgba(245, 166, 35'));
+}
+
+describe('XLogChartRenderer — 밀집 보기', () => {
+  /** 같은 자리에 n 건을 쌓는다 */
+  const pile = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      xlog({ txid: `p${i}`, endTime: START + SPAN / 2, elapsed: 1_000 }),
+    );
+
+  it('꺼져 있으면 아무것도 얹지 않는다', () => {
+    // 늘 켜 두면 열이 깔려 점 색(어느 서버인가)이 읽기 어려워진다.
+    const h = setup({ showDensity: false });
+    draw(h, pile(50));
+    expect(densityRects(h.ctx)).toHaveLength(0);
+  });
+
+  it('켜면 붐비는 자리를 칠한다', () => {
+    const h = setup({ showDensity: true });
+    draw(h, pile(50));
+    expect(densityRects(h.ctx).length).toBeGreaterThan(0);
+  });
+
+  it('한산하면 켜도 칠하지 않는다', () => {
+    // 둘이 겹친 것은 어디에나 있다. 그것까지 칠하면 화면 전체가 옅게 밝아진다.
+    const h = setup({ showDensity: true });
+    draw(h, pile(2));
+    expect(densityRects(h.ctx)).toHaveLength(0);
+  });
+
+  it('점을 덮지 않는다 — 밝기만 더한다', () => {
+    // 보통 합성으로 칠하면 그 위의 점이 열에 묻혀 어느 서버인지 못 읽는다.
+    const h = setup({ showDensity: true });
+    draw(h, pile(50));
+    expect(h.ctx.ops.some(o => o.op === 'setCompositeOperation')).toBe(true);
+  });
+
+  it('한 건도 없으면 칠할 것이 없다', () => {
+    const h = setup({ showDensity: true });
+    draw(h, []);
+    expect(densityRects(h.ctx)).toHaveLength(0);
   });
 });

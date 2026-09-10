@@ -191,11 +191,24 @@ export const Y_AXIS_CONFIGS: Record<YAxisMode, YAxisModeConfig> = {
  * 두 수가 나란히 있으면 같은 것으로 읽힌다.
  */
 export function formatYValue(mode: YAxisMode, x: SXLog): string {
+  return formatYAmount(mode, Y_AXIS_CONFIGS[mode].valueExtractor(x));
+}
+
+/**
+ * 이 축의 **아무 값이나** 같은 규칙으로 적는다.
+ *
+ * 평균·최댓값처럼 트랜잭션 하나에서 나오지 않은 수도 화면에 적을 일이 있는데
+ * (`selectionStats`), 그때 단위 규칙이 갈리면 «축은 초인데 요약은 ms» 가 된다.
+ *
+ * **소수점은 버린다.** 초 축은 ×1000 을 하므로 평균이 `3,004.3333ms` 로 나오고,
+ * 그 뒷자리는 읽는 데 품만 든다.
+ */
+export function formatYAmount(mode: YAxisMode, v: number): string {
   const cfg = Y_AXIS_CONFIGS[mode];
-  const v = cfg.valueExtractor(x);
-  if (cfg.unit === 'sec') return `${(v * 1000).toLocaleString()}ms`;
-  if (cfg.unit === '') return v.toLocaleString();
-  return `${v.toLocaleString()}${cfg.unit}`;
+  if (cfg.unit === 'sec') return `${Math.round(v * 1000).toLocaleString()}ms`;
+  const n = Number.isInteger(v) ? v : Math.round(v * 10) / 10;
+  if (cfg.unit === '') return n.toLocaleString();
+  return `${n.toLocaleString()}${cfg.unit}`;
 }
 
 /** Y축 이름에서 단위 괄호를 뗀 짧은 이름. 목록 머리에 쓴다 */
@@ -214,6 +227,16 @@ export interface XLogChartConfig {
    */
   yMax: number;
   showIgnoreArea: boolean;
+  /**
+   * 밀집 구간을 밝기로 겹쳐 보일지.
+   *
+   * **점 하나가 5x5 를 막는다.** 촘촘한 구간에서는 대부분이 안 그려져서
+   * 실측에서 5,000건 남짓한 구간의 점이 339개였다 — 화면은 «여기 좀 있네» 인데
+   * 실제로는 한 덩어리다. 켜면 칸마다 건수를 세어 밝기로 얹는다 (`densityGrid`).
+   *
+   * 기본은 끔이다. 늘 켜 두면 점 색(어느 서버인가)이 열에 묻힌다.
+   */
+  showDensity: boolean;
   ignoreThresholdMs: number;
   backgroundColor: string;
   gridColor: string;
@@ -224,6 +247,7 @@ export const DEFAULT_CHART_CONFIG: XLogChartConfig = {
   timeRangeMs: 300_000,
   yMax: 9,
   showIgnoreArea: false,
+  showDensity: false,
   ignoreThresholdMs: 0,
   // 값은 colorPalette.ts 하나에만 둔다 (여기와 두 벌이 되면 그리드만 흰 배경용으로 남는다).
   backgroundColor: XLOG_BACKGROUND,

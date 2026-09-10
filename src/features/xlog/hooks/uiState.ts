@@ -100,6 +100,7 @@ export function toChartConfig(saved: XLogChartPrefs | undefined): XLogChartConfi
     timeRangeMs: positive(saved.time_range_ms, DEFAULT_CHART_CONFIG.timeRangeMs),
     yMax: positive(saved.y_max, DEFAULT_CHART_CONFIG.yMax),
     showIgnoreArea: saved.show_ignore_area === true,
+    showDensity: saved.show_density === true,
     // 0 은 «무시 안 함» 이라 정상값이다. positive() 를 쓰면 0 이 기본값으로 튄다.
     ignoreThresholdMs:
       Number.isFinite(saved.ignore_threshold_ms) && saved.ignore_threshold_ms >= 0
@@ -114,6 +115,7 @@ export function fromChartConfig(c: XLogChartConfig): XLogChartPrefs {
     time_range_ms: c.timeRangeMs,
     y_max: c.yMax,
     show_ignore_area: c.showIgnoreArea,
+    show_density: c.showDensity,
     ignore_threshold_ms: c.ignoreThresholdMs,
   };
 }

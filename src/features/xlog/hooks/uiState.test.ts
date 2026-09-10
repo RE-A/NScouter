@@ -108,6 +108,7 @@ describe('toChartConfig', () => {
       time_range_ms: 600_000,
       y_max: 30,
       show_ignore_area: true,
+      show_density: false,
       ignore_threshold_ms: 100,
     });
     expect(c.yAxisMode).toBe('sqlTime');
@@ -127,6 +128,7 @@ describe('toChartConfig', () => {
       time_range_ms: 300_000,
       y_max: 9,
       show_ignore_area: false,
+      show_density: false,
       ignore_threshold_ms: 0,
     });
     expect(c.yAxisMode).toBe(DEFAULT_CHART_CONFIG.yAxisMode);
@@ -139,6 +141,7 @@ describe('toChartConfig', () => {
       time_range_ms: 300_000,
       y_max: 9,
       show_ignore_area: false,
+      show_density: false,
       ignore_threshold_ms: 0,
     });
     expect(c.ignoreThresholdMs).toBe(0);
@@ -151,6 +154,7 @@ describe('toChartConfig', () => {
       time_range_ms: 300_000,
       y_max: 9,
       show_ignore_area: false,
+      show_density: false,
       ignore_threshold_ms: 0,
     });
     expect(c.backgroundColor).toBe(DEFAULT_CHART_CONFIG.backgroundColor);

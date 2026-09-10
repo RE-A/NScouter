@@ -44,6 +44,8 @@ import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
 import { durationTone } from './features/xlog/components/durationTone';
+import { SelectionSummary } from './features/xlog/components/SelectionSummary';
+import { selectionStats } from './features/xlog/components/selectionStats';
 // ko-KR 로케일은 "4시 36분 18초" 를 낸다 — 폭을 먹고 줄바꿈되며 차트 X축(04:36:18)과도 어긋난다.
 import { formatTime, formatTimeMs } from './features/xlog/utils/colorPalette';
 import { AlertPanel } from './features/xlog/components/AlertPanel';
@@ -896,6 +898,26 @@ export default function App() {
     setActiveTab('xlog');
   }, []);
 
+  /**
+   * 순위표에서 서비스 하나를 눌렀을 때.
+   *
+   * **서버 고르기는 건드리지 않는다.** 위 격자는 «이 서버 한 대» 로 좁히는 것이지만
+   * 여기서 고른 것은 이름 하나라, 어느 서버를 보고 있었는지는 그대로 두는 편이 맞다.
+   *
+   * 조건은 **서비스 자리만** 갈아 끼운다 — IP 조건은 «무엇을 보려던 참인가» 라서
+   * 서비스를 바꿔도 유지되는 편이 맞다 (`drillToXLog` 와 같은 규칙).
+   */
+  const drillToService = useCallback((serviceName: string) => {
+    setFilter(prev => ({
+      ...prev,
+      patterns: [
+        ...prev.patterns.filter(r => r.field !== 'service'),
+        { field: 'service' as const, text: serviceName, exclude: false },
+      ],
+    }));
+    setActiveTab('xlog');
+  }, []);
+
   useShortcuts({
     // Esc 는 **지금 보는 탭 하나만** 닫는다. 전부 닫으면 되돌릴 방법이 없다.
     'close-detail': detail.closeActive,
@@ -924,6 +946,16 @@ export default function App() {
   const isStreaming = isConnected;
   const hasDetail = detail.tabs.length > 0;
   const hasSelected = selectedXLogs.length > 0;
+  /**
+   * 고른 구간의 요약.
+   *
+   * **축을 따라간다** — 점 높이가 SQL Time 인데 요약이 Elapsed 를 말하면
+   * «왜 3초짜리가 맨 밑에 있나» 가 다시 시작된다 (`formatYValue` 주석 참고).
+   */
+  const selection = useMemo(
+    () => selectionStats(selectedXLogs, config.yAxisMode),
+    [selectedXLogs, config.yAxisMode],
+  );
 
   return (
     // key 로 갈아끼우는 이유: memo 로 막아 둔 자식(차트 등)까지 확실히 새 언어로 그린다.
@@ -1156,6 +1188,9 @@ export default function App() {
                           <span className="text-fg-faint"> · {t('느린 순')} {XLOG_TABLE_LIMIT}{t('건')}</span>
                         )}
                       </span>
+                      {/* 끌고 나면 다음 질문은 늘 같다 — «얼마나 느렸고 몇 개가 터졌나».
+                          건수만 적혀 있으면 그 답을 목록을 훑어 눈으로 세야 한다. */}
+                      <SelectionSummary stats={selection} />
                       {/* **서버는 잘렸다는 신호를 주지 않는다.** 여기서 말하지 않으면
                           없는 트랜잭션을 없다고 믿게 된다 (F-54). */}
                       {wideTruncated && (
@@ -1269,6 +1304,7 @@ export default function App() {
               families={pickedFamilies}
               agentMap={agentMap}
               onDrill={drillToXLog}
+              onDrillService={drillToService}
             />
           )}
         </div>

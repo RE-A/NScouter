@@ -22,6 +22,16 @@ export const EN: Record<string, string> = {
   '최대': 'Max',
   '정렬': 'Sort',
   '다시': 'Again',
+  '폭': 'Span',
+  '밀집': 'Density',
+  '내역': 'Breakdown',
+  '그 외': 'other',
+  '겹침': 'overlapping',
+  '한 건 평균으로 나눈 소요 시간입니다': 'Elapsed time per transaction, averaged',
+  'SQL 과 API 가 겹쳐 돌아 둘의 합이 전체보다 큽니다 — 빼서 «나머지» 를 낼 수 없습니다':
+    'SQL and API ran concurrently, so their sum exceeds the total — the remainder cannot be derived',
+  '겹쳐서 안 그려진 것까지 세어 붐비는 자리를 밝기로 보여줍니다':
+    'Counts the dots that overlap and shades the busiest spots',
   '비밀번호 기억': 'Remember password',
   '기동할 때 마지막 서버로 자동 접속합니다': 'Connect to the last server on startup',
   '이름 바꾸기': 'Rename',

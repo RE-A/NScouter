@@ -58,6 +58,13 @@ interface VisualizeTabProps {
   agentMap: Map<number, string>;
   /** 이 서버의 트랜잭션을 보러 간다 (XLog 탭으로 데려가며 조건을 건다) */
   onDrill: (objHash: number) => void;
+  /**
+   * 이 서비스의 트랜잭션을 보러 간다.
+   *
+   * **순위표의 값어치는 «이게 제일 비싸다» 다음에 있다.** 이름을 찾아 놓고 XLog 탭에서
+   * 같은 글자를 다시 쳐야 하면 순위를 본 보람이 없다.
+   */
+  onDrillService: (serviceName: string) => void;
 }
 
 export const VisualizeTab = memo(function VisualizeTab({
@@ -69,6 +76,7 @@ export const VisualizeTab = memo(function VisualizeTab({
   families,
   agentMap,
   onDrill,
+  onDrillService,
 }: VisualizeTabProps) {
   const { kpis, lastReceivedAt } = useKpiSamples(enabled, picked);
   const { samples } = useInstanceKpis(enabled, picked);
@@ -292,6 +300,7 @@ export const VisualizeTab = memo(function VisualizeTab({
                   rows={insight.services}
                   loading={insight.loading}
                   wholeType={insight.wholeType}
+                  onDrill={onDrillService}
                 />
               </div>
             </div>

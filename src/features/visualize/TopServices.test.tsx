@@ -55,3 +55,22 @@ describe('TopServices', () => {
     expect(screen.getByText('이 구간에 서비스 호출이 없습니다')).toBeTruthy();
   });
 });
+
+describe('TopServices — 파고들기', () => {
+  it('줄을 누르면 그 서비스 이름을 넘긴다', () => {
+    // 순위표의 값어치는 «이게 제일 비싸다» 다음에 있다. 이름을 찾아 놓고
+    // XLog 탭에서 같은 글자를 다시 쳐야 하면 순위를 본 보람이 없다.
+    const onDrill = vi.fn();
+    render(<TopServices rows={rows} loading={false} wholeType={false} onDrill={onDrill} />);
+
+    fireEvent.click(screen.getByText('/shop/report'));
+    expect(onDrill).toHaveBeenCalledWith('/shop/report');
+  });
+
+  it('갈 데가 없으면 눌리지 않는다', () => {
+    // 눌러도 아무 일 없는 줄은 없느니만 못하다.
+    render(<TopServices rows={rows} loading={false} wholeType={false} />);
+    const row = screen.getByText('/shop/list').closest('button') as HTMLButtonElement;
+    expect(row.disabled).toBe(true);
+  });
+});

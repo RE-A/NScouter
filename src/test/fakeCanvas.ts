@@ -21,6 +21,18 @@ export class FakeCanvasContext {
   strokeStyle = '#000000';
   lineWidth = 1;
   globalAlpha = 1;
+  /**
+   * 가산 합성 등. **바뀐 것을 받아 적는다** — 값만 들고 있으면
+   * «언제 켰다 껐는지» 가 안 남아 «점 위에 밝기만 더했는가» 를 볼 수 없다.
+   */
+  private composite = 'source-over';
+  get globalCompositeOperation(): string {
+    return this.composite;
+  }
+  set globalCompositeOperation(v: string) {
+    this.composite = v;
+    this.record('setCompositeOperation', v);
+  }
   font = '10px sans-serif';
   textAlign = 'left';
   textBaseline = 'alphabetic';
