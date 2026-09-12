@@ -1,28 +1,30 @@
-// 에이전트 설정 원문 편집 (ASIS ConfigureView)
+// 설정 원문 편집 (ASIS ConfigureView) — 에이전트 · 콜렉터 공용
 //
-// **파일을 통째로 덮어쓴다.** 에이전트는 받은 텍스트를 그대로 저장하고 reload 한다 —
+// **파일을 통째로 덮어쓴다.** 에이전트도 콜렉터도 받은 텍스트를 그대로 저장하고 reload 한다 —
 // 한 줄만 보내면 나머지 설정이 사라진다 (F-40). 그래서 편집 대상은 언제나 원문 전체다.
 //
-// 이 화면만 유일하게 **운영 중인 에이전트를 바꾼다.** 조회 화면과 같은 무게로 두면 안 된다.
+// 이 화면은 **운영 중인 서버를 바꾼다.** 조회 화면과 같은 무게로 두면 안 된다.
+// 누구에게 저장할지는 부르는 쪽이 `save` 로 정한다 — 에이전트와 콜렉터가 커맨드만 다르다.
 
 import { memo, useEffect, useState } from 'react';
-import { saveAgentConfig } from '../api/scouterApi';
 import { t } from '../../../i18n';
 
 interface ConfigEditorProps {
-  objHash: number;
-  objName: string;
+  /** 경고문에 적을 대상 이름 */
+  targetName: string;
   /** 서버에서 읽어 온 원문 */
   text: string;
+  /** 원문 전체를 저장한다 */
+  save: (text: string) => Promise<void>;
   /** 저장 성공 후 다시 읽게 한다 — 저장했다는 말만 믿지 않는다 */
   onSaved: () => void;
   onCancel: () => void;
 }
 
 export const ConfigEditor = memo(function ConfigEditor({
-  objHash,
-  objName,
+  targetName,
   text,
+  save: saveText,
   onSaved,
   onCancel,
 }: ConfigEditorProps) {
@@ -39,7 +41,7 @@ export const ConfigEditor = memo(function ConfigEditor({
   const save = () => {
     setBusy(true);
     setError(null);
-    saveAgentConfig(objHash, draft)
+    saveText(draft)
       .then(() => {
         setConfirming(false);
         onSaved();
@@ -54,8 +56,8 @@ export const ConfigEditor = memo(function ConfigEditor({
     <div className="flex min-h-[60vh] flex-1 flex-col">
       {/* **경고를 접어 두지 않는다.** 무엇이 일어나는지 모르고 누르면 안 되는 버튼이다. */}
       <p className="mx-4 mt-2 rounded border-l-2 border-warn bg-warn/10 px-2 py-1.5 text-micro text-warn">
-        {t('저장하면')} <span className="font-mono">{objName}</span> {t('의 설정 파일이 이 내용으로')}{' '}
-        <strong>{t('통째로 바뀌고')}</strong> {t('에이전트가 설정을 다시 읽습니다. 지우고 저장한 줄은')}
+        {t('저장하면')} <span className="font-mono">{targetName}</span> {t('의 설정 파일이 이 내용으로')}{' '}
+        <strong>{t('통째로 바뀌고')}</strong> {t('설정을 다시 읽습니다. 지우고 저장한 줄은')}
         {t('기본값으로 돌아갑니다.')}
       </p>
 

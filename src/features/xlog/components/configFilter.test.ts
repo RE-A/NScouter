@@ -7,6 +7,8 @@ const entry = (key: string, value: string, def: string): ConfigEntry => ({
   value,
   default: def,
   changed: value !== def,
+  desc: '',
+  value_type: 0,
 });
 
 const ROWS: ConfigEntry[] = [
@@ -42,5 +44,17 @@ describe('filterConfig', () => {
 
   it('대소문자를 가리지 않는다', () => {
     expect(filterConfig(ROWS, 'NET_COLLECTOR_IP', false)).toHaveLength(1);
+  });
+
+  it('설명으로도 찾는다', () => {
+    // 키 이름을 아는 사람보다 하는 일을 아는 사람이 더 많다.
+    const rows = [{ ...entry('xlog_lower_bound_time_ms', '0', '0'), desc: 'minimum elapsed to send XLog' }];
+    expect(filterConfig(rows, 'minimum elapsed', false)).toHaveLength(1);
+  });
+
+  it('고치고 있는 항목은 조건에 안 맞아도 남긴다', () => {
+    // «바뀐 것만» 을 켠 채 기본값인 항목을 고치면, 입력하는 도중에 사라지면 안 된다.
+    const rows = filterConfig(ROWS, '', true, new Set(['net_collector_tcp_port']));
+    expect(rows.map(r => r.key)).toContain('net_collector_tcp_port');
   });
 });

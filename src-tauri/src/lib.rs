@@ -72,6 +72,7 @@ pub fn run() {
             get_object_heap_histogram,
             get_agent_config,
             get_server_config,
+            save_server_config,
             get_summary,
             get_error_summary,
             get_interaction,

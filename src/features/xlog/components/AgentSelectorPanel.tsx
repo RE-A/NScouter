@@ -8,6 +8,7 @@ import { groupAgents, shortName, type GroupBy } from './agentTree';
 import { shouldShowTypes, typeCounts, typeLabel, typeTone } from './objectTypes';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
+import { ConfigSettingsDialog } from '../../config/ConfigSettingsDialog';
 import { isJavaeeObjectType } from '../types/counter';
 import { t } from '../../../i18n';
 
@@ -131,6 +132,13 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   const [menu, setMenu] = useState<{ agent: AgentObject; x: number; y: number } | null>(null);
   /** 열려 있는 조회 창 */
   const [inspect, setInspect] = useState<{ agent: AgentObject; kind: InspectKind } | null>(null);
+  /**
+   * 설정 창을 연 에이전트.
+   *
+   * 설정은 조회 창(`ObjectInspector`)이 아니라 **따로 된 설정 창**이다 — 구역·설명이 붙은
+   * 편집 화면이라 조회 창의 폭으로는 안 들어가고, 콜렉터 설정과 같은 창을 쓴다.
+   */
+  const [configOf, setConfigOf] = useState<AgentObject | null>(null);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, agent: AgentObject) => {
     e.preventDefault();
@@ -433,7 +441,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
             {
               // 호스트 에이전트도 답한다 (실측 41개). JVM 전용이 아니라서 막지 않는다.
               label: t('설정'),
-              onSelect: () => setInspect({ agent: menu.agent, kind: 'config' }),
+              onSelect: () => setConfigOf(menu.agent),
             },
             {
               // 위쪽은 전부 조회다. 이것만 **에이전트를 건드린다** — 그래서 끝에 둔다.
@@ -444,6 +452,18 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 : t('JVM 에이전트에서만 실행됩니다'),
             },
           ]}
+        />
+      )}
+
+      {configOf && (
+        <ConfigSettingsDialog
+          target={{
+            kind: 'agent',
+            objHash: configOf.obj_hash,
+            objName: configOf.obj_name,
+            objType: configOf.obj_type,
+          }}
+          onClose={() => setConfigOf(null)}
         />
       )}
 

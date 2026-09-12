@@ -24,6 +24,69 @@ export const EN: Record<string, string> = {
   '다시': 'Again',
   '폭': 'Span',
   '밀집': 'Density',
+  // ── 에이전트 설정 편집 ─────────────────────────────────
+  // ── 설정 창 (에이전트 · 콜렉터) ────────────────────────
+  '콜렉터 설정': 'Collector settings',
+  '지금 붙은 콜렉터의 설정을 보고 고칩니다': 'View and edit the connected collector’s settings',
+  '콜렉터': 'Collector',
+  '자바 에이전트': 'Java agent',
+  '호스트 에이전트': 'Host agent',
+  '설정 구역': 'Setting sections',
+  '설정 찾기': 'Find a setting',
+  '이름·설명·키로 찾기': 'find by name, description or key',
+  '기본값과 다른 것만': 'Changed from default only',
+  '기본값과 다른 항목': 'changed from default',
+  '기본값과 다름': 'changed',
+  '내부 항목': 'Internal options',
+  '내부': 'internal',
+  '사용 안 함': 'deprecated',
+  '재시작 필요': 'restart required',
+  '예시 항목': 'sample option',
+  '저장하지 않은 바뀜': 'unsaved edits',
+  '공식': 'Official',
+  '공식 설명 없음': 'no official description',
+  '스카우터 공식 문서의 원문': 'Original text from the Scouter documentation',
+  '원문 더 보기': 'Show full text',
+  '원문 편집': 'Edit raw file',
+  '공식 문서에 «restart required» 로 적힌 항목입니다':
+    'The official documentation marks this option «restart required»',
+  '공식 문서의 예시 항목입니다 — $measurement$ 자리에 실제 측정값 이름을 넣어 씁니다':
+    'A sample option in the official docs — replace $measurement$ with a real measurement name',
+  '_ 로 시작하는 항목입니다. 대개 공식 설명이 없고 일상적으로 고칠 것이 아닙니다. 기본값과 다르게 되어 있으면 이 스위치와 무관하게 보입니다.':
+    'Options starting with _. Most have no official description and are not for everyday tuning. Ones changed from their default are always shown.',
+  '«재시작 필요» 로 표시된 항목은 재시작해야 적용됩니다.':
+    'Options marked «restart required» take effect after a restart.',
+  '의 설정 파일이 아래처럼 바뀐 채로 통째로 저장되고 콜렉터가 설정을 다시 읽습니다.':
+    '’s configuration file is saved as a whole with the changes below, and the collector reloads it.',
+  '설정을 다시 읽습니다. 지우고 저장한 줄은': 'the settings are reloaded. Lines you delete and save',
+  '설정 파일 그대로입니다. 줄 이음·주석을 손으로 다듬을 때 씁니다.':
+    'The configuration file as is. Use it to hand-edit comments and line continuations.',
+  '설정 파일이 없습니다. 기본값으로 동작 중입니다.': 'No configuration file. Running on defaults.',
+  '설정 항목을 받지 못했습니다. 에이전트가 응답하지 않았을 수 있습니다.':
+    'No settings received. The agent may not have responded.',
+  '이 서버는 항목 설명을 주지 않습니다 (오래된 판). 공식 문서에 있는 항목만 설명이 붙습니다.':
+    'This server does not provide option descriptions (older version). Only options in the official docs are described.',
+  '바꿈': 'edited',
+  '개 바꿈': ' edited',
+  '고칠 값': 'to fix',
+  '모두 되돌리기': 'Undo all',
+  '되돌리기': 'Undo',
+  '더 보기': 'More',
+  '켜짐': 'On',
+  '꺼짐': 'Off',
+  '값 바꿈': 'value changed',
+  '새로 적음': 'added',
+  '줄 지움 → 기본값': 'line removed → default',
+  '빨갛게 표시된 값을 먼저 고치세요': 'Fix the values marked in red first',
+  '이 줄을 설정 파일에서 지워 기본값을 따르게 합니다':
+    'Removes this line from the file so the default applies',
+  '쉼표로 구분합니다 — a,b,c': 'comma separated — a,b,c',
+  '«이름:값» 을 쉼표로 구분합니다 — a:1,b:2': '«name:value» pairs, comma separated — a:1,b:2',
+  '의 설정 파일이 아래처럼 바뀐 채로 통째로 저장되고 에이전트가 설정을 다시 읽습니다.':
+    '’s configuration file is saved as a whole with the changes below, and the agent reloads it.',
+  '정수만 넣을 수 있습니다': 'Integers only',
+  'true 또는 false 여야 합니다': 'Must be true or false',
+  '«이름:값» 모양이 아닌 것이 있습니다': 'Some items are not «name:value»',
   '내역': 'Breakdown',
   '그 외': 'other',
   '겹침': 'overlapping',
@@ -382,8 +445,6 @@ export const EN: Record<string, string> = {
   // 설정 편집기
   '저장하면': 'Saving replaces',
   '의 설정 파일이 이 내용으로': ' configuration file with this content and',
-  '에이전트가 설정을 다시 읽습니다. 지우고 저장한 줄은':
-    ' the agent reloads it. Lines you delete and save',
   '기본값으로 돌아갑니다.': ' return to their defaults.',
   '아니요': 'No',
   '편집': 'Edit',

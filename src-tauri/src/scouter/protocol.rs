@@ -145,6 +145,14 @@ pub const CMD_LIST_CONFIGURE_SERVER: &str = "LIST_CONFIGURE_SERVER";
 /// 에이전트 설정 **저장**. `objHash` + `setConfig`(전문).
 /// **부수효과**: 에이전트가 파일을 통째로 덮어쓰고 reload 한다 (F-40)
 pub const CMD_SET_CONFIGURE_WAS: &str = "SET_CONFIGURE_WAS";
+/// 콜렉터 설정 **저장**. `setConfig`(전문) 하나.
+/// **부수효과**: 콜렉터가 `scouter.conf` 를 통째로 덮어쓰고 reload 한다 (바이트코드 `setConfigureServer`)
+pub const CMD_SET_CONFIGURE_SERVER: &str = "SET_CONFIGURE_SERVER";
+/// 설정 항목별 설명. `objHash` 가 0 이면 콜렉터 자신의 것, 아니면 **에이전트에 되물어본다**.
+/// 응답은 MapPack 하나 — 키마다 Text(설명). 콜렉터 바이트코드(`getConfigureDesc`)로 확인
+pub const CMD_CONFIGURE_DESC: &str = "CONFIGURE_DESC";
+/// 설정 항목별 값 종류. 응답은 MapPack 하나 — 키마다 Decimal(`ValueType` 1~5)
+pub const CMD_CONFIGURE_VALUE_TYPE: &str = "CONFIGURE_VALUE_TYPE";
 
 // ─── 인터랙션 (토폴로지) ──────────────────────────────────────
 /// 오브젝트별 호출 관계. `objType`(Text) + `objHash`(List, 비우면 타입 전체).

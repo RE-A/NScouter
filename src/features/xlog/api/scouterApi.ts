@@ -454,6 +454,16 @@ export async function saveAgentConfig(objHash: number, text: string): Promise<vo
 }
 
 /**
+ * 콜렉터 설정 저장.
+ *
+ * 에이전트와 같은 규칙이다 — **원문 전체**를 보내면 콜렉터가 `scouter.conf` 를 통째로 덮어쓰고
+ * 다시 읽는다. 일부만 보내면 나머지 설정이 사라진다.
+ */
+export async function saveServerConfig(text: string): Promise<void> {
+  return invoke<void>('save_server_config', { text });
+}
+
+/**
  * 실행 중인 트랜잭션 한 건의 상세.
  *
  * `blocked_time`/`waited_time` 이 **null 이면 0이 아니라 "측정 꺼짐"이다** —

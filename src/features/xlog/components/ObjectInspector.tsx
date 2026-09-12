@@ -5,7 +5,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  getAgentConfig,
   getDumpFileContent,
   getDumpFileList,
   getObjectActiveServices,
@@ -29,14 +28,11 @@ import type {
   SocketInfo,
   ThreadInfo,
 } from '../types/object';
-import type { ConfigView as ConfigViewData } from '../types/config';
 import { isBusy, threadStatTone } from '../types/object';
 import { useTextResolver } from '../hooks/useTextResolver';
 import { durationTone } from './durationTone';
-import { filterConfig } from './configFilter';
 import { ObjectActions } from './ObjectActions';
 import { ThreadDetailDialog } from './ThreadDetailDialog';
-import { ConfigEditor } from './ConfigEditor';
 import { buildPropertyRows, type PropertyRow } from './objectProperties';
 import { getAgentColor } from '../utils/colorPalette';
 // 이 파일에는 시각을 담은 지역 변수 t 가 있어 별명을 쓴다
@@ -50,7 +46,6 @@ export type InspectKind =
   | 'classes'
   | 'dump'
   | 'heap'
-  | 'config'
   /** 샘플링으로 모인 스레드 스택. 켜고 끄기만 하던 것을 **읽는** 쪽 */
   | 'stack'
   /** 오브젝트 자체의 신원 — 무엇이고, 어디 있고, 언제 살아 있었나 */
@@ -73,7 +68,6 @@ const TITLE: Record<InspectKind, string> = {
   classes: '로드된 클래스',
   dump: '스레드 덤프',
   heap: '힙 히스토그램',
-  config: '에이전트 설정',
   stack: '모인 스택',
   properties: '속성',
   actions: '에이전트 작업',
@@ -87,7 +81,6 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
   const [classes, setClasses] = useState<ClassListPage | null>(null);
   const [heap, setHeap] = useState<HeapHistoRow[] | null>(null);
   const [dumps, setDumps] = useState<DumpFile[] | null>(null);
-  const [config, setConfig] = useState<ConfigViewData | null>(null);
   const [props, setProps] = useState<PropertyRow[] | null>(null);
   /** 모인 스택의 시각 목록. null 이면 아직 안 받았다 */
   const [stackTimes, setStackTimes] = useState<number[] | null>(null);
@@ -95,17 +88,6 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
   const [stackText, setStackText] = useState<{ time: number; text: string } | null>(null);
   /** 상세를 연 액티브 서비스 행 */
   const [pickedActive, setPickedActive] = useState<ActiveService | null>(null);
-  /** 설정은 표(바뀐 것 찾기)와 원문(전체 맥락)이 서로 다른 질문에 답한다 */
-  const [configMode, setConfigMode] = useState<'table' | 'text'>('table');
-  /** 표 기본값은 "기본값과 다른 것만" — 306개를 다 보려고 여는 창이 아니다 */
-  const [changedOnly, setChangedOnly] = useState(true);
-  /**
-   * 설정 편집 중인가.
-   *
-   * **읽기가 기본이다.** 이 창의 나머지는 전부 조회인데 이것만 운영 중인 에이전트를
-   * 바꾸므로, 들어가려면 한 번 더 눌러야 한다.
-   */
-  const [editingConfig, setEditingConfig] = useState(false);
   /** 선택한 덤프 파일의 내용. null 이면 목록 화면 */
   const [dumpText, setDumpText] = useState<{ name: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -173,9 +155,6 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
         break;
       case 'heap':
         getObjectHeapHistogram(objHash).then(setHeap).catch(fail).finally(done);
-        break;
-      case 'config':
-        getAgentConfig(objHash).then(setConfig).catch(fail).finally(done);
         break;
       case 'stack':
         // 오늘 하루를 훑는다. 구간 전체 원문을 받지 않고 **시각만** 받는다 —
@@ -280,53 +259,6 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
             placeholder={tr('검색')}
             className="w-40 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
           />
-          {kind === 'config' && (
-            <>
-              {/* 원문에는 걸리지 않는 조건이다. 켜 두면 눌러도 아무 일이 없는 스위치가 된다 */}
-              {configMode === 'table' && (
-                <label
-                  title={tr('기본값 그대로인 항목은 볼 이유가 없다')}
-                  className="flex items-center gap-1 text-micro text-fg-dim"
-                >
-                  <input
-                    type="checkbox"
-                    checked={changedOnly}
-                    onChange={e => setChangedOnly(e.target.checked)}
-                    className="accent-[var(--color-accent)]"
-                  />
-                  {tr('바뀐 것만')}
-                </label>
-              )}
-              {!editingConfig && (
-                <div className="flex items-center gap-1">
-                  {(['table', 'text'] as const).map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setConfigMode(m)}
-                      aria-pressed={configMode === m}
-                      className={`rounded px-1.5 py-0.5 text-micro transition-colors ${
-                        configMode === m
-                          ? 'bg-accent text-white'
-                          : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
-                      }`}
-                    >
-                      {m === 'table' ? tr('항목') : tr('원문')}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {/* 원문을 보고 있을 때만 편집으로 갈 수 있다 — 표에서는 무엇을 고칠지 정할 수 없다 */}
-              {!editingConfig && configMode === 'text' && config?.text && (
-                <button
-                  onClick={() => setEditingConfig(true)}
-                  title={tr('설정 파일을 통째로 바꿉니다')}
-                  className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-                >
-                  {tr('편집')}
-                </button>
-              )}
-            </>
-          )}
           {kind === 'stack' && stackText && (
             <>
               <span className="font-mono text-micro text-fg-dim">
@@ -378,22 +310,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
           </button>
         </header>
 
-        {/* 편집은 스크롤 영역 밖에 둔다 — textarea 가 남은 높이를 다 써야 한다 */}
-        {kind === 'config' && editingConfig && config && (
-          <ConfigEditor
-            objHash={objHash}
-            objName={objName}
-            text={config.text}
-            onSaved={() => {
-              // **저장했다는 말만 믿지 않는다.** 다시 읽어 화면을 서버 상태로 맞춘다.
-              setEditingConfig(false);
-              load();
-            }}
-            onCancel={() => setEditingConfig(false)}
-          />
-        )}
-
-        <div className={`min-h-0 flex-1 overflow-auto ${kind === 'config' && editingConfig ? 'hidden' : ''}`}>
+        <div className="min-h-0 flex-1 overflow-auto">
           {kind === 'actions' && <ObjectActions objHash={objHash} />}
           {kind !== 'actions' && loading && <Note>{tr('조회 중…')}</Note>}
           {kind !== 'actions' && error && <Note tone="danger">{error}</Note>}
@@ -466,14 +383,6 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
               rows={(props ?? []).filter(
                 r => !q || r.key.toLowerCase().includes(q) || r.value.toLowerCase().includes(q),
               )}
-            />
-          )}
-          {!loading && !error && kind === 'config' && !editingConfig && (
-            <ConfigPane
-              data={config}
-              mode={configMode}
-              changedOnly={changedOnly}
-              query={q}
             />
           )}
           {!loading && !error && kind === 'classes' && (
@@ -978,84 +887,6 @@ function ClassTable({ rows }: { rows: LoadedClass[] }) {
           </li>
         ))}
       </ol>
-    </div>
-  );
-}
-
-const CONFIG_COLS = 'grid grid-cols-[minmax(0,300px)_minmax(0,1fr)] gap-x-4 px-4';
-
-function ConfigPane({
-  data,
-  mode,
-  changedOnly,
-  query,
-}: {
-  data: ConfigViewData | null;
-  mode: 'table' | 'text';
-  changedOnly: boolean;
-  query: string;
-}) {
-  if (!data) return <Note>{tr('설정을 불러오지 못했습니다.')}</Note>;
-
-  if (mode === 'text') {
-    // 설정 파일이 없어도 에이전트는 기본값으로 돈다. 원문만 비는 게 정상일 수 있다.
-    if (!data.text) {
-      return <Note>{tr('설정 파일이 없습니다. 에이전트가 기본값으로 동작 중입니다.')}</Note>;
-    }
-    return (
-      <pre className="px-4 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-fg">
-        {data.text}
-      </pre>
-    );
-  }
-
-  const rows = filterConfig(data.entries, query, changedOnly);
-  const changed = data.entries.filter(e => e.changed).length;
-
-  return (
-    <div>
-      <div
-        className={`${CONFIG_COLS} sticky top-0 border-b border-line bg-raised py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
-      >
-        <span>{tr('키')}</span>
-        <span>{tr('값')}</span>
-      </div>
-      {rows.length === 0 ? (
-        <Note>
-          {changedOnly && changed === 0
-            ? tr('기본값과 다른 설정이 없습니다.')
-            : tr('조건에 맞는 항목이 없습니다.')}
-        </Note>
-      ) : (
-        <ol className="divide-y divide-line/40">
-          {rows.map(e => (
-            <li
-              key={e.key}
-              className={`${CONFIG_COLS} border-l-2 py-1 ${
-                e.changed ? 'border-l-accent bg-accent/8' : 'border-l-transparent'
-              }`}
-            >
-              <span className="truncate font-mono text-micro text-fg-muted" title={e.key}>
-                {e.key}
-              </span>
-              <span className="min-w-0">
-                <span className="block font-mono text-micro break-all text-fg">
-                  {e.value || <span className="text-fg-faint">{tr('(비어 있음)')}</span>}
-                </span>
-                {/* 바뀐 항목에서만 기본값을 보여준다 — 같은 값을 두 번 쓰면 표가 안 읽힌다 */}
-                {e.changed && (
-                  <span className="block font-mono text-micro break-all text-fg-faint">
-                    {tr('기본')} {e.default || tr('(비어 있음)')}
-                  </span>
-                )}
-              </span>
-            </li>
-          ))}
-        </ol>
-      )}
-      <p className="px-4 py-2 text-micro text-fg-faint">
-        {tr('전체')} {data.entries.length.toLocaleString()}{tr('개 · 기본값과 다른 항목')} {changed}{tr('개')}
-      </p>
     </div>
   );
 }

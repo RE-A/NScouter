@@ -12,6 +12,8 @@
 // WAS 쪽 둘은 콜렉터가 **에이전트에 다시 물어본다**. 에이전트가 없거나 답이 null 이면
 // 콜렉터는 아무것도 쓰지 않는다 — 빈 응답이 오류 메시지 대신 온다.
 
+use std::collections::HashMap;
+
 use serde::Serialize;
 
 use super::pack::MapPack;
@@ -27,6 +29,25 @@ pub struct ConfigEntry {
     pub value: String,
     pub default: String,
     pub changed: bool,
+    /// 이 항목이 무엇을 하는가.
+    ///
+    /// **에이전트 자신이 준다** (`@ConfigDesc`, `CONFIGURE_DESC`). 우리가 따로 적으면
+    /// 에이전트 판이 올라갈 때마다 어긋난다 — 에이전트 코드에 붙은 설명이라 그 판과
+    /// 늘 맞는다. 에이전트가 설명을 안 주면(오래된 판) 빈 문자열이다.
+    pub desc: String,
+    /// 값 종류 (`CONFIGURE_VALUE_TYPE`). 0 은 «모른다» — 그때 화면은 글자 칸을 준다.
+    pub value_type: u8,
+}
+
+/// 값 종류. ASIS `scouter.lang.conf.ValueType` 과 번호가 같아야 한다
+pub mod value_type {
+    /// 모른다 — 에이전트가 안 줬다
+    pub const UNKNOWN: u8 = 0;
+    pub const VALUE: u8 = 1;
+    pub const NUM: u8 = 2;
+    pub const BOOL: u8 = 3;
+    pub const COMMA_SEPARATED: u8 = 4;
+    pub const COMMA_COLON_SEPARATED: u8 = 5;
 }
 
 /// 설정 전문 + 항목 표.
@@ -112,9 +133,73 @@ pub fn parse_config_entries(map: &MapPack) -> Vec<ConfigEntry> {
                 changed: value != default,
                 value,
                 default,
+                desc: String::new(),
+                value_type: value_type::UNKNOWN,
             }
         })
         .collect()
+}
+
+/// 설명 응답. 키마다 Text 하나다.
+///
+/// **Text 가 아닌 값은 버린다** — 판에 따라 값이 비어(Null) 오기도 하는데,
+/// 그걸 "null" 로 적으면 없는 설명이 생긴다.
+pub fn parse_config_desc(map: &MapPack) -> HashMap<String, String> {
+    map.entries
+        .iter()
+        .filter_map(|(k, v)| match v {
+            ScouterValue::Text(s) if !s.trim().is_empty() => Some((k.clone(), s.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// 값 종류 응답. 키마다 Decimal 하나다. 모르는 번호는 «모른다» 로 둔다.
+pub fn parse_config_value_types(map: &MapPack) -> HashMap<String, u8> {
+    map.entries
+        .iter()
+        .filter_map(|(k, v)| {
+            let n = v.as_decimal()?;
+            let t = u8::try_from(n).ok().filter(|t| (1..=5).contains(t))?;
+            Some((k.clone(), t))
+        })
+        .collect()
+}
+
+/// `$` 로 감싼 자리를 지운다 — ASIS `ConfigureView.removeVariableString`.
+///
+/// 몇몇 설정은 키 이름 안에 자리 표시가 있다(`$name$` 같은 것). 설명과 값 종류는
+/// **자리를 뺀 이름**으로 걸려 있기도 해서, 그대로 찾으면 못 찾는다.
+pub fn strip_variable(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    let mut sink = false;
+    for c in key.chars() {
+        if c == '$' {
+            sink = !sink;
+        } else if !sink {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// 항목에 설명과 값 종류를 붙인다.
+///
+/// 키로 먼저 찾고, 없으면 자리 표시를 뺀 이름으로 찾는다 (ASIS 와 같은 순서).
+pub fn attach_meta(
+    entries: &mut [ConfigEntry],
+    desc: &HashMap<String, String>,
+    types: &HashMap<String, u8>,
+) {
+    for e in entries.iter_mut() {
+        let bare = strip_variable(&e.key);
+        if let Some(d) = desc.get(&e.key).or_else(|| desc.get(&bare)) {
+            e.desc = d.clone();
+        }
+        if let Some(t) = types.get(&e.key).or_else(|| types.get(&bare)) {
+            e.value_type = *t;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +310,69 @@ mod tests {
     #[test]
     fn 목록이_없으면_빈_표다() {
         assert!(parse_config_entries(&MapPack::new()).is_empty());
+    }
+
+    fn entry(key: &str) -> ConfigEntry {
+        ConfigEntry {
+            key: key.into(),
+            value: String::new(),
+            default: String::new(),
+            changed: false,
+            desc: String::new(),
+            value_type: value_type::UNKNOWN,
+        }
+    }
+
+    #[test]
+    fn 설명은_키마다_text_하나다() {
+        let mut m = MapPack::new();
+        m.put("profile_sql_param_enabled", ScouterValue::Text("SQL 파라미터를 남긴다".into()));
+        let d = parse_config_desc(&m);
+        assert_eq!(d.get("profile_sql_param_enabled").map(String::as_str), Some("SQL 파라미터를 남긴다"));
+    }
+
+    #[test]
+    fn 비어_온_설명은_버린다() {
+        // "null" 로 적으면 없는 설명이 생긴다.
+        let mut m = MapPack::new();
+        m.put("a", ScouterValue::Null);
+        m.put("b", ScouterValue::Text("  ".into()));
+        assert!(parse_config_desc(&m).is_empty());
+    }
+
+    #[test]
+    fn 값_종류는_1에서_5_까지만_받는다() {
+        // 모르는 번호를 그대로 넘기면 화면이 없는 입력기를 찾는다.
+        let mut m = MapPack::new();
+        m.put("a", ScouterValue::Decimal(3));
+        m.put("b", ScouterValue::Decimal(9));
+        m.put("c", ScouterValue::Text("3".into()));
+        let t = parse_config_value_types(&m);
+        assert_eq!(t.get("a"), Some(&value_type::BOOL));
+        assert!(!t.contains_key("b"));
+        assert!(!t.contains_key("c"));
+    }
+
+    #[test]
+    fn 자리_표시를_뺀_이름을_만든다() {
+        // ASIS removeVariableString 과 같은 규칙.
+        assert_eq!(strip_variable("plugin_$name$_enabled"), "plugin__enabled");
+        assert_eq!(strip_variable("plain_key"), "plain_key");
+    }
+
+    #[test]
+    fn 설명과_종류를_항목에_붙인다() {
+        let mut es = vec![entry("trace_http_client_ip_header_key"), entry("x_$v$_y")];
+        let desc = HashMap::from([
+            ("trace_http_client_ip_header_key".to_string(), "IP 헤더".to_string()),
+            // 자리 표시를 뺀 이름으로만 걸려 있는 경우
+            ("x__y".to_string(), "변수 키".to_string()),
+        ]);
+        let types = HashMap::from([("x__y".to_string(), value_type::NUM)]);
+        attach_meta(&mut es, &desc, &types);
+        assert_eq!(es[0].desc, "IP 헤더");
+        assert_eq!(es[0].value_type, value_type::UNKNOWN, "종류를 안 줬으면 모른다로 둔다");
+        assert_eq!(es[1].desc, "변수 키");
+        assert_eq!(es[1].value_type, value_type::NUM);
     }
 }

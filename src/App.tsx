@@ -6,6 +6,7 @@ import { Divider } from './components/Divider';
 import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './components/paneSizing';
 import { ConnectionDialog } from './features/xlog/components/ConnectionDialog';
 import { SettingsDialog } from './features/settings/SettingsDialog';
+import { ConfigSettingsDialog } from './features/config/ConfigSettingsDialog';
 import { LogLevelSelector } from './features/xlog/components/LogLevelSelector';
 import { XLogChart } from './features/xlog/components/XLogChart';
 import { XLogToolbar } from './features/xlog/components/XLogToolbar';
@@ -178,6 +179,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
+  /**
+   * 데모(합성 데이터)로 붙었는가. 그때는 콜렉터가 없어 콜렉터 설정을 물을 곳이 없다.
+   * 이름은 Rust `DEMO_SERVER_ID` 와 같아야 한다.
+   */
+  const isDemo = serverId === 'DEMO (합성 데이터)';
+  const [showCollectorConfig, setShowCollectorConfig] = useState(false);
   const [config, setConfig] = useState<XLogChartConfig>(DEFAULT_CHART_CONFIG);
   const [filter, setFilter] = useState<XLogFilterState>(DEFAULT_FILTER);
   const [selectedXLogs, setSelectedXLogs] = useState<SXLog[]>([]);
@@ -1028,6 +1035,16 @@ export default function App() {
             onBadgeClick={handleAlertBadgeClick}
           />
           <LogLevelSelector />
+          {/* 콜렉터 설정 — **붙어 있을 때만.** 데모는 콜렉터가 없어 물을 곳이 없다 */}
+          {isConnected && !isDemo && (
+            <button
+              onClick={() => setShowCollectorConfig(true)}
+              title={t('지금 붙은 콜렉터의 설정을 보고 고칩니다')}
+              className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+            >
+              {t('콜렉터 설정')}
+            </button>
+          )}
           <button
             onClick={() => setShowSettings(true)}
             title={t('설정')}
@@ -1042,6 +1059,12 @@ export default function App() {
 
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showCollectorConfig && (
+        <ConfigSettingsDialog
+          target={{ kind: 'collector', name: currentServer ?? serverId }}
+          onClose={() => setShowCollectorConfig(false)}
+        />
+      )}
       {showFilters && (
         <FilterDialog
           filter={filter}

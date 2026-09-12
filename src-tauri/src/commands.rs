@@ -9,7 +9,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::config::AppConfig;
 use crate::scouter::configure::{
-    escape_config_text, parse_config_entries, parse_config_text, parse_save_result, ConfigView,
+    attach_meta, escape_config_text, parse_config_desc, parse_config_entries, parse_config_text,
+    parse_config_value_types, parse_save_result, ConfigView,
 };
 use crate::scouter::connection::ScouterConnection;
 use crate::scouter::counter::{build_counter_multi_param, parse_counter_multi, CounterUpdate, CounterValue};
@@ -330,13 +331,36 @@ pub async fn get_agent_config(
         .as_ref()
         .map(parse_config_text)
         .unwrap_or_default();
-    let entries = request_object_map(&state, CMD_LIST_CONFIGURE_WAS, obj_hash)
+    let mut entries = request_object_map(&state, CMD_LIST_CONFIGURE_WAS, obj_hash)
         .await?
         .as_ref()
         .map(parse_config_entries)
         .unwrap_or_default();
 
-    log::debug!("get_agent_config: objHash={obj_hash} → 원문 {}자, {}개 항목", text.len(), entries.len());
+    // 설명과 값 종류. **못 받아도 표는 보여준다** — 오래된 에이전트는 이 커맨드에
+    // 답하지 않는다(콜렉터가 되물어 보는 것이라 에이전트 판에 달렸다). 그때는 글자 칸과
+    // 빈 설명으로 뜨는데, 그건 지금까지와 같은 화면이다. 설명이 없다고 설정을 못 보면 안 된다.
+    let desc = request_object_map(&state, CMD_CONFIGURE_DESC, obj_hash)
+        .await
+        .ok()
+        .flatten()
+        .map(|m| parse_config_desc(&m))
+        .unwrap_or_default();
+    let types = request_object_map(&state, CMD_CONFIGURE_VALUE_TYPE, obj_hash)
+        .await
+        .ok()
+        .flatten()
+        .map(|m| parse_config_value_types(&m))
+        .unwrap_or_default();
+    attach_meta(&mut entries, &desc, &types);
+
+    log::debug!(
+        "get_agent_config: objHash={obj_hash} → 원문 {}자, {}개 항목 (설명 {} · 종류 {})",
+        text.len(),
+        entries.len(),
+        desc.len(),
+        types.len()
+    );
     Ok(ConfigView { text, entries })
 }
 
@@ -478,14 +502,64 @@ pub async fn get_server_config(state: State<'_, AppState>) -> Result<ConfigView,
         .as_ref()
         .map(parse_config_text)
         .unwrap_or_default();
-    let entries = request_map(&state, CMD_LIST_CONFIGURE_SERVER, MapPack::new())
+    let mut entries = request_map(&state, CMD_LIST_CONFIGURE_SERVER, MapPack::new())
         .await?
         .as_ref()
         .map(parse_config_entries)
         .unwrap_or_default();
 
-    log::debug!("get_server_config: 원문 {}자, {}개 항목", text.len(), entries.len());
+    // 설명과 값 종류 — **`objHash` 를 안 넣는다.** 콜렉터는 `objHash` 가 0 이면 자기 설정의 것을,
+    // 아니면 그 에이전트에 되물어 준다(바이트코드 `getConfigureDesc`). ASIS 도 빈 MapPack 을 보낸다.
+    // 못 받아도 표는 보여준다 — 에이전트 쪽과 같은 이유다.
+    let desc = request_map(&state, CMD_CONFIGURE_DESC, MapPack::new())
+        .await
+        .ok()
+        .flatten()
+        .map(|m| parse_config_desc(&m))
+        .unwrap_or_default();
+    let types = request_map(&state, CMD_CONFIGURE_VALUE_TYPE, MapPack::new())
+        .await
+        .ok()
+        .flatten()
+        .map(|m| parse_config_value_types(&m))
+        .unwrap_or_default();
+    attach_meta(&mut entries, &desc, &types);
+
+    log::debug!(
+        "get_server_config: 원문 {}자, {}개 항목 (설명 {} · 종류 {})",
+        text.len(),
+        entries.len(),
+        desc.len(),
+        types.len()
+    );
     Ok(ConfigView { text, entries })
+}
+
+/// 콜렉터 설정 저장.
+///
+/// 에이전트 저장(`save_agent_config`)과 같은 모양이다 — `setConfig` 에 **원문 전체**를 싣고,
+/// 콜렉터는 `Configure.saveText()` 로 파일을 통째로 쓴 뒤 `reload(true)` 하고 `result` 로
+/// 성공 여부를 준다 (바이트코드 `setConfigureServer`, ASIS `ConfigureView.saveConfigurations`).
+///
+/// 빈 텍스트는 거절한다 — 콜렉터 설정이 통째로 지워진다.
+#[tauri::command]
+pub async fn save_server_config(state: State<'_, AppState>, text: String) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("빈 설정은 저장하지 않습니다 — 콜렉터 설정이 통째로 지워집니다".into());
+    }
+
+    let mut param = MapPack::new();
+    param.put(
+        "setConfig",
+        crate::scouter::value::ScouterValue::Text(escape_config_text(&text)),
+    );
+
+    let map = request_map(&state, CMD_SET_CONFIGURE_SERVER, param).await?;
+    let map = map.ok_or("콜렉터가 저장 결과를 주지 않았습니다")?;
+    parse_save_result(&map)?;
+
+    log::debug!("save_server_config: {}자 저장", text.len());
+    Ok(())
 }
 
 /// 과거 XLog 한 페이지 조회 결과
