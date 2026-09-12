@@ -25,12 +25,16 @@ use nscouter_lib::scouter::protocol::{
     CMD_TRANX_PROFILE, CMD_TRANX_PROFILE_FULL, CMD_TRANX_REAL_TIME_GROUP,
     CMD_TRANX_REAL_TIME_GROUP_LATEST,
     CMD_XLOG_READ_BY_GXID,
+    CMD_CONFIGURE_DESC, CMD_CONFIGURE_VALUE_TYPE,
     CMD_GET_CONFIGURE_SERVER, CMD_GET_CONFIGURE_WAS, CMD_LIST_CONFIGURE_SERVER,
-    CMD_LIST_CONFIGURE_WAS, CMD_SET_CONFIGURE_WAS, CMD_INTR_COUNTER_REAL_TIME_BY_OBJ,
+    CMD_LIST_CONFIGURE_WAS, CMD_SET_CONFIGURE_SERVER, CMD_SET_CONFIGURE_WAS,
+    CMD_INTR_COUNTER_REAL_TIME_BY_OBJ,
     CMD_LOAD_APICALL_SUMMARY, CMD_LOAD_IP_SUMMARY, CMD_LOAD_SERVICE_ERROR_SUMMARY,
     CMD_LOAD_SERVICE_SUMMARY, CMD_LOAD_SQL_SUMMARY, CMD_LOAD_UA_SUMMARY,
 };
-use nscouter_lib::scouter::configure::{parse_config_entries, parse_config_text};
+use nscouter_lib::scouter::configure::{
+    attach_meta, parse_config_desc, parse_config_entries, parse_config_text, parse_config_value_types,
+};
 use nscouter_lib::scouter::object::build_object_param;
 use nscouter_lib::scouter::summary::{build_summary_param, parse_error_summary, parse_summary};
 use nscouter_lib::scouter::value::ScouterValue;
@@ -6885,4 +6889,266 @@ fn probe_realtime_stream_continuity() {
     assert!(total > 0, "한 건도 못 받았다 — 부하가 없거나 요청이 틀렸다");
     // 부하가 도는 동안 **연속으로 다섯 번(2.5초) 넘게** 비면 스트림이 끊긴 것이다.
     assert!(worst_streak < 5, "빈 폴링이 {worst_streak}회 연속 — 스트림이 끊겼다");
+}
+
+// ── 설정 화면이 기대는 세 가지 (0.4.2) ─────────────────────────────────
+//
+// 화면은 «설명이 붙고, 값 종류에 맞는 입력 칸이 뜨고, 저장하면 반영된다» 를 전제한다.
+// 셋 다 지금까지 유닛 테스트로만 확인했다. 여기서 진짜 콜렉터에 물어본다.
+
+/// 설명과 값 종류 — **콜렉터 자신의 것.** `objHash` 를 넣지 않는다.
+#[test]
+#[ignore]
+fn live_server_config_desc_and_value_type() {
+    let entries = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_LIST_CONFIGURE_SERVER, sess, &MapPack::new())
+            .expect("콜렉터 설정 목록 요청 실패");
+        first_map(&mut c).map(|m| parse_config_entries(&m)).unwrap_or_default()
+    };
+
+    let desc = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_CONFIGURE_DESC, sess, &MapPack::new())
+            .expect("설명 요청 실패");
+        first_map(&mut c).map(|m| parse_config_desc(&m)).unwrap_or_default()
+    };
+    let types = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_CONFIGURE_VALUE_TYPE, sess, &MapPack::new())
+            .expect("값 종류 요청 실패");
+        first_map(&mut c).map(|m| parse_config_value_types(&m)).unwrap_or_default()
+    };
+
+    let mut merged = entries.clone();
+    attach_meta(&mut merged, &desc, &types);
+
+    let described = merged.iter().filter(|e| !e.desc.is_empty()).count();
+    let typed = merged.iter().filter(|e| e.value_type != 0).count();
+    println!(
+        "콜렉터: 항목 {} · 설명 {} (붙은 것 {}) · 종류 {} (붙은 것 {})",
+        merged.len(),
+        desc.len(),
+        described,
+        types.len(),
+        typed
+    );
+    for e in merged.iter().filter(|e| e.desc.is_empty()).take(10) {
+        println!("  설명 없음: {}", e.key);
+    }
+
+    assert!(!desc.is_empty(), "설명이 0개 — 이 판은 CONFIGURE_DESC 에 답하지 않는다");
+    assert!(!types.is_empty(), "값 종류가 0개 — CONFIGURE_VALUE_TYPE 에 답하지 않는다");
+    assert!(
+        described * 2 > merged.len(),
+        "설명이 붙은 항목이 절반도 안 된다 — 키가 어긋났을 것이다"
+    );
+    // 종류를 모르면 화면이 전부 자유 입력 칸이 된다.
+    let bools = merged.iter().filter(|e| e.value_type == 3).count();
+    println!("  참/거짓 항목 {bools}개");
+    assert!(bools > 0, "BOOL 이 하나도 없다 — 값 종류 번호가 어긋났다");
+}
+
+/// 에이전트 쪽 설명·값 종류 — 콜렉터가 **에이전트에 되물어** 준다.
+#[test]
+#[ignore]
+fn live_agent_config_desc_and_value_type() {
+    let objs = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+    };
+    assert!(!objs.is_empty(), "자바 에이전트가 없다");
+    let (obj_type, obj_hash) = objs[0].clone();
+
+    let entries = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_LIST_CONFIGURE_WAS, sess, &build_object_param(obj_hash))
+            .expect("에이전트 설정 목록 요청 실패");
+        first_map(&mut c).map(|m| parse_config_entries(&m)).unwrap_or_default()
+    };
+
+    let desc = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_CONFIGURE_DESC, sess, &build_object_param(obj_hash))
+            .expect("설명 요청 실패");
+        first_map(&mut c).map(|m| parse_config_desc(&m)).unwrap_or_default()
+    };
+    let types = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_CONFIGURE_VALUE_TYPE, sess, &build_object_param(obj_hash))
+            .expect("값 종류 요청 실패");
+        first_map(&mut c).map(|m| parse_config_value_types(&m)).unwrap_or_default()
+    };
+
+    let mut merged = entries.clone();
+    attach_meta(&mut merged, &desc, &types);
+    let described = merged.iter().filter(|e| !e.desc.is_empty()).count();
+    let typed = merged.iter().filter(|e| e.value_type != 0).count();
+    println!(
+        "{obj_type}({obj_hash}): 항목 {} · 설명 붙은 것 {described} · 종류 붙은 것 {typed}",
+        merged.len()
+    );
+
+    assert!(!entries.is_empty(), "에이전트 설정 항목이 0개다 (F-37)");
+    assert!(!desc.is_empty(), "에이전트가 설명에 답하지 않았다");
+    assert!(
+        described * 2 > merged.len(),
+        "설명이 붙은 항목이 절반도 안 된다 — 키가 어긋났을 것이다"
+    );
+}
+
+/// 콜렉터 설정 저장 — **원문을 통째로 덮는다.** 끝나면 원래대로 되돌린다.
+///
+/// `save_server_config` 가 보내는 것과 같은 모양으로 보낸다:
+/// `setConfig` 에 `escape_config_text` 를 거친 원문 전체.
+#[test]
+#[ignore]
+fn live_server_config_save_roundtrip() {
+    use nscouter_lib::scouter::configure::escape_config_text;
+
+    fn read_text() -> String {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_GET_CONFIGURE_SERVER, sess, &MapPack::new())
+            .expect("콜렉터 설정 원문 요청 실패");
+        first_map(&mut c).map(|m| parse_config_text(&m)).unwrap_or_default()
+    }
+
+    fn save(text: &str) -> String {
+        let mut param = MapPack::new();
+        param.put("setConfig", ScouterValue::Text(escape_config_text(text)));
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_SET_CONFIGURE_SERVER, sess, &param)
+            .expect("콜렉터 설정 저장 요청 실패");
+        first_map(&mut c)
+            .and_then(|m| m.get_text("result").map(|s| s.to_string()))
+            .unwrap_or_else(|| "(응답 없음)".into())
+    }
+
+    fn value_of(key: &str) -> Option<String> {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_LIST_CONFIGURE_SERVER, sess, &MapPack::new())
+            .expect("콜렉터 설정 목록 요청 실패");
+        first_map(&mut c)
+            .map(|m| parse_config_entries(&m))
+            .unwrap_or_default()
+            .into_iter()
+            .find(|e| e.key == key)
+            .map(|e| e.value)
+    }
+
+    // 되돌릴 것이 없으면 시작하지 않는다.
+    let original = read_text();
+    assert!(!original.is_empty(), "원문이 비었다 — 덮어쓰면 설정이 날아간다. 중단");
+    println!("원문 {}자, log_keep_days={:?}", original.chars().count(), value_of("log_keep_days"));
+
+    // 되돌리기 쉬운 것을 고른다. 기본 31일이라 30 은 관찰 가능하면서 해가 없다.
+    const KEY: &str = "log_keep_days";
+    let before = value_of(KEY).expect("log_keep_days 가 목록에 없다");
+    let probe = if before == "30" { "29" } else { "30" };
+    let edited = format!("{original}\n# nscouter live test\n{KEY}={probe}\n");
+
+    let result = save(&edited);
+    println!("저장 result={result}");
+    assert_eq!(result, "true", "저장이 성공을 돌려주지 않았다");
+
+    // **저장했다는 말만 믿지 않는다.** reload(true) 뒤 값이 실제로 바뀌었는가.
+    let after = value_of(KEY);
+    println!("저장 후 {KEY}={after:?} (원래 {before})");
+
+    // 무슨 일이 있어도 원문을 되돌린다 — 판정은 그 다음이다.
+    let restore = save(&original);
+    let restored = value_of(KEY);
+    println!("되돌리기 result={restore}, {KEY}={restored:?}");
+
+    assert_eq!(after.as_deref(), Some(probe), "저장 후에도 값이 안 바뀌었다");
+    assert_eq!(restore, "true", "되돌리기 저장이 실패했다");
+    assert_eq!(restored.as_deref(), Some(before.as_str()), "되돌리기 후 값이 원래대로가 아니다");
+    assert_eq!(read_text(), original, "되돌린 원문이 원래와 다르다");
+}
+
+/// 카탈로그가 실제 키를 얼마나 덮는가 — 실키 목록을 파일로 뽑는다.
+///
+/// 카탈로그는 **공식 문서**에서 뽑았고 문서는 판마다 뒤처진다. 안 덮이는 키는
+/// 화면에서 «기타» 에 설명 없이 뜨므로, 몇 개가 그렇게 되는지 세어 둘 값어치가 있다.
+#[test]
+#[ignore]
+fn probe_config_catalog_coverage() {
+    let out = std::env::var("NSCOUTER_KEYS_OUT").unwrap_or_else(|_| "live_keys.json".into());
+
+    let server: Vec<String> = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_LIST_CONFIGURE_SERVER, sess, &MapPack::new()).unwrap();
+        first_map(&mut c)
+            .map(|m| parse_config_entries(&m))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.key)
+            .collect()
+    };
+    let server_desc: Vec<String> = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_CONFIGURE_DESC, sess, &MapPack::new()).unwrap();
+        let d = first_map(&mut c).map(|m| parse_config_desc(&m)).unwrap_or_default();
+        server.iter().filter(|k| d.contains_key(*k)).cloned().collect()
+    };
+
+    let objs = {
+        let mut c = login();
+        fetch_objects(&mut c)
+    };
+    let mut per_type: Vec<(String, Vec<String>)> = Vec::new();
+    let mut seen_type = std::collections::HashSet::new();
+    for (obj_type, obj_hash) in &objs {
+        if !seen_type.insert(obj_type.clone()) {
+            continue;
+        }
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_LIST_CONFIGURE_WAS, sess, &build_object_param(*obj_hash)).unwrap();
+        let keys: Vec<String> = first_map(&mut c)
+            .map(|m| parse_config_entries(&m))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.key)
+            .collect();
+
+        // 콜렉터가 주는 설명이 카탈로그의 빈 곳을 메우는지 보려면, 어느 키에 설명이
+        // 붙는지도 알아야 한다.
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_CONFIGURE_DESC, sess, &build_object_param(*obj_hash)).unwrap();
+        let desc = first_map(&mut c).map(|m| parse_config_desc(&m)).unwrap_or_default();
+        let described: Vec<String> =
+            keys.iter().filter(|k| desc.contains_key(*k)).cloned().collect();
+        println!("{obj_type}: {}개 (설명 있는 것 {})", keys.len(), described.len());
+        per_type.push((obj_type.clone(), keys));
+        per_type.push((format!("{obj_type}__desc"), described));
+    }
+
+    let mut json = String::from("{\n");
+    json.push_str(&format!("  \"server\": {},\n", json_list(&server)));
+    json.push_str(&format!("  \"server__desc\": {},\n", json_list(&server_desc)));
+    for (i, (t, keys)) in per_type.iter().enumerate() {
+        let comma = if i + 1 == per_type.len() { "" } else { "," };
+        json.push_str(&format!("  \"{t}\": {}{comma}\n", json_list(keys)));
+    }
+    json.push_str("}\n");
+    std::fs::write(&out, json).expect("키 목록 쓰기 실패");
+    println!("실키 목록 → {out} (콜렉터 {}개)", server.len());
+}
+
+fn json_list(v: &[String]) -> String {
+    let items: Vec<String> = v.iter().map(|s| format!("\"{}\"", s.replace('"', "\\\""))).collect();
+    format!("[{}]", items.join(","))
 }
