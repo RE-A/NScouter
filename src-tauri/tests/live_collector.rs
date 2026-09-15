@@ -7328,3 +7328,30 @@ fn brief(v: &ScouterValue) -> String {
         other => format!("{other:?}"),
     }
 }
+
+/// 커넥션 풀은 어느 WAS 의 것인가 — **이름 말고 이을 길이 있는가.**
+///
+/// Active 탭에 풀 소진 막대를 붙이려면 「이 풀 = 이 WAS」 를 말할 수 있어야 한다.
+/// datasource 오브젝트가 부모를 가리키는 필드를 갖고 있는지, 아니면 이름뿐인지
+/// 실물로 본다. 이름뿐이라면 화면에서 단정할 수 있는 범위가 좁아진다.
+#[test]
+#[ignore]
+fn probe_datasource_parent_link() {
+    let mut c = login();
+    let sess = c.session;
+    c.send_request(CMD_OBJECT_LIST_REAL_TIME, sess, &MapPack::new())
+        .expect("오브젝트 목록 요청 실패");
+
+    while let Ok(Some(pack)) = c.read_next_pack() {
+        let AnyPack::Object(o) = pack else { continue };
+        if o.obj_type != "datasource" && o.obj_type != "tomcat" {
+            continue;
+        }
+        println!("[{}] {} (hash={})", o.obj_type, o.obj_name, o.obj_hash);
+        println!("    address={:?} version={:?}", o.address, o.version);
+        // tags 는 에이전트·판마다 키가 다르다. 부모를 가리키는 것이 있는지 통째로 본다.
+        for (k, v) in &o.tags {
+            println!("    tag {k} = {v:?}");
+        }
+    }
+}

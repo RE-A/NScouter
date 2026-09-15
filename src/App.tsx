@@ -1324,6 +1324,7 @@ export default function App() {
               javaeeType={javaeeType}
               picked={filter.objHashSet}
               agentMap={agentMap}
+              poolHashes={shownHashes.datasource}
             />
           )}
         </div>

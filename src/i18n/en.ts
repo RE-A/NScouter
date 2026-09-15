@@ -29,6 +29,12 @@ export const EN: Record<string, string> = {
   'Active 탭': 'Active tab',
   '실행 중': 'Running',
   '액티브 현황': 'Active overview',
+  '사용 중': 'In use',
+  '유휴': 'Idle',
+  '왼쪽에서 커넥션 풀을 함께 골라야 값이 옵니다.':
+    'Select the connection pools on the left as well to receive values.',
+  '커넥션 풀이 안 잡힙니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.':
+    'No connection pools detected. Turn on both spring.datasource.hikari.register-mbeans in the app and jmx_counter_enabled in the agent.',
   '가장 오래된 것': 'Longest running',
   '무엇을 기다리나': 'Waiting on',
   '가지': ' kinds',

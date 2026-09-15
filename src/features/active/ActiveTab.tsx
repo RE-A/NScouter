@@ -19,6 +19,7 @@ import type { ActiveService } from '../xlog/types/object';
 import { ThreadDetailDialog } from '../xlog/components/ThreadDetailDialog';
 import { ActiveGauge } from './ActiveGauge';
 import { ActiveList } from './ActiveList';
+import { PoolStrip } from './PoolStrip';
 import { ResourceGroups } from './ResourceGroups';
 import {
   groupByResource,
@@ -27,7 +28,9 @@ import {
   sortRows,
   stepCounts,
 } from './activeModel';
+import { buildPools } from './poolModel';
 import { DEFAULT_POLL_MS, POLL_MS, useActiveServices, type PollMs } from './useActiveServices';
+import { usePoolCounters } from './usePoolCounters';
 import { t } from '../../i18n';
 
 interface ActiveTabProps {
@@ -38,6 +41,13 @@ interface ActiveTabProps {
   /** 왼쪽에서 고른 서버. 여기 없는 서버의 것은 보여주지 않는다 */
   picked: ReadonlySet<number>;
   agentMap: Map<number, string>;
+  /**
+   * 고른 것 중 커넥션 풀(datasource) 오브젝트.
+   *
+   * 값은 이미 도는 카운터 스트림에서 줍는다 — 스트림 대상이 «고른 것» 이라
+   * 여기 없는 풀은 값도 오지 않는다.
+   */
+  poolHashes: readonly number[];
 }
 
 /** 주기 고르개에 적을 글자. `0` 은 멈춤 */
@@ -50,6 +60,7 @@ export const ActiveTab = memo(function ActiveTab({
   javaeeType,
   picked,
   agentMap,
+  poolHashes,
 }: ActiveTabProps) {
   const [period, setPeriod] = useState<PollMs>(DEFAULT_POLL_MS);
   const [query, setQuery] = useState('');
@@ -57,6 +68,7 @@ export const ActiveTab = memo(function ActiveTab({
   const [detail, setDetail] = useState<ActiveService | null>(null);
 
   const feed = useActiveServices(javaeeType, enabled, period);
+  const poolCounters = usePoolCounters(enabled);
 
   const serverName = useCallback(
     (objHash: number) => agentMap.get(objHash) ?? `#${objHash}`,
@@ -67,6 +79,15 @@ export const ActiveTab = memo(function ActiveTab({
   const mine = useMemo(
     () => (picked.size === 0 ? feed.rows : feed.rows.filter(r => picked.has(r.obj_hash))),
     [feed.rows, picked],
+  );
+
+  const pools = useMemo(
+    () =>
+      buildPools(
+        poolHashes.map(h => ({ objHash: h, objName: agentMap.get(h) ?? `#${h}` })),
+        poolCounters,
+      ),
+    [poolHashes, agentMap, poolCounters],
   );
 
   const counts = useMemo(() => stepCounts(mine), [mine]);
@@ -154,6 +175,12 @@ export const ActiveTab = memo(function ActiveTab({
           oldest={oldest}
           oldestServer={oldest === null ? '' : serverName(oldest.obj_hash)}
         />
+      </section>
+
+      {/* 풀 줄 — 자리가 뜻이다. 위(게이지)가 «얼마나», 아래(목록)가 «무엇 때문에» 고,
+          그 사이에 «자원이 남아 있나» 가 놓인다. */}
+      <section aria-label={t('커넥션 풀')} className="px-3 pt-3">
+        <PoolStrip pools={pools} noneSelected={poolHashes.length === 0} />
       </section>
 
       {/* 본문 — 왼쪽은 접은 것, 오른쪽은 편 것 */}

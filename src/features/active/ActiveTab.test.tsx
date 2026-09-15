@@ -9,7 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTab } from './ActiveTab';
 import type { ActiveService } from '../xlog/types/object';
 
-const api = vi.hoisted(() => ({ getTypeActiveServices: vi.fn() }));
+const api = vi.hoisted(() => ({
+  getTypeActiveServices: vi.fn(),
+  // 풀 값은 이미 도는 카운터 스트림에서 줍는다. 여기서는 흘려보내기만 한다.
+  onCounterData: vi.fn(() => Promise.resolve(() => {})),
+}));
 vi.mock('../xlog/api/scouterApi', () => api);
 // 스택 창은 따로 검증된다. 여기서는 열렸는지만 본다.
 vi.mock('../xlog/components/ThreadDetailDialog', () => ({
@@ -46,18 +50,20 @@ const ROWS: ActiveService[] = [
 const AGENTS = new Map([
   [1, '/h/shop-app'],
   [2, '/h/order-app'],
+  [91, '/h/shop-app/HikariPool-1'],
 ]);
 
 beforeEach(() => api.getTypeActiveServices.mockResolvedValue({ rows: ROWS, incomplete: [] }));
 afterEach(() => vi.clearAllMocks());
 
-function draw(picked: number[] = []) {
+function draw(picked: number[] = [], poolHashes: number[] = []) {
   render(
     <ActiveTab
       enabled
       javaeeType="tomcat"
       picked={new Set(picked)}
       agentMap={AGENTS}
+      poolHashes={poolHashes}
     />,
   );
 }
@@ -186,5 +192,32 @@ describe('ActiveTab — 정직하게 말하기', () => {
     const off = screen.getByRole('button', { name: '멈춤' });
     fireEvent.click(off);
     expect(off.getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe('ActiveTab — 커넥션 풀 줄', () => {
+  const pool = () => within(screen.getByRole('region', { name: '커넥션 풀' }));
+
+  it('풀을 안 골랐으면 왜 비었는지 말한다 — 줄을 숨기지 않는다', async () => {
+    // 숨기면 «이 앱은 커넥션 풀을 못 본다» 로 읽힌다. 값이 안 오는 이유는 둘 뿐이고,
+    // 그중 하나(안 고름)는 사용자가 바로 고칠 수 있다.
+    draw();
+    await screen.findAllByText('12.4초');
+    expect(pool().getByText(/왼쪽에서 커넥션 풀을 함께 골라야/)).toBeTruthy();
+  });
+
+  it('고른 풀은 값이 오기 전에도 줄에 남는다', async () => {
+    // 사라지면 «풀이 없다» 로 읽힌다.
+    draw([1], [91]);
+    await screen.findAllByText('12.4초');
+    expect(pool().getByText(/HikariPool-1/)).toBeTruthy();
+    // 상한을 모르면 0% 가 아니라 «—» 다. 0% 는 «여유롭다» 로 읽힌다.
+    expect(pool().getByText('—')).toBeTruthy();
+  });
+
+  it('부모 WAS 를 같이 적는다 — 풀 이름만으로는 어느 서버 것인지 모른다', async () => {
+    draw([1], [91]);
+    await screen.findAllByText('12.4초');
+    expect(pool().getByText('shop-app · HikariPool-1')).toBeTruthy();
   });
 });
