@@ -14,6 +14,7 @@ const agents: AgentObject[] = [
   { obj_hash: 11, obj_type: 'tomcat', obj_name: '/h/shop-app', address: '', version: '', alive: true, wakeup: 0, tags: [] },
   { obj_hash: 22, obj_type: 'tomcat', obj_name: '/h/order-app', address: '', version: '', alive: true, wakeup: 0, tags: [] },
   { obj_hash: 33, obj_type: 'linux', obj_name: '/h/test-host', address: '', version: '', alive: true, wakeup: 0, tags: [] },
+  { obj_hash: 44, obj_type: 'datasource', obj_name: '/h/shop-app/HikariPool-1', address: '', version: '', alive: true, wakeup: 0, tags: [] },
 ];
 
 vi.mock('../api/scouterApi', () => ({
@@ -170,5 +171,33 @@ describe('AgentSelectorPanel — 종류가 하나뿐이면', () => {
     await waitFor(() => expect(screen.getByText('shop-app')).toBeTruthy());
     expect(screen.queryByTitle(/오브젝트 종류 —/)).toBeNull();
     expect(screen.queryByText('종류')).toBeNull();
+  });
+});
+
+describe('AgentSelectorPanel — 설정 메뉴', () => {
+  /** 줄을 오른쪽 눌러 메뉴를 연다. 줄에 보이는 것은 마지막 마디뿐이다 */
+  async function openMenu(shortLabel: string) {
+    const row = await screen.findByText(shortLabel);
+    fireEvent.contextMenu(row);
+    return screen.getByRole('menuitem', { name: '설정' }) as HTMLButtonElement;
+  }
+
+  it('커넥션 풀은 설정을 열 수 없다', async () => {
+    // datasource 는 설정 파일이 없어 항상 0개가 온다(실측). 누를 수 있게 두면
+    // «못 받았다» 가 떠서 고장으로 읽힌다.
+    draw();
+    const item = await openMenu('HikariPool-1');
+    expect(item.disabled).toBe(true);
+    expect(item.title).toBe('커넥션 풀은 설정 파일이 없습니다');
+  });
+
+  it('WAS 는 연다', async () => {
+    draw();
+    expect((await openMenu('shop-app')).disabled).toBe(false);
+  });
+
+  it('호스트도 연다 — JVM 전용으로 막지 않는다', async () => {
+    draw();
+    expect((await openMenu('test-host')).disabled).toBe(false);
   });
 });

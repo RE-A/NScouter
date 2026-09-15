@@ -7152,3 +7152,179 @@ fn json_list(v: &[String]) -> String {
     let items: Vec<String> = v.iter().map(|s| format!("\"{}\"", s.replace('"', "\\\""))).collect();
     format!("[{}]", items.join(","))
 }
+
+/// 「지금 무엇이 돌고 있나」 를 콜렉터가 얼마나 말해 주는가.
+///
+/// 새 탭(리소스별 현재 상태)이 무엇을 보여 줄 수 있는지 정하려면, **쿼리까지 오는지**
+/// 를 먼저 알아야 한다. 응답의 키를 통째로 찍어 본다 — 문서가 아니라 실물로 정한다.
+#[test]
+#[ignore]
+fn probe_whats_running_now() {
+    let objs = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+    };
+    assert!(!objs.is_empty(), "자바 에이전트가 없다");
+    let (obj_type, obj_hash) = objs[0].clone();
+    println!("대상 {obj_type}({obj_hash})\n");
+
+    for cmd in [CMD_OBJECT_ACTIVE_SERVICE_LIST, CMD_ACTIVESPEED_REAL_TIME] {
+        println!("── {cmd}");
+        let mut c = login();
+        let sess = c.session;
+        let param = build_object_param(obj_hash);
+        if c.send_request(cmd, sess, &param).is_err() {
+            println!("   요청 실패\n");
+            continue;
+        }
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Map(m) = pack {
+                for (k, v) in &m.entries {
+                    println!("   {k} = {}", brief(v));
+                }
+            }
+        }
+        println!();
+    }
+
+    // 스레드 상세 — 활성 서비스 하나를 골라 스택을 받아 본다.
+    let list = {
+        let mut found = Vec::new();
+        for _ in 0..10 {
+            let mut c = login();
+            let sess = c.session;
+            c.send_request(CMD_OBJECT_ACTIVE_SERVICE_LIST, sess, &build_object_param(obj_hash))
+                .unwrap();
+            while let Ok(Some(pack)) = c.read_next_pack() {
+                if let AnyPack::Map(m) = pack {
+                    found = nscouter_lib::scouter::object::parse_active_services(&m);
+                }
+            }
+            if !found.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        found
+    };
+    println!("── 활성 서비스 {}건", list.len());
+    for a in list.iter().take(5) {
+        println!("   #{} {} {} {}ms txid={:?}", a.id, a.name, a.service, a.elapsed, a.txid);
+    }
+    let Some(first) = list.first() else {
+        println!("   0건 — 부하가 도는지 확인 (load.ps1)");
+        return;
+    };
+
+    println!("\n── {CMD_OBJECT_THREAD_DETAIL} (스레드 #{})", first.id);
+    let mut c = login();
+    let sess = c.session;
+    c.send_request(
+        CMD_OBJECT_THREAD_DETAIL,
+        sess,
+        &nscouter_lib::scouter::object::build_thread_detail_param(
+            obj_hash,
+            first.id,
+            first.txid.unwrap_or(0),
+        ),
+    )
+    .expect("스레드 상세 요청 실패");
+    while let Ok(Some(pack)) = c.read_next_pack() {
+        if let AnyPack::Map(m) = pack {
+            for (k, v) in &m.entries {
+                println!("   {k} = {}", brief(v));
+            }
+        }
+    }
+
+    // **쿼리가 실제로 실려 오는가.** 한 번 보고 «비었다» 로 정하면 틀린다.
+    // 5초 동안 되풀이해 들여다보며 sql·subcall 이 찬 순간을 센다.
+    println!("\n── 5초 동안 sql / subcall 칸을 들여다본다");
+    let mut seen = 0usize;
+    let mut filled = 0usize;
+    let mut samples: Vec<String> = Vec::new();
+    for _ in 0..50 {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_OBJECT_ACTIVE_SERVICE_LIST, sess, &build_object_param(obj_hash))
+            .unwrap();
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Map(m) = pack {
+                let svc = list_text(&m, "service");
+                let sql = list_text(&m, "sql");
+                let sub = list_text(&m, "subcall");
+                let stat = list_text(&m, "stat");
+                let ela = list_num(&m, "elapsed");
+                for (i, name) in svc.iter().enumerate() {
+                    seen += 1;
+                    let q = sql.get(i).cloned().unwrap_or_default();
+                    let sc = sub.get(i).cloned().unwrap_or_default();
+                    if q.is_empty() && sc.is_empty() {
+                        continue;
+                    }
+                    filled += 1;
+                    if samples.len() < 10 {
+                        let what = if q.is_empty() {
+                            format!("subcall={sc}")
+                        } else {
+                            format!("sql={q}")
+                        };
+                        samples.push(format!(
+                            "   {} {}ms [{}] {what}",
+                            name,
+                            ela.get(i).copied().unwrap_or(0),
+                            stat.get(i).cloned().unwrap_or_default()
+                        ));
+                    }
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    println!("   활성 표본 {seen}건 중 sql/subcall 이 찬 것 {filled}건");
+    for line in &samples {
+        println!("{line}");
+    }
+}
+
+/// MapPack 의 List 를 문자열로 꺼낸다 (탐침용).
+fn list_text(m: &MapPack, key: &str) -> Vec<String> {
+    match m.entries.get(key) {
+        Some(ScouterValue::List(items)) => items
+            .iter()
+            .map(|v| match v {
+                ScouterValue::Text(s) => s.clone(),
+                _ => String::new(),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn list_num(m: &MapPack, key: &str) -> Vec<i64> {
+    match m.entries.get(key) {
+        Some(ScouterValue::List(items)) => {
+            items.iter().map(|v| v.as_decimal().unwrap_or(0)).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// 값을 한 줄로 줄여 찍는다. 스택 같은 긴 텍스트는 앞부분만.
+fn brief(v: &ScouterValue) -> String {
+    match v {
+        ScouterValue::Text(s) => {
+            let one = s.replace('\n', " ⏎ ");
+            if one.chars().count() > 160 {
+                format!("Text({}자) {:?}…", s.chars().count(), one.chars().take(160).collect::<String>())
+            } else {
+                format!("Text {one:?}")
+            }
+        }
+        ScouterValue::List(items) => {
+            let head: Vec<String> = items.iter().take(3).map(brief).collect();
+            format!("List({}개) {}", items.len(), head.join(", "))
+        }
+        other => format!("{other:?}"),
+    }
+}

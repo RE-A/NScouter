@@ -9,7 +9,7 @@ import { shouldShowTypes, typeCounts, typeLabel, typeTone } from './objectTypes'
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { ConfigSettingsDialog } from '../../config/ConfigSettingsDialog';
-import { isJavaeeObjectType } from '../types/counter';
+import { isDatasourceObjectType, isJavaeeObjectType } from '../types/counter';
 import { t } from '../../../i18n';
 
 interface AgentSelectorPanelProps {
@@ -440,8 +440,13 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
             },
             {
               // 호스트 에이전트도 답한다 (실측 41개). JVM 전용이 아니라서 막지 않는다.
+              // **datasource 만 막는다** — 커넥션 풀은 설정 파일이 없어 항상 0개가 온다
+              // (실측). 열어 봐야 «못 받았다» 뿐이라 누를 수 있게 두면 거짓 실패로 읽힌다.
               label: t('설정'),
               onSelect: () => setConfigOf(menu.agent),
+              disabled: isDatasourceObjectType(menu.agent.obj_type)
+                ? t('커넥션 풀은 설정 파일이 없습니다')
+                : undefined,
             },
             {
               // 위쪽은 전부 조회다. 이것만 **에이전트를 건드린다** — 그래서 끝에 둔다.

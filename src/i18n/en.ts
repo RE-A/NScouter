@@ -316,6 +316,7 @@ export const EN: Record<string, string> = {
   '클래스별 점유를 파일로': 'Write per-class usage to a file',
   'JVM 에이전트에서만 실행됩니다': 'Java agents only',
   'JVM 에이전트에서만 조회됩니다': 'Java agents only',
+  '커넥션 풀은 설정 파일이 없습니다': 'Connection pools have no configuration file',
   '목록에서 이 오브젝트를 찾지 못했습니다. 방금 내려갔을 수 있습니다.':
     'This object is not in the list — it may have just gone down.',
 
