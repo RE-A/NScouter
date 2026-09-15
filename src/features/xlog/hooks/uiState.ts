@@ -16,7 +16,7 @@ import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '.
 import type { XLogMode } from '../types/timeRange';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
-export type TabId = 'xlog' | 'visualize' | 'counter' | 'alert';
+export type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert';
 
 export interface StoredLayout {
   servicesW: number;
@@ -35,7 +35,7 @@ export const DEFAULT_LAYOUT: StoredLayout = {
   agentGroupBy: 'type',
 };
 
-const TABS: readonly TabId[] = ['xlog', 'visualize', 'counter', 'alert'];
+const TABS: readonly TabId[] = ['xlog', 'active', 'visualize', 'counter', 'alert'];
 const GROUP_BYS: readonly GroupBy[] = ['type', 'group'];
 
 /** 0·음수·NaN 이면 기본값으로 돌린다 */

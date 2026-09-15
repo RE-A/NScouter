@@ -14,6 +14,7 @@ import { AgentSelectorPanel } from './features/xlog/components/AgentSelectorPane
 import { CounterChart } from './features/xlog/components/CounterChart';
 import { XLogDetailPanel } from './features/xlog/components/XLogDetailPanel';
 import { ActiveServicePanel } from './features/xlog/components/ActiveServicePanel';
+import { ActiveTab } from './features/active/ActiveTab';
 import { SummaryPanel } from './features/xlog/components/SummaryPanel';
 import { TopologyPanel } from './features/xlog/components/TopologyPanel';
 import { FiveMinCounterChart } from './features/xlog/components/FiveMinCounterChart';
@@ -127,7 +128,7 @@ const C = {
   success: T.success, warn: T.warn, error: T.error,
 };
 
-type TabId = 'xlog' | 'visualize' | 'counter' | 'alert';
+type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert';
 
 /** 열린 탭이 하나도 없을 때 상세 패널에 줄 빈 상태 */
 const EMPTY_DETAIL = {
@@ -941,6 +942,7 @@ export default function App() {
       });
     },
     'tab-xlog': () => setActiveTab('xlog'),
+    'tab-active': () => setActiveTab('active'),
     'tab-visualize': () => setActiveTab('visualize'),
     'tab-counter': () => setActiveTab('counter'),
     'tab-alert': () => setActiveTab('alert'),
@@ -991,7 +993,7 @@ export default function App() {
 
         {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다 */}
         <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
-          {(['xlog', 'visualize', 'counter', 'alert'] as TabId[]).map(tab => {
+          {(['xlog', 'active', 'visualize', 'counter', 'alert'] as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
               <button
@@ -1305,6 +1307,25 @@ export default function App() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Active 탭 ── */}
+      {/* 「지금 이 순간 무엇이 걸려 있는가」. 나머지 탭은 전부 이미 지나간 것을 본다. */}
+      {activeTab === 'active' && (
+        <div style={tabBodyStyle}>
+          {!isConnected ? (
+            <EmptyState text={t('연결 후 사용 가능합니다.')} />
+          ) : nothingPicked ? (
+            <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+          ) : (
+            <ActiveTab
+              enabled={activeTab === 'active'}
+              javaeeType={javaeeType}
+              picked={filter.objHashSet}
+              agentMap={agentMap}
+            />
+          )}
         </div>
       )}
 
@@ -1826,6 +1847,7 @@ function EmptyState({ text }: { text: string }) {
 
 const TAB_LABELS: Record<TabId, string> = {
   xlog: 'XLog',
+  active: 'Active',
   visualize: 'Visualize',
   counter: 'Counter',
   alert: 'Alert',

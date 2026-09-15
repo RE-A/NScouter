@@ -13,6 +13,7 @@ export type ShortcutAction =
   | 'close-detail'
   | 'focus-search'
   | 'tab-xlog'
+  | 'tab-active'
   | 'tab-visualize'
   | 'tab-counter'
   | 'tab-alert'
@@ -41,9 +42,10 @@ export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; action: ShortcutAction
   // **숫자는 탭이 놓인 순서다.** 탭이 하나 늘면 뒤가 밀린다 — 화면에 보이는 자리와
   // 다른 숫자를 외우게 하는 것보다, 위치를 세면 되는 쪽이 낫다.
   { keys: 'Ctrl+1', action: 'tab-xlog' },
-  { keys: 'Ctrl+2', action: 'tab-visualize' },
-  { keys: 'Ctrl+3', action: 'tab-counter' },
-  { keys: 'Ctrl+4', action: 'tab-alert' },
+  { keys: 'Ctrl+2', action: 'tab-active' },
+  { keys: 'Ctrl+3', action: 'tab-visualize' },
+  { keys: 'Ctrl+4', action: 'tab-counter' },
+  { keys: 'Ctrl+5', action: 'tab-alert' },
   { keys: 'Ctrl+W', action: 'close-detail-tab' },
   { keys: 'Ctrl+Tab', action: 'cycle-detail-next' },
   { keys: 'Ctrl+Shift+Tab', action: 'cycle-detail-prev' },
@@ -76,10 +78,12 @@ export function matchShortcut(e: KeyEventLike): ShortcutAction | null {
     case '1':
       return 'tab-xlog';
     case '2':
-      return 'tab-visualize';
+      return 'tab-active';
     case '3':
-      return 'tab-counter';
+      return 'tab-visualize';
     case '4':
+      return 'tab-counter';
+    case '5':
       return 'tab-alert';
     case 'w':
     case 'W':

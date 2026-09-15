@@ -32,9 +32,10 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key({ key: 'f', ctrlKey: true }))).toBe('focus-search');
     // 숫자는 탭이 놓인 순서다 — 탭이 늘면 뒤가 밀린다.
     expect(matchShortcut(key({ key: '1', ctrlKey: true }))).toBe('tab-xlog');
-    expect(matchShortcut(key({ key: '2', ctrlKey: true }))).toBe('tab-visualize');
-    expect(matchShortcut(key({ key: '3', ctrlKey: true }))).toBe('tab-counter');
-    expect(matchShortcut(key({ key: '4', ctrlKey: true }))).toBe('tab-alert');
+    expect(matchShortcut(key({ key: '2', ctrlKey: true }))).toBe('tab-active');
+    expect(matchShortcut(key({ key: '3', ctrlKey: true }))).toBe('tab-visualize');
+    expect(matchShortcut(key({ key: '4', ctrlKey: true }))).toBe('tab-counter');
+    expect(matchShortcut(key({ key: '5', ctrlKey: true }))).toBe('tab-alert');
     expect(matchShortcut(key({ key: 'w', ctrlKey: true }))).toBe('close-detail-tab');
     expect(matchShortcut(key({ key: 'Tab', ctrlKey: true }))).toBe('cycle-detail-next');
     expect(matchShortcut(key({ key: 'Tab', ctrlKey: true, shiftKey: true }))).toBe(

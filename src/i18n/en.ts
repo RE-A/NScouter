@@ -25,6 +25,28 @@ export const EN: Record<string, string> = {
   '폭': 'Span',
   '밀집': 'Density',
   // ── 에이전트 설정 편집 ─────────────────────────────────
+  // ── Active 탭 (지금 실행 중) ──────────────────────────
+  'Active 탭': 'Active tab',
+  '실행 중': 'Running',
+  '액티브 현황': 'Active overview',
+  '가장 오래된 것': 'Longest running',
+  '무엇을 기다리나': 'Waiting on',
+  '가지': ' kinds',
+  'DB 쿼리': 'DB query',
+  '외부 호출': 'Outbound call',
+  '제 코드': 'Own code',
+  '기다리는 대상 없음 — 제 코드 실행 중': 'Not waiting on anything — running its own code',
+  '째': ' so far',
+  '갱신': 'Refresh',
+  '멈춤': 'Off',
+  '지금 받기': 'Fetch now',
+  '마지막 갱신': 'Last update',
+  '개 서버가 응답하지 않아 목록에 빠져 있습니다':
+    ' server(s) did not respond and are missing from the list',
+  '서비스·쿼리·호출·스레드·IP 로 찾기': 'find by service, query, call, thread or IP',
+  '이 행은 상세를 물을 수 없습니다': 'No detail available for this row',
+  '순간 스냅샷입니다 — 짧게 끝나는 쿼리는 잡히지 않습니다. 쿼리의 바인드 값은 오지 않습니다.':
+    'A point-in-time snapshot — short queries are rarely caught, and bind values are not sent.',
   // ── 설정 창 (에이전트 · 콜렉터) ────────────────────────
   '콜렉터 설정': 'Collector settings',
   '지금 붙은 콜렉터의 설정을 보고 고칩니다': 'View and edit the connected collector’s settings',

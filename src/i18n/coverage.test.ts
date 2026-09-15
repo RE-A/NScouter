@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EN } from './en';
 import { SHORTCUT_LABEL } from '../features/settings/SettingsDialog';
+import { KIND_LABEL } from '../features/active/activeModel';
 import { SHORTCUT_HELP } from '../features/xlog/hooks/shortcuts';
 
 function tsxFiles(dir: string): string[] {
@@ -66,6 +67,12 @@ describe('간접 호출', () => {
     // 소스에 문구가 리터럴로 안 남아 빠짐을 눈치채지 못한다 —
     // 영어 화면에서 그 줄만 한국어로 남는다. 여기서 직접 본다.
     const missing = Object.values(SHORTCUT_LABEL).filter(v => !(v in EN)).sort();
+    expect(missing).toEqual([]);
+  });
+
+  it('Active 탭의 리소스 종류 이름이 사전에 있다', () => {
+    // 같은 덫이다 — `t(KIND_LABEL[kind])` 라 소스에 리터럴이 안 남는다.
+    const missing = Object.values(KIND_LABEL).filter(v => !(v in EN)).sort();
     expect(missing).toEqual([]);
   });
 
