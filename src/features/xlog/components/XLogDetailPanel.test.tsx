@@ -114,3 +114,71 @@ describe('XLogDetailPanel — 요약에서 목록으로', () => {
     expect(screen.queryByTitle('무엇이 반복되나')).toBeNull();
   });
 });
+
+describe('XLogDetailPanel — 찾으면 그 자리로 데려간다', () => {
+  // 60 스텝 중 40번째만 target 을 담는다. 나머지는 모두 «select common».
+  const many: ProfileStep[] = Array.from({ length: 60 }, (_, i) => sql(i, i === 40 ? 9 : 7, 5));
+  const MANY: Partial<XLogDetailState> = {
+    profile: { txid: 'z1', obj_hash: 1, steps: many },
+    texts: { 7: 'select common', 9: 'select target_table where x' },
+  };
+
+  /** 스크롤이 불린 줄의 글자. jsdom 에는 scrollIntoView 가 없어 흉내 낸다 */
+  function recordScrolls(): string[] {
+    const calls: string[] = [];
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+      calls.push(this.textContent ?? '');
+    });
+    return calls;
+  }
+
+  it('검색어를 고쳐도 첫 적중이 같은 줄이면 다시 그 줄로 데려간다', () => {
+    // 재현한 결함: 강조가 «켜질 때» 만 스크롤해서, ta → tar → target 동안 화면이 멈춰 있었다.
+    // 읽느라 스크롤을 옮겨 둔 뒤 검색어를 다듬으면 결과가 화면 밖에 그대로 남았다.
+    const calls = recordScrolls();
+    panel(MANY);
+    const box = screen.getByLabelText('이 안에서 찾기');
+
+    fireEvent.change(box, { target: { value: 'targ' } });
+    const afterFirst = calls.length;
+    fireEvent.change(box, { target: { value: 'target' } });
+    fireEvent.change(box, { target: { value: 'target_' } });
+
+    expect(calls.length - afterFirst).toBe(2);
+    expect(calls[calls.length - 1]).toContain('target_table');
+  });
+
+  it('Enter 는 다음 적중, Shift+Enter 는 이전 적중이다', () => {
+    panel();
+    const box = screen.getByLabelText('이 안에서 찾기');
+    fireEvent.change(box, { target: { value: 'fruit' } });
+    expect(screen.getByText('1/2')).toBeTruthy();
+
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(screen.getByText('2/2')).toBeTruthy();
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(screen.getByText('1/2')).toBeTruthy();
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: true });
+    expect(screen.getByText('2/2')).toBeTruthy();
+  });
+
+  it('적중이 하나뿐이어도 Enter 를 누르면 다시 그 줄로 데려간다', () => {
+    // 옮겨 갈 곳이 없다고 아무 일도 안 하면 «Enter 가 안 먹는다» 로 읽힌다.
+    const calls = recordScrolls();
+    panel(MANY);
+    const box = screen.getByLabelText('이 안에서 찾기');
+    fireEvent.change(box, { target: { value: 'target' } });
+    const before = calls.length;
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(calls.length).toBeGreaterThan(before);
+  });
+
+  it('한글 조합 중의 Enter 는 이동으로 치지 않는다', () => {
+    // 조합을 끝내는 Enter 까지 이동으로 받으면 한 글자 칠 때마다 적중이 넘어간다.
+    panel();
+    const box = screen.getByLabelText('이 안에서 찾기');
+    fireEvent.change(box, { target: { value: 'fruit' } });
+    fireEvent.keyDown(box, { key: 'Enter', isComposing: true });
+    expect(screen.getByText('1/2')).toBeTruthy();
+  });
+});

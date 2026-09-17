@@ -117,6 +117,25 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
   const highlightStep = picked ?? stepHits[hitIdx]?.index ?? null;
 
   /**
+   * 짚은 자리로 **다시** 데려오라는 신호.
+   *
+   * 검색어를 고치거나 적중 사이를 오갈 때마다 바뀐다. 첫 적중이 같은 줄로 남아도
+   * 화면을 그 줄로 되돌린다 — 안 그러면 읽느라 옮겨 둔 스크롤 그대로 결과가 밖에 있다.
+   */
+  const [highlightSeq, setHighlightSeq] = useState(0);
+  useEffect(() => {
+    setHighlightSeq(n => n + 1);
+  }, [query, hitIdx, picked]);
+
+  /** 적중 사이 이동. 끝에서 처음으로 돈다 */
+  const moveHit = (step: 1 | -1) => {
+    if (stepHits.length === 0) return;
+    setHitIdx(i => (i + step + stepHits.length) % stepHits.length);
+    // 순번이 그대로여도(적중 하나) 다시 데려온다
+    setHighlightSeq(n => n + 1);
+  };
+
+  /**
    * 검색으로 연 트랜잭션은 **목록으로 돌려놓는다.**
    * 요약 모드에는 걸린 줄이 없어서, 강조해 봐야 보이지 않는다.
    */
@@ -322,10 +341,17 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                     type="search"
                     value={panelQuery}
                     onChange={e => setPanelQuery(e.target.value)}
+                    // 찾기 칸의 Enter 는 «다음», Shift+Enter 는 «이전» 이다 — 편집기·브라우저와 같다.
+                    onKeyDown={e => {
+                      if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                      e.preventDefault();
+                      moveHit(e.shiftKey ? -1 : 1);
+                    }}
+                    title={t('Enter 다음 · Shift+Enter 이전')}
                     placeholder={t('이 안에서 찾기')}
                     aria-label={t('이 안에서 찾기')}
                     spellCheck={false}
-                    className="w-28 rounded border border-line-strong bg-input px-1.5 py-0.5 text-micro text-fg placeholder:text-fg-faint focus:w-40"
+                    className="search-field w-32 rounded py-0.5 pr-1.5 text-micro focus:w-44"
                   />
                   {/* 걸린 자리가 여럿이면 오갈 수 있어야 한다 —
                       한 군데만 데려다 놓으면 나머지는 직접 찾아야 한다. */}
@@ -335,9 +361,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                   {stepHits.length > 0 && (
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() =>
-                          setHitIdx(i => (i - 1 + stepHits.length) % stepHits.length)
-                        }
+                        onClick={() => moveHit(-1)}
                         disabled={stepHits.length < 2}
                         title={t('이전 적중')}
                         className="rounded px-1 text-micro text-fg-dim hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:text-fg-faint"
@@ -348,7 +372,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                         {hitIdx + 1}/{stepHits.length}
                       </span>
                       <button
-                        onClick={() => setHitIdx(i => (i + 1) % stepHits.length)}
+                        onClick={() => moveHit(1)}
                         disabled={stepHits.length < 2}
                         title={t('다음 적중')}
                         className="rounded px-1 text-micro text-fg-dim hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:text-fg-faint"
@@ -385,6 +409,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                   totalElapsed={xlog.elapsed}
                   onOpenThread={txid => onOpenTxid(txid, yyyymmdd(xlog.endTime))}
                   highlightIndex={highlightStep}
+                  highlightSeq={highlightSeq}
                 />
               ) : (
                 <ProfileSummaryTable

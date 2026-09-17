@@ -5,6 +5,7 @@ import { useXLogCanvas } from '../hooks/useXLogCanvas';
 import { useXLogStream } from '../hooks/useXLogStream';
 
 import { usePastXLog } from '../hooks/usePastXLog';
+import { useConnectionReset } from '../hooks/useConnectionReset';
 import { useLiveBackfill } from '../hooks/useLiveBackfill';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
@@ -61,6 +62,14 @@ interface XLogChartProps {
    * 돌아서 같은 구간이면 아무 일도 일어나지 않는다.
    */
   refreshSignal?: number;
+  /**
+   * 연결할 때마다 올라가는 번호. **바뀌면 받아 둔 XLog 를 버린다.**
+   *
+   * 서버를 갈아타도 저장소가 그대로라, 같은 서비스 이름(= 같은 objHash)을 쓰는
+   * 두 콜렉터 사이에서 이전 서버의 점이 시간 창에서 밀려날 때까지 남았다
+   * (`useConnectionReset`).
+   */
+  connectionEpoch?: number;
 }
 
 /**
@@ -92,6 +101,7 @@ export const XLogChart = memo(function XLogChart({
   onConfigChange,
   onPastRangeChange,
   refreshSignal = 0,
+  connectionEpoch = 0,
 }: XLogChartProps) {
   const { store: liveStore, streamError, clearError } = useXLogStream(config);
 
@@ -112,7 +122,13 @@ export const XLogChart = memo(function XLogChart({
    * 30분 창이 차려면 30분이 걸린다. 창의 왼쪽(= 아직 못 받은 과거)을 같은 저장소에
    * 뒤늦게 부어 넣는다 — 겹치지 않게 무엇을 받을지는 훅이 정한다.
    */
-  const backfill = useLiveBackfill(liveStore, config.timeRangeMs, objHashes, connected && !isPast);
+  const backfill = useLiveBackfill(
+    liveStore,
+    config.timeRangeMs,
+    objHashes,
+    connected && !isPast,
+    connectionEpoch,
+  );
 
   // **처음 마운트될 때는 다시 받지 않는다.** 이미 위에서 받고 있다.
   const pastReload = past.reload;
@@ -122,6 +138,20 @@ export const XLogChart = memo(function XLogChart({
     if (isPast) pastReload();
   }, [refreshSignal, isPast, pastReload]);
   const store = isPast ? past.store : liveStore;
+
+  // 접속이 바뀌면 이전 서버의 점을 버린다. 과거 구간을 보던 중이면 새 서버에서 다시 받는다.
+  const pastStore = past.store;
+  useConnectionReset(
+    connected,
+    connectionEpoch,
+    () => {
+      liveStore.clear();
+      pastStore.clear();
+    },
+    () => {
+      if (isPast) pastReload();
+    },
+  );
 
   // 과거는 고정 구간, 실시간은 흐르는 창.
   const timeWindow = useMemo(

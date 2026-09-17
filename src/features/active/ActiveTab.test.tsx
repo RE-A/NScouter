@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   getTypeActiveServices: vi.fn(),
   // 풀 값은 이미 도는 카운터 스트림에서 줍는다. 여기서는 흘려보내기만 한다.
   onCounterData: vi.fn(() => Promise.resolve(() => {})),
+  getThreadDetail: vi.fn(() => Promise.resolve(null)),
 }));
 vi.mock('../xlog/api/scouterApi', () => api);
 // 스택 창은 따로 검증된다. 여기서는 열렸는지만 본다.
@@ -56,11 +57,11 @@ const AGENTS = new Map([
 beforeEach(() => api.getTypeActiveServices.mockResolvedValue({ rows: ROWS, incomplete: [] }));
 afterEach(() => vi.clearAllMocks());
 
-function draw(picked: number[] = [], poolHashes: number[] = []) {
+function draw(picked: number[] = [], poolHashes: number[] = [], javaeeTypes: string[] = ['tomcat']) {
   render(
     <ActiveTab
       enabled
-      javaeeType="tomcat"
+      javaeeTypes={javaeeTypes}
       picked={new Set(picked)}
       agentMap={AGENTS}
       poolHashes={poolHashes}
@@ -154,6 +155,15 @@ describe('ActiveTab — 목록', () => {
     await waitFor(() => expect(txns().getByText('1 / 4건')).toBeTruthy());
   });
 
+  it('쿼리의 «상세» 를 누르면 쿼리 창이 열리고, 스택 창은 열리지 않는다', async () => {
+    // 줄 클릭까지 번지면 창이 둘 뜬다.
+    draw();
+    await screen.findAllByText('12.4초');
+    fireEvent.click(txns().getAllByTitle('쿼리 상세 보기')[0]);
+    expect(await screen.findByRole('dialog', { name: '쿼리 상세' })).toBeTruthy();
+    expect(screen.queryByText(/^상세:/)).toBeNull();
+  });
+
   it('줄을 누르면 스택 창이 열린다', async () => {
     draw();
     await screen.findAllByText('12.4초');
@@ -169,10 +179,11 @@ describe('ActiveTab — 정직하게 말하기', () => {
     expect(txns().queryByText('/shop/ping<GET>')).toBeNull();
   });
 
-  it('응답하지 않은 서버가 있으면 말한다 — 조용히 적게 보여주지 않는다', async () => {
-    api.getTypeActiveServices.mockResolvedValue({ rows: ROWS, incomplete: [7, 8] });
+  it('못 닿은 서버가 있으면 이름까지 말한다 — 조용히 적게 보여주지 않는다', async () => {
+    // 수만 적으면 어느 서버를 믿고 봐야 할지 모른다.
+    api.getTypeActiveServices.mockResolvedValue({ rows: ROWS, incomplete: [2] });
     draw();
-    expect(await screen.findByText(/응답하지 않아 목록에 빠져 있습니다/)).toBeTruthy();
+    expect(await screen.findByText(/이번 갱신에 닿지 못한 서버: \/h\/order-app/)).toBeTruthy();
   });
 
   it('이 화면이 못 보여주는 것을 화면에 적어 둔다', async () => {
@@ -219,5 +230,34 @@ describe('ActiveTab — 커넥션 풀 줄', () => {
     draw([1], [91]);
     await screen.findAllByText('12.4초');
     expect(pool().getByText('shop-app · HikariPool-1')).toBeTruthy();
+  });
+});
+
+describe('ActiveTab — 떴다 사라졌다 하지 않게', () => {
+  it('타입이 여럿이면 전부 묻는다 — 첫 타입만 물으면 나머지 서비스가 영영 안 뜬다', async () => {
+    api.getTypeActiveServices.mockImplementation((type: string) =>
+      Promise.resolve(
+        type === 'java'
+          ? { rows: [row({ obj_hash: 2, id: 9, txid: 'j', service: '/batch/run<GET>', elapsed: 2_000 })], incomplete: [] }
+          : { rows: ROWS.slice(0, 1), incomplete: [] },
+      ),
+    );
+    draw([], [], ['tomcat', 'java']);
+    await screen.findAllByText('12.4초');
+    expect(api.getTypeActiveServices).toHaveBeenCalledWith('tomcat');
+    expect(api.getTypeActiveServices).toHaveBeenCalledWith('java');
+    await waitFor(() => expect(txns().getByText('/batch/run<GET>')).toBeTruthy());
+  });
+
+  it('갱신 중 못 닿은 서버의 행을 지우지 않고 «지난 값» 으로 남긴다', async () => {
+    // 지우면 «끝났다» 로 읽힌다. 실제로는 콜렉터가 그 서버에 못 물어본 것이다.
+    api.getTypeActiveServices
+      .mockResolvedValueOnce({ rows: ROWS, incomplete: [] })
+      .mockResolvedValue({ rows: ROWS.filter(r => r.obj_hash !== 2), incomplete: [2] });
+    draw();
+    await screen.findAllByText('12.4초');
+    fireEvent.click(screen.getByRole('button', { name: '지금 받기' }));
+    await waitFor(() => expect(txns().getByText('지난 값')).toBeTruthy());
+    expect(txns().getByText('/shop/ping<GET>')).toBeTruthy();
   });
 });

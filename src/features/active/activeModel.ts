@@ -8,8 +8,9 @@
 //   1. **순간 스냅샷이다.** 5초·44표본에서 `sql`/`subcall` 이 차 있던 것은 7건뿐이었다.
 //      빠른 쿼리는 거의 안 잡힌다. 뒤집으면 **느린 것은 잘 잡힌다** — 그래서 목록은
 //      느린 것부터 놓고, 「전부 보여준다」고 말하지 않는다.
-//   2. **바인드 값은 오지 않는다** (`where product_id=?`). 쿼리는 **문장 단위**로만
+//   2. **목록에는 바인드 값이 없다** (`where product_id=?`). 쿼리는 **문장 단위**로만
 //      묶을 수 있다. 같은 문장이 여러 건이면 그게 곧 «이 쿼리에 N건 매달림» 이다.
+//      (값 자체는 스레드 상세의 `SQLActiveBindVar` 로 온다 — 쿼리 상세 창이 묻는다.)
 //
 // 구간은 **기존 액티브 막대(`activeSpeed.ts`)와 같은 3단계**를 쓴다. 한 앱에서
 // 같은 것을 두 가지로 나누면 «3초 이상이 왜 저기선 5건 여기선 3건인가» 가 된다.
@@ -237,4 +238,85 @@ export function formatElapsed(ms: number): string {
   const min = Math.floor(ms / 60_000);
   const sec = Math.floor((ms % 60_000) / 1_000);
   return `${min}분 ${String(sec).padStart(2, '0')}초`;
+}
+
+// ─── 못 닿은 서버 ──────────────────────────────────────────────
+//
+// **갱신마다 떴다 사라졌다 하던 이유.** 콜렉터는 에이전트가 열어 둔 TCP 세션을
+// 꺼내 쓰는데, `net_tcp_get_agent_connection_wait_ms`(기본 1초) 안에 못 얻으면 그 서버는
+// 행 없이 빈 팩만 온다 (`probe_active_service_short_wait` 가 실물로 재현). 네트워크가
+// 느린 곳(ECS 등)이나 다른 클라이언트가 무거운 요청을 보내는 동안 잘 일어난다.
+//
+// 그 순간 행을 지우면 «끝났다» 로 읽힌다. 실제로는 **못 물어본 것**이다.
+// 그래서 직전에 받은 행을 **지난 값이라고 표시해서** 이어 보여준다. 다만 끝없이
+// 이어 붙이면 죽은 서버의 옛 트랜잭션이 영원히 «실행 중» 으로 남으므로 횟수를 둔다.
+
+/** 연속으로 못 닿아도 직전 값을 이어 보여줄 횟수. 넘으면 버리고 «못 닿음» 만 적는다 */
+export const MAX_CARRY = 3;
+
+export interface CarryState {
+  /** 오브젝트별로 마지막에 **실제로 받은** 행 */
+  lastRows: ReadonlyMap<number, readonly ActiveService[]>;
+  /** 오브젝트별로 연속해서 못 닿은 횟수 */
+  misses: ReadonlyMap<number, number>;
+}
+
+export const EMPTY_CARRY: CarryState = { lastRows: new Map(), misses: new Map() };
+
+export interface CarryResult {
+  /** 화면에 놓을 행 — 이번에 받은 것 + 이어 붙인 지난 값 */
+  rows: ActiveService[];
+  /** 지난 값을 보여주고 있는 서버 */
+  stale: ReadonlySet<number>;
+  /** 이번에 못 닿은 서버 전부 (지난 값이 있든 없든) */
+  unreached: ReadonlySet<number>;
+  next: CarryState;
+}
+
+/**
+ * 이번 응답과 직전 상태를 합친다.
+ *
+ * `unreached` 에 없는 서버는 **닿은 것**으로 본다 — 0건이라 행이 하나도 없어도 그렇다.
+ * (콜렉터 응답에서 0건 서버는 행으로 드러나지 않으므로, 「행이 있다」 로 닿음을
+ * 가르면 한가한 서버의 옛 행이 영영 안 지워진다.)
+ */
+export function carryUnreached(
+  prev: CarryState,
+  fresh: readonly ActiveService[],
+  unreachedList: readonly number[],
+): CarryResult {
+  const unreached = new Set(unreachedList);
+
+  const byHash = new Map<number, ActiveService[]>();
+  for (const r of fresh) {
+    if (unreached.has(r.obj_hash)) continue;
+    const list = byHash.get(r.obj_hash);
+    if (list) list.push(r);
+    else byHash.set(r.obj_hash, [r]);
+  }
+
+  const lastRows = new Map<number, readonly ActiveService[]>();
+  const misses = new Map<number, number>();
+  const rows: ActiveService[] = [];
+  const stale = new Set<number>();
+
+  // 닿은 서버 — 받은 그대로. 없던 서버도, 행이 사라진 서버도 여기서 정리된다.
+  for (const [h, list] of byHash) {
+    lastRows.set(h, list);
+    rows.push(...list);
+  }
+
+  // 못 닿은 서버 — 횟수 안이면 지난 값을 이어 붙인다.
+  for (const h of unreached) {
+    const n = (prev.misses.get(h) ?? 0) + 1;
+    misses.set(h, n);
+    const last = prev.lastRows.get(h);
+    if (last && last.length > 0 && n <= MAX_CARRY) {
+      lastRows.set(h, last);
+      rows.push(...last);
+      stale.add(h);
+    }
+  }
+
+  return { rows, stale, unreached, next: { lastRows, misses } };
 }

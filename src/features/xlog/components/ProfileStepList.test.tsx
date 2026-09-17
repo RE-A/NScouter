@@ -150,3 +150,71 @@ describe('ProfileStepList — 소요 시간 표기', () => {
     expect(screen.queryByText('0ms')).toBeNull();
   });
 });
+
+describe('ProfileStepList — 긴 문장 펼치기', () => {
+  /** jsdom 은 레이아웃이 없어 넘침을 못 잰다. 넘친 것처럼 만든다 */
+  function overflowing() {
+    const sh = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    const ch = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 400 });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 40 });
+    return () => {
+      if (sh) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', sh);
+      if (ch) Object.defineProperty(HTMLElement.prototype, 'clientHeight', ch);
+    };
+  }
+
+  function drawLong() {
+    render(
+      <ProfileStepList
+        steps={[sqlStep(21, '')]}
+        texts={{ 21: 'select ' + Array.from({ length: 40 }, (_, i) => `col_${i}`).join(', ') + ' from big_table' }}
+        totalElapsed={7}
+      />,
+    );
+  }
+
+  it('접혀 있으면 «펼치기» 는 아래에 하나뿐이다', () => {
+    const restore = overflowing();
+    try {
+      drawLong();
+      expect(screen.getAllByRole('button', { name: /펼치기/ })).toHaveLength(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it('검색으로 짚은 긴 문장은 펼쳐서 보여준다 — 걸린 글자가 접힘 아래에 숨지 않게', () => {
+    // where 절 조건으로 찾는 일이 흔한데, 그건 대개 세 줄 접힘 아래에 있다.
+    const restore = overflowing();
+    try {
+      render(
+        <ProfileStepList
+          steps={[sqlStep(21, '')]}
+          texts={{ 21: 'select ' + Array.from({ length: 40 }, (_, i) => `col_${i}`).join(', ') + ' from big_table' }}
+          totalElapsed={7}
+          highlightIndex={0}
+        />,
+      );
+      expect(screen.getAllByRole('button', { name: '접기' }).length).toBeGreaterThan(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('펼치면 위에도 «접기» 가 생긴다 — 맨 밑까지 내려가지 않아도 접힌다', () => {
+    const restore = overflowing();
+    try {
+      drawLong();
+      fireEvent.click(screen.getByRole('button', { name: /펼치기/ }));
+      const closers = screen.getAllByRole('button', { name: '접기' });
+      expect(closers.map(b => b.getAttribute('data-where'))).toEqual(['top', 'bottom']);
+
+      fireEvent.click(closers[0]);
+      expect(screen.queryAllByRole('button', { name: '접기' })).toHaveLength(0);
+      expect(screen.getByRole('button', { name: /펼치기/ })).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+});

@@ -12,7 +12,8 @@
 // 같은 것을 붙들고 있은 시간, 그리고 전체를 한눈에 세우는 게이지.
 //
 // **이 화면의 성격을 화면 안에 적어 둔다.** 순간 스냅샷이라 빠른 쿼리는 거의 안
-// 잡히고, 바인드 값은 오지 않는다. 적어 두지 않으면 «왜 대부분 비어 있냐» 가 된다.
+// 잡힌다. 적어 두지 않으면 «왜 대부분 비어 있냐» 가 된다.
+// 바인드 값은 목록 응답에는 없고 스레드 상세에는 있다 — 쿼리 상세 창이 그걸 묻는다.
 
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { ActiveService } from '../xlog/types/object';
@@ -20,6 +21,7 @@ import { ThreadDetailDialog } from '../xlog/components/ThreadDetailDialog';
 import { ActiveGauge } from './ActiveGauge';
 import { ActiveList } from './ActiveList';
 import { PoolStrip } from './PoolStrip';
+import { QueryDetailDialog } from './QueryDetailDialog';
 import { ResourceGroups } from './ResourceGroups';
 import {
   groupByResource,
@@ -36,8 +38,12 @@ import { t } from '../../i18n';
 interface ActiveTabProps {
   /** 접속돼 있고 이 탭을 보고 있는가 */
   enabled: boolean;
-  /** javaee 오브젝트의 objType. 액티브는 objHash 로는 못 묻는다 (F-34) */
-  javaeeType: string;
+  /**
+   * 고른 javaee 오브젝트들의 objType. 액티브는 objHash 로는 못 묻는다 (F-34).
+   *
+   * **여럿일 수 있다.** 하나만 물으면 다른 타입에 붙은 서비스가 영영 안 뜬다.
+   */
+  javaeeTypes: readonly string[];
   /** 왼쪽에서 고른 서버. 여기 없는 서버의 것은 보여주지 않는다 */
   picked: ReadonlySet<number>;
   agentMap: Map<number, string>;
@@ -57,7 +63,7 @@ function pollLabel(ms: PollMs): string {
 
 export const ActiveTab = memo(function ActiveTab({
   enabled,
-  javaeeType,
+  javaeeTypes,
   picked,
   agentMap,
   poolHashes,
@@ -66,8 +72,10 @@ export const ActiveTab = memo(function ActiveTab({
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState<string | null>(null);
   const [detail, setDetail] = useState<ActiveService | null>(null);
+  /** 쿼리 상세를 연 줄 */
+  const [queryOf, setQueryOf] = useState<ActiveService | null>(null);
 
-  const feed = useActiveServices(javaeeType, enabled, period);
+  const feed = useActiveServices(javaeeTypes, enabled, period);
   const poolCounters = usePoolCounters(enabled);
 
   const serverName = useCallback(
@@ -89,6 +97,13 @@ export const ActiveTab = memo(function ActiveTab({
       ),
     [poolHashes, agentMap, poolCounters],
   );
+
+  /** 고른 서버 중 못 닿은 것. 안 고른 서버가 못 닿은 것까지 알릴 이유는 없다 */
+  const unreachedMine = useMemo(
+    () => [...feed.unreached].filter(h => picked.size === 0 || picked.has(h)),
+    [feed.unreached, picked],
+  );
+  const staleMine = unreachedMine.filter(h => feed.stale.has(h)).length;
 
   const counts = useMemo(() => stepCounts(mine), [mine]);
   const groups = useMemo(() => groupByResource(mine), [mine]);
@@ -115,7 +130,7 @@ export const ActiveTab = memo(function ActiveTab({
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder={t('서비스·쿼리·호출·스레드·IP 로 찾기')}
-          className="h-7 w-[280px] rounded border border-line bg-input px-2 text-body text-fg placeholder:text-fg-faint focus:border-accent focus:outline-none"
+          className="search-field h-7 w-[280px] rounded pr-2 text-body"
         />
 
         <div className="flex items-center gap-1">
@@ -161,11 +176,15 @@ export const ActiveTab = memo(function ActiveTab({
           {feed.error}
         </p>
       )}
-      {feed.incomplete.length > 0 && (
-        // 조용히 적게 보여주면 «지금 한가하다» 로 오해한다.
-        <p className="border-b border-line px-3 py-1.5 text-micro text-warn">
-          {feed.incomplete.length}
-          {t('개 서버가 응답하지 않아 목록에 빠져 있습니다')}
+      {unreachedMine.length > 0 && (
+        // 조용히 적게 보여주면 «지금 한가하다» 로 오해한다. **누가** 빠졌는지까지 적는다 —
+        // 수만 적으면 어느 서버를 믿고 봐야 할지 모른다.
+        <p
+          className="border-b border-line px-3 py-1.5 text-micro text-warn"
+          title={t('콜렉터가 이 서버의 에이전트 연결을 제때 얻지 못했습니다. 네트워크가 느리거나 다른 요청이 연결을 쓰는 중일 때 일어납니다.')}
+        >
+          {t('이번 갱신에 닿지 못한 서버')}: {unreachedMine.map(serverName).join(', ')}
+          {staleMine > 0 && ` — ${t('직전 값을 흐리게 이어 보여줍니다')}`}
         </p>
       )}
 
@@ -215,20 +234,35 @@ export const ActiveTab = memo(function ActiveTab({
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ActiveList
               rows={shown}
+              stale={feed.stale}
               holds={feed.holds}
               at={feed.at}
               maxElapsed={counts.maxElapsed}
               serverName={serverName}
               onPick={setDetail}
+              onPickQuery={setQueryOf}
             />
           </div>
 
           {/* 이 화면이 무엇을 못 보여주는지. 빼면 «왜 대부분 비어 있냐» 가 된다 */}
           <p className="border-t border-line px-3 py-1.5 text-micro text-fg-faint">
-            {t('순간 스냅샷입니다 — 짧게 끝나는 쿼리는 잡히지 않습니다. 쿼리의 바인드 값은 오지 않습니다.')}
+            {t('순간 스냅샷입니다 — 짧게 끝나는 쿼리는 잡히지 않습니다. 쿼리의 바인드 값은 «상세» 에서 봅니다.')}
           </p>
         </section>
       </div>
+
+      {queryOf && (
+        <QueryDetailDialog
+          row={queryOf}
+          rows={mine}
+          serverName={serverName}
+          onOpenStack={r => {
+            setQueryOf(null);
+            setDetail(r);
+          }}
+          onClose={() => setQueryOf(null)}
+        />
+      )}
 
       {detail?.txid && (
         <ThreadDetailDialog

@@ -16,6 +16,7 @@ import { ErrorDetail } from './ErrorDetail';
 import { bindSql } from './sqlBind';
 import { affectedRows } from './sqlAffected';
 import { formatSql } from './sqlFormat';
+import { CopyButton } from '../../../components/CopyButton';
 import { useViewOptions } from '../hooks/useViewOptions';
 import { t } from '../../../i18n';
 
@@ -37,6 +38,14 @@ interface ProfileStepListProps {
    * 안 짚어 주면 목록을 처음부터 훑어야 한다.
    */
   highlightIndex?: number | null;
+  /**
+   * 같은 줄이라도 **다시 데려오라는** 신호. 값이 바뀔 때마다 강조한 줄로 스크롤한다.
+   *
+   * 강조가 «켜질 때» 만 스크롤하면, 검색어를 고쳐도 첫 적중이 같은 줄인 동안에는
+   * 화면이 움직이지 않는다 — 읽느라 스크롤을 옮겨 둔 뒤 검색어를 다듬으면 결과가
+   * 화면 밖에 그대로 남았다. 검색어·적중 순번이 바뀌면 부르는 쪽이 이 값을 바꾼다.
+   */
+  highlightSeq?: number;
 }
 
 /** 스텝 종류별 표기 — 채운 배지 대신 글자색으로 구분한다 */
@@ -55,6 +64,7 @@ export const ProfileStepList = memo(function ProfileStepList({
   totalElapsed,
   onOpenThread,
   highlightIndex = null,
+  highlightSeq = 0,
 }: ProfileStepListProps) {
   const options = useViewOptions();
   const visible = steps.filter(s => s.kind !== 'Unknown');
@@ -76,6 +86,8 @@ export const ProfileStepList = memo(function ProfileStepList({
             total={totalElapsed}
             onOpenThread={onOpenThread}
             highlighted={i === highlightIndex}
+            // 강조한 줄에만 넘긴다 — 모든 줄에 넘기면 한 글자 칠 때마다 수백 줄이 다시 그려진다.
+            highlightSeq={i === highlightIndex ? highlightSeq : 0}
             sqlBindInline={options.sqlBindInline}
           />
         ),
@@ -91,6 +103,7 @@ function StepRow({
   total,
   onOpenThread,
   highlighted,
+  highlightSeq,
   sqlBindInline,
 }: {
   step: Exclude<ProfileStep, { kind: 'Unknown' }>;
@@ -99,6 +112,7 @@ function StepRow({
   total: number;
   onOpenThread?: (txid: string) => void;
   highlighted: boolean;
+  highlightSeq: number;
   sqlBindInline: boolean;
 }) {
   const text = (hash: number) => texts[hash] ?? `0x${(hash >>> 0).toString(16)}`;
@@ -170,7 +184,7 @@ function StepRow({
   useEffect(() => {
     if (!highlighted) return;
     rowRef.current?.scrollIntoView?.({ block: 'center' });
-  }, [highlighted]);
+  }, [highlighted, highlightSeq]);
 
   return (
     <li
@@ -231,6 +245,7 @@ function StepRow({
             params={step.param}
             inline={sqlBindInline}
             updated={step.updated}
+            revealed={highlighted}
           />
         )}
         {failed && <ErrorDetail text={text(errorHash)} compact />}
@@ -297,50 +312,26 @@ function Affected({ updated }: { updated: number }) {
   );
 }
 
-/**
- * 눌러서 클립보드로. 복사했다는 것을 **버튼 자신이** 잠깐 말한다.
- *
- * 토스트를 띄우지 않는 이유: 프로파일 한 판에 스텝이 수백 개라 어느 줄에서 눌렀는지가
- * 중요한데, 화면 한가운데 뜨는 알림은 그걸 말해 주지 못한다.
- */
-function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    if (!done) return;
-    const id = setTimeout(() => setDone(false), 1200);
-    return () => clearTimeout(id);
-  }, [done]);
-
-  return (
-    <button
-      type="button"
-      onClick={e => {
-        // 행 클릭(상세 열기)까지 번지면 복사하려다 다른 창이 뜬다.
-        e.stopPropagation();
-        // 클립보드는 거절될 수 있다(권한·포커스). 실패하면 조용히 둔다 —
-        // 여기서 에러를 띄우면 프로파일 읽기가 끊긴다.
-        void navigator.clipboard?.writeText(text).then(() => setDone(true)).catch(() => {});
-      }}
-      title={t('이 문장을 클립보드로 복사합니다')}
-      className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-    >
-      {done ? t('복사됨') : t('복사')}
-    </button>
-  );
-}
-
 function SqlBody({
   sql,
   params,
   inline,
   updated,
+  revealed = false,
 }: {
   sql: string;
   params: string;
   inline: boolean;
   /** 몇 행을 바꿨는가 (`SqlStep3.updated`) */
   updated: number;
+  /**
+   * 검색으로 짚은 줄인가.
+   *
+   * 줄로 스크롤해도 **걸린 글자가 세 줄 접힘 아래에 있으면** 여전히 안 보인다 —
+   * `where` 절 조건으로 찾는 일이 흔한데 그건 대개 뒤쪽이다. 짚으면 펼친다.
+   * 짚기를 풀어도 다시 접지는 않는다: 읽던 문장이 갑자기 줄어들면 자리를 잃는다.
+   */
+  revealed?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   /**
@@ -368,6 +359,10 @@ function SqlBody({
    */
   const shown = expanded ? formatSql(filled) : filled;
   const mismatched = bound !== null && (bound.bound < bound.placeholders || bound.leftover.length > 0);
+
+  useEffect(() => {
+    if (revealed && overflows) setExpanded(true);
+  }, [revealed, overflows]);
 
   useLayoutEffect(() => {
     // 펼친 뒤에는 넘치지 않으므로 재지 않는다 — 재면 «접기» 버튼이 사라진다.
@@ -402,8 +397,40 @@ function SqlBody({
     );
   }
 
+  /**
+   * 접는다 — **접은 뒤 문장 자리로 돌아온다.**
+   *
+   * 아래쪽 «접기» 로 접으면 문장이 수십 줄 줄어드는데, 스크롤 위치는 그대로라 화면이
+   * 엉뚱한 스텝에 가 있게 된다. 방금 보던 문장을 다시 찾으러 올라가야 한다.
+   */
+  const collapse = () => {
+    setExpanded(false);
+    requestAnimationFrame(() => codeRef.current?.scrollIntoView?.({ block: 'nearest' }));
+  };
+
+  const toggleButton = (where: 'top' | 'bottom') => (
+    <button
+      type="button"
+      // 행 클릭(상세 열기)까지 번지면 접으려다 다른 창이 뜬다.
+      onClick={e => {
+        e.stopPropagation();
+        if (expanded) collapse();
+        else setExpanded(true);
+      }}
+      aria-expanded={expanded}
+      data-where={where}
+      className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+    >
+      {expanded ? t('접기') : `${t('펼치기')} (${filled.length.toLocaleString()}${t('자')})`}
+    </button>
+  );
+
   return (
     <div className="mt-0.5">
+      {/* **펼쳤으면 위에도 «접기» 를 둔다.** 긴 문장을 펼치면 아래 버튼까지 스크롤해야
+          접을 수 있었다 — 읽다가 접으려는 순간 버튼은 대개 화면 밖이다. */}
+      {expanded && overflows && <div className="flex items-baseline">{toggleButton('top')}</div>}
+
       {/* **`block` 과 `line-clamp` 를 같이 쓰면 안 된다.** 둘 다 display 를 정하는데
           line-clamp 는 `-webkit-box` 를 써야 동작한다 — `block` 이 이기면 아무 일도 없다.
           (이 파일의 기존 `line-clamp-4` 도 같은 이유로 내내 안 먹고 있었다.) */}
@@ -418,19 +445,7 @@ function SqlBody({
       </code>
 
       <div className="flex items-baseline">
-        {overflows && (
-          <button
-            type="button"
-            // 행 클릭(상세 열기)까지 번지면 접으려다 다른 창이 뜬다.
-            onClick={e => {
-              e.stopPropagation();
-              setExpanded(v => !v);
-            }}
-            className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-          >
-            {expanded ? t('접기') : `${t('펼치기')} (${filled.length.toLocaleString()}${t('자')})`}
-          </button>
-        )}
+        {overflows && toggleButton('bottom')}
         {/* **채운 문장을 복사한다.** 이 화면을 여는 이유의 절반은 «이 쿼리를 DB 에 붙여
             돌려 보는 것» 이다. 값이 들어간 문장이라 그대로 실행된다.
             펼침 여부와 무관하게 **전문**을 복사한다 — 접혀 있다고 세 줄만 주면 안 된다. */}

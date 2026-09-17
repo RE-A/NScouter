@@ -246,7 +246,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder={t('이름 · 타입 찾기')}
-              className="min-w-0 flex-1 rounded border border-line bg-input px-1.5 py-0.5 text-small text-fg placeholder:text-fg-faint focus:border-accent focus:outline-none"
+              className="search-field min-w-0 flex-1 rounded py-0.5 pr-1.5 text-small"
             />
             {searching && (
               <button

@@ -257,7 +257,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
             value={filter}
             onChange={e => setFilter(e.target.value)}
             placeholder={tr('검색')}
-            className="w-40 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
+            className="search-field w-40 rounded py-0.5 pr-2 text-body"
           />
           {kind === 'stack' && stackText && (
             <>

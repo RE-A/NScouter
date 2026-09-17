@@ -108,7 +108,7 @@ export const ConfigSettingsDialog = memo(function ConfigSettingsDialog({
                 onChange={e => setQuery(e.target.value)}
                 placeholder={t('이름·설명·키로 찾기')}
                 aria-label={t('설정 찾기')}
-                className="w-64 rounded border border-line-strong bg-input px-2 py-1 text-small text-fg placeholder:text-fg-faint focus:border-accent focus:outline-none"
+                className="search-field w-64 rounded py-1 pr-2 text-small"
               />
               <label className="flex items-center gap-1.5 text-small text-fg-dim">
                 <input type="checkbox" checked={changedOnly} onChange={e => setChangedOnly(e.target.checked)} />

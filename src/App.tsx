@@ -181,6 +181,13 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
   /**
+   * 연결할 때마다 올라가는 번호.
+   *
+   * `serverId` 는 콜렉터 설정값이라 두 콜렉터가 같을 수 있어 «다른 접속» 을 가르지 못한다.
+   * XLog 저장소가 이 번호로 이전 서버의 점을 버린다 (`useConnectionReset`).
+   */
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
+  /**
    * 데모(합성 데이터)로 붙었는가. 그때는 콜렉터가 없어 콜렉터 설정을 물을 곳이 없다.
    * 이름은 Rust `DEMO_SERVER_ID` 와 같아야 한다.
    */
@@ -209,6 +216,13 @@ export default function App() {
    * 해시 목록으로는 요청할 수 없다.
    */
   const [javaeeType, setJavaeeType] = useState('');
+  /**
+   * javaee 오브젝트별 objType.
+   *
+   * `javaeeType` 은 **첫 타입 하나**라, `tomcat` 과 `java` 가 섞인 곳에서 나머지 타입의
+   * 서비스가 영영 안 잡힌다. Active 탭은 고른 서버들의 타입을 전부 물어야 해서 따로 둔다.
+   */
+  const [javaeeTypeOf, setJavaeeTypeOf] = useState<ReadonlyMap<number, string>>(new Map());
   /**
    * 호스트 오브젝트의 objType (`linux` 등).
    *
@@ -338,12 +352,12 @@ export default function App() {
 
   useEffect(() => {
     return subscribe(
-      onConnected(id => { setIsConnected(true); setServerId(id); }),
+      onConnected(id => { setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1); }),
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
         setSelectedXLogs([]); setAgentMap(new Map());
         setCounterHashes({ javaee: [], host: [], datasource: [] });
-        setJavaeeType(''); setHostType(''); clearDetail();
+        setJavaeeType(''); setJavaeeTypeOf(new Map()); setHostType(''); clearDetail();
       }),
     );
   }, [clearDetail]);
@@ -368,6 +382,7 @@ export default function App() {
         });
         // 타입이 섞여 있으면 첫 번째만 쓴다. 실환경에서 javaee 타입이 여럿인 경우는 드물다.
         setJavaeeType(javaee[0]?.obj_type ?? '');
+        setJavaeeTypeOf(new Map(javaee.map(a => [a.obj_hash, a.obj_type])));
         setHostType(host[0]?.obj_type ?? '');
         // **이름도 여기서 채운다.** 예전에는 AgentSelectorPanel(XLog 탭)만 채웠는데,
         // 그 패널은 XLog 탭에서만 마운트된다 — 카운터 탭으로 시작하면(마지막에 보던 탭이
@@ -872,6 +887,12 @@ export default function App() {
     };
   }, [counterHashes, filter.objHashSet]);
 
+  /** 고른 javaee 서버들의 objType — Active 탭이 타입마다 한 번씩 묻는다 */
+  const pickedJavaeeTypes = useMemo(
+    () => [...new Set(shownHashes.javaee.map(h => javaeeTypeOf.get(h)).filter((t): t is string => !!t))],
+    [shownHashes.javaee, javaeeTypeOf],
+  );
+
   /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
   const nothingPicked = filter.objHashSet.size === 0;
 
@@ -1174,6 +1195,7 @@ export default function App() {
                     filter={filter}
                     onSelect={handleXLogSelect}
                     connected={isConnected}
+                    connectionEpoch={connectionEpoch}
                     clearSignal={clearSignal}
                     pastRange={pastRange}
                     refreshSignal={refreshSignal}
@@ -1321,7 +1343,7 @@ export default function App() {
           ) : (
             <ActiveTab
               enabled={activeTab === 'active'}
-              javaeeType={javaeeType}
+              javaeeTypes={pickedJavaeeTypes}
               picked={filter.objHashSet}
               agentMap={agentMap}
               poolHashes={shownHashes.datasource}

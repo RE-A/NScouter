@@ -23,6 +23,8 @@
   /* 테두리 */
   --color-line: var(--border);
   --color-line-strong: var(--border-strong);
+  --color-search: var(--bg-search);
+  --color-line-search: var(--border-search);
 
   /* 글자 */
   --color-fg: var(--text);
@@ -115,6 +117,43 @@
   /* 숫자·ID 는 자릿수가 흔들리면 비교가 어렵다 */
   .tnum {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ── 검색 칸 ────────────────────────────────────────────────
+ * 화면마다 검색창이 여섯 군데 있고 각자 bg-input · border-line 으로 칠해져 있었다.
+ * 색을 바꾸려면 여섯 곳을 고쳐야 했고, 실제로 서로 조금씩 달랐다.
+ * 이 클래스 하나로 모은다. 크기(폭·높이·글자 크기)만 쓰는 쪽이 정한다.
+ *
+ * **색·테두리·안쪽 왼쪽 여백은 쓰는 쪽 유틸로 덮지 말 것.** components 층이라
+ * `bg-input` · `border-line` · `px-2` 가 붙으면 그쪽이 이긴다 (좌우 여백은 `pr-*` 로).
+ */
+@layer components {
+  .search-field {
+    background-color: var(--bg-search);
+    border: 1px solid var(--border-search);
+    color: var(--text);
+    /* 돋보기 — «여기가 검색칸» 을 글자를 읽기 전에 알린다. 색은 안내 문구와 같은 text-dim */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239a9ac0' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='4.5'/%3E%3Cpath d='M10.5 10.5 14 14'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 6px 50%;
+    background-size: 11px 11px;
+    padding-left: 21px;
+  }
+
+  .search-field::placeholder {
+    color: var(--text-dim);
+  }
+
+  .search-field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+    outline: none;
+  }
+
+  .search-field:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 }
 

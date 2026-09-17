@@ -29,6 +29,13 @@ export const EN: Record<string, string> = {
   'Active 탭': 'Active tab',
   '실행 중': 'Running',
   '액티브 현황': 'Active overview',
+  '이번 갱신에 닿지 못한 서버': 'Servers not reached this refresh',
+  '직전 값을 흐리게 이어 보여줍니다': 'showing their previous values dimmed',
+  '지난 값': 'previous',
+  '이번 갱신에 이 서버에 닿지 못해 직전 값을 보여줍니다':
+    'This server was not reached this refresh; showing its previous values',
+  '콜렉터가 이 서버의 에이전트 연결을 제때 얻지 못했습니다. 네트워크가 느리거나 다른 요청이 연결을 쓰는 중일 때 일어납니다.':
+    'The collector could not get this agent’s connection in time. This happens when the network is slow or another request is using the connection.',
   '사용 중': 'In use',
   '유휴': 'Idle',
   '왼쪽에서 커넥션 풀을 함께 골라야 값이 옵니다.':
@@ -47,12 +54,30 @@ export const EN: Record<string, string> = {
   '멈춤': 'Off',
   '지금 받기': 'Fetch now',
   '마지막 갱신': 'Last update',
-  '개 서버가 응답하지 않아 목록에 빠져 있습니다':
-    ' server(s) did not respond and are missing from the list',
   '서비스·쿼리·호출·스레드·IP 로 찾기': 'find by service, query, call, thread or IP',
   '이 행은 상세를 물을 수 없습니다': 'No detail available for this row',
-  '순간 스냅샷입니다 — 짧게 끝나는 쿼리는 잡히지 않습니다. 쿼리의 바인드 값은 오지 않습니다.':
-    'A point-in-time snapshot — short queries are rarely caught, and bind values are not sent.',
+  '순간 스냅샷입니다 — 짧게 끝나는 쿼리는 잡히지 않습니다. 쿼리의 바인드 값은 «상세» 에서 봅니다.':
+    'A point-in-time snapshot — short queries are rarely caught. See bind values under «Details».',
+  '쿼리 상세': 'Query details',
+  '외부 호출 상세': 'Outbound call details',
+  '쿼리 상세 보기': 'Show query details',
+  '외부 호출 상세 보기': 'Show outbound call details',
+  '문장': 'Statement',
+  '호출 대상': 'Target',
+  '값 채워 보기': 'Fill in values',
+  '바인드 값을 묻는 중…': 'Fetching bind values…',
+  '이 문장에는 바인드 값이 없습니다.': 'This statement has no bind values.',
+  '자리표시자': 'Filled',
+  '개만 채웠습니다 — 남은 자리는 ? 그대로입니다.': ' placeholders — the rest are left as ?.',
+  '값마다 에이전트 설정 trace_sql_parameter_max_length (기본 20자) 에서 잘릴 수 있습니다.':
+    'Each value may be truncated at the agent setting trace_sql_parameter_max_length (default 20 chars).',
+  '이미 끝난 트랜잭션이라 바인드 값을 받지 못했습니다.':
+    'The transaction already finished, so bind values could not be fetched.',
+  '여는 사이에 다음 쿼리로 넘어가 이 문장의 바인드 값을 받지 못했습니다.':
+    'It moved on to the next query while opening, so bind values for this statement could not be fetched.',
+  '이 쿼리에 매달린 트랜잭션': 'Transactions waiting on this query',
+  'Enter 다음 · Shift+Enter 이전': 'Enter next · Shift+Enter previous',
+  '이 호출에 매달린 트랜잭션': 'Transactions waiting on this call',
   // ── 설정 창 (에이전트 · 콜렉터) ────────────────────────
   '콜렉터 설정': 'Collector settings',
   '지금 붙은 콜렉터의 설정을 보고 고칩니다': 'View and edit the connected collector’s settings',

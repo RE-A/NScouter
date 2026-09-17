@@ -40,22 +40,34 @@ const STAT_TONE: Record<string, string> = {
 
 interface ActiveListProps {
   rows: readonly ActiveService[];
+  /**
+   * 이번에 못 닿아 **직전 값**을 보여주고 있는 서버.
+   *
+   * 그 행의 경과는 지난 갱신 때 값이다. 흐리게 두고 붙들고 있은 시간은 적지 않는다 —
+   * 지금도 붙들고 있는지 모른다.
+   */
+  stale: ReadonlySet<number>;
   holds: ReadonlyMap<string, Hold>;
   /** 마지막으로 받은 시각. 붙들고 있은 시간을 이 시각 기준으로 잰다 */
   at: number | null;
   /** 막대의 100% 기준. 걸러낸 뒤에도 **전체 최댓값**을 쓴다 (기준이 흔들리면 못 견준다) */
   maxElapsed: number;
   serverName: (objHash: number) => string;
+  /** 줄을 누르면 — 스택 트레이스 */
   onPick: (row: ActiveService) => void;
+  /** 쿼리·호출 줄을 누르면 — 전문과 바인드 값 */
+  onPickQuery: (row: ActiveService) => void;
 }
 
 export const ActiveList = memo(function ActiveList({
   rows,
+  stale,
   holds,
   at,
   maxElapsed,
   serverName,
   onPick,
+  onPickQuery,
 }: ActiveListProps) {
   if (rows.length === 0) {
     return (
@@ -70,15 +82,30 @@ export const ActiveList = memo(function ActiveList({
       {rows.map(row => {
         const step = stepOf(row.elapsed);
         const res = resourceOf(row);
-        const held = at === null ? null : heldMs(holds, row, at);
+        const old = stale.has(row.obj_hash);
+        const held = at === null || old ? null : heldMs(holds, row, at);
         const server = serverName(row.obj_hash);
 
         return (
-          <li key={rowKey(row)}>
-            <button
+          <li key={rowKey(row)} className={old ? 'opacity-50' : undefined}>
+            {/* 줄 전체는 버튼이 아니라 **버튼처럼 동작하는 칸**이다 — 안에 쿼리 상세 버튼이
+                따로 있어야 하는데, 버튼 안에 버튼은 둘 수 없다. */}
+            <div
               // txid 가 없으면 스택을 물을 수 없다. 눌러도 빈 창이면 고장으로 읽힌다.
+              role="button"
+              tabIndex={row.txid ? 0 : -1}
+              aria-disabled={row.txid === null}
               onClick={row.txid ? () => onPick(row) : undefined}
-              disabled={row.txid === null}
+              onKeyDown={
+                row.txid
+                  ? e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onPick(row);
+                      }
+                    }
+                  : undefined
+              }
               title={row.txid ? t('스택 트레이스 보기') : t('이 행은 상세를 물을 수 없습니다')}
               className={`flex w-full items-start gap-3 px-3 py-2 text-left ${
                 row.txid ? 'cursor-pointer hover:bg-hover/60' : 'cursor-default'
@@ -109,19 +136,29 @@ export const ActiveList = memo(function ActiveList({
                   </span>
                 ) : (
                   <span className="flex min-w-0 items-baseline gap-1.5">
-                    <span
-                      className={`shrink-0 font-mono text-micro ${
-                        res.kind === 'sql' ? 'text-[var(--cat-sql)]' : 'text-[var(--cat-api)]'
-                      }`}
+                    {/* 잘린 한 줄로는 조건을 못 읽는다. 눌러서 전문·바인드 값을 본다 */}
+                    <button
+                      type="button"
+                      onClick={e => {
+                        // 줄 클릭(스택 열기)까지 번지면 창이 둘 뜬다.
+                        e.stopPropagation();
+                        onPickQuery(row);
+                      }}
+                      title={res.kind === 'sql' ? t('쿼리 상세 보기') : t('외부 호출 상세 보기')}
+                      className="flex min-w-0 flex-1 items-baseline gap-1.5 rounded px-1 -mx-1 text-left hover:bg-hover"
                     >
-                      {res.kind === 'sql' ? 'SQL' : 'API'}
-                    </span>
-                    <span
-                      className="min-w-0 flex-1 truncate font-mono text-micro text-fg-muted"
-                      title={res.label}
-                    >
-                      {res.label}
-                    </span>
+                      <span
+                        className={`shrink-0 font-mono text-micro ${
+                          res.kind === 'sql' ? 'text-[var(--cat-sql)]' : 'text-[var(--cat-api)]'
+                        }`}
+                      >
+                        {res.kind === 'sql' ? 'SQL' : 'API'}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-micro text-fg-muted">
+                        {res.label}
+                      </span>
+                      <span className="shrink-0 text-micro text-accent">{t('상세')}</span>
+                    </button>
                     {/* «3초째 같은 쿼리» — 방금 넘어온 것과 계속 매달린 것을 가른다 */}
                     {held !== null && (
                       <span className="shrink-0 font-mono text-micro tabular-nums text-fg-dim">
@@ -136,6 +173,11 @@ export const ActiveList = memo(function ActiveList({
                   <span className="truncate" title={server}>
                     {server}
                   </span>
+                  {old && (
+                    <span className="text-warn" title={t('이번 갱신에 이 서버에 닿지 못해 직전 값을 보여줍니다')}>
+                      {t('지난 값')}
+                    </span>
+                  )}
                   <span aria-hidden>·</span>
                   <span className="truncate font-mono" title={row.name}>
                     {row.name}
@@ -158,7 +200,7 @@ export const ActiveList = memo(function ActiveList({
                   cpu {row.cpu.toLocaleString()}ms
                 </span>
               </span>
-            </button>
+            </div>
           </li>
         );
       })}

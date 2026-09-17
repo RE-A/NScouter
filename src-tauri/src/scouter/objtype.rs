@@ -634,10 +634,18 @@ pub fn build_active_service_param(obj_type: &str, obj_hash: Option<i32>) -> MapP
 
 /// 응답 pack 하나가 "그 오브젝트는 끝까지 응답했는가"를 함께 알려준다.
 ///
-/// `complete=false` 면 그 에이전트의 목록이 **잘렸다는 뜻**이다.
-/// 조용히 적게 보여주면 "지금 한가하다"로 오해한다.
+/// **`complete` 가 없으면 응답하지 않은 것이다.** 예전에는 없음을 «완료» 로 봤는데
+/// 바이트코드로 보니 반대였다:
+///   - 에이전트(`AgentThread.activeThreadList`)는 건수와 무관하게 **늘** `complete=true` 를
+///     넣는다 — 한가해서 0건이어도 넣는다 (오프셋 591, 유일한 정상 종료 경로).
+///   - 콜렉터(`ThreadList.agentActiveServiceList`)는 에이전트 세션을
+///     `net_tcp_get_agent_connection_wait_ms`(기본 1초) 안에 못 얻으면 `S501` 을 남기고
+///     **objHash 만 든 팩**을 보낸다.
+///
+/// 없음을 완료로 보면 그 서버의 행이 경고 없이 사라진다 — 갱신마다 떴다 사라졌다 하던
+/// 현상의 절반이 이것이었다. `probe_active_service_short_wait` 가 실물로 재현한다.
 pub fn is_complete(map: &MapPack) -> bool {
-    matches!(map.entries.get("complete"), Some(ScouterValue::Boolean(true)) | None)
+    matches!(map.entries.get("complete"), Some(ScouterValue::Boolean(true)))
 }
 
 #[cfg(test)]
@@ -659,9 +667,20 @@ mod active_service_tests {
     }
 
     #[test]
-    fn missing_complete_flag_counts_as_complete() {
-        // 플래그가 없다고 "잘렸다"로 표시하면 멀쩡한 목록에 경고가 붙는다.
-        assert!(is_complete(&MapPack::new()));
+    fn missing_complete_flag_means_the_agent_was_not_reached() {
+        // 에이전트는 0건이어도 complete=true 를 넣는다. 없는 것은 콜렉터가 세션을 못 얻어
+        // objHash 만 채워 보낸 팩이다 — 이걸 완료로 보면 행이 경고 없이 사라진다.
+        let mut unreached = MapPack::new();
+        unreached.put("objHash", ScouterValue::Decimal(42));
+        assert!(!is_complete(&unreached));
+    }
+
+    #[test]
+    fn idle_agent_with_complete_flag_is_complete() {
+        // 한가한 서버에 거짓 경고가 붙으면 안 된다.
+        let mut idle = MapPack::new();
+        idle.put("complete", ScouterValue::Boolean(true));
+        assert!(is_complete(&idle));
     }
 
     #[test]

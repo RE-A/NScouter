@@ -6,6 +6,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   advanceHolds,
+  carryUnreached,
+  EMPTY_CARRY,
+  MAX_CARRY,
   elapsedPct,
   formatElapsed,
   groupByResource,
@@ -210,5 +213,60 @@ describe('시간 표기', () => {
     expect(formatElapsed(1_000)).toBe('1.0초');
     expect(formatElapsed(59_999)).toBe('60.0초');
     expect(formatElapsed(60_000)).toBe('1분 00초');
+  });
+});
+
+describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
+  const a1 = row({ obj_hash: 1, id: 1, txid: 'a1', elapsed: 5_000 });
+  const b1 = row({ obj_hash: 2, id: 2, txid: 'b1', elapsed: 900 });
+
+  it('못 닿은 서버의 행을 지우지 않고 지난 값으로 이어 보여준다', () => {
+    // 지우면 «끝났다» 로 읽힌다. 실제로는 못 물어본 것이다.
+    const first = carryUnreached(EMPTY_CARRY, [a1, b1], []);
+    const second = carryUnreached(first.next, [b1], [1]);
+    expect(second.rows.map(r => r.txid).sort()).toEqual(['a1', 'b1']);
+    expect([...second.stale]).toEqual([1]);
+  });
+
+  it('닿은 서버의 행은 지난 값으로 표시하지 않는다', () => {
+    const first = carryUnreached(EMPTY_CARRY, [a1, b1], []);
+    const second = carryUnreached(first.next, [b1], [1]);
+    expect(second.stale.has(2)).toBe(false);
+  });
+
+  it('정해진 횟수를 넘기면 지난 값을 버린다 — 죽은 서버가 영원히 «실행 중» 으로 남지 않게', () => {
+    let s = carryUnreached(EMPTY_CARRY, [a1], []).next;
+    for (let i = 0; i < MAX_CARRY; i++) {
+      const r = carryUnreached(s, [], [1]);
+      expect(r.rows).toHaveLength(1);
+      s = r.next;
+    }
+    const over = carryUnreached(s, [], [1]);
+    expect(over.rows).toHaveLength(0);
+    // 버렸어도 «못 닿음» 은 계속 알린다
+    expect(over.unreached.has(1)).toBe(true);
+  });
+
+  it('다시 닿으면 횟수를 처음부터 센다', () => {
+    let s = carryUnreached(EMPTY_CARRY, [a1], []).next;
+    s = carryUnreached(s, [], [1]).next;
+    s = carryUnreached(s, [a1], []).next;
+    expect(s.misses.get(1)).toBeUndefined();
+  });
+
+  it('0건이라 행이 없는 서버도 닿은 것이다 — 옛 행을 붙들지 않는다', () => {
+    // 한가해진 서버는 응답에 행이 하나도 없다. 「행이 있다」 로 닿음을 가르면
+    // 방금 끝난 트랜잭션이 지난 값으로 계속 남는다.
+    const first = carryUnreached(EMPTY_CARRY, [a1], []);
+    const idle = carryUnreached(first.next, [], []);
+    expect(idle.rows).toHaveLength(0);
+    expect(idle.stale.size).toBe(0);
+  });
+
+  it('처음부터 못 닿은 서버는 이어 붙일 것이 없다 — 지어내지 않는다', () => {
+    const r = carryUnreached(EMPTY_CARRY, [], [7]);
+    expect(r.rows).toHaveLength(0);
+    expect(r.stale.size).toBe(0);
+    expect(r.unreached.has(7)).toBe(true);
   });
 });

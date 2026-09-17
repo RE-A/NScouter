@@ -7355,3 +7355,229 @@ fn probe_datasource_parent_link() {
         }
     }
 }
+
+/// 액티브 목록이 **갱신마다 떴다 사라졌다** 하는 이유 — 동시 요청 재현.
+///
+/// 바이트코드로 본 구조(콜렉터 `ThreadList.agentActiveServiceList` · `AgentCall.call`):
+///   - 콜렉터는 에이전트에 먼저 연결하지 않는다. **에이전트가 열어 둔 TCP 연결**을
+///     `TcpAgentManager.get` 으로 꺼내 쓰고 `add` 로 돌려놓는다.
+///   - 꺼낼 게 없으면 `S501 Cannot find a tcp agent` → null → **objHash 만 든 팩**.
+///   - 에이전트가 여는 연결은 기본 1개다 (`net_collector_tcp_session_count=1`).
+///
+/// 그러니 같은 에이전트에 요청이 겹치면 하나를 뺀 나머지는 빈손이어야 한다.
+/// 에이전트는 정상 응답에 **늘** `complete=true` 를 넣으므로(`AgentThread.activeThreadList`
+/// 오프셋 591), `complete` 가 없는 팩이 곧 «못 닿았다» 다. 그걸 센다.
+#[test]
+#[ignore]
+fn probe_active_service_concurrency() {
+    use nscouter_lib::scouter::objtype::build_active_service_param;
+    use std::sync::{Arc, Barrier};
+
+    let obj_type = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+            .first()
+            .map(|(t, _)| t.clone())
+            .expect("자바 에이전트가 없다")
+    };
+
+    for parallel in [1usize, 2, 4, 8] {
+        let barrier = Arc::new(Barrier::new(parallel));
+        let handles: Vec<_> = (0..parallel)
+            .map(|_| {
+                let b = Arc::clone(&barrier);
+                let t = obj_type.clone();
+                std::thread::spawn(move || {
+                    let mut c = login();
+                    let s = c.session;
+                    b.wait(); // 한꺼번에 쏜다
+                    c.send_request(
+                        CMD_OBJECT_ACTIVE_SERVICE_LIST,
+                        s,
+                        &build_active_service_param(&t, None),
+                    )
+                    .unwrap();
+                    let (mut reached, mut missed) = (0, 0);
+                    while let Ok(Some(pack)) = c.read_next_pack() {
+                        if let AnyPack::Map(m) = pack {
+                            if m.entries.contains_key("complete") {
+                                reached += 1;
+                            } else {
+                                missed += 1;
+                            }
+                        }
+                    }
+                    (reached, missed)
+                })
+            })
+            .collect();
+
+        let (mut reached, mut missed) = (0, 0);
+        for h in handles {
+            let (r, m) = h.join().unwrap();
+            reached += r;
+            missed += m;
+        }
+        println!("동시 {parallel:>2}건 → 닿음 {reached:>2} · 못 닿음(complete 없음) {missed:>2}");
+    }
+}
+
+/// 에이전트 세션을 **오래 붙잡은 채로** 액티브 목록을 물으면 빈손인가.
+///
+/// 동시 8건으로는 재현되지 않았다(`probe_active_service_concurrency`) — 콜렉터가
+/// 세션을 `net_tcp_get_agent_connection_wait_ms`(기본 1초)만큼 기다리고, 로컬 호출은
+/// 몇 ms 라 다 풀리기 때문이다. 그러면 **1초 넘게 묶이는** 호출과 겹칠 때 빠져야 한다.
+/// 운영(ECS)에서 네트워크가 느리거나 다른 클라이언트가 무거운 요청을 보내면 그렇게 된다.
+#[test]
+#[ignore]
+fn probe_active_service_while_session_busy() {
+    use nscouter_lib::scouter::objtype::build_active_service_param;
+    use std::time::{Duration, Instant};
+
+    let objs = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+    };
+    let (obj_type, target) = objs.first().cloned().expect("자바 에이전트가 없다");
+    println!("대상 {obj_type}({target}), 같은 타입 {}대", objs.len());
+
+    // 1. 무거운 요청이 얼마나 걸리는지부터 잰다 — 1초를 못 넘기면 실험이 성립하지 않는다.
+    for cmd in [CMD_OBJECT_HEAPHISTO, CMD_OBJECT_THREAD_LIST, CMD_OBJECT_CLASS_LIST] {
+        let started = Instant::now();
+        let mut c = login();
+        let s = c.session;
+        if c.send_request(cmd, s, &build_object_param(target)).is_err() {
+            continue;
+        }
+        while let Ok(Some(_)) = c.read_next_pack() {}
+        println!("  {cmd:<24} 단독 {}ms", started.elapsed().as_millis());
+    }
+
+    // 2. 무거운 요청을 걸어 두고, 조금 뒤 액티브 목록을 묻는다.
+    for heavy in [CMD_OBJECT_HEAPHISTO, CMD_OBJECT_THREAD_LIST] {
+        let hold = std::thread::spawn(move || {
+            let started = Instant::now();
+            let mut c = login();
+            let s = c.session;
+            c.send_request(heavy, s, &build_object_param(target)).unwrap();
+            while let Ok(Some(_)) = c.read_next_pack() {}
+            started.elapsed().as_millis()
+        });
+        std::thread::sleep(Duration::from_millis(30));
+
+        let started = Instant::now();
+        let mut c = login();
+        let s = c.session;
+        c.send_request(
+            CMD_OBJECT_ACTIVE_SERVICE_LIST,
+            s,
+            &build_active_service_param(&obj_type, None),
+        )
+        .unwrap();
+        let mut report = Vec::new();
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Map(m) = pack {
+                let h = m.get_decimal("objHash").unwrap_or(0);
+                let reached = m.entries.contains_key("complete");
+                report.push(format!("{}{}", if h == target as i64 { "*" } else { "" }, if reached { "닿음" } else { "빈손" }));
+            }
+        }
+        let active_ms = started.elapsed().as_millis();
+        let heavy_ms = hold.join().unwrap();
+        println!(
+            "  {heavy} {heavy_ms}ms 와 겹침 → 액티브 {active_ms}ms · 오브젝트별 [{}] (*=붙잡힌 대상)",
+            report.join(", ")
+        );
+    }
+}
+
+/// 대조 실험 — 콜렉터의 세션 대기를 줄이면 **붙잡힌 에이전트만** 빈손이 되는가.
+///
+/// 로컬에서는 무거운 요청도 240ms 라 기본 대기(1초)를 못 넘긴다. 운영의 느린 네트워크를
+/// 흉내 내려고 **테스트 콜렉터**의 `net_tcp_get_agent_connection_wait_ms` 를 10ms 로
+/// 잠깐 내린다. 원문 전체를 먼저 읽어 두고, 판정보다 **되돌리기를 먼저** 한다.
+///
+/// **다른 테스트와 같이 돌리지 않는다.** 설정을 내린 동안은 콜렉터 전체가 영향을 받아,
+/// 나란히 돌던 액티브 테스트가 빈손을 받는다 — 실제로 `cargo test ... active` 로 한꺼번에
+/// 돌렸을 때 `probe_active_service_concurrency` 가 8건 중 8건 빈손이 됐다.
+/// 그래서 `NSCOUTER_LIVE_CONFIG_WRITE=1` 일 때만 돈다:
+///
+///   NSCOUTER_LIVE_CONFIG_WRITE=1 cargo test --test live_collector -- --ignored --nocapture probe_active_service_short_wait
+#[test]
+#[ignore]
+fn probe_active_service_short_wait() {
+    if std::env::var("NSCOUTER_LIVE_CONFIG_WRITE").as_deref() != Ok("1") {
+        println!("건너뜀 — 콜렉터 설정을 바꾸는 실험이다. NSCOUTER_LIVE_CONFIG_WRITE=1 로 단독 실행할 것");
+        return;
+    }
+    use nscouter_lib::scouter::configure::escape_config_text;
+    use nscouter_lib::scouter::objtype::build_active_service_param;
+    use std::time::Duration;
+
+    fn read_text() -> String {
+        let mut c = login();
+        let s = c.session;
+        c.send_request(CMD_GET_CONFIGURE_SERVER, s, &MapPack::new()).unwrap();
+        first_map(&mut c).map(|m| parse_config_text(&m)).unwrap_or_default()
+    }
+    fn save(text: &str) -> String {
+        let mut p = MapPack::new();
+        p.put("setConfig", ScouterValue::Text(escape_config_text(text)));
+        let mut c = login();
+        let s = c.session;
+        c.send_request(CMD_SET_CONFIGURE_SERVER, s, &p).unwrap();
+        first_map(&mut c)
+            .and_then(|m| m.get_text("result").map(|x| x.to_string()))
+            .unwrap_or_default()
+    }
+
+    let objs = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+    };
+    let (obj_type, target) = objs.first().cloned().expect("자바 에이전트가 없다");
+
+    let original = read_text();
+    assert!(!original.is_empty(), "원문이 비었다 — 덮어쓰면 설정이 날아간다. 중단");
+    let shortened = format!("{original}\nnet_tcp_get_agent_connection_wait_ms=10\n");
+    assert_eq!(save(&shortened), "true", "대기 시간을 줄이지 못했다");
+
+    let mut rounds = Vec::new();
+    for _ in 0..5 {
+        let hold = std::thread::spawn(move || {
+            let mut c = login();
+            let s = c.session;
+            c.send_request(CMD_OBJECT_HEAPHISTO, s, &build_object_param(target)).unwrap();
+            while let Ok(Some(_)) = c.read_next_pack() {}
+        });
+        std::thread::sleep(Duration::from_millis(30));
+
+        let mut c = login();
+        let s = c.session;
+        c.send_request(CMD_OBJECT_ACTIVE_SERVICE_LIST, s, &build_active_service_param(&obj_type, None))
+            .unwrap();
+        let (mut held, mut other) = ("?", "?");
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Map(m) = pack {
+                let reached = if m.entries.contains_key("complete") { "닿음" } else { "빈손" };
+                if m.get_decimal("objHash") == Some(target as i64) {
+                    held = reached;
+                } else {
+                    other = reached;
+                }
+            }
+        }
+        hold.join().unwrap();
+        rounds.push((held, other));
+    }
+
+    // 무슨 일이 있어도 되돌린다. 판정은 그 다음이다.
+    let restored = save(&original);
+    let back = read_text();
+
+    for (i, (held, other)) in rounds.iter().enumerate() {
+        println!("  {}회차: 붙잡힌 에이전트 {held} · 다른 에이전트 {other}", i + 1);
+    }
+    println!("되돌리기 result={restored}, 원문 일치={}", back == original);
+    assert_eq!(back, original, "원문을 되돌리지 못했다");
+}

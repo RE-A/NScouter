@@ -48,7 +48,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
           if (e.key === 'Enter' && canRun) onRun(draft);
           if (e.key === 'Escape' && state.running) onCancel();
         }}
-        className="w-56 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint disabled:cursor-not-allowed disabled:text-fg-faint"
+        className="search-field w-56 rounded py-0.5 pr-2 text-body disabled:text-fg-faint"
       />
 
       {state.running ? (

@@ -53,6 +53,14 @@ export function useLiveBackfill(
   timeRangeMs: number,
   objHashes: number[],
   enabled: boolean,
+  /**
+   * 연결 번호. 바뀌면 «어느 서버를 채워 봤나» 를 잊는다.
+   *
+   * 끊겼다 붙으면 `enabled` 가 꺼졌다 켜지며 잊지만, 끊김과 재연결이 한 렌더에 묶이면
+   * `enabled` 가 계속 켜져 있어 못 잊는다. 그러면 같은 이름(= 같은 objHash)의 서버로
+   * 갈아탔을 때 «이미 채웠다» 로 보고 새 서버의 왼쪽 창을 안 채운다.
+   */
+  connectionEpoch = 0,
 ): UseLiveBackfillResult {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(0);
@@ -65,7 +73,13 @@ export function useLiveBackfill(
   // 배열은 매 렌더 새로 만들어지므로 내용으로 견준다.
   const hashKey = objHashes.join(',');
 
+  const epochRef = useRef(connectionEpoch);
+
   useEffect(() => {
+    if (epochRef.current !== connectionEpoch) {
+      epochRef.current = connectionEpoch;
+      coveredRef.current = null;
+    }
     if (!enabled) {
       // 끊겼다 다시 붙으면 그 사이가 비어 있다 — 어느 서버를 채워 봤는지는 잊는다.
       // «어디까지» 는 저장소가 들고 있으므로 이걸 잊어도 겹쳐 받지 않는다.
@@ -138,7 +152,7 @@ export function useLiveBackfill(
     };
     // hashKey 로 배열 정체성 대신 내용을 본다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, hashKey, timeRangeMs, store]);
+  }, [enabled, hashKey, timeRangeMs, store, connectionEpoch]);
 
   return { loading, loaded, truncated, error };
 }

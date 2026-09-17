@@ -113,6 +113,27 @@ describe('useLiveBackfill', () => {
     expect(calls.list[0].objHashes).toEqual([2]);
   });
 
+  it('같은 이름의 서버로 갈아타면 새 서버의 창을 다시 채운다', async () => {
+    // objHash 는 이름에서 만들어져, 개발·운영 콜렉터가 같은 서비스 이름이면 해시가 같다.
+    // 연결 번호를 안 보면 «이미 채웠다» 로 보고 새 서버의 왼쪽이 빈 채로 남는다.
+    const store = new XLogDataStore();
+    store.addBatch([packToS(Date.now() - 30 * MIN)]);
+
+    const { rerender } = renderHook(
+      ({ epoch }: { epoch: number }) => useLiveBackfill(store, 30 * MIN, [1], true, epoch),
+      { initialProps: { epoch: 1 } },
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(BACKFILL_DELAY_MS); });
+    calls.list = [];
+
+    // 갈아탄다 — 저장소는 비워졌고(useConnectionReset), 끊김은 같은 렌더에 묶여 안 보였다.
+    store.clear();
+    rerender({ epoch: 2 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(BACKFILL_DELAY_MS); });
+    expect(calls.list.length).toBeGreaterThan(0);
+    expect(calls.list[0].objHashes).toEqual([1]);
+  });
+
   it('과거 모드를 다녀와도 갖고 있는 구간은 다시 받지 않는다', async () => {
     const store = new XLogDataStore();
     const now = Date.now();
