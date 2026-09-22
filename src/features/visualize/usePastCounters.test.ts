@@ -9,7 +9,7 @@ import { MAX_POINTS, usePastCounters, type CounterQuery } from './usePastCounter
 
 interface Call {
   counter: string;
-  objType: string;
+  objTypes: readonly string[];
   stime: number;
   etime: number;
   maxPoints: number;
@@ -24,20 +24,20 @@ const api = vi.hoisted(() => ({
 vi.mock('../xlog/api/scouterApi', () => ({
   getPastCounter: (
     counter: string,
-    objType: string,
+    objTypes: readonly string[],
     stime: number,
     etime: number,
     maxPoints: number,
   ) => {
-    api.calls.push({ counter, objType, stime, etime, maxPoints });
+    api.calls.push({ counter, objTypes, stime, etime, maxPoints });
     return api.fail ? Promise.reject(new Error(api.fail)) : Promise.resolve(api.rows);
   },
 }));
 
 const RANGE = { stime: 1_000, etime: 2_000 };
 const Q: CounterQuery[] = [
-  { counter: 'TPS', objType: 'tomcat' },
-  { counter: 'Cpu', objType: 'linux' },
+  { counter: 'TPS', objTypes: ['tomcat'] },
+  { counter: 'Cpu', objTypes: ['linux'] },
 ];
 
 beforeEach(() => {
@@ -62,7 +62,7 @@ describe('usePastCounters', () => {
   it('줄마다 한 번씩 묻는다', async () => {
     const { result } = mount(true, Q, RANGE, [11]);
     await waitFor(() => expect(result.current.rows.length).toBe(2));
-    expect(api.calls.map(c => `${c.counter}@${c.objType}`)).toEqual(['TPS@tomcat', 'Cpu@linux']);
+    expect(api.calls.map(c => `${c.counter}@${c.objTypes.join(',')}`)).toEqual(['TPS@tomcat', 'Cpu@linux']);
   });
 
   it('구간을 그대로 넘긴다', async () => {
@@ -96,7 +96,7 @@ describe('usePastCounters', () => {
   it('objType 을 모르는 줄은 묻지 않는다', async () => {
     // 호스트 에이전트가 없거나 안 골랐으면 물을 데가 없다.
     // **받아 봐야 전부 걸러진다** — 100대짜리 환경에서 6시간치를 통째로 버리는 셈이다.
-    const { result } = mount(true, [{ counter: 'Cpu', objType: '' }], RANGE, [11]);
+    const { result } = mount(true, [{ counter: 'Cpu', objTypes: [] }], RANGE, [11]);
     await waitFor(() => expect(result.current.rows.length).toBe(1));
     expect(api.calls).toEqual([]);
     expect(result.current.rows[0].series).toEqual([]);
@@ -106,7 +106,7 @@ describe('usePastCounters', () => {
 
   it('물어본 줄은 그렇다고 표시한다', async () => {
     api.rows = [];
-    const { result } = mount(true, [{ counter: 'TPS', objType: 'tomcat' }], RANGE, [11]);
+    const { result } = mount(true, [{ counter: 'TPS', objTypes: ['tomcat'] }], RANGE, [11]);
     await waitFor(() => expect(result.current.rows.length).toBe(1));
     expect(result.current.rows[0].asked).toBe(true);
     expect(result.current.rows[0].series).toEqual([]);

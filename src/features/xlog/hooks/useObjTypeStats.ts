@@ -41,14 +41,17 @@ const EMPTY: ObjTypeStats = {
  *   커맨드가 갈리면 «오늘» 이 어느 쪽인지 코드에서 안 보인다.
  */
 export function useObjTypeStats(
-  objType: string,
+  objTypes: readonly string[],
   enabled: boolean,
   date?: string,
 ): ObjTypeStats {
   const [state, setState] = useState<ObjTypeStats>(EMPTY);
+  // 배열은 내용이 같아도 매번 새것일 수 있다. 내용으로 견준다.
+  const typesKey = [...objTypes].sort().join('\u0000');
 
   useEffect(() => {
-    if (!enabled || !objType) {
+    const types = typesKey === '' ? [] : typesKey.split('\u0000');
+    if (!enabled || types.length === 0) {
       setState(EMPTY);
       return;
     }
@@ -58,8 +61,8 @@ export function useObjTypeStats(
     const pollLive = async () => {
       try {
         const [group, perObject] = await Promise.all([
-          getActiveSpeed(objType),
-          getActiveSpeedByObject(objType),
+          getActiveSpeed(types),
+          getActiveSpeedByObject(types),
         ]);
         if (!alive) return;
         setState(prev => ({ ...prev, group, perObject, error: null }));
@@ -72,10 +75,14 @@ export function useObjTypeStats(
     const pollToday = async () => {
       try {
         const [todayCount, visitors] = await Promise.all([
-          getTodayCounter('ServiceCount', objType, date),
+          getTodayCounter('ServiceCount', types, date),
           // **방문자는 «지금까지» 만 있다.** VISITOR_REALTIME_TOTAL 에는 날짜가 없다 —
           // 과거 날짜를 보는 중에 오늘 숫자를 같이 띄우면 그날 것으로 읽힌다.
-          date ? Promise.resolve(null) : getTodayVisitor(objType),
+          // 종류마다 받아 더한다. **고유 사용자 수라 종류를 넘으면 겹칠 수 있다** —
+          // 화면이 그렇다고 적는다(`ActiveServicePanel`).
+          date
+            ? Promise.resolve(null)
+            : Promise.all(types.map(t => getTodayVisitor(t))).then(v => v.reduce((a, b) => a + b, 0)),
         ]);
         if (!alive) return;
         setState(prev => ({ ...prev, todayCount, visitors }));
@@ -96,7 +103,7 @@ export function useObjTypeStats(
       clearInterval(liveTimer);
       if (todayTimer !== null) clearInterval(todayTimer);
     };
-  }, [objType, enabled, date]);
+  }, [typesKey, enabled, date]);
 
   return state;
 }

@@ -76,7 +76,7 @@ afterEach(() => {
  * 접이식 섹션은 **제목 자체가 여는 버튼**이다 (`SectionHeader`).
  */
 async function open(onDrill?: (h: number) => void) {
-  render(<TopologyPanel objType="tomcat" agentMap={agentMap} enabled onDrill={onDrill} />);
+  render(<TopologyPanel objTypes={['tomcat']} agentMap={agentMap} enabled onDrill={onDrill} />);
   fireEvent.click(screen.getByRole('button', { name: '토폴로지' }));
   // **«무언가 그렸다» 로는 부족하다.** 층 이름은 데이터가 없어도 그려지므로,
   // 노드 상자가 나와야 조회가 끝난 것이다.
@@ -182,5 +182,16 @@ describe('TopologyPanel — 마우스', () => {
 
     fireEvent.mouseLeave(canvas);
     expect(screen.queryByText('shop-db')).toBeNull();
+  });
+});
+
+describe('TopologyPanel — 종류가 여럿', () => {
+  it('고른 종류를 전부 묻는다 — 첫 종류만 물으면 나머지 시스템의 호출이 빠진다', async () => {
+    render(
+      <TopologyPanel objTypes={['ORDER-JVM', 'PAY-JVM']} agentMap={agentMap} enabled />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '토폴로지' }));
+    await waitFor(() => expect(getInteraction).toHaveBeenCalled());
+    expect(getInteraction).toHaveBeenCalledWith(['ORDER-JVM', 'PAY-JVM']);
   });
 });

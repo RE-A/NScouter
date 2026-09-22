@@ -56,6 +56,7 @@ import {
   onConnected,
   onDisconnected,
   getObjectList,
+  getObjectTypeFamilies,
   getXLogDetail,
   startCounterStream,
   stopCounterStream,
@@ -106,6 +107,9 @@ import {
   isJavaeeObjectType,
   isHostObjectType,
   isDatasourceObjectType,
+  learnFamiliesFromObjects,
+  registerObjectTypeFamilies,
+  resetObjectTypeFamilies,
   HOST_CHART_COUNTERS,
   HOST_FIVE_MIN_COUNTERS,
   HOST_UNCOLLECTED_COUNTERS,
@@ -210,26 +214,17 @@ export default function App() {
     datasource: number[];
   }>({ javaee: [], host: [], datasource: [] });
   /**
-   * javaee 오브젝트의 objType (`tomcat` 등).
+   * 오브젝트별 objType.
    *
-   * 액티브 서비스·오늘 누적은 objHash 가 아니라 **objType** 이 기준이라
-   * 해시 목록으로는 요청할 수 없다.
-   */
-  const [javaeeType, setJavaeeType] = useState('');
-  /**
-   * javaee 오브젝트별 objType.
+   * 액티브 서비스·요약·오늘 누적·5분 집계는 objHash 가 아니라 **objType** 이 기준이라
+   * 해시 목록으로는 요청할 수 없다. 그래서 고른 서버들의 종류를 모아 **종류마다** 묻는다.
    *
-   * `javaeeType` 은 **첫 타입 하나**라, `tomcat` 과 `java` 가 섞인 곳에서 나머지 타입의
-   * 서비스가 영영 안 잡힌다. Active 탭은 고른 서버들의 타입을 전부 물어야 해서 따로 둔다.
+   * 예전에는 Family 마다 **첫 종류 하나**(`javaeeType`·`hostType`)만 들고 있었다.
+   * «실환경에서 javaee 타입이 여럿인 경우는 드물다» 고 적어 두었는데 드물지 않았다 —
+   * 커스텀 종류(`monitoring_group_type`)를 쓰면 시스템마다 종류가 달라, 첫 시스템 말고는
+   * Active·Counter·Visualize 에서 통째로 빠졌다.
    */
-  const [javaeeTypeOf, setJavaeeTypeOf] = useState<ReadonlyMap<number, string>>(new Map());
-  /**
-   * 호스트 오브젝트의 objType (`linux` 등).
-   *
-   * 5분 집계 카운터도 objType 기준이라 해시로는 요청할 수 없다.
-   * javaee 와 값이 다르므로 하나로 합칠 수 없다 — Family 가 갈린다 (F-15).
-   */
-  const [hostType, setHostType] = useState('');
+  const [objTypeOf, setObjTypeOf] = useState<ReadonlyMap<number, string>>(new Map());
 
   // **알림은 앱이 하나만 쥔다.** 배지와 Alert 탭이 각자 모으면, 다른 탭을 보는 동안
   // 온 알림이 탭에는 없어서 배지에 2가 떠도 목록은 비어 있다 (실제로 겪었다).
@@ -357,7 +352,9 @@ export default function App() {
         setIsConnected(false); setServerId('');
         setSelectedXLogs([]); setAgentMap(new Map());
         setCounterHashes({ javaee: [], host: [], datasource: [] });
-        setJavaeeType(''); setJavaeeTypeOf(new Map()); setHostType(''); clearDetail();
+        setObjTypeOf(new Map()); clearDetail();
+        // 콜렉터마다 사이트 정의가 다르다. 다른 콜렉터의 종류 표를 들고 가면 안 된다.
+        resetObjectTypeFamilies();
       }),
     );
   }, [clearDetail]);
@@ -368,9 +365,14 @@ export default function App() {
   useEffect(() => {
     if (!isConnected) { setCounterHashes({ javaee: [], host: [], datasource: [] }); return; }
     let cancelled = false;
-    getObjectList()
-      .then(list => {
+    // **종류를 가르기 전에 콜렉터의 종류→Family 표부터 받는다.** 커스텀 종류
+    // (`monitoring_group_type`)는 이름 목록에 없어서, 표 없이 가르면 WAS 가 통째로 빠진다.
+    // 표를 못 받아도(옛 콜렉터) 목록은 연다 — 그때는 `detected` 태그로 배운다.
+    Promise.all([getObjectList(), getObjectTypeFamilies().catch(() => [])])
+      .then(([list, families]) => {
         if (cancelled) return;
+        registerObjectTypeFamilies(families);
+        learnFamiliesFromObjects(list);
         // Family 를 나눠 둔다. 요청은 합쳐 보내도 되지만(실측 확인),
         // **화면은 나눠야 한다** — CPU 와 TPS 를 같은 줄에 놓으면 읽히지 않는다.
         const javaee = list.filter(a => isJavaeeObjectType(a.obj_type));
@@ -380,10 +382,7 @@ export default function App() {
           host: host.map(a => a.obj_hash),
           datasource: list.filter(a => isDatasourceObjectType(a.obj_type)).map(a => a.obj_hash),
         });
-        // 타입이 섞여 있으면 첫 번째만 쓴다. 실환경에서 javaee 타입이 여럿인 경우는 드물다.
-        setJavaeeType(javaee[0]?.obj_type ?? '');
-        setJavaeeTypeOf(new Map(javaee.map(a => [a.obj_hash, a.obj_type])));
-        setHostType(host[0]?.obj_type ?? '');
+        setObjTypeOf(new Map(list.map(a => [a.obj_hash, a.obj_type])));
         // **이름도 여기서 채운다.** 예전에는 AgentSelectorPanel(XLog 탭)만 채웠는데,
         // 그 패널은 XLog 탭에서만 마운트된다 — 카운터 탭으로 시작하면(마지막에 보던 탭이
         // 복원되면 흔하다) 차트 범례와 서버 고르기가 **해시 숫자로** 남았다.
@@ -887,10 +886,14 @@ export default function App() {
     };
   }, [counterHashes, filter.objHashSet]);
 
-  /** 고른 javaee 서버들의 objType — Active 탭이 타입마다 한 번씩 묻는다 */
+  /** 고른 서버들의 종류 — 종류 단위 요청은 이 종류마다 한 번씩 묻고 합친다 */
   const pickedJavaeeTypes = useMemo(
-    () => [...new Set(shownHashes.javaee.map(h => javaeeTypeOf.get(h)).filter((t): t is string => !!t))],
-    [shownHashes.javaee, javaeeTypeOf],
+    () => typesOf(shownHashes.javaee, objTypeOf),
+    [shownHashes.javaee, objTypeOf],
+  );
+  const pickedHostTypes = useMemo(
+    () => typesOf(shownHashes.host, objTypeOf),
+    [shownHashes.host, objTypeOf],
   );
 
   /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
@@ -1365,8 +1368,8 @@ export default function App() {
           ) : (
             <VisualizeTab
               enabled={activeTab === 'visualize'}
-              javaeeType={javaeeType}
-              hostType={hostType}
+              javaeeTypes={pickedJavaeeTypes}
+              hostTypes={pickedHostTypes}
               picked={filter.objHashSet}
               javaeeHashes={shownHashes.javaee}
               families={pickedFamilies}
@@ -1389,19 +1392,19 @@ export default function App() {
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {/* 추세(카운터 차트)보다 **지금**이 먼저다. 장애 중이면 여기부터 본다. */}
               <ActiveServicePanel
-                objType={javaeeType}
-                enabled={activeTab === 'counter' && javaeeType !== ''}
+                objTypes={pickedJavaeeTypes}
+                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
                 agentMap={agentMap}
               />
               <SummaryPanel
-                objType={javaeeType}
-                enabled={activeTab === 'counter' && javaeeType !== ''}
+                objTypes={pickedJavaeeTypes}
+                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
                 onOpenTxid={openSummaryTxid}
               />
               <TopologyPanel
-                objType={javaeeType}
+                objTypes={pickedJavaeeTypes}
                 agentMap={agentMap}
-                enabled={activeTab === 'counter' && javaeeType !== ''}
+                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
                 onDrill={drillToXLog}
               />
               {/* 카운터가 "서버가 견디는가"라면 이건 "무엇이 들어오는가"다.
@@ -1440,8 +1443,8 @@ export default function App() {
               {/* 실시간 팩에 없는 카운터는 여기서만 보인다 (F-42).
                   같은 "호스트" 안에 섞으면 갱신 주기가 2초와 5분으로 섞여 오해를 부른다. */}
               <FiveMinSection
-                objType={hostType}
-                enabled={activeTab === 'counter' && hostType !== ''}
+                objTypes={pickedHostTypes}
+                enabled={activeTab === 'counter' && pickedHostTypes.length > 0}
                 agentMap={agentMap}
               />
               <CounterSection
@@ -1490,11 +1493,11 @@ export default function App() {
  * 이 둘은 스트림으로는 영원히 안 온다 (F-42). 5분 집계로 따로 묻는다.
  */
 function FiveMinSection({
-  objType,
+  objTypes,
   enabled,
   agentMap,
 }: {
-  objType: string;
+  objTypes: readonly string[];
   enabled: boolean;
   agentMap: Map<number, string>;
 }) {
@@ -1504,14 +1507,14 @@ function FiveMinSection({
     <section className="mb-4">
       <header className="mb-2 flex items-baseline gap-2 border-b border-line pb-1">
         <h2 className="text-body font-medium text-fg">{t('호스트 · 5분 집계')}</h2>
-        <span className="text-micro text-fg-faint">{objType} · {t('실시간 팩에 없는 카운터')}</span>
+        <span className="text-micro text-fg-faint">{objTypes.join(' · ')} · {t('실시간 팩에 없는 카운터')}</span>
       </header>
       <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
         {HOST_FIVE_MIN_COUNTERS.map(c => (
           <FiveMinCounterChart
             key={c}
             counter={c}
-            objType={objType}
+            objTypes={objTypes}
             enabled={enabled}
             agentMap={agentMap}
             height={110}
@@ -1865,6 +1868,23 @@ function EmptyState({ text }: { text: string }) {
       {text}
     </div>
   );
+}
+
+// ─── 도우미 ───────────────────────────────────────────────────
+
+/**
+ * 해시들의 종류를 겹치지 않게, **이름순으로** 모은다.
+ *
+ * 순서를 고정하는 이유: 부제에 «SHOP-JVM · ORDER-JVM» 처럼 적히는데, 고른 순서를 따르면
+ * 서버를 하나 더 고를 때마다 글자 순서가 바뀐다.
+ */
+function typesOf(hashes: readonly number[], typeOf: ReadonlyMap<number, string>): string[] {
+  const out = new Set<string>();
+  for (const h of hashes) {
+    const t = typeOf.get(h);
+    if (t) out.add(t);
+  }
+  return [...out].sort();
 }
 
 // ─── 상수 ─────────────────────────────────────────────────────

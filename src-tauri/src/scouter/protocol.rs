@@ -140,6 +140,8 @@ pub const CMD_GET_CONFIGURE_WAS: &str = "GET_CONFIGURE_WAS";
 pub const CMD_LIST_CONFIGURE_WAS: &str = "LIST_CONFIGURE_WAS";
 /// 콜렉터 설정 파일 원문. 파라미터 없음
 pub const CMD_GET_CONFIGURE_SERVER: &str = "GET_CONFIGURE_SERVER";
+/// 카운터 정의(counters.xml) — 기본(`default`)과 사이트 정의(`custom`)를 Blob 으로 준다
+pub const CMD_GET_XML_COUNTER: &str = "GET_XML_COUNTER";
 /// 콜렉터 설정 key/value/default 목록. 파라미터 없음
 pub const CMD_LIST_CONFIGURE_SERVER: &str = "LIST_CONFIGURE_SERVER";
 /// 에이전트 설정 **저장**. `objHash` + `setConfig`(전문).

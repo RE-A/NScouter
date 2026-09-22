@@ -9,7 +9,7 @@ import { shouldShowTypes, typeCounts, typeLabel, typeTone } from './objectTypes'
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { ConfigSettingsDialog } from '../../config/ConfigSettingsDialog';
-import { isDatasourceObjectType, isJavaeeObjectType } from '../types/counter';
+import { isDatasourceObjectType, isJavaeeObjectType, learnFamiliesFromObjects } from '../types/counter';
 import { t } from '../../../i18n';
 
 interface AgentSelectorPanelProps {
@@ -53,6 +53,9 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
       try {
         const list = await getObjectList();
         if (!cancelled) {
+          // 접속한 뒤에 새 종류의 에이전트가 붙을 수 있다. 그 종류가 WAS 인지 호스트인지
+          // 배워 둔다 — 안 그러면 다음 접속까지 메뉴·색·카운터 대상에서 빠진다.
+          learnFamiliesFromObjects(list);
           setAgents(list);
           onAgentsLoaded?.(list);
         }

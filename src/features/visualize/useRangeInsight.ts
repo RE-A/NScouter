@@ -44,15 +44,17 @@ export interface RangeInsight {
 
 /**
  * @param enabled 펼쳐져 있고 접속돼 있는가. 꺼져 있으면 **아무것도 묻지 않는다**
- * @param objType javaee objType. 비어 있으면 물을 데가 없다
+ * @param objTypes javaee objType 들. 비어 있으면 물을 데가 없다. 여럿이면 종류마다 물어 더한다
  * @param picked  고른 서버. 한 대면 그 대만, 여럿이면 타입 전체를 받는다
  */
 export function useRangeInsight(
   enabled: boolean,
-  objType: string,
+  objTypes: readonly string[],
   picked: ReadonlySet<number>,
   range: Range | null,
 ): RangeInsight {
+  // 배열은 내용이 같아도 매번 새것일 수 있다. 내용으로 견준다.
+  const typesKey = [...objTypes].sort().join('\u0000');
   const [distribution, setDistribution] = useState<ElapsedDistribution | null>(null);
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [wholeType, setWholeType] = useState(false);
@@ -67,7 +69,8 @@ export function useRangeInsight(
   const pickedKey = [...picked].sort((a, b) => a - b).join(',');
 
   useEffect(() => {
-    if (!enabled || objType === '' || range === null || picked.size === 0) {
+    const types = typesKey === '' ? [] : typesKey.split('\u0000');
+    if (!enabled || types.length === 0 || range === null || picked.size === 0) {
       setDistribution(null);
       setServices([]);
       return;
@@ -84,7 +87,7 @@ export function useRangeInsight(
     const run = async () => {
       const [dist, rows] = await Promise.all([
         getXLogDistribution(hashes, range.stime, range.etime),
-        getSummary('service', yyyymmdd(range.stime), range.stime, range.etime, objType, single),
+        getSummary('service', yyyymmdd(range.stime), range.stime, range.etime, types, single),
       ]);
       if (cancelled) return;
 
@@ -105,7 +108,7 @@ export function useRangeInsight(
     return () => { cancelled = true; };
     // pickedKey 로 내용을 견주므로 Set 자체는 의존성에 넣지 않는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, objType, pickedKey, range?.stime, range?.etime, nonce, resolve]);
+  }, [enabled, typesKey, pickedKey, range?.stime, range?.etime, nonce, resolve]);
 
   return { distribution, services, wholeType, loading, error, reload };
 }

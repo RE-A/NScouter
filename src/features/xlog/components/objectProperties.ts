@@ -8,11 +8,7 @@
 // 아는 키만 뽑으면 새 에이전트의 정보가 조용히 사라진다.
 
 import type { AgentObject } from '../types/xlog';
-import {
-  isDatasourceObjectType,
-  isHostObjectType,
-  isJavaeeObjectType,
-} from '../types/counter';
+import { familyOfObjectType } from '../types/counter';
 
 export interface PropertyRow {
   key: string;
@@ -25,10 +21,8 @@ export interface PropertyRow {
 
 /** counters.xml 의 Family. 카운터가 Family 단위로 정의되므로 이게 곧 "무엇을 물을 수 있나"다 */
 export function familyOf(objType: string): string {
-  if (isJavaeeObjectType(objType)) return 'javaee';
-  if (isHostObjectType(objType)) return 'host';
-  if (isDatasourceObjectType(objType)) return 'datasource';
-  return '알 수 없음';
+  // 콜렉터가 아는 Family 를 그대로 보여준다 — `batch`·`golang` 도 «알 수 없음» 이 아니다.
+  return familyOfObjectType(objType) ?? '알 수 없음';
 }
 
 /**

@@ -40,7 +40,10 @@ use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, XLo
 use crate::scouter::protocol::*;
 use crate::scouter::alert::build_alert_param;
 use crate::scouter::streaming::{run_xlog_stream, StreamCursor};
-use crate::scouter::summary::{build_summary_param, parse_error_summary, parse_summary, ErrorSummaryRow, SummaryRow};
+use crate::scouter::summary::{
+    build_summary_param, merge_error_summary, merge_summary, parse_error_summary, parse_summary,
+    ErrorSummaryRow, SummaryRow,
+};
 use crate::scouter::trace::build_gxid_param;
 use crate::scouter::value::ScouterValue;
 use crate::state::{AppState, StreamKind};
@@ -428,16 +431,24 @@ pub async fn get_summary(
     date: String,
     stime: i64,
     etime: i64,
-    obj_type: String,
+    obj_types: Vec<String>,
     obj_hash: i32,
 ) -> Result<Vec<SummaryRow>, String> {
-    let param = build_summary_param(&date, stime, etime, &obj_type, obj_hash);
-    let rows = request_map(&state, kind.cmd(), param)
-        .await?
-        .as_ref()
-        .map(parse_summary)
-        .unwrap_or_default();
-    log::debug!("get_summary: {} → {}행", kind.cmd(), rows.len());
+    // **종류마다 묻고 id 로 더한다** (`merge_summary`). 첫 종류만 물으면
+    // 커스텀 종류(`monitoring_group_type`)를 쓰는 곳에서 나머지 시스템이 통째로 빠진다.
+    let mut parts = Vec::with_capacity(obj_types.len());
+    for obj_type in &obj_types {
+        let param = build_summary_param(&date, stime, etime, obj_type, obj_hash);
+        parts.push(
+            request_map(&state, kind.cmd(), param)
+                .await?
+                .as_ref()
+                .map(parse_summary)
+                .unwrap_or_default(),
+        );
+    }
+    let rows = merge_summary(parts);
+    log::debug!("get_summary: {} × {:?} → {}행", kind.cmd(), obj_types, rows.len());
     Ok(rows)
 }
 
@@ -448,16 +459,22 @@ pub async fn get_error_summary(
     date: String,
     stime: i64,
     etime: i64,
-    obj_type: String,
+    obj_types: Vec<String>,
     obj_hash: i32,
 ) -> Result<Vec<ErrorSummaryRow>, String> {
-    let param = build_summary_param(&date, stime, etime, &obj_type, obj_hash);
-    let rows = request_map(&state, CMD_LOAD_SERVICE_ERROR_SUMMARY, param)
-        .await?
-        .as_ref()
-        .map(parse_error_summary)
-        .unwrap_or_default();
-    log::debug!("get_error_summary: {}행", rows.len());
+    let mut parts = Vec::with_capacity(obj_types.len());
+    for obj_type in &obj_types {
+        let param = build_summary_param(&date, stime, etime, obj_type, obj_hash);
+        parts.push(
+            request_map(&state, CMD_LOAD_SERVICE_ERROR_SUMMARY, param)
+                .await?
+                .as_ref()
+                .map(parse_error_summary)
+                .unwrap_or_default(),
+        );
+    }
+    let rows = merge_error_summary(parts);
+    log::debug!("get_error_summary: {:?} → {}행", obj_types, rows.len());
     Ok(rows)
 }
 
@@ -468,29 +485,51 @@ pub async fn get_error_summary(
 #[tauri::command]
 pub async fn get_interaction(
     state: State<'_, AppState>,
-    obj_type: String,
+    obj_types: Vec<String>,
 ) -> Result<Vec<InteractionCounterPack>, String> {
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
-    let mut param = MapPack::new();
-    param.put("objType", ScouterValue::Text(obj_type.clone()));
-    // 빈 리스트를 보내면 콜렉터가 살아 있는 오브젝트로 채운다 (F-40)
-    param.put("objHash", ScouterValue::List(Vec::new()));
-
-    let session = conn.session;
-    conn.send_request(CMD_INTR_COUNTER_REAL_TIME_BY_OBJ, session, &param)
-        .map_err(|e| format!("인터랙션 요청 실패: {e}"))?;
-
+    // 종류마다 묻고 이어 붙인다. 호출 한 줄은 그것을 **보낸 오브젝트**의 것이라
+    // 종류가 다르면 겹치지 않는다. `send_request` 가 매번 소켓을 새로 연다 (F-1).
     let mut rows = Vec::new();
-    loop {
-        match conn.read_next_pack().map_err(|e| format!("인터랙션 수신 실패: {e}"))? {
-            Some(AnyPack::Interaction(i)) => rows.push(i),
-            Some(_) => {}
-            None => break,
+    for obj_type in &obj_types {
+        let mut param = MapPack::new();
+        param.put("objType", ScouterValue::Text(obj_type.clone()));
+        // 빈 리스트를 보내면 콜렉터가 살아 있는 오브젝트로 채운다 (F-40)
+        param.put("objHash", ScouterValue::List(Vec::new()));
+
+        let session = conn.session;
+        conn.send_request(CMD_INTR_COUNTER_REAL_TIME_BY_OBJ, session, &param)
+            .map_err(|e| format!("인터랙션 요청 실패: {e}"))?;
+
+        loop {
+            match conn.read_next_pack().map_err(|e| format!("인터랙션 수신 실패: {e}"))? {
+                Some(AnyPack::Interaction(i)) => rows.push(i),
+                Some(_) => {}
+                None => break,
+            }
         }
     }
-    log::debug!("get_interaction: {obj_type} → {}행", rows.len());
+    log::debug!("get_interaction: {:?} → {}행", obj_types, rows.len());
+    Ok(rows)
+}
+
+/// 오브젝트 종류 → Family 표.
+///
+/// 커스텀 종류(`monitoring_group_type=ORDER-JVM`)를 WAS·호스트로 가르려면 필요하다.
+/// 콜렉터는 처음 보는 종류를 에이전트가 감지한 종류의 Family 로 등록해 두므로
+/// (`crate::scouter::family` 머리말), 그 정의를 그대로 받는다.
+#[tauri::command]
+pub async fn get_object_type_families(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::scouter::family::ObjectTypeFamily>, String> {
+    let rows = request_map(&state, CMD_GET_XML_COUNTER, MapPack::new())
+        .await?
+        .as_ref()
+        .map(crate::scouter::family::parse_counter_xml_families)
+        .unwrap_or_default();
+    log::debug!("get_object_type_families: 종류 {}개", rows.len());
     Ok(rows)
 }
 
@@ -1581,23 +1620,27 @@ async fn request_objtype_maps(
 #[tauri::command]
 pub async fn get_active_speed(
     state: State<'_, AppState>,
-    obj_type: String,
+    obj_types: Vec<String>,
 ) -> Result<ActiveSpeed, String> {
-    let maps = request_objtype_maps(
-        &state,
-        CMD_ACTIVESPEED_REAL_TIME_GROUP,
-        &build_objtype_param(&obj_type),
-    )
-    .await?;
-
-    // 응답이 없으면 그 타입의 에이전트가 없는 것이다. 0으로 보여 주는 편이 낫다.
-    Ok(maps.first().map(parse_active_speed).unwrap_or(ActiveSpeed {
-        obj_hash: 0,
-        act1: 0,
-        act2: 0,
-        act3: 0,
-        tps: 0.0,
-    }))
+    // 종류마다 합계를 받아 **더한다.** 단계별 건수와 TPS 는 오브젝트들을 더한 값이라
+    // 종류를 넘어 더해도 뜻이 같다 — 콜렉터의 GROUP 도 그 종류의 오브젝트들을 더한 것이다.
+    let mut total = ActiveSpeed { obj_hash: 0, act1: 0, act2: 0, act3: 0, tps: 0.0 };
+    for obj_type in &obj_types {
+        let maps = request_objtype_maps(
+            &state,
+            CMD_ACTIVESPEED_REAL_TIME_GROUP,
+            &build_objtype_param(obj_type),
+        )
+        .await?;
+        // 응답이 없으면 그 종류의 에이전트가 없는 것이다. 0으로 더한다.
+        if let Some(a) = maps.first().map(parse_active_speed) {
+            total.act1 += a.act1;
+            total.act2 += a.act2;
+            total.act3 += a.act3;
+            total.tps += a.tps;
+        }
+    }
+    Ok(total)
 }
 
 /// 서비스 그룹 실시간 (TPS / Elapsed).
@@ -1629,15 +1672,20 @@ pub async fn get_service_group(
 #[tauri::command]
 pub async fn get_active_speed_by_object(
     state: State<'_, AppState>,
-    obj_type: String,
+    obj_types: Vec<String>,
 ) -> Result<Vec<ActiveSpeed>, String> {
-    let maps = request_objtype_maps(
-        &state,
-        CMD_ACTIVESPEED_REAL_TIME,
-        &build_objtype_param(&obj_type),
-    )
-    .await?;
-    Ok(maps.iter().map(parse_active_speed).collect())
+    // 오브젝트별이라 종류를 넘어 이어 붙이면 된다 — 한 오브젝트는 한 종류에만 있다.
+    let mut out = Vec::new();
+    for obj_type in &obj_types {
+        let maps = request_objtype_maps(
+            &state,
+            CMD_ACTIVESPEED_REAL_TIME,
+            &build_objtype_param(obj_type),
+        )
+        .await?;
+        out.extend(maps.iter().map(parse_active_speed));
+    }
+    Ok(out)
 }
 
 /// 오늘 하루 누적 카운터. `date` 를 주면 그날 것.
@@ -1645,24 +1693,28 @@ pub async fn get_active_speed_by_object(
 pub async fn get_today_counter(
     state: State<'_, AppState>,
     counter: String,
-    obj_type: String,
+    obj_types: Vec<String>,
     date: Option<String>,
 ) -> Result<Vec<CounterSeries>, String> {
-    let (cmd, param) = match date.as_deref() {
-        Some(d) => (
-            CMD_COUNTER_PAST_DATE_ALL,
-            build_past_date_counter_param(&counter, &obj_type, d),
-        ),
-        None => (
-            CMD_COUNTER_TODAY_ALL,
-            build_today_counter_param(&counter, &obj_type),
-        ),
-    };
-
-    let maps = request_objtype_maps(&state, cmd, &param).await?;
-    let series: Vec<CounterSeries> = maps.iter().map(parse_counter_series).collect();
+    // 오브젝트별 시계열이라 종류를 넘어 이어 붙인다.
+    let mut series: Vec<CounterSeries> = Vec::new();
+    for obj_type in &obj_types {
+        let (cmd, param) = match date.as_deref() {
+            Some(d) => (
+                CMD_COUNTER_PAST_DATE_ALL,
+                build_past_date_counter_param(&counter, obj_type, d),
+            ),
+            None => (
+                CMD_COUNTER_TODAY_ALL,
+                build_today_counter_param(&counter, obj_type),
+            ),
+        };
+        let maps = request_objtype_maps(&state, cmd, &param).await?;
+        series.extend(maps.iter().map(parse_counter_series));
+    }
     log::debug!(
-        "get_today_counter: {counter}/{obj_type} → 오브젝트 {}개",
+        "get_today_counter: {counter}/{:?} → 오브젝트 {}개",
+        obj_types,
         series.len()
     );
     Ok(series)
@@ -1687,21 +1739,25 @@ pub async fn get_today_counter(
 pub async fn get_past_counter(
     state: State<'_, AppState>,
     counter: String,
-    obj_type: String,
+    obj_types: Vec<String>,
     stime: i64,
     etime: i64,
     tz_offset_ms: i64,
     max_points: usize,
 ) -> Result<Vec<CounterSeries>, String> {
+    // 종류마다·날마다 조각을 받아 한데 모은다. `merge_series` 가 오브젝트별로 잇고,
+    // 한 오브젝트는 한 종류에만 있으므로 종류를 넘어 섞이지 않는다.
     let mut parts = Vec::new();
-    for (s, e) in split_by_day(stime, etime, tz_offset_ms) {
-        let maps = request_objtype_maps(
-            &state,
-            CMD_COUNTER_PAST_TIME_ALL,
-            &build_past_time_counter_param(&counter, &obj_type, s, e),
-        )
-        .await?;
-        parts.push(maps.iter().map(parse_counter_series).collect::<Vec<_>>());
+    for obj_type in &obj_types {
+        for (s, e) in split_by_day(stime, etime, tz_offset_ms) {
+            let maps = request_objtype_maps(
+                &state,
+                CMD_COUNTER_PAST_TIME_ALL,
+                &build_past_time_counter_param(&counter, obj_type, s, e),
+            )
+            .await?;
+            parts.push(maps.iter().map(parse_counter_series).collect::<Vec<_>>());
+        }
     }
 
     // **합친 뒤에 줄인다.** 조각마다 줄이면 조각 경계에서 버킷 크기가 달라져
@@ -1713,7 +1769,8 @@ pub async fn get_past_counter(
     let after: usize = series.iter().map(|s| s.times.len()).sum();
 
     log::debug!(
-        "get_past_counter: {counter}/{obj_type} {stime}~{etime} → 오브젝트 {}개 · 점 {before}→{after}",
+        "get_past_counter: {counter}/{:?} {stime}~{etime} → 오브젝트 {}개 · 점 {before}→{after}",
+        obj_types,
         series.len()
     );
     Ok(series)

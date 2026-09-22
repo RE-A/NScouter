@@ -17,7 +17,7 @@ const spy = vi.hoisted(() => ({
 }));
 
 vi.mock('../hooks/useObjTypeStats', () => ({
-  useObjTypeStats: (_objType: string, _enabled: boolean, date?: string) => {
+  useObjTypeStats: (_objTypes: readonly string[], _enabled: boolean, date?: string) => {
     spy.calls.push(date);
     return spy.stats;
   },
@@ -41,7 +41,7 @@ function stats(over: Partial<ObjTypeStats> = {}): ObjTypeStats {
 
 function panel() {
   return render(
-    <ActiveServicePanel objType="tomcat" enabled agentMap={new Map()} />,
+    <ActiveServicePanel objTypes={['tomcat']} enabled agentMap={new Map()} />,
   );
 }
 
@@ -101,5 +101,29 @@ describe('ActiveServicePanel — 하루 누적', () => {
     fireEvent.click(screen.getByRole('button', { name: '오늘' }));
 
     expect(lastDate()).toBeUndefined();
+  });
+});
+
+describe('ActiveServicePanel — 종류가 여럿', () => {
+  it('종류가 하나면 그냥 «방문자» 다', () => {
+    panel();
+    expect(screen.getByText('방문자')).toBeTruthy();
+  });
+
+  it('종류가 여럿이면 «종류별 합» 이라고 적는다 — 같은 사용자가 두 번 셀 수 있다', () => {
+    // 방문자는 고유 사용자 수라 시스템을 넘어 더하면 겹친다. 그냥 «방문자» 로 적으면
+    // 실제보다 많은 수를 사람 수로 읽는다.
+    render(
+      <ActiveServicePanel objTypes={['ORDER-JVM', 'PAY-JVM']} enabled agentMap={new Map()} />,
+    );
+    const label = screen.getByText('방문자 (종류별 합)');
+    expect(label.getAttribute('title')).toMatch(/두 번 세어집니다/);
+  });
+
+  it('부제에 종류를 전부 적는다 — 무엇을 합친 수인지 보여야 한다', () => {
+    render(
+      <ActiveServicePanel objTypes={['ORDER-JVM', 'PAY-JVM']} enabled agentMap={new Map()} />,
+    );
+    expect(screen.getByText(/ORDER-JVM · PAY-JVM/)).toBeTruthy();
   });
 });

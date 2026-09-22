@@ -225,3 +225,112 @@ mod tests {
         assert_eq!(rows[0].sql, 0, "SQL 이 원인이 아닌 에러는 0 이다");
     }
 }
+
+// ─── 여러 종류 합치기 ──────────────────────────────────────────
+//
+// 요약은 **종류(objType) 하나**로만 물을 수 있다. 운영에서는 종류를 시스템마다 따로
+// 둔다(`monitoring_group_type`) — WAS 가 `ORDER-JVM` · `PAY-JVM` 처럼 여럿이다. 첫 종류
+// 하나만 물으면 나머지 시스템의 요약이 통째로 빠진다.
+//
+// 종류마다 물어 **id 로 더한다.** 콜렉터가 5분 조각들을 합칠 때도 같은 칸을 더한다
+// (`SummaryService` — count·error 는 `iadd`, elapsed·cpu·mem 은 `ladd`). 그래서 여기서
+// 더한 값은 콜렉터가 한 번에 준 것과 뜻이 같다.
+
+fn add_opt(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+    match (a, b) {
+        (None, None) => None,
+        (x, y) => Some(x.unwrap_or(0) + y.unwrap_or(0)),
+    }
+}
+
+/// 종류별 요약을 id 로 더한다. **처음 나온 순서를 지킨다** — 화면이 다시 정렬한다.
+pub fn merge_summary(parts: Vec<Vec<SummaryRow>>) -> Vec<SummaryRow> {
+    let mut out: Vec<SummaryRow> = Vec::new();
+    let mut at: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+    for row in parts.into_iter().flatten() {
+        match at.get(&row.id) {
+            Some(&i) => {
+                let m = &mut out[i];
+                m.count += row.count;
+                m.error = add_opt(m.error, row.error);
+                m.elapsed = add_opt(m.elapsed, row.elapsed);
+                m.cpu = add_opt(m.cpu, row.cpu);
+                m.mem = add_opt(m.mem, row.mem);
+            }
+            None => {
+                at.insert(row.id, out.len());
+                out.push(row);
+            }
+        }
+    }
+    out
+}
+
+/// 종류별 에러 요약을 id 로 더한다.
+///
+/// 건수만 더하고 **대표 트랜잭션·서비스 등은 먼저 온 것을 둔다.** 대표는 «이런 건이
+/// 있었다» 를 보여 주는 한 건이라, 어느 종류의 것이든 뜻이 같다.
+pub fn merge_error_summary(parts: Vec<Vec<ErrorSummaryRow>>) -> Vec<ErrorSummaryRow> {
+    let mut out: Vec<ErrorSummaryRow> = Vec::new();
+    let mut at: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+    for row in parts.into_iter().flatten() {
+        match at.get(&row.id) {
+            Some(&i) => out[i].count += row.count,
+            None => {
+                at.insert(row.id, out.len());
+                out.push(row);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn row(id: i32, count: i64, error: Option<i64>, elapsed: Option<i64>) -> SummaryRow {
+        SummaryRow { id, count, error, elapsed, cpu: None, mem: None }
+    }
+
+    #[test]
+    fn 같은_서비스는_종류를_넘어_더한다() {
+        // 두 시스템(ORDER-JVM·PAY-JVM)이 같은 API 를 불렀다
+        let merged = merge_summary(vec![
+            vec![row(7, 10, Some(1), Some(500))],
+            vec![row(7, 5, Some(2), Some(300)), row(9, 1, Some(0), Some(40))],
+        ]);
+        assert_eq!(merged, vec![row(7, 15, Some(3), Some(800)), row(9, 1, Some(0), Some(40))]);
+    }
+
+    #[test]
+    fn 없는_항목은_없는_채로_둔다() {
+        // IP 요약에는 elapsed 가 없다. 더하다 0 으로 만들면 «0ms 걸렸다» 가 된다.
+        let merged = merge_summary(vec![vec![row(1, 2, None, None)], vec![row(1, 3, None, None)]]);
+        assert_eq!(merged, vec![row(1, 5, None, None)]);
+    }
+
+    #[test]
+    fn 종류가_하나면_그대로다() {
+        let one = vec![row(1, 2, Some(0), Some(10)), row(2, 1, Some(1), Some(5))];
+        assert_eq!(merge_summary(vec![one.clone()]), one);
+    }
+
+    #[test]
+    fn 에러_요약은_건수만_더하고_대표는_먼저_온_것을_둔다() {
+        let e = |id: i32, count: i64, txid: i64| ErrorSummaryRow {
+            id,
+            error: 1,
+            service: 2,
+            message: 3,
+            count,
+            txid,
+            sql: 0,
+            apicall: 0,
+        };
+        let merged = merge_error_summary(vec![vec![e(5, 2, 111)], vec![e(5, 4, 222)]]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].count, 6);
+        assert_eq!(merged[0].txid, 111);
+    }
+}

@@ -26,7 +26,8 @@ import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 
 interface TopologyPanelProps {
-  objType: string;
+  /** javaee 종류들. 여럿이면 종류마다 물어 이어 붙인다 */
+  objTypes: readonly string[];
   /** 에이전트 objHash → 이름. 노드 이름과 층 판정에 쓴다 */
   agentMap: Map<number, string>;
   enabled: boolean;
@@ -56,11 +57,13 @@ const LAYER_LABEL: Record<NodeLayer, string> = {
 };
 
 export const TopologyPanel = memo(function TopologyPanel({
-  objType,
+  objTypes,
   agentMap,
   enabled,
   onDrill,
 }: TopologyPanelProps) {
+  // 배열은 내용이 같아도 매번 새것일 수 있다. 내용으로 견준다.
+  const typesKey = [...objTypes].sort().join('\u0000');
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<InteractionRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,9 +85,10 @@ export const TopologyPanel = memo(function TopologyPanel({
   const [textVersion, setTextVersion] = useState(0);
 
   const load = useCallback(() => {
-    if (!objType) return;
+    const types = typesKey === '' ? [] : typesKey.split('\u0000');
+    if (types.length === 0) return;
     setLoading(true);
-    getInteraction(objType)
+    getInteraction(types)
       .then(list => {
         setRows(list);
         setError(null);
@@ -99,7 +103,7 @@ export const TopologyPanel = memo(function TopologyPanel({
       })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [objType, agentMap, resolve]);
+  }, [typesKey, agentMap, resolve]);
 
   useEffect(() => {
     if (!open || !enabled) return;
@@ -173,7 +177,7 @@ export const TopologyPanel = memo(function TopologyPanel({
     <section className="mb-4">
       <SectionHeader
         title={t('토폴로지')}
-        subtitle={`${objType} · ${t('호출 관계')}`}
+        subtitle={`${objTypes.join(' · ')} · ${t('호출 관계')}`}
         open={open}
         onToggle={() => setOpen(o => !o)}
         action={

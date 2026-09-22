@@ -203,10 +203,10 @@ export async function getSummary(
   date: string,
   stime: number,
   etime: number,
-  objType: string,
+  objTypes: readonly string[],
   objHash = 0,
 ): Promise<SummaryRow[]> {
-  return invoke<SummaryRow[]>('get_summary', { kind, date, stime, etime, objType, objHash });
+  return invoke<SummaryRow[]>('get_summary', { kind, date, stime, etime, objTypes, objHash });
 }
 
 /** 에러 요약. 대표 txid 가 있어 그 트랜잭션을 바로 열 수 있다 */
@@ -214,10 +214,10 @@ export async function getErrorSummary(
   date: string,
   stime: number,
   etime: number,
-  objType: string,
+  objTypes: readonly string[],
   objHash = 0,
 ): Promise<ErrorSummaryRow[]> {
-  return invoke<ErrorSummaryRow[]>('get_error_summary', { date, stime, etime, objType, objHash });
+  return invoke<ErrorSummaryRow[]>('get_error_summary', { date, stime, etime, objTypes, objHash });
 }
 
 /**
@@ -226,8 +226,8 @@ export async function getErrorSummary(
  * **에이전트가 기본으로 수집하지 않는다** (`counter_interaction_enabled`, F-40).
  * 꺼져 있으면 에러가 아니라 0건이다.
  */
-export async function getInteraction(objType: string): Promise<InteractionRow[]> {
-  return invoke<InteractionRow[]>('get_interaction', { objType });
+export async function getInteraction(objTypes: readonly string[]): Promise<InteractionRow[]> {
+  return invoke<InteractionRow[]>('get_interaction', { objTypes });
 }
 
 /** 콜렉터 설정. 오브젝트와 무관하다 */
@@ -334,13 +334,13 @@ export interface CounterSeries {
 }
 
 /** 타입 전체 합계 + TPS */
-export async function getActiveSpeed(objType: string): Promise<ActiveSpeed> {
-  return invoke<ActiveSpeed>('get_active_speed', { objType });
+export async function getActiveSpeed(objTypes: readonly string[]): Promise<ActiveSpeed> {
+  return invoke<ActiveSpeed>('get_active_speed', { objTypes });
 }
 
 /** 오브젝트별 액티브 서비스 */
-export async function getActiveSpeedByObject(objType: string): Promise<ActiveSpeed[]> {
-  return invoke<ActiveSpeed[]>('get_active_speed_by_object', { objType });
+export async function getActiveSpeedByObject(objTypes: readonly string[]): Promise<ActiveSpeed[]> {
+  return invoke<ActiveSpeed[]>('get_active_speed_by_object', { objTypes });
 }
 
 /**
@@ -349,7 +349,7 @@ export async function getActiveSpeedByObject(objType: string): Promise<ActiveSpe
  * **오늘 누적(`getTodayCounter`)으로는 «최근 1시간» 을 못 그린다** — 그건 자정부터
  * 지금까지의 5분 버킷이라 한 시간만 떼어 보려면 288개를 받아 12개만 쓴다.
  *
- * 대상은 **objType 하나**다. 콜렉터가 objHash 목록을 안 받으므로 타입 전체가 오고,
+ * 대상은 **objType 단위**다. 콜렉터가 objHash 목록을 안 받으므로 타입 전체가 오고,
  * 고른 서버만 쓰는 것은 화면 몫이다.
  *
  * @param maxPoints 오브젝트당 받을 점의 최대 수. 콜렉터는 2초 간격 원본을 주는데
@@ -358,14 +358,14 @@ export async function getActiveSpeedByObject(objType: string): Promise<ActiveSpe
  */
 export async function getPastCounter(
   counter: string,
-  objType: string,
+  objTypes: readonly string[],
   stime: number,
   etime: number,
   maxPoints: number,
 ): Promise<CounterSeries[]> {
   return invoke<CounterSeries[]>('get_past_counter', {
     counter,
-    objType,
+    objTypes,
     stime,
     etime,
     maxPoints,
@@ -427,10 +427,10 @@ export async function getXLogDistribution(
 /** 오늘 누적 카운터. date 를 주면 그날 것 */
 export async function getTodayCounter(
   counter: string,
-  objType: string,
+  objTypes: readonly string[],
   date?: string,
 ): Promise<CounterSeries[]> {
-  return invoke<CounterSeries[]>('get_today_counter', { counter, objType, date: date ?? null });
+  return invoke<CounterSeries[]>('get_today_counter', { counter, objTypes, date: date ?? null });
 }
 
 /**
@@ -459,6 +459,16 @@ export async function saveAgentConfig(objHash: number, text: string): Promise<vo
  * 에이전트와 같은 규칙이다 — **원문 전체**를 보내면 콜렉터가 `scouter.conf` 를 통째로 덮어쓰고
  * 다시 읽는다. 일부만 보내면 나머지 설정이 사라진다.
  */
+/**
+ * 오브젝트 종류 → Family 표 (`GET_XML_COUNTER`).
+ *
+ * 커스텀 종류(`monitoring_group_type=ORDER-JVM`)를 WAS·호스트로 가르는 근거다.
+ * 콜렉터가 처음 보는 종류를 에이전트가 감지한 종류의 Family 로 등록해 둔다.
+ */
+export async function getObjectTypeFamilies(): Promise<{ name: string; family: string }[]> {
+  return invoke<{ name: string; family: string }[]>('get_object_type_families');
+}
+
 export async function saveServerConfig(text: string): Promise<void> {
   return invoke<void>('save_server_config', { text });
 }

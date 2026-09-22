@@ -14,8 +14,12 @@ import type { Range } from './timelineScale';
 /** 한 줄이 무엇을 어디에 물을지 */
 export interface CounterQuery {
   counter: CounterName;
-  /** 이 카운터를 가진 Family 의 objType. 비어 있으면 묻지 않는다 */
-  objType: string;
+  /**
+   * 이 카운터를 가진 Family 의 objType 들. 비어 있으면 묻지 않는다.
+   *
+   * **여럿일 수 있다** — 커스텀 종류(`monitoring_group_type`)를 쓰면 시스템마다 종류가 다르다.
+   */
+  objTypes: readonly string[];
 }
 
 export interface CounterRow {
@@ -68,7 +72,7 @@ export function usePastCounters(
   const reload = useCallback(() => setNonce(n => n + 1), []);
 
   // 배열은 매 렌더 새로 만들어지므로 내용으로 견준다.
-  const queryKey = queries.map(q => `${q.counter}@${q.objType}`).join('|');
+  const queryKey = queries.map(q => `${q.counter}@${[...q.objTypes].sort().join(',')}`).join('|');
   /**
    * **어느 서버를 골랐는지는 조회 조건이 아니다.**
    *
@@ -96,13 +100,13 @@ export function usePastCounters(
         // 물을 데가 없으면 묻지 않는다 — 호스트 에이전트가 아예 없거나, 있어도
         // 고르지 않았을 때다. **받아 봐야 전부 걸러진다** — 서버가 100대인 곳에서
         // 6시간치를 받아 통째로 버리는 셈이다.
-        if (q.objType === '') {
+        if (q.objTypes.length === 0) {
           out.push({ counter: q.counter, series: [], asked: false });
           continue;
         }
         const all = await getPastCounter(
           q.counter,
-          q.objType,
+          q.objTypes,
           range.stime,
           range.etime,
           MAX_POINTS,

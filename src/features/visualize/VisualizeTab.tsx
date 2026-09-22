@@ -46,11 +46,11 @@ interface VisualizeTabProps {
   /** 접속돼 있고 이 탭을 보고 있는가 */
   enabled: boolean;
   /** javaee 오브젝트의 objType. 액티브 서비스는 objHash 로는 못 묻는다 */
-  javaeeType: string;
+  javaeeTypes: readonly string[];
   /** 지금 보기로 고른 오브젝트. 여기 없는 서버는 그리지 않는다 */
   picked: ReadonlySet<number>;
   /** 호스트 오브젝트의 objType. 없으면 CPU 줄을 물을 데가 없다 */
-  hostType: string;
+  hostTypes: readonly string[];
   /** 트랜잭션이 있는 오브젝트들. 격자에서 파고들 수 있는 칸을 가른다 */
   javaeeHashes: readonly number[];
   /** 고른 서버들이 속한 Family. 안 고른 Family 의 지표는 «안 골랐다» 고 말한다 */
@@ -67,10 +67,13 @@ interface VisualizeTabProps {
   onDrillService: (serviceName: string) => void;
 }
 
+/** 고른 Family 가 없을 때 넘기는 빈 목록. 렌더마다 새 배열을 만들면 훅이 매번 다시 돈다 */
+const NO_TYPES: readonly string[] = [];
+
 export const VisualizeTab = memo(function VisualizeTab({
   enabled,
-  javaeeType,
-  hostType,
+  javaeeTypes,
+  hostTypes,
   picked,
   javaeeHashes,
   families,
@@ -125,19 +128,19 @@ export const VisualizeTab = memo(function VisualizeTab({
   const queries = useMemo<CounterQuery[]>(() => {
     // **고른 Family 만 묻는다.** objType 은 «붙어 있는 종류» 지 «고른 것» 이 아니다 —
     // 호스트를 안 골랐는데 CPU 를 물으면 타입 전체를 받아 통째로 버린다.
-    const typeOf = (counter: CounterQuery['counter']): string => {
+    const typesOf = (counter: CounterQuery['counter']): readonly string[] => {
       const family = counterFamily(counter);
-      if (family === 'host') return families.has('host') ? hostType : '';
-      return families.has('javaee') ? javaeeType : '';
+      if (family === 'host') return families.has('host') ? hostTypes : [];
+      return families.has('javaee') ? javaeeTypes : [];
     };
     const rowsOf: CounterQuery[] = [];
     for (const id of ['tps', 'elapsed', 'error', 'cpu'] as const) {
       const def = KPI_DEFS.find(d => d.id === id);
       if (!def) continue;
-      rowsOf.push({ counter: def.counter, objType: typeOf(def.counter) });
+      rowsOf.push({ counter: def.counter, objTypes: typesOf(def.counter) });
     }
     return rowsOf;
-  }, [javaeeType, hostType, families]);
+  }, [javaeeTypes, hostTypes, families]);
 
   const past = usePastCounters(enabled, queries, range, picked);
 
@@ -149,10 +152,10 @@ export const VisualizeTab = memo(function VisualizeTab({
     () => queries.concat(
       KPI_DEFS.filter(d => d.id === 'active').map(d => ({
         counter: d.counter,
-        objType: families.has('javaee') ? javaeeType : '',
+        objTypes: families.has('javaee') ? javaeeTypes : [],
       })),
     ),
-    [queries, javaeeType, families],
+    [queries, javaeeTypes, families],
   );
   const yesterdayRaw = useYesterday(enabled, yesterdayQueries);
 
@@ -174,7 +177,7 @@ export const VisualizeTab = memo(function VisualizeTab({
   const [showInsight, setShowInsight] = useState(false);
   const insight = useRangeInsight(
     enabled && showInsight,
-    families.has('javaee') ? javaeeType : '',
+    families.has('javaee') ? javaeeTypes : NO_TYPES,
     picked,
     range,
   );
@@ -310,8 +313,8 @@ export const VisualizeTab = memo(function VisualizeTab({
       {/* 지표가 «몇 이다» 라면 이건 «지금 무엇이 밀려 있나» 다.
           숫자가 커진 이유를 바로 옆에서 물을 수 있어야 한 화면이 된다. */}
       <ActiveServicePanel
-        objType={javaeeType}
-        enabled={enabled && javaeeType !== ''}
+        objTypes={javaeeTypes}
+        enabled={enabled && javaeeTypes.length > 0}
         agentMap={agentMap}
       />
 

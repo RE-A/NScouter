@@ -19,7 +19,8 @@ import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 
 interface SummaryPanelProps {
-  objType: string;
+  /** javaee 종류들. 여럿이면 종류마다 물어 id 로 더한다 (Rust `merge_summary`) */
+  objTypes: readonly string[];
   enabled: boolean;
   /** 에러 요약의 대표 트랜잭션을 연다. 상세는 XLog 탭에 있으므로 탭 전환까지 호출부가 한다 */
   onOpenTxid: (txid: string, date: string) => void;
@@ -65,10 +66,12 @@ const TAB_ON = 'bg-accent text-white';
 const TAB_OFF = 'text-fg-dim hover:bg-hover hover:text-fg-muted';
 
 export const SummaryPanel = memo(function SummaryPanel({
-  objType,
+  objTypes,
   enabled,
   onOpenTxid,
 }: SummaryPanelProps) {
+  // 배열은 내용이 같아도 매번 새것일 수 있다. 내용으로 견준다.
+  const typesKey = [...objTypes].sort().join('\u0000');
   // 요약은 구간 전체를 훑는 무거운 조회다. 카운터 탭을 열 때마다 자동으로 돌리지 않는다.
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<PanelTab>('service');
@@ -85,7 +88,8 @@ export const SummaryPanel = memo(function SummaryPanel({
   const dict = KINDS.find(k => k.kind === kind)?.dict ?? null;
 
   const load = useCallback(() => {
-    if (!objType) return;
+    const types = typesKey === '' ? [] : typesKey.split('\u0000');
+    if (types.length === 0) return;
     setLoading(true);
     setError(null);
     const now = Date.now();
@@ -93,7 +97,7 @@ export const SummaryPanel = memo(function SummaryPanel({
     const stime = now - rangeMs;
 
     if (kind === 'error') {
-      getErrorSummary(date, stime, now, objType)
+      getErrorSummary(date, stime, now, types)
         .then(list => {
           setErrorRows(list);
           // 예외 클래스와 메시지는 **둘 다 error 사전**이다 — message 를 hashMsg 로
@@ -112,7 +116,7 @@ export const SummaryPanel = memo(function SummaryPanel({
       return;
     }
 
-    getSummary(kind, date, stime, now, objType)
+    getSummary(kind, date, stime, now, types)
       .then(list => {
         setRows(list);
         // 해시만 있으면 "무엇이" 비쌌는지 알 수 없다 — 이 화면을 여는 이유가 그건데.
@@ -124,7 +128,7 @@ export const SummaryPanel = memo(function SummaryPanel({
       })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [objType, kind, rangeMs, dict, resolve]);
+  }, [typesKey, kind, rangeMs, dict, resolve]);
 
   useEffect(() => {
     if (open && enabled) load();
@@ -173,7 +177,7 @@ export const SummaryPanel = memo(function SummaryPanel({
     <section className="mb-4">
       <SectionHeader
         title={t('요약')}
-        subtitle={`${objType} · ${t('구간 누적')}`}
+        subtitle={`${objTypes.join(' · ')} · ${t('구간 누적')}`}
         open={open}
         onToggle={() => setOpen(o => !o)}
       />

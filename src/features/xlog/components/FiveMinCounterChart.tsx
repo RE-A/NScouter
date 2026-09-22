@@ -17,8 +17,8 @@ const POLL_MS = 60_000;
 
 interface FiveMinCounterChartProps {
   counter: CounterName;
-  /** 카운터는 objHash 가 아니라 objType 단위로 묻는다 */
-  objType: string;
+  /** 카운터는 objHash 가 아니라 objType 단위로 묻는다. 여럿이면 종류마다 물어 이어 붙인다 */
+  objTypes: readonly string[];
   enabled: boolean;
   /** objHash → objName. 범례에만 쓴다 */
   agentMap: Map<number, string>;
@@ -29,20 +29,23 @@ type Load = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: '
 
 export const FiveMinCounterChart = memo(function FiveMinCounterChart({
   counter,
-  objType,
+  objTypes,
   enabled,
   agentMap,
   height = 110,
 }: FiveMinCounterChartProps) {
+  // 배열은 내용이 같아도 매번 새것일 수 있다. 내용으로 견준다.
+  const typesKey = [...objTypes].sort().join('\u0000');
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!enabled || !objType) return;
+    const types = typesKey === '' ? [] : typesKey.split('\u0000');
+    if (!enabled || types.length === 0) return;
     let alive = true;
 
     const poll = () => {
-      getTodayCounter(counter, objType)
+      getTodayCounter(counter, types)
         .then(rows => { if (alive) setLoad({ kind: 'ok', rows }); })
         .catch(e => { if (alive) setLoad({ kind: 'error', message: String(e) }); });
     };
@@ -50,7 +53,7 @@ export const FiveMinCounterChart = memo(function FiveMinCounterChart({
     poll();
     const id = setInterval(poll, POLL_MS);
     return () => { alive = false; clearInterval(id); };
-  }, [counter, objType, enabled]);
+  }, [counter, typesKey, enabled]);
 
   // 미래 슬롯을 자른다 — 안 자르면 지금 이후가 전부 0으로 그려져
   // "방금 0으로 떨어졌다"로 읽힌다. 응답이 받은 시점 기준으로 한 번만 계산한다.

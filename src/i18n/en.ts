@@ -29,6 +29,9 @@ export const EN: Record<string, string> = {
   'Active 탭': 'Active tab',
   '실행 중': 'Running',
   '액티브 현황': 'Active overview',
+  '방문자 (종류별 합)': 'Visitors (sum per type)',
+  '종류마다 센 고유 사용자 수를 더했습니다. 같은 사용자가 여러 시스템을 거쳤다면 두 번 세어집니다.':
+    'Unique users counted per object type, then added. A user who went through several systems is counted more than once.',
   '연결을 못 얻어 못 물어본 서버': 'Not asked — agent connection unavailable',
   '콜렉터가 비활성으로 보는 서버': 'Treated as inactive by the collector',
   '못 받은 서버는 직전 값을 흐리게 이어 보여줍니다':

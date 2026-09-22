@@ -1,6 +1,6 @@
 [package]
 name = "nscouter"
-version = "0.5.3"
+version = "0.5.4"
 description = "Nscouter - Modern Scouter Client"
 authors = []
 edition = "2021"

@@ -225,7 +225,7 @@ export const JAVAEE_OBJECT_TYPES: readonly string[] = [
 ];
 
 export function isJavaeeObjectType(objType: string): boolean {
-  return JAVAEE_OBJECT_TYPES.includes(objType);
+  return familyOfObjectType(objType) === 'javaee';
 }
 
 /**
@@ -239,7 +239,7 @@ export const HOST_OBJECT_TYPES: readonly string[] = [
 ];
 
 export function isHostObjectType(objType: string): boolean {
-  return HOST_OBJECT_TYPES.includes(objType);
+  return familyOfObjectType(objType) === 'host';
 }
 
 /**
@@ -249,7 +249,79 @@ export function isHostObjectType(objType: string): boolean {
  * 이 판정이 없으면 오브젝트 목록에서 조용히 버려진다.
  */
 export function isDatasourceObjectType(objType: string): boolean {
-  return objType === 'datasource';
+  return familyOfObjectType(objType) === 'datasource';
+}
+
+// ─── 종류 → Family: 콜렉터가 아는 것을 먼저 본다 ─────────────────
+//
+// **위의 이름 목록만으로 가르면 안 된다.** 운영에서는 에이전트의 `monitoring_group_type`
+// 에 시스템 이름(`ORDER-JVM`)을 넣어 종류를 바꿔 쓴다. 이름 목록에 없으니 WAS 로 안 잡혀
+// Active 탭·카운터에서 통째로 빠졌다.
+//
+// 콜렉터는 처음 보는 종류를 에이전트가 감지한 종류(`tags.detected`)의 Family 로 등록해
+// 둔다(`CounterManager.addObjectTypeIfNotExist`). 접속할 때 그 표를 받아 여기 넣는다.
+// 판정 순서:
+//
+//   1. 콜렉터의 표 (`registerObjectTypeFamilies` — `GET_XML_COUNTER`)
+//   2. 오브젝트의 `detected` 태그로 배운 것 (`learnFamiliesFromObjects` — 1이 실패한 옛 콜렉터용)
+//   3. 위의 이름 목록 (콜렉터에 묻기 전 · 묻지 못한 경우)
+//
+// **모듈 안에 둔다.** 판정 함수가 화면 곳곳(목록·메뉴·카운터 대상 고르기)에서 이름 하나만
+// 받아 불리는데, 그 자리마다 표를 넘기게 바꾸면 손댈 곳이 판정 자체보다 커진다.
+// 접속이 바뀌면 `resetObjectTypeFamilies` 로 비운다 — 콜렉터마다 사이트 정의가 다르다.
+
+const collectorFamilies = new Map<string, string>();
+const learnedFamilies = new Map<string, string>();
+
+function builtinFamily(objType: string): string | null {
+  if (JAVAEE_OBJECT_TYPES.includes(objType)) return 'javaee';
+  if (HOST_OBJECT_TYPES.includes(objType)) return 'host';
+  if (objType === 'datasource') return 'datasource';
+  return null;
+}
+
+/**
+ * 종류의 Family. 모르면 `null` 이다 — **지어내지 않는다.**
+ *
+ * 값은 counters.xml 의 Family 이름 그대로다(`javaee`·`host`·`datasource`·`batch`…).
+ * 이 앱이 다루는 것은 앞의 셋이고, 나머지는 «WAS 도 호스트도 아니다» 로 읽힌다.
+ */
+export function familyOfObjectType(objType: string): string | null {
+  return collectorFamilies.get(objType) ?? learnedFamilies.get(objType) ?? builtinFamily(objType);
+}
+
+/** 콜렉터가 준 종류→Family 표를 넣는다. 앞선 표는 버린다 */
+export function registerObjectTypeFamilies(
+  entries: readonly { name: string; family: string }[],
+): void {
+  collectorFamilies.clear();
+  for (const e of entries) {
+    if (e.name !== '' && e.family !== '') collectorFamilies.set(e.name, e.family);
+  }
+}
+
+/**
+ * 오브젝트 목록에서 배운다 — **콜렉터 표에도 이름 목록에도 없는 종류만.**
+ *
+ * 콜렉터가 하는 일과 같다: 에이전트가 감지한 종류(`tags.detected`)의 Family 를 물려준다.
+ * 콜렉터 표를 못 받은 경우(옛 판, 요청 실패)와, 접속한 뒤에 새 종류가 붙은 경우를 덮는다.
+ */
+export function learnFamiliesFromObjects(
+  objects: readonly { obj_type: string; tags: readonly (readonly [string, string])[] }[],
+): void {
+  for (const o of objects) {
+    if (familyOfObjectType(o.obj_type) !== null) continue;
+    const detected = o.tags.find(([k]) => k === 'detected')?.[1];
+    if (!detected) continue;
+    const family = collectorFamilies.get(detected) ?? builtinFamily(detected);
+    if (family) learnedFamilies.set(o.obj_type, family);
+  }
+}
+
+/** 접속이 바뀌면 비운다 — 콜렉터마다 사이트 정의가 다르다 */
+export function resetObjectTypeFamilies(): void {
+  collectorFamilies.clear();
+  learnedFamilies.clear();
 }
 
 export const MAX_COUNTER_SAMPLES = 155; // 5분 / 2초 ≈ 150 + 여유

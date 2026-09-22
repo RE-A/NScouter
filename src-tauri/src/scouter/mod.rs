@@ -7,6 +7,7 @@ pub mod connection;
 pub mod counter;
 pub mod dictionary;
 pub mod distribution;
+pub mod family;
 pub mod mock_server;
 pub mod object;
 pub mod objtype;

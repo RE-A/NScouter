@@ -7696,3 +7696,194 @@ fn probe_active_service_heartbeat_gap() {
         std::thread::sleep(Duration::from_millis(1000));
     }
 }
+
+/// 커스텀 종류(`monitoring_group_type`)의 Family 는 **콜렉터가 안다.**
+///
+/// 운영에서는 종류 자리에 시스템 이름(`ORDER-JVM`)을 넣는다. NScouter 는 종류 이름 목록
+/// (`tomcat`·`java`…)으로 WAS 를 가려서 그런 서버를 통째로 놓쳤다.
+///
+/// 콜렉터 `CounterManager.addObjectTypeIfNotExist`: 처음 보는 종류의 에이전트가 붙으면
+/// ObjectPack 의 `tags.detected`(에이전트가 감지한 `tomcat` 등)의 Family 를 물려받아
+/// **새 종류로 등록**하고 사이트 정의(counters.site.xml)에 쓴다. `GET_XML_COUNTER` 가
+/// 기본 정의(`default`)와 사이트 정의(`custom`)를 Blob 으로 준다.
+///
+/// 이 탐침은 두 Blob 에서 `<ObjectType>` 의 이름·Family 를 뽑아 찍는다.
+#[test]
+#[ignore]
+fn probe_object_type_families() {
+    let mut c = login();
+    let s = c.session;
+    c.send_request("GET_XML_COUNTER", s, &MapPack::new()).expect("GET_XML_COUNTER 요청 실패");
+    let m = first_map(&mut c).expect("응답 없음");
+    for key in ["default", "custom"] {
+        let Some(ScouterValue::Blob(bytes)) = m.entries.get(key) else {
+            println!("[{key}] Blob 아님: {:?}", m.entries.get(key).map(std::mem::discriminant));
+            continue;
+        };
+        let xml = String::from_utf8_lossy(bytes);
+        let types: Vec<String> = xml
+            .split("<ObjectType")
+            .skip(1)
+            .map(|chunk| {
+                let head = chunk.split('>').next().unwrap_or("");
+                let attr = |name: &str| {
+                    head.split(&format!("{name}=\""))
+                        .nth(1)
+                        .and_then(|r| r.split('"').next())
+                        .unwrap_or("?")
+                        .to_string()
+                };
+                format!("{}→{}", attr("name"), attr("family"))
+            })
+            .collect();
+        println!("[{key}] {}B · 종류 {}개: {}", bytes.len(), types.len(), types.join(" "));
+    }
+
+    // 지금 붙어 있는 오브젝트의 종류와 `detected` 태그
+    let mut c = login();
+    let s = c.session;
+    c.send_request(CMD_OBJECT_LIST_REAL_TIME, s, &MapPack::new()).unwrap();
+    while let Ok(Some(pack)) = c.read_next_pack() {
+        if let AnyPack::Object(o) = pack {
+            let detected = o.tags.iter().find(|(k, _)| k == "detected").map(|(_, v)| v.clone());
+            println!("  {:<40} objType={:<12} detected={:?}", o.obj_name, o.obj_type, detected);
+        }
+    }
+}
+
+/// 테스트 에이전트(shop-app)에 커스텀 종류를 걸거나 되돌린다 — **테스트 환경 전용.**
+///
+///   NSCOUTER_GROUP_TYPE=SHOP-JVM  → `monitoring_group_type=SHOP-JVM` 을 덧붙여 저장
+///   NSCOUTER_GROUP_TYPE=restore   → 그 줄을 지우고 저장
+///
+/// 저장은 원문을 통째로 덮으므로(F-40) 원문을 읽어 그 줄만 넣고 뺀다.
+#[test]
+#[ignore]
+fn probe_set_group_type() {
+    let Ok(want) = std::env::var("NSCOUTER_GROUP_TYPE") else {
+        println!("건너뜀 — NSCOUTER_GROUP_TYPE 을 줄 것");
+        return;
+    };
+    let target = {
+        let mut c = login();
+        let s = c.session;
+        c.send_request(CMD_OBJECT_LIST_REAL_TIME, s, &MapPack::new()).unwrap();
+        let mut hit = None;
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Object(o) = pack {
+                if o.obj_name == "/shop-app/shop-app" {
+                    hit = Some(o.obj_hash);
+                }
+            }
+        }
+        hit.expect("/shop-app/shop-app 이 없다")
+    };
+
+    let original = {
+        let mut c = login();
+        let s = c.session;
+        c.send_request(CMD_GET_CONFIGURE_WAS, s, &build_object_param(target)).unwrap();
+        first_map(&mut c).map(|m| parse_config_text(&m)).unwrap_or_default()
+    };
+    assert!(!original.is_empty(), "원문이 비었다 — 덮어쓰면 설정이 날아간다. 중단");
+
+    let kept: Vec<&str> = original
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("monitoring_group_type"))
+        .collect();
+    let mut next = kept.join("\n");
+    if want != "restore" {
+        next.push_str(&format!("\nmonitoring_group_type={want}\n"));
+    } else {
+        next.push('\n');
+    }
+
+    let mut p = build_object_param(target);
+    p.put("setConfig", ScouterValue::Text(next));
+    let mut c = login();
+    let s = c.session;
+    c.send_request(CMD_SET_CONFIGURE_WAS, s, &p).unwrap();
+    let result = first_map(&mut c)
+        .and_then(|m| m.get_text("result").map(|x| x.to_string()))
+        .unwrap_or_default();
+    println!("shop-app({target}) monitoring_group_type → {want} : result={result}");
+}
+
+/// 커스텀 종류가 섞인 환경에서 **종류마다 물어 합치면** 두 시스템이 다 나오는가.
+///
+/// `probe_set_group_type` 으로 shop-app 을 `SHOP-JVM` 으로 바꿔 둔 상태에서 돌린다 —
+/// 그러면 WAS 종류가 `SHOP-JVM` · `tomcat` 둘이다(운영에서 시스템마다 종류를 따로 두는 모양).
+/// 화면이 쓰는 Rust 함수(`parse_counter_xml_families` · `merge_summary`)를 그대로 쓴다.
+#[test]
+#[ignore]
+fn live_mixed_object_types() {
+    use nscouter_lib::scouter::family::parse_counter_xml_families;
+    use nscouter_lib::scouter::objtype::build_objtype_param;
+    use nscouter_lib::scouter::summary::merge_summary;
+
+    // 1. 콜렉터의 종류 → Family 표
+    let families = {
+        let mut c = login();
+        let s = c.session;
+        c.send_request("GET_XML_COUNTER", s, &MapPack::new()).unwrap();
+        parse_counter_xml_families(&first_map(&mut c).expect("응답 없음"))
+    };
+    let family_of = |t: &str| families.iter().find(|f| f.name == t).map(|f| f.family.clone());
+
+    // 2. 붙어 있는 WAS 종류 — 이름 목록이 아니라 표로 가른다
+    let mut javaee_types: Vec<String> = Vec::new();
+    {
+        let mut c = login();
+        let s = c.session;
+        c.send_request(CMD_OBJECT_LIST_REAL_TIME, s, &MapPack::new()).unwrap();
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Object(o) = pack {
+                if family_of(&o.obj_type).as_deref() == Some("javaee") && !javaee_types.contains(&o.obj_type) {
+                    javaee_types.push(o.obj_type);
+                }
+            }
+        }
+    }
+    javaee_types.sort();
+    println!("WAS 종류 (콜렉터 표 기준): {javaee_types:?}");
+
+    // 3. 종류마다 오브젝트별 액티브 · 서비스 요약
+    let mut objects = 0;
+    let mut parts = Vec::new();
+    for t in &javaee_types {
+        let mut c = login();
+        let s = c.session;
+        c.send_request(CMD_ACTIVESPEED_REAL_TIME, s, &build_objtype_param(t)).unwrap();
+        let mut n = 0;
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if matches!(pack, AnyPack::Map(_)) {
+                n += 1;
+            }
+        }
+        objects += n;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let date = yyyymmdd_local(now);
+        let mut c = login();
+        let s = c.session;
+        c.send_request(
+            CMD_LOAD_SERVICE_SUMMARY,
+            s,
+            &build_summary_param(&date, now - 10 * 60_000, now, t, 0),
+        )
+        .unwrap();
+        let rows = first_map(&mut c).map(|m| parse_summary(&m)).unwrap_or_default();
+        let calls: i64 = rows.iter().map(|r| r.count).sum();
+        println!("  {t:<10} 오브젝트 {n} · 요약 {}행 · 호출 {calls}", rows.len());
+        parts.push(rows);
+    }
+    let merged = merge_summary(parts);
+    let merged_calls: i64 = merged.iter().map(|r| r.count).sum();
+    println!("합친 요약 {}행 · 호출 {merged_calls}", merged.len());
+
+    assert!(javaee_types.len() >= 2, "WAS 종류가 둘이 아니다 — probe_set_group_type 을 먼저 돌릴 것");
+    assert!(objects >= 2, "종류마다 물었는데 오브젝트가 {objects}개뿐이다");
+}

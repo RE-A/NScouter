@@ -22,7 +22,11 @@ import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 
 interface ActiveServicePanelProps {
-  objType: string;
+  /**
+   * javaee 종류들. **여럿일 수 있다** — 커스텀 종류(`monitoring_group_type`)를 쓰면
+   * 시스템마다 종류가 다르다. 하나만 물으면 나머지 시스템이 막대에서 빠진다.
+   */
+  objTypes: readonly string[];
   enabled: boolean;
   agentMap: Map<number, string>;
 }
@@ -42,7 +46,7 @@ const TONE: Record<SpeedStep | 0, string> = {
 };
 
 export const ActiveServicePanel = memo(function ActiveServicePanel({
-  objType,
+  objTypes,
   enabled,
   agentMap,
 }: ActiveServicePanelProps) {
@@ -56,7 +60,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
   const [day, setDay] = useState('');
   const today = toDateString(Date.now());
   const isToday = day === '' || day === today;
-  const stats = useObjTypeStats(objType, enabled, isToday ? undefined : day);
+  const stats = useObjTypeStats(objTypes, enabled, isToday ? undefined : day);
 
   if (!enabled) return null;
 
@@ -70,7 +74,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
     <section className="mb-4">
       <SectionHeader
         title={t('액티브 서비스')}
-        subtitle={`${objType} · ${t('지금 이 순간')}`}
+        subtitle={`${objTypes.join(' · ')} · ${t('지금 이 순간')}`}
       />
 
       {stats.error && (
@@ -182,8 +186,19 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
               </div>
               {/* 방문자에는 날짜가 없다(VISITOR_REALTIME_TOTAL). 지난 날에는
                   숫자를 지우고 이유를 적는다 — 비워 두면 «0명» 으로 읽힌다 */}
-              <div className="text-micro text-fg-faint">
-                {isToday ? t('방문자') : t('방문자는 오늘만')}
+              <div
+                className="text-micro text-fg-faint"
+                title={
+                  isToday && objTypes.length > 1
+                    ? t('종류마다 센 고유 사용자 수를 더했습니다. 같은 사용자가 여러 시스템을 거쳤다면 두 번 세어집니다.')
+                    : undefined
+                }
+              >
+                {!isToday
+                  ? t('방문자는 오늘만')
+                  : objTypes.length > 1
+                    ? t('방문자 (종류별 합)')
+                    : t('방문자')}
               </div>
             </div>
           </div>
@@ -195,7 +210,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
       {/* 막대가 "몇 건"이라면 목록은 "무엇이". 기본은 접어 둔다 —
           에이전트에 스레드 스택을 뜨게 하는 요청이라 공짜가 아니다. */}
       <div className="mt-2">
-        <ActiveServiceList objType={objType} agentMap={agentMap} />
+        <ActiveServiceList objTypes={objTypes} agentMap={agentMap} />
       </div>
     </section>
   );
