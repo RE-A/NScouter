@@ -1345,6 +1345,7 @@ export default function App() {
               enabled={activeTab === 'active'}
               javaeeTypes={pickedJavaeeTypes}
               picked={filter.objHashSet}
+              expectedHashes={shownHashes.javaee}
               agentMap={agentMap}
               poolHashes={shownHashes.datasource}
             />

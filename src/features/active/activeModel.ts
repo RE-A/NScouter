@@ -242,81 +242,110 @@ export function formatElapsed(ms: number): string {
 
 // ─── 못 닿은 서버 ──────────────────────────────────────────────
 //
-// **갱신마다 떴다 사라졌다 하던 이유.** 콜렉터는 에이전트가 열어 둔 TCP 세션을
-// 꺼내 쓰는데, `net_tcp_get_agent_connection_wait_ms`(기본 1초) 안에 못 얻으면 그 서버는
-// 행 없이 빈 팩만 온다 (`probe_active_service_short_wait` 가 실물로 재현). 네트워크가
-// 느린 곳(ECS 등)이나 다른 클라이언트가 무거운 요청을 보내는 동안 잘 일어난다.
+// **갱신마다 떴다 사라졌다 하던 이유가 둘이다.** 처음에는 하나만 막고 고쳤다고 했는데
+// 아니었다.
 //
-// 그 순간 행을 지우면 «끝났다» 로 읽힌다. 실제로는 **못 물어본 것**이다.
-// 그래서 직전에 받은 행을 **지난 값이라고 표시해서** 이어 보여준다. 다만 끝없이
-// 이어 붙이면 죽은 서버의 옛 트랜잭션이 영원히 «실행 중» 으로 남으므로 횟수를 둔다.
+//   1. **콜렉터가 에이전트 연결을 못 얻었다.** 에이전트가 열어 둔 TCP 연결을 꺼내 쓰는데
+//      `net_tcp_get_agent_connection_wait_ms`(기본 1초) 안에 못 얻으면 `S501` 을 남기고
+//      **objHash 만 든 빈 팩**을 보낸다.
+//   2. **콜렉터가 아예 묻지 않았다.** 하트비트(UDP)가 `object_deadtime_ms`(기본 8초) 안에
+//      안 오면 그 오브젝트를 «살아 있지 않다» 로 보고 조회 대상에서 뺀다
+//      (코드: `AgentManager.getLiveObjHashList` 는 `alive` 인 것만 돌려준다).
+//      이때는 **팩이 아예 없다** — 빈 팩조차 없어서 1번의 신호로는 잡히지 않는다.
+//
+// 둘 다 «못 물어본 것» 이지 «한가한 것» 이 아니다. 그 순간 행을 지우면 «끝났다» 로 읽힌다.
+// 그래서 직전 값을 **지난 값이라고 표시해** 잠깐 이어 보여준다. 다만 끝없이 이어 붙이면
+// 죽은 서버의 옛 트랜잭션이 영원히 «실행 중» 으로 남으므로 시간을 둔다.
 
-/** 연속으로 못 닿아도 직전 값을 이어 보여줄 횟수. 넘으면 버리고 «못 닿음» 만 적는다 */
-export const MAX_CARRY = 3;
+/**
+ * 지난 값을 이어 보여줄 시간.
+ *
+ * **횟수가 아니라 시간이다.** 폴링 주기를 1·2·5초 중에 고를 수 있어서, 횟수로 재면
+ * 같은 화면이 주기마다 다르게 움직인다. 하트비트가 끊긴 것으로 판정되는 데 기본 8초가
+ * 걸리므로(`object_deadtime_ms`), 그보다 넉넉히 두어 한 번의 출렁임을 덮는다.
+ */
+export const CARRY_MS = 15_000;
+
+/** 왜 못 받았나 */
+export type MissKind =
+  /** 빈 팩이 왔다 — 콜렉터가 에이전트 연결을 제때 못 얻음 */
+  | 'empty'
+  /** 팩이 아예 없다 — 콜렉터가 살아 있지 않다고 보고 묻지 않음 */
+  | 'silent';
 
 export interface CarryState {
-  /** 오브젝트별로 마지막에 **실제로 받은** 행 */
-  lastRows: ReadonlyMap<number, readonly ActiveService[]>;
-  /** 오브젝트별로 연속해서 못 닿은 횟수 */
-  misses: ReadonlyMap<number, number>;
+  /** 오브젝트별로 마지막에 **실제로 받은** 행과 그 시각 */
+  lastRows: ReadonlyMap<number, { rows: readonly ActiveService[]; at: number }>;
 }
 
-export const EMPTY_CARRY: CarryState = { lastRows: new Map(), misses: new Map() };
+export const EMPTY_CARRY: CarryState = { lastRows: new Map() };
+
+export interface CarryInput {
+  /** 이번에 받은 행 전부 */
+  fresh: readonly ActiveService[];
+  /** 팩을 하나라도 돌려준 오브젝트 */
+  answered: readonly number[];
+  /** 그중 빈 팩이던 오브젝트 */
+  empty: readonly number[];
+  /** 물었어야 할 오브젝트 — 여기 있는데 답이 없으면 «묻지도 않았다» 다 */
+  expected: readonly number[];
+  now: number;
+}
 
 export interface CarryResult {
   /** 화면에 놓을 행 — 이번에 받은 것 + 이어 붙인 지난 값 */
   rows: ActiveService[];
   /** 지난 값을 보여주고 있는 서버 */
   stale: ReadonlySet<number>;
-  /** 이번에 못 닿은 서버 전부 (지난 값이 있든 없든) */
-  unreached: ReadonlySet<number>;
+  /** 이번에 못 받은 서버와 그 이유 (지난 값이 있든 없든) */
+  missed: ReadonlyMap<number, MissKind>;
   next: CarryState;
 }
 
 /**
  * 이번 응답과 직전 상태를 합친다.
  *
- * `unreached` 에 없는 서버는 **닿은 것**으로 본다 — 0건이라 행이 하나도 없어도 그렇다.
- * (콜렉터 응답에서 0건 서버는 행으로 드러나지 않으므로, 「행이 있다」 로 닿음을
- * 가르면 한가한 서버의 옛 행이 영영 안 지워진다.)
+ * **«답했다» 의 기준은 팩이 왔는가다.** 행이 있는가로 가르면 한가해진 서버의 옛 행이
+ * 영영 안 지워진다 — 0건인 서버는 행으로 드러나지 않기 때문이다.
  */
-export function carryUnreached(
-  prev: CarryState,
-  fresh: readonly ActiveService[],
-  unreachedList: readonly number[],
-): CarryResult {
-  const unreached = new Set(unreachedList);
+export function carryUnreached(prev: CarryState, input: CarryInput): CarryResult {
+  const { fresh, answered, empty, expected, now } = input;
+  const answeredSet = new Set(answered);
+
+  const missed = new Map<number, MissKind>();
+  for (const h of empty) missed.set(h, 'empty');
+  for (const h of expected) {
+    if (!answeredSet.has(h)) missed.set(h, 'silent');
+  }
 
   const byHash = new Map<number, ActiveService[]>();
   for (const r of fresh) {
-    if (unreached.has(r.obj_hash)) continue;
+    if (missed.has(r.obj_hash)) continue;
     const list = byHash.get(r.obj_hash);
     if (list) list.push(r);
     else byHash.set(r.obj_hash, [r]);
   }
 
-  const lastRows = new Map<number, readonly ActiveService[]>();
-  const misses = new Map<number, number>();
+  const lastRows = new Map<number, { rows: readonly ActiveService[]; at: number }>();
   const rows: ActiveService[] = [];
   const stale = new Set<number>();
 
-  // 닿은 서버 — 받은 그대로. 없던 서버도, 행이 사라진 서버도 여기서 정리된다.
-  for (const [h, list] of byHash) {
-    lastRows.set(h, list);
+  // 답한 서버 — 받은 그대로. 행이 하나도 없어도 «한가하다» 로 기록한다.
+  for (const h of answeredSet) {
+    if (missed.get(h) === 'empty') continue;
+    const list = byHash.get(h) ?? [];
+    lastRows.set(h, { rows: list, at: now });
     rows.push(...list);
   }
 
-  // 못 닿은 서버 — 횟수 안이면 지난 값을 이어 붙인다.
-  for (const h of unreached) {
-    const n = (prev.misses.get(h) ?? 0) + 1;
-    misses.set(h, n);
+  // 못 받은 서버 — 아직 시간 안이면 지난 값을 이어 붙인다.
+  for (const h of missed.keys()) {
     const last = prev.lastRows.get(h);
-    if (last && last.length > 0 && n <= MAX_CARRY) {
-      lastRows.set(h, last);
-      rows.push(...last);
-      stale.add(h);
-    }
+    if (!last || last.rows.length === 0 || now - last.at > CARRY_MS) continue;
+    lastRows.set(h, last);
+    rows.push(...last.rows);
+    stale.add(h);
   }
 
-  return { rows, stale, unreached, next: { lastRows, misses } };
+  return { rows, stale, missed, next: { lastRows } };
 }

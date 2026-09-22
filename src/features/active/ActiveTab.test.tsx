@@ -54,15 +54,30 @@ const AGENTS = new Map([
   [91, '/h/shop-app/HikariPool-1'],
 ]);
 
-beforeEach(() => api.getTypeActiveServices.mockResolvedValue({ rows: ROWS, incomplete: [] }));
+/** 콜렉터 응답 한 벌. `answered` 를 안 넣으면 실제 응답과 모양이 달라진다 */
+function reply(rows: ActiveService[], o: { incomplete?: number[]; answered?: number[] } = {}) {
+  return {
+    rows,
+    incomplete: o.incomplete ?? [],
+    answered: o.answered ?? [...new Set(rows.map(r => r.obj_hash))],
+  };
+}
+
+beforeEach(() => api.getTypeActiveServices.mockResolvedValue(reply(ROWS)));
 afterEach(() => vi.clearAllMocks());
 
-function draw(picked: number[] = [], poolHashes: number[] = [], javaeeTypes: string[] = ['tomcat']) {
+function draw(
+  picked: number[] = [],
+  poolHashes: number[] = [],
+  javaeeTypes: string[] = ['tomcat'],
+  expectedHashes: number[] = [1, 2],
+) {
   render(
     <ActiveTab
       enabled
       javaeeTypes={javaeeTypes}
       picked={new Set(picked)}
+      expectedHashes={expectedHashes}
       agentMap={AGENTS}
       poolHashes={poolHashes}
     />,
@@ -91,7 +106,7 @@ describe('ActiveTab — 게이지', () => {
   });
 
   it('한가하면 «없음» 이라고 말한다', async () => {
-    api.getTypeActiveServices.mockResolvedValue({ rows: [], incomplete: [] });
+    api.getTypeActiveServices.mockResolvedValue(reply([]));
     draw();
     await waitFor(() => expect(gauge().getByText('없음')).toBeTruthy());
   });
@@ -179,11 +194,20 @@ describe('ActiveTab — 정직하게 말하기', () => {
     expect(txns().queryByText('/shop/ping<GET>')).toBeNull();
   });
 
-  it('못 닿은 서버가 있으면 이름까지 말한다 — 조용히 적게 보여주지 않는다', async () => {
-    // 수만 적으면 어느 서버를 믿고 봐야 할지 모른다.
-    api.getTypeActiveServices.mockResolvedValue({ rows: ROWS, incomplete: [2] });
+  it('연결을 못 얻은 서버는 이름과 이유를 말한다', async () => {
+    // 수만 적으면 어느 서버를 믿고 봐야 할지 모르고, 이유를 안 적으면 어디를 고칠지 모른다.
+    api.getTypeActiveServices.mockResolvedValue(reply(ROWS, { incomplete: [2] }));
     draw();
-    expect(await screen.findByText(/이번 갱신에 닿지 못한 서버: \/h\/order-app/)).toBeTruthy();
+    expect(await screen.findByText(/연결을 못 얻어 못 물어본 서버: \/h\/order-app/)).toBeTruthy();
+  });
+
+  it('콜렉터가 묻지도 않은 서버를 따로 말한다 — 이유가 다르면 고칠 곳도 다르다', async () => {
+    // 하트비트가 끊긴 것으로 보이면 빈 팩조차 안 온다. 앞 판에서 이 경우를 놓쳤다.
+    api.getTypeActiveServices.mockResolvedValue(
+      reply(ROWS.filter(r => r.obj_hash !== 2), { answered: [1] }),
+    );
+    draw();
+    expect(await screen.findByText(/콜렉터가 비활성으로 보는 서버: \/h\/order-app/)).toBeTruthy();
   });
 
   it('이 화면이 못 보여주는 것을 화면에 적어 둔다', async () => {
@@ -238,8 +262,8 @@ describe('ActiveTab — 떴다 사라졌다 하지 않게', () => {
     api.getTypeActiveServices.mockImplementation((type: string) =>
       Promise.resolve(
         type === 'java'
-          ? { rows: [row({ obj_hash: 2, id: 9, txid: 'j', service: '/batch/run<GET>', elapsed: 2_000 })], incomplete: [] }
-          : { rows: ROWS.slice(0, 1), incomplete: [] },
+          ? reply([row({ obj_hash: 2, id: 9, txid: 'j', service: '/batch/run<GET>', elapsed: 2_000 })])
+          : reply(ROWS.slice(0, 1)),
       ),
     );
     draw([], [], ['tomcat', 'java']);
@@ -249,11 +273,24 @@ describe('ActiveTab — 떴다 사라졌다 하지 않게', () => {
     await waitFor(() => expect(txns().getByText('/batch/run<GET>')).toBeTruthy());
   });
 
-  it('갱신 중 못 닿은 서버의 행을 지우지 않고 «지난 값» 으로 남긴다', async () => {
+  it('빈 팩이 온 서버의 행을 지우지 않고 «지난 값» 으로 남긴다', async () => {
     // 지우면 «끝났다» 로 읽힌다. 실제로는 콜렉터가 그 서버에 못 물어본 것이다.
     api.getTypeActiveServices
-      .mockResolvedValueOnce({ rows: ROWS, incomplete: [] })
-      .mockResolvedValue({ rows: ROWS.filter(r => r.obj_hash !== 2), incomplete: [2] });
+      .mockResolvedValueOnce(reply(ROWS))
+      .mockResolvedValue(reply(ROWS.filter(r => r.obj_hash !== 2), { incomplete: [2] }));
+    draw();
+    await screen.findAllByText('12.4초');
+    fireEvent.click(screen.getByRole('button', { name: '지금 받기' }));
+    await waitFor(() => expect(txns().getByText('지난 값')).toBeTruthy());
+    expect(txns().getByText('/shop/ping<GET>')).toBeTruthy();
+  });
+
+  it('**팩이 아예 안 온 서버도** «지난 값» 으로 남긴다 — 여기서 여전히 깜빡였다', async () => {
+    // 콜렉터가 비활성으로 보면 빈 팩도 안 온다. 앞 판은 이 경우를 그냥 지워서
+    // «고쳤는데 여전히 사라졌다 보였다» 가 됐다.
+    api.getTypeActiveServices
+      .mockResolvedValueOnce(reply(ROWS))
+      .mockResolvedValue(reply(ROWS.filter(r => r.obj_hash !== 2), { answered: [1] }));
     draw();
     await screen.findAllByText('12.4초');
     fireEvent.click(screen.getByRole('button', { name: '지금 받기' }));

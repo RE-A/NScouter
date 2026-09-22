@@ -1737,9 +1737,14 @@ pub async fn get_type_active_services(
 
     let mut rows = Vec::new();
     let mut incomplete = Vec::new();
+    let mut answered = Vec::new();
     for m in &maps {
+        // **팩이 왔다는 것 자체가 신호다.** 행이 0건이어도 «물어봤고 한가하다» 는 뜻이라,
+        // 팩이 아예 없는 오브젝트(콜렉터가 비활성으로 보고 건너뛴 것)와 구별해야 한다.
+        let hash = m.get_decimal("objHash").unwrap_or(0) as i32;
+        answered.push(hash);
         if !is_complete(m) {
-            incomplete.push(m.get_decimal("objHash").unwrap_or(0) as i32);
+            incomplete.push(hash);
         }
         rows.extend(parse_active_services(m));
     }
@@ -1748,11 +1753,12 @@ pub async fn get_type_active_services(
     rows.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
 
     log::debug!(
-        "get_type_active_services: {obj_type} → {}행 (미완 {}개)",
+        "get_type_active_services: {obj_type} → {}행 (답한 오브젝트 {} · 그중 빈손 {})",
         rows.len(),
+        answered.len(),
         incomplete.len()
     );
-    Ok(TypeActiveServices { rows, incomplete })
+    Ok(TypeActiveServices { rows, incomplete, answered })
 }
 
 /// 오늘 방문자 수.

@@ -7581,3 +7581,118 @@ fn probe_active_service_short_wait() {
     println!("되돌리기 result={restored}, 원문 일치={}", back == original);
     assert_eq!(back, original, "원문을 되돌리지 못했다");
 }
+
+/// 하트비트가 끊기면 콜렉터는 **묻지도 않는다** — 팩 자체가 안 온다.
+///
+/// Active 탭이 갱신마다 떴다 사라졌다 하던 두 번째 원인이다. 첫 번째(빈 팩,
+/// `probe_active_service_short_wait`)와 달리 **아무 신호도 없어서**, 응답만 보면
+/// «그 서버는 한가하다» 와 구별되지 않는다.
+///
+/// 콜렉터는 `AgentManager.getLiveObjHashList` 로 대상을 고르는데 `alive` 인 것만 돌려주고,
+/// 하트비트(UDP)가 `object_deadtime_ms`(기본 8초) 안에 안 오면 `alive` 가 꺼진다.
+///
+/// 돌리는 법 — 다른 창에서 에이전트의 하트비트를 끊었다 잇는다:
+///   podman pause shop-app ; sleep 10 ; podman unpause shop-app
+/// 25초 동안 1초마다 «누가 답했나» 를 찍는다.
+#[test]
+#[ignore]
+fn probe_active_service_heartbeat_gap() {
+    use nscouter_lib::scouter::objtype::build_active_service_param;
+    use std::time::Duration;
+
+    let objs = {
+        let mut c = login();
+        javaee_objects(&fetch_objects(&mut c))
+    };
+    let obj_type = objs.first().map(|(t, _)| t.clone()).expect("자바 에이전트가 없다");
+    let names: Vec<(i32, String)> = {
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_OBJECT_LIST_REAL_TIME, sess, &MapPack::new()).unwrap();
+        let mut out = Vec::new();
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Object(o) = pack {
+                out.push((o.obj_hash, o.obj_name));
+            }
+        }
+        out
+    };
+
+    // **탐침이 직접 끊는다.** 다른 창에서 손으로 맞추면 멈춘 구간과 조회 시점이 어긋난다 —
+    // 실제로 그렇게 하다가 «멈췄는데도 계속 답함» 을 보고 한참 헤맸다.
+    let container = std::env::var("NSCOUTER_PAUSE_CONTAINER").unwrap_or_default();
+    let podman = |cmd: &str| {
+        if container.is_empty() {
+            return;
+        }
+        let ok = std::process::Command::new("podman")
+            .arg(cmd)
+            .arg(&container)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        println!("   >> podman {cmd} {container} → {ok}");
+    };
+
+    println!("{obj_type} — 1초마다 25회. «답함» 은 팩이 온 것, «없음» 은 콜렉터가 묻지도 않은 것\n");
+    if container.is_empty() {
+        println!("(NSCOUTER_PAUSE_CONTAINER 를 주면 5회차에 멈추고 17회차에 다시 켠다)");
+    }
+
+    for i in 1..=25 {
+        if i == 5 {
+            podman("pause");
+        }
+        if i == 17 {
+            podman("unpause");
+        }
+        let mut c = login();
+        let sess = c.session;
+        c.send_request(CMD_OBJECT_ACTIVE_SERVICE_LIST, sess, &build_active_service_param(&obj_type, None))
+            .unwrap();
+
+        let mut answered = Vec::new();
+        let mut rows = 0usize;
+        while let Ok(Some(pack)) = c.read_next_pack() {
+            if let AnyPack::Map(m) = pack {
+                let h = m.get_decimal("objHash").unwrap_or(0) as i32;
+                let reached = m.entries.contains_key("complete");
+                rows += nscouter_lib::scouter::object::parse_active_services(&m).len();
+                answered.push((h, reached));
+            }
+        }
+
+        // 살아 있다고 보는 오브젝트도 같이 본다 — 둘이 함께 움직이면 하트비트가 원인이다.
+        let alive: Vec<i32> = {
+            let mut c = login();
+            let sess = c.session;
+            c.send_request(CMD_OBJECT_LIST_REAL_TIME, sess, &MapPack::new()).unwrap();
+            let mut out = Vec::new();
+            while let Ok(Some(pack)) = c.read_next_pack() {
+                if let AnyPack::Object(o) = pack {
+                    if o.alive && o.obj_type == obj_type {
+                        out.push(o.obj_hash);
+                    }
+                }
+            }
+            out
+        };
+
+        let seen: Vec<String> = names
+            .iter()
+            .filter(|(_, n)| n.contains("app"))
+            .map(|(h, n)| {
+                let short = n.rsplit('/').next().unwrap_or(n);
+                let a = match answered.iter().find(|(hash, _)| hash == h) {
+                    Some((_, true)) => "답함",
+                    Some((_, false)) => "빈팩",
+                    None => "**없음**",
+                };
+                let live = if alive.contains(h) { "alive" } else { "**dead**" };
+                format!("{short}={a}/{live}")
+            })
+            .collect();
+        println!("{i:2}초 행 {rows:2} · {}", seen.join(" · "));
+        std::thread::sleep(Duration::from_millis(1000));
+    }
+}

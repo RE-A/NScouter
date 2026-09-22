@@ -137,9 +137,17 @@ export function threadStatTone(stat: string): string {
 export interface TypeActiveServices {
   rows: ActiveService[];
   /**
-   * 끝까지 응답하지 못한 오브젝트.
+   * **빈 팩**이 온 오브젝트 — 콜렉터가 에이전트 연결을 제때 못 얻었다 (`S501`).
    *
    * 조용히 적게 보여주면 "지금 한가하다"로 오해한다.
    */
   incomplete: number[];
+  /**
+   * 팩을 하나라도 돌려준 오브젝트. **행이 0건이어도 여기 들어간다.**
+   *
+   * 여기 없는 오브젝트는 콜렉터가 **묻지도 않은** 것이다 — 살아 있지 않다고 보면
+   * 조회 대상에서 빼고 빈 팩조차 안 보낸다. 그 경우는 응답만으로는 «한가하다» 와
+   * 구별되지 않아, 부르는 쪽이 «물었어야 할 목록» 과 견줘야 한다.
+   */
+  answered: number[];
 }

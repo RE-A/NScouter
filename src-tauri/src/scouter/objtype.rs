@@ -37,12 +37,24 @@ pub struct ActiveSpeed {
 
 /// 타입 전체의 액티브 서비스 목록.
 ///
-/// `incomplete` 는 **끝까지 응답하지 못한 오브젝트**다. 조용히 적게 보여주면
-/// "지금 한가하다"로 오해한다.
+/// **못 받은 것이 두 가지다.** 둘을 구별하지 못하면 화면이 «한가하다» 로 잘못 말한다.
+///
+/// | | 무슨 일 | 응답 |
+/// |---|---|---|
+/// | `incomplete` | 콜렉터가 에이전트 연결을 제때 못 얻었다 (`S501`) | objHash 만 든 빈 팩 |
+/// | `answered` 에 없음 | 콜렉터가 **아예 묻지 않았다** | 팩 자체가 없다 |
+///
+/// 뒤쪽은 콜렉터가 그 오브젝트를 «살아 있지 않다» 로 볼 때다 —
+/// 하트비트(UDP)가 `object_deadtime_ms`(기본 8초) 안에 안 오면 그렇게 된다
+/// (코드: `AgentManager.getLiveObjHashList` 가 `alive` 인 것만 돌려준다).
+/// 그래서 **답한 오브젝트 목록을 같이 준다.** 부르는 쪽이 «물어봤는데 0건» 과
+/// «묻지도 않았다» 를 가를 수 있어야 한다.
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeActiveServices {
     pub rows: Vec<super::object::ActiveService>,
     pub incomplete: Vec<i32>,
+    /// 팩을 하나라도 돌려준 오브젝트. 행이 0건이어도 여기 들어간다
+    pub answered: Vec<i32>,
 }
 
 /// 한 오브젝트의 시계열. 오늘/과거 카운터 응답이 이 모양이다.

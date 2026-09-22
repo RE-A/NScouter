@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 import {
   advanceHolds,
   carryUnreached,
+  CARRY_MS,
   EMPTY_CARRY,
-  MAX_CARRY,
   elapsedPct,
   formatElapsed,
   groupByResource,
@@ -219,54 +219,149 @@ describe('시간 표기', () => {
 describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
   const a1 = row({ obj_hash: 1, id: 1, txid: 'a1', elapsed: 5_000 });
   const b1 = row({ obj_hash: 2, id: 2, txid: 'b1', elapsed: 900 });
+  const T0 = 1_000_000;
 
-  it('못 닿은 서버의 행을 지우지 않고 지난 값으로 이어 보여준다', () => {
-    // 지우면 «끝났다» 로 읽힌다. 실제로는 못 물어본 것이다.
-    const first = carryUnreached(EMPTY_CARRY, [a1, b1], []);
-    const second = carryUnreached(first.next, [b1], [1]);
-    expect(second.rows.map(r => r.txid).sort()).toEqual(['a1', 'b1']);
-    expect([...second.stale]).toEqual([1]);
+  /** 두 서버가 다 답한 한 번의 갱신 */
+  function bothAnswered(at = T0) {
+    return carryUnreached(EMPTY_CARRY, {
+      fresh: [a1, b1],
+      answered: [1, 2],
+      empty: [],
+      expected: [1, 2],
+      now: at,
+    });
+  }
+
+  it('빈 팩이 온 서버의 행을 지우지 않고 지난 값으로 이어 보여준다', () => {
+    // 콜렉터가 에이전트 연결을 못 얻은 경우. 지우면 «끝났다» 로 읽힌다.
+    const next = carryUnreached(bothAnswered().next, {
+      fresh: [b1],
+      answered: [1, 2],
+      empty: [1],
+      expected: [1, 2],
+      now: T0 + 2_000,
+    });
+    expect(next.rows.map(r => r.txid).sort()).toEqual(['a1', 'b1']);
+    expect([...next.stale]).toEqual([1]);
+    expect(next.missed.get(1)).toBe('empty');
   });
 
-  it('닿은 서버의 행은 지난 값으로 표시하지 않는다', () => {
-    const first = carryUnreached(EMPTY_CARRY, [a1, b1], []);
-    const second = carryUnreached(first.next, [b1], [1]);
-    expect(second.stale.has(2)).toBe(false);
+  it('**팩이 아예 안 온 서버도** 이어 보여준다 — 콜렉터가 묻지도 않은 경우', () => {
+    // 하트비트가 끊긴 것으로 보이면 콜렉터는 그 서버를 조회 대상에서 빼고,
+    // 빈 팩조차 보내지 않는다. 이 경우를 놓쳐서 «고쳤는데 여전히 깜빡인다» 가 됐다.
+    const next = carryUnreached(bothAnswered().next, {
+      fresh: [b1],
+      answered: [2],
+      empty: [],
+      expected: [1, 2],
+      now: T0 + 2_000,
+    });
+    expect(next.rows.map(r => r.txid).sort()).toEqual(['a1', 'b1']);
+    expect([...next.stale]).toEqual([1]);
+    expect(next.missed.get(1)).toBe('silent');
   });
 
-  it('정해진 횟수를 넘기면 지난 값을 버린다 — 죽은 서버가 영원히 «실행 중» 으로 남지 않게', () => {
-    let s = carryUnreached(EMPTY_CARRY, [a1], []).next;
-    for (let i = 0; i < MAX_CARRY; i++) {
-      const r = carryUnreached(s, [], [1]);
-      expect(r.rows).toHaveLength(1);
-      s = r.next;
-    }
-    const over = carryUnreached(s, [], [1]);
+  it('답한 서버의 행은 지난 값으로 표시하지 않는다', () => {
+    const next = carryUnreached(bothAnswered().next, {
+      fresh: [b1],
+      answered: [2],
+      empty: [],
+      expected: [1, 2],
+      now: T0 + 2_000,
+    });
+    expect(next.stale.has(2)).toBe(false);
+  });
+
+  it('정해진 시간을 넘기면 지난 값을 버린다 — 죽은 서버가 영원히 «실행 중» 으로 남지 않게', () => {
+    const miss = (at: number, prev = bothAnswered().next) =>
+      carryUnreached(prev, { fresh: [], answered: [], empty: [], expected: [1], now: at });
+
+    expect(miss(T0 + CARRY_MS).rows).toHaveLength(1);
+    const over = miss(T0 + CARRY_MS + 1);
     expect(over.rows).toHaveLength(0);
     // 버렸어도 «못 닿음» 은 계속 알린다
-    expect(over.unreached.has(1)).toBe(true);
+    expect(over.missed.get(1)).toBe('silent');
   });
 
-  it('다시 닿으면 횟수를 처음부터 센다', () => {
-    let s = carryUnreached(EMPTY_CARRY, [a1], []).next;
-    s = carryUnreached(s, [], [1]).next;
-    s = carryUnreached(s, [a1], []).next;
-    expect(s.misses.get(1)).toBeUndefined();
+  it('**횟수가 아니라 시간으로 센다** — 주기를 바꿔도 같은 만큼 버틴다', () => {
+    // 1초 주기로 다섯 번 못 받아도 아직 5초다. 횟수로 세면 여기서 이미 버렸다.
+    let state = bothAnswered().next;
+    for (let i = 1; i <= 5; i++) {
+      const r = carryUnreached(state, {
+        fresh: [],
+        answered: [],
+        empty: [],
+        expected: [1],
+        now: T0 + i * 1_000,
+      });
+      expect(r.rows).toHaveLength(1);
+      state = r.next;
+    }
   });
 
-  it('0건이라 행이 없는 서버도 닿은 것이다 — 옛 행을 붙들지 않는다', () => {
-    // 한가해진 서버는 응답에 행이 하나도 없다. 「행이 있다」 로 닿음을 가르면
+  it('다시 답하면 시간이 처음부터 간다', () => {
+    const missed = carryUnreached(bothAnswered().next, {
+      fresh: [],
+      answered: [],
+      empty: [],
+      expected: [1],
+      now: T0 + 10_000,
+    });
+    const back = carryUnreached(missed.next, {
+      fresh: [a1],
+      answered: [1],
+      empty: [],
+      expected: [1],
+      now: T0 + 12_000,
+    });
+    const later = carryUnreached(back.next, {
+      fresh: [],
+      answered: [],
+      empty: [],
+      expected: [1],
+      now: T0 + 12_000 + CARRY_MS,
+    });
+    expect(later.rows).toHaveLength(1);
+    expect(later.stale.has(1)).toBe(true);
+  });
+
+  it('0건이라 행이 없는 서버도 답한 것이다 — 옛 행을 붙들지 않는다', () => {
+    // 한가해진 서버는 응답에 행이 하나도 없다. 「행이 있다」 로 답했음을 가르면
     // 방금 끝난 트랜잭션이 지난 값으로 계속 남는다.
-    const first = carryUnreached(EMPTY_CARRY, [a1], []);
-    const idle = carryUnreached(first.next, [], []);
+    const idle = carryUnreached(bothAnswered().next, {
+      fresh: [],
+      answered: [1, 2],
+      empty: [],
+      expected: [1, 2],
+      now: T0 + 2_000,
+    });
     expect(idle.rows).toHaveLength(0);
     expect(idle.stale.size).toBe(0);
+    expect(idle.missed.size).toBe(0);
   });
 
-  it('처음부터 못 닿은 서버는 이어 붙일 것이 없다 — 지어내지 않는다', () => {
-    const r = carryUnreached(EMPTY_CARRY, [], [7]);
+  it('처음부터 못 받은 서버는 이어 붙일 것이 없다 — 지어내지 않는다', () => {
+    const r = carryUnreached(EMPTY_CARRY, {
+      fresh: [],
+      answered: [],
+      empty: [],
+      expected: [7],
+      now: T0,
+    });
     expect(r.rows).toHaveLength(0);
     expect(r.stale.size).toBe(0);
-    expect(r.unreached.has(7)).toBe(true);
+    expect(r.missed.get(7)).toBe('silent');
+  });
+
+  it('고르지 않은 서버가 답하지 않은 것은 알리지 않는다', () => {
+    // expected 에 없는 서버는 애초에 물을 대상이 아니다.
+    const r = carryUnreached(EMPTY_CARRY, {
+      fresh: [b1],
+      answered: [2],
+      empty: [],
+      expected: [2],
+      now: T0,
+    });
+    expect(r.missed.size).toBe(0);
   });
 });

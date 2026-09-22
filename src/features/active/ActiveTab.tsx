@@ -46,6 +46,14 @@ interface ActiveTabProps {
   javaeeTypes: readonly string[];
   /** 왼쪽에서 고른 서버. 여기 없는 서버의 것은 보여주지 않는다 */
   picked: ReadonlySet<number>;
+  /**
+   * 고른 것 중 **답이 와야 할** WAS.
+   *
+   * 콜렉터는 살아 있다고 보는 오브젝트에만 묻는다. 하트비트가 끊긴 것으로 보이면
+   * 빈 팩조차 안 보내서, 응답만으로는 «한가하다» 와 «묻지도 않았다» 가 구별되지 않는다.
+   * 여기 견줘서 후자를 찾는다.
+   */
+  expectedHashes: readonly number[];
   agentMap: Map<number, string>;
   /**
    * 고른 것 중 커넥션 풀(datasource) 오브젝트.
@@ -65,6 +73,7 @@ export const ActiveTab = memo(function ActiveTab({
   enabled,
   javaeeTypes,
   picked,
+  expectedHashes,
   agentMap,
   poolHashes,
 }: ActiveTabProps) {
@@ -75,7 +84,7 @@ export const ActiveTab = memo(function ActiveTab({
   /** 쿼리 상세를 연 줄 */
   const [queryOf, setQueryOf] = useState<ActiveService | null>(null);
 
-  const feed = useActiveServices(javaeeTypes, enabled, period);
+  const feed = useActiveServices(javaeeTypes, expectedHashes, enabled, period);
   const poolCounters = usePoolCounters(enabled);
 
   const serverName = useCallback(
@@ -98,12 +107,20 @@ export const ActiveTab = memo(function ActiveTab({
     [poolHashes, agentMap, poolCounters],
   );
 
-  /** 고른 서버 중 못 닿은 것. 안 고른 서버가 못 닿은 것까지 알릴 이유는 없다 */
-  const unreachedMine = useMemo(
-    () => [...feed.unreached].filter(h => picked.size === 0 || picked.has(h)),
-    [feed.unreached, picked],
-  );
-  const staleMine = unreachedMine.filter(h => feed.stale.has(h)).length;
+  /**
+   * 고른 서버 중 못 받은 것을 이유별로.
+   *
+   * **둘을 합쳐 적으면 안 된다.** 고치는 방법이 다르다 — 앞은 에이전트 연결(세션)이고,
+   * 뒤는 하트비트다.
+   */
+  const missedMine = useMemo(() => {
+    const mineOnly = [...feed.missed].filter(([h]) => picked.size === 0 || picked.has(h));
+    return {
+      empty: mineOnly.filter(([, kind]) => kind === 'empty').map(([h]) => h),
+      silent: mineOnly.filter(([, kind]) => kind === 'silent').map(([h]) => h),
+      stale: mineOnly.filter(([h]) => feed.stale.has(h)).length,
+    };
+  }, [feed.missed, feed.stale, picked]);
 
   const counts = useMemo(() => stepCounts(mine), [mine]);
   const groups = useMemo(() => groupByResource(mine), [mine]);
@@ -176,15 +193,27 @@ export const ActiveTab = memo(function ActiveTab({
           {feed.error}
         </p>
       )}
-      {unreachedMine.length > 0 && (
-        // 조용히 적게 보여주면 «지금 한가하다» 로 오해한다. **누가** 빠졌는지까지 적는다 —
-        // 수만 적으면 어느 서버를 믿고 봐야 할지 모른다.
+      {/* 조용히 적게 보여주면 «지금 한가하다» 로 오해한다. **누가·왜** 빠졌는지까지 적는다 —
+          수만 적으면 어느 서버를 믿고 봐야 할지 모르고, 이유를 안 적으면 어디를 고칠지 모른다. */}
+      {missedMine.empty.length > 0 && (
         <p
           className="border-b border-line px-3 py-1.5 text-micro text-warn"
-          title={t('콜렉터가 이 서버의 에이전트 연결을 제때 얻지 못했습니다. 네트워크가 느리거나 다른 요청이 연결을 쓰는 중일 때 일어납니다.')}
+          title={t('콜렉터가 이 서버의 에이전트 연결을 제때 얻지 못했습니다. 콜렉터 로그의 S501 을 확인하세요.')}
         >
-          {t('이번 갱신에 닿지 못한 서버')}: {unreachedMine.map(serverName).join(', ')}
-          {staleMine > 0 && ` — ${t('직전 값을 흐리게 이어 보여줍니다')}`}
+          {t('연결을 못 얻어 못 물어본 서버')}: {missedMine.empty.map(serverName).join(', ')}
+        </p>
+      )}
+      {missedMine.silent.length > 0 && (
+        <p
+          className="border-b border-line px-3 py-1.5 text-micro text-warn"
+          title={t('콜렉터가 이 서버를 «비활성» 으로 보고 조회 대상에서 뺐습니다. 하트비트(UDP)가 object_deadtime_ms(기본 8초) 안에 오지 않으면 그렇게 됩니다.')}
+        >
+          {t('콜렉터가 비활성으로 보는 서버')}: {missedMine.silent.map(serverName).join(', ')}
+        </p>
+      )}
+      {missedMine.stale > 0 && (
+        <p className="border-b border-line px-3 py-1.5 text-micro text-fg-faint">
+          {t('못 받은 서버는 직전 값을 흐리게 이어 보여줍니다')}
         </p>
       )}
 

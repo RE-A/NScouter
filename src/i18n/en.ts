@@ -29,13 +29,17 @@ export const EN: Record<string, string> = {
   'Active 탭': 'Active tab',
   '실행 중': 'Running',
   '액티브 현황': 'Active overview',
-  '이번 갱신에 닿지 못한 서버': 'Servers not reached this refresh',
-  '직전 값을 흐리게 이어 보여줍니다': 'showing their previous values dimmed',
+  '연결을 못 얻어 못 물어본 서버': 'Not asked — agent connection unavailable',
+  '콜렉터가 비활성으로 보는 서버': 'Treated as inactive by the collector',
+  '못 받은 서버는 직전 값을 흐리게 이어 보여줍니다':
+    'Servers with no answer keep showing their previous values, dimmed',
+  '콜렉터가 이 서버를 «비활성» 으로 보고 조회 대상에서 뺐습니다. 하트비트(UDP)가 object_deadtime_ms(기본 8초) 안에 오지 않으면 그렇게 됩니다.':
+    'The collector treats this server as inactive and skipped it. That happens when its heartbeat (UDP) does not arrive within object_deadtime_ms (8s by default).',
   '지난 값': 'previous',
   '이번 갱신에 이 서버에 닿지 못해 직전 값을 보여줍니다':
     'This server was not reached this refresh; showing its previous values',
-  '콜렉터가 이 서버의 에이전트 연결을 제때 얻지 못했습니다. 네트워크가 느리거나 다른 요청이 연결을 쓰는 중일 때 일어납니다.':
-    'The collector could not get this agent’s connection in time. This happens when the network is slow or another request is using the connection.',
+  '콜렉터가 이 서버의 에이전트 연결을 제때 얻지 못했습니다. 콜렉터 로그의 S501 을 확인하세요.':
+    'The collector could not get this agent’s connection in time. Check S501 in the collector log.',
   '사용 중': 'In use',
   '유휴': 'Idle',
   '왼쪽에서 커넥션 풀을 함께 골라야 값이 옵니다.':

@@ -45,7 +45,8 @@
 
 | 증상 | 먼저 확인 | 바꿀 설정 |
 |---|---|---|
-| 갱신마다 떴다 사라졌다 · «이번 갱신에 닿지 못한 서버» | 콜렉터 로그에 `[S501] Cannot find a tcp agent` | [콜] `net_tcp_get_agent_connection_wait_ms` ↑ · [에] `net_collector_tcp_session_count` ↑ |
+| 갱신마다 떴다 사라졌다 · «연결을 못 얻어 못 물어본 서버» | 콜렉터 로그에 `[S501] Cannot find a tcp agent` | [콜] `net_tcp_get_agent_connection_wait_ms` ↑ · [에] `net_collector_tcp_session_count` ↑ |
+| 갱신마다 떴다 사라졌다 · «콜렉터가 비활성으로 보는 서버» · 왼쪽 목록의 살아 있음 표시도 깜빡인다 | 하트비트는 **UDP 6100** 으로 간다 — 방화벽·보안그룹·NAT·MTU 로 유실되는지 | [콜] `object_deadtime_ms` ↑ (기본 8초). 근본은 UDP 유실을 없애는 것 |
 | 어떤 서버의 서비스가 한 번도 안 뜬다 | ① 그 서버에 S501 이 계속 찍히나 ② 서버 **종류**가 `tomcat`·`java`·`jboss`·`jetty`·`resin` 인가 | ① 위와 같음 ② 아래 5장 «WAS 로 안 잡힌다» |
 | 짧은 쿼리가 거의 안 보인다 | — | **정상이다.** 순간 스냅샷이다 |
 
