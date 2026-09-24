@@ -5,6 +5,10 @@
 //
 // 풀이 없을 때 **줄을 통째로 숨기지 않는다.** 두 관문(F-41)을 안 열면 풀 오브젝트
 // 자체가 안 잡히는데, 화면에서 사라지면 «이 앱은 커넥션 풀을 못 본다» 로 읽힌다.
+//
+// **고르라고 시키지 않는다.** 고른 WAS 아래 풀은 앱이 스스로 찾아 받는다
+// (App 의 `poolHashes`). 그래서 여기서 비어 있다는 것은 «안 골랐다» 가 아니라
+// 둘 중 하나다 — 풀 오브젝트 자체가 없거나(관문), 이름이 부모와 안 이어지거나.
 
 import { memo } from 'react';
 import { poolLevel, usagePct, type Pool, type PoolLevel } from './poolModel';
@@ -20,11 +24,16 @@ const LEVEL: Record<PoolLevel, { bar: string; text: string }> = {
 
 interface PoolStripProps {
   pools: readonly Pool[];
-  /** 고른 것 중 WAS 는 있는데 풀이 하나도 없는가 */
-  noneSelected: boolean;
+  /**
+   * 콜렉터에 `datasource` 오브젝트가 **하나라도** 붙어 있는가.
+   *
+   * 비었을 때의 안내가 갈린다. 하나도 없으면 관문(F-41) 문제이고, 있는데 여기가
+   * 비었으면 이름이 부모 WAS 와 안 이어진 것이다 — 고치는 곳이 서로 다르다.
+   */
+  anyDatasource: boolean;
 }
 
-export const PoolStrip = memo(function PoolStrip({ pools, noneSelected }: PoolStripProps) {
+export const PoolStrip = memo(function PoolStrip({ pools, anyDatasource }: PoolStripProps) {
   return (
     <div className="rounded border border-line bg-raised px-3 py-2">
       <div className="mb-1.5 flex items-baseline justify-between">
@@ -38,8 +47,8 @@ export const PoolStrip = memo(function PoolStrip({ pools, noneSelected }: PoolSt
       {pools.length === 0 ? (
         // 왜 비었는지까지 적는다. «없다» 만 적으면 어디를 봐야 할지 알 수 없다.
         <p className="py-1 text-micro text-fg-faint">
-          {noneSelected
-            ? t('왼쪽에서 커넥션 풀을 함께 골라야 값이 옵니다.')
+          {anyDatasource
+            ? t('고른 서버 아래에 커넥션 풀이 없습니다. 풀 오브젝트는 있으니, 이름이 WAS 아래로 안 붙는 경우라면 왼쪽에서 그 풀을 직접 고르세요.')
             : t('커넥션 풀이 안 잡힙니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')}
         </p>
       ) : (

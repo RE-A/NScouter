@@ -15,6 +15,7 @@ import { CounterChart } from './features/xlog/components/CounterChart';
 import { XLogDetailPanel } from './features/xlog/components/XLogDetailPanel';
 import { ActiveServicePanel } from './features/xlog/components/ActiveServicePanel';
 import { ActiveTab } from './features/active/ActiveTab';
+import { poolsUnder } from './features/active/poolModel';
 import { SummaryPanel } from './features/xlog/components/SummaryPanel';
 import { TopologyPanel } from './features/xlog/components/TopologyPanel';
 import { FiveMinCounterChart } from './features/xlog/components/FiveMinCounterChart';
@@ -395,31 +396,6 @@ export default function App() {
     return () => { cancelled = true; };
   }, [isConnected]);
 
-  /**
-   * 카운터도 **고른 서버 것만** 받는다.
-   *
-   * 예전에는 붙어 있는 오브젝트 전부를 요청했다. 서버가 100대면 2초마다 오브젝트
-   * 100개짜리 요청이 나가고, 화면은 그중 몇 대만 그린다 — 나머지는 받아서 버린다.
-   */
-  const counterStreamRef = useRef<string>('');
-  useEffect(() => {
-    if (!isConnected) { counterStreamRef.current = ''; return; }
-    const hashes = [...filter.objHashSet];
-
-    if (hashes.length === 0) {
-      if (counterStreamRef.current !== '') {
-        counterStreamRef.current = '';
-        stopCounterStream().catch(() => {});
-      }
-      return;
-    }
-
-    const key = hashes.slice().sort((a, b) => a - b).join(',');
-    if (key === counterStreamRef.current) return;
-    counterStreamRef.current = key;
-    startCounterStream(hashes, ALL_CHART_COUNTERS).catch(() => {});
-  }, [isConnected, filter.objHashSet]);
-
   useEffect(() => {
     if (!isConnected) return;
     startAlertStream().catch(() => {});
@@ -427,7 +403,14 @@ export default function App() {
 
   const handleConfigChange = useCallback((p: Partial<XLogChartConfig>) => setConfig(prev => ({ ...prev, ...p })), []);
   const handleFilterChange = useCallback((p: Partial<XLogFilterState>) => setFilter(prev => ({ ...prev, ...p })), []);
-  const handleConnected = useCallback((_sid: string, _hashes: number[]) => {}, []);
+  /**
+   * 접속 창이 «붙었다» 고 알릴 때.
+   *
+   * **여기서 할 일이 없다.** 실제 상태(연결·오브젝트 목록·스트림)는 Rust 가 보내는
+   * `onConnected` 이벤트에 달린 effect 들이 세운다 — 접속 창으로 붙든 서버를
+   * 갈아타든 같은 길을 타야 «창으로 붙을 때와 갈아탈 때가 다르다» 가 안 생긴다.
+   */
+  const handleConnected = useCallback((_sid: string) => {}, []);
   const handleDisconnected = useCallback(() => {}, []);
 
   /**
@@ -493,7 +476,7 @@ export default function App() {
       }
       setSwitching(true);
       switchToServer(profile)
-        .then(hashes => {
+        .then(() => {
           setCurrentServer(label);
           // **콜백이 잡아 둔 `servers` 를 쓰면 안 된다.** 방금 `rememberServer` 가
           // 목록을 갈아 끼웠다면 그 사본은 이미 옛것이고, 그대로 저장하면
@@ -502,7 +485,7 @@ export default function App() {
             void persistServers(prev, label);
             return prev;
           });
-          handleConnected('scouter', hashes);
+          handleConnected('scouter');
         })
         .catch(() => {
           // 실패하면 끊긴 채로 남는다. 접속 폼이 다시 나오므로 손으로 붙을 수 있다.
@@ -668,6 +651,16 @@ export default function App() {
     if (xlogs.length === 1) openDetail(xlogs[0]);
   }, [openDetail, resetSearch]);
   const handleRowClick = useCallback((xlog: SXLog) => { openDetail(xlog); }, [openDetail]);
+  /**
+   * Active 탭의 트래픽 차트에서 끝난 점을 눌렀을 때.
+   *
+   * 상세 패널은 XLog 탭에 있다 — 여기서 열면 화면이 두 곳에 생긴다. 탭을 옮겨
+   * **원래 상세를 보던 자리**에서 열어 준다.
+   */
+  const handleOpenXLogFromActive = useCallback((xlog: SXLog) => {
+    openDetail(xlog);
+    setActiveTab('xlog');
+  }, [openDetail]);
   // 목록만 지우면 캔버스에 선택 사각형이 남는다. 둘 다 지운다.
   const handleClearSelection = useCallback(() => {
     setSelectedXLogs([]);
@@ -835,8 +828,20 @@ export default function App() {
    * 렌더마다 열면 그것만으로 앱이 바쁘다.
    */
   const streamHashesRef = useRef<string>('');
+  /**
+   * 어느 접속에서 연 스트림인가.
+   *
+   * **같은 목록이라도 서버를 갈아탔으면 다시 열어야 한다.** objHash 는 objName 의
+   * 해시라(F-35) 개발·운영이 같은 이름을 쓰면 **해시까지 같다** — 그러면 «같은 목록»
+   * 으로 보여 새 서버에서 스트림을 안 열고, 화면이 조용히 빈 채로 남는다.
+   */
+  const streamEpochRef = useRef(connectionEpoch);
   useEffect(() => {
     if (!isConnected) { streamHashesRef.current = ''; return; }
+    if (streamEpochRef.current !== connectionEpoch) {
+      streamEpochRef.current = connectionEpoch;
+      streamHashesRef.current = '';
+    }
     // **고른 것이 곧 받는 것이다.** 예전에는 빈 선택을 «전부» 로 읽어 접속하자마자
     // 100대의 XLog 를 받았다 (agentFilter.ts 머리말).
     const hashes = [...filter.objHashSet];
@@ -855,7 +860,7 @@ export default function App() {
     if (key === streamHashesRef.current) return;
     streamHashesRef.current = key;
     startXLogStream(hashes).catch(() => {});
-  }, [isConnected, filter.objHashSet]);
+  }, [isConnected, filter.objHashSet, connectionEpoch]);
 
   /**
    * 과거 조회 대상.
@@ -895,6 +900,61 @@ export default function App() {
     () => typesOf(shownHashes.host, objTypeOf),
     [shownHashes.host, objTypeOf],
   );
+
+  /**
+   * 값을 받아야 할 커넥션 풀 — **고른 WAS 아래 것까지 스스로 찾는다.**
+   *
+   * 예전에는 고른 것만 받았다. 그런데 풀을 보려면 왼쪽 목록에서 `datasource`
+   * 오브젝트를 따로 골라야 했고, 어느 것이 내가 보는 WAS 의 풀인지는 목록만 봐서는
+   * 알 수 없었다 — 이름이 다 `HikariPool-1` 이다.
+   *
+   * 부모는 이름으로 **확정적으로** 안다 (`poolsUnder` 주석 참고). 고른 것에 이걸
+   * 더해 받되, **고르기 자체는 건드리지 않는다** — 고르기는 XLog 대상이기도 해서
+   * 여기서 손대면 사용자가 고르지 않은 서버의 점이 스캐터에 섞인다.
+   */
+  const poolHashes = useMemo(() => {
+    const entries = counterHashes.datasource.map(h => ({
+      objHash: h,
+      objName: agentMap.get(h) ?? '',
+    }));
+    const parents = shownHashes.javaee.map(h => agentMap.get(h) ?? '');
+    return [...new Set([...shownHashes.datasource, ...poolsUnder(entries, parents)])];
+  }, [counterHashes.datasource, shownHashes.datasource, shownHashes.javaee, agentMap]);
+
+  /**
+   * 카운터도 **고른 서버 것만** 받는다.
+   *
+   * 예전에는 붙어 있는 오브젝트 전부를 요청했다. 서버가 100대면 2초마다 오브젝트
+   * 100개짜리 요청이 나가고, 화면은 그중 몇 대만 그린다 — 나머지는 받아서 버린다.
+   *
+   * **고른 WAS 아래 커넥션 풀은 더해서 받는다.** 풀은 부모와 별개의 오브젝트라
+   * (F-41) 안 더하면 값이 영영 안 온다. 늘어나는 것은 한 요청에 담기는 objHash 몇
+   * 개뿐이고, 요청 수는 그대로다.
+   */
+  const counterStreamRef = useRef<string>('');
+  /** XLog 쪽과 같은 이유 — 이름이 같으면 해시도 같아서 «같은 목록» 으로 보인다 */
+  const counterEpochRef = useRef(connectionEpoch);
+  useEffect(() => {
+    if (!isConnected) { counterStreamRef.current = ''; return; }
+    if (counterEpochRef.current !== connectionEpoch) {
+      counterEpochRef.current = connectionEpoch;
+      counterStreamRef.current = '';
+    }
+    const hashes = [...new Set([...filter.objHashSet, ...poolHashes])];
+
+    if (hashes.length === 0) {
+      if (counterStreamRef.current !== '') {
+        counterStreamRef.current = '';
+        stopCounterStream().catch(() => {});
+      }
+      return;
+    }
+
+    const key = hashes.slice().sort((a, b) => a - b).join(',');
+    if (key === counterStreamRef.current) return;
+    counterStreamRef.current = key;
+    startCounterStream(hashes, ALL_CHART_COUNTERS).catch(() => {});
+  }, [isConnected, filter.objHashSet, poolHashes, connectionEpoch]);
 
   /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
   const nothingPicked = filter.objHashSet.size === 0;
@@ -1350,7 +1410,10 @@ export default function App() {
               picked={filter.objHashSet}
               expectedHashes={shownHashes.javaee}
               agentMap={agentMap}
-              poolHashes={shownHashes.datasource}
+              poolHashes={poolHashes}
+              anyDatasource={counterHashes.datasource.length > 0}
+              connectionEpoch={connectionEpoch}
+              onOpenXLog={handleOpenXLogFromActive}
             />
           )}
         </div>

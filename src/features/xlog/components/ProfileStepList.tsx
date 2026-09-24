@@ -17,6 +17,9 @@ import { bindSql } from './sqlBind';
 import { affectedRows } from './sqlAffected';
 import { formatSql } from './sqlFormat';
 import { CopyButton } from '../../../components/CopyButton';
+import { StepBody, LONG_BODY } from './StepBody';
+import { StepDetailDialog } from './StepDetailDialog';
+import { previewLine } from './textFormat';
 import { useViewOptions } from '../hooks/useViewOptions';
 import { t } from '../../../i18n';
 
@@ -48,14 +51,19 @@ interface ProfileStepListProps {
   highlightSeq?: number;
 }
 
-/** 스텝 종류별 표기 — 채운 배지 대신 글자색으로 구분한다 */
+/**
+ * 스텝 종류별 표기 — 채운 배지 대신 글자색으로 구분한다.
+ *
+ * `full` 은 전체 보기 창의 배지다. 목록의 한 글자(`·`·`M`)는 자리를 아끼려고 줄인
+ * 것이라, 창 제목에 그대로 쓰면 무엇을 보고 있는지 알 수 없다.
+ */
 const KIND = {
-  Method: { label: 'M', cls: 'text-[var(--cat-method)]' },
-  Sql: { label: 'SQL', cls: 'text-[var(--cat-sql)]' },
-  ApiCall: { label: 'API', cls: 'text-[var(--cat-api)]' },
-  Message: { label: '·', cls: 'text-fg-faint' },
-  Socket: { label: 'SCK', cls: 'text-[var(--cat-socket)]' },
-  ThreadCall: { label: 'THR', cls: 'text-[var(--cat-api)]' },
+  Method: { label: 'M', full: 'METHOD', cls: 'text-[var(--cat-method)]' },
+  Sql: { label: 'SQL', full: 'SQL', cls: 'text-[var(--cat-sql)]' },
+  ApiCall: { label: 'API', full: 'API', cls: 'text-[var(--cat-api)]' },
+  Message: { label: '·', full: 'MESSAGE', cls: 'text-fg-faint' },
+  Socket: { label: 'SCK', full: 'SOCKET', cls: 'text-[var(--cat-socket)]' },
+  ThreadCall: { label: 'THR', full: 'THREAD', cls: 'text-[var(--cat-api)]' },
 } as const;
 
 export const ProfileStepList = memo(function ProfileStepList({
@@ -171,6 +179,12 @@ function StepRow({
     step.kind === 'ThreadCall' && step.threaded && step.txid !== '0' ? step.txid : null;
 
   const kind = KIND[step.kind];
+  /**
+   * 한 줄에 담을 수 없는 본문인가.
+   *
+   * SQL 은 제 본문을 `SqlBody` 가 따로 그린다 — 여기서 또 접으면 두 벌이 된다.
+   */
+  const longLabel = step.kind !== 'Sql' && (label.length > LONG_BODY || label.includes('\n'));
   const { leftPct, widthPct } = waterfallGeometry(step.start_time, elapsed, total);
   const failed = errorHash !== 0;
 
@@ -213,11 +227,21 @@ function StepRow({
         {threadTxid && onOpenThread ? (
           <button
             onClick={() => onOpenThread(threadTxid)}
-            title={`${t('이 스레드로 이어진 작업을 엽니다')} — ${label}`}
+            title={`${t('이 스레드로 이어진 작업을 엽니다')} — ${previewLine(label, 120)}`}
             className="block max-w-full truncate text-left text-small text-accent underline decoration-dotted underline-offset-2 hover:bg-hover"
           >
             {label}
           </button>
+        ) : longLabel ? (
+          // **긴 본문은 툴팁에 밀어 넣지 않는다.** SAP PO 의 RECEIVER_PAYLOAD 처럼
+          // XML 한 통이 실려 오는 스텝은 hover 로는 읽을 수도 복사할 수도 없었다.
+          <StepBody
+            kind={kind.full}
+            title={previewLine(label, 60)}
+            body={label}
+            tone={step.kind === 'Message' ? 'text-fg-muted' : 'text-fg'}
+            revealed={highlighted}
+          />
         ) : (
           <span
             className={`block truncate text-small ${
@@ -228,17 +252,23 @@ function StepRow({
             {label}
           </span>
         )}
-        {detail && (
-          // 긴 SQL 이 행을 무한히 밀어내지 않게 4줄에서 자른다.
-          // 전문은 title 로 볼 수 있고, 필요하면 행을 넓히면 된다.
-          // `block` 을 빼야 line-clamp 가 듣는다 (위 SqlBody 주석 참고).
-          <code
-            title={detail}
-            className="mt-0.5 line-clamp-4 break-all whitespace-pre-wrap font-mono text-micro text-fg-muted"
-          >
-            {detail}
-          </code>
-        )}
+        {detail !== null &&
+          (detail.length > LONG_BODY ? (
+            <StepBody
+              kind={kind.full}
+              title={previewLine(label, 60)}
+              body={detail}
+              tone="text-fg-muted"
+              revealed={highlighted}
+            />
+          ) : (
+            <code
+              title={detail}
+              className="mt-0.5 block break-all whitespace-pre-wrap font-mono text-micro text-fg-muted"
+            >
+              {detail}
+            </code>
+          ))}
         {step.kind === 'Sql' && (
           <SqlBody
             sql={text(step.hash)}
@@ -334,6 +364,8 @@ function SqlBody({
   revealed?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  /** 전체 보기 창을 열었는가 — 정렬·검색·복사를 거기서 한다 */
+  const [full, setFull] = useState(false);
   /**
    * 접힌 상태에서 실제로 넘쳤는가.
    *
@@ -434,9 +466,10 @@ function SqlBody({
       {/* **`block` 과 `line-clamp` 를 같이 쓰면 안 된다.** 둘 다 display 를 정하는데
           line-clamp 는 `-webkit-box` 를 써야 동작한다 — `block` 이 이기면 아무 일도 없다.
           (이 파일의 기존 `line-clamp-4` 도 같은 이유로 내내 안 먹고 있었다.) */}
+      {/* **긴 문장을 title 로 달지 않는다.** 수천 자짜리 툴팁은 화면을 덮을 뿐
+          고를 수도 복사할 수도 없다 — 전문은 «전체 보기» 창에서 본다. */}
       <code
         ref={codeRef}
-        title={filled}
         className={`break-all whitespace-pre-wrap font-mono text-micro text-fg-muted ${
           expanded ? 'block' : 'line-clamp-3'
         }`}
@@ -446,6 +479,16 @@ function SqlBody({
 
       <div className="flex items-baseline">
         {overflows && toggleButton('bottom')}
+        <button
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            setFull(true);
+          }}
+          className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+        >
+          {t('전문 보기')}
+        </button>
         {/* **채운 문장을 복사한다.** 이 화면을 여는 이유의 절반은 «이 쿼리를 DB 에 붙여
             돌려 보는 것» 이다. 값이 들어간 문장이라 그대로 실행된다.
             펼침 여부와 무관하게 **전문**을 복사한다 — 접혀 있다고 세 줄만 주면 안 된다. */}
@@ -477,6 +520,16 @@ function SqlBody({
         <span className="mt-0.5 block text-micro text-warn" title={bound.leftover.join(', ')}>
           {t('쓰이지 않은 값')} {bound.leftover.length}{t('개:')} {bound.leftover.join(', ')}
         </span>
+      )}
+
+      {/* 보고 있는 문장 그대로 넘긴다 — 값을 채워 두었으면 채운 문장이다 */}
+      {full && (
+        <StepDetailDialog
+          kind="SQL"
+          title={previewLine(sql, 60)}
+          body={filled}
+          onClose={() => setFull(false)}
+        />
       )}
     </div>
   );

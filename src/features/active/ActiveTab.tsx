@@ -17,12 +17,15 @@
 
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { ActiveService } from '../xlog/types/object';
+import type { SXLog } from '../xlog/types/xlog';
 import { ThreadDetailDialog } from '../xlog/components/ThreadDetailDialog';
 import { ActiveGauge } from './ActiveGauge';
 import { ActiveList } from './ActiveList';
 import { PoolStrip } from './PoolStrip';
 import { QueryDetailDialog } from './QueryDetailDialog';
 import { ResourceGroups } from './ResourceGroups';
+import { TrafficChart } from './TrafficChart';
+import { useActiveTraffic } from './useActiveTraffic';
 import {
   groupByResource,
   matchesRow,
@@ -56,13 +59,33 @@ interface ActiveTabProps {
   expectedHashes: readonly number[];
   agentMap: Map<number, string>;
   /**
-   * 고른 것 중 커넥션 풀(datasource) 오브젝트.
+   * 볼 커넥션 풀(datasource) 오브젝트.
    *
-   * 값은 이미 도는 카운터 스트림에서 줍는다 — 스트림 대상이 «고른 것» 이라
-   * 여기 없는 풀은 값도 오지 않는다.
+   * **고른 WAS 아래 풀을 App 이 찾아 넣어 준다** — 풀을 보려고 왼쪽에서 풀까지
+   * 따로 고를 필요가 없다. 값은 이미 도는 카운터 스트림에서 줍는다(스트림 대상에도
+   * 같이 들어간다).
    */
   poolHashes: readonly number[];
+  /** 콜렉터에 datasource 오브젝트가 하나라도 있는가 — 비었을 때의 안내가 갈린다 */
+  anyDatasource: boolean;
+  /** 접속할 때마다 올라가는 번호. 바뀌면 이전 서버의 행을 버린다 */
+  connectionEpoch?: number;
+  /**
+   * 트래픽 차트에서 **끝난** 점을 눌렀을 때.
+   *
+   * 상세 패널은 XLog 탭에 있다 — 여기서 열 수 없으므로 App 이 탭을 옮기고 연다.
+   * 없으면 끝난 점은 눌러도 아무 일도 하지 않는다(눌러도 안 되는 링크는 안 만든다).
+   */
+  onOpenXLog?: (xlog: SXLog) => void;
 }
+
+/**
+ * 트래픽 차트가 담아 두는 시간.
+ *
+ * 1분이다. 이 화면은 «지금» 을 보는 자리라 더 넓히면 XLog 탭과 하는 일이 겹치고,
+ * 좁히면 «방금 지나간 것» 이 남지 않아 목록이 빈 순간을 설명하지 못한다.
+ */
+const TRAFFIC_WINDOW_MS = 60_000;
 
 /** 주기 고르개에 적을 글자. `0` 은 멈춤 */
 function pollLabel(ms: PollMs): string {
@@ -76,6 +99,9 @@ export const ActiveTab = memo(function ActiveTab({
   expectedHashes,
   agentMap,
   poolHashes,
+  anyDatasource,
+  connectionEpoch = 0,
+  onOpenXLog,
 }: ActiveTabProps) {
   const [period, setPeriod] = useState<PollMs>(DEFAULT_POLL_MS);
   const [query, setQuery] = useState('');
@@ -84,8 +110,9 @@ export const ActiveTab = memo(function ActiveTab({
   /** 쿼리 상세를 연 줄 */
   const [queryOf, setQueryOf] = useState<ActiveService | null>(null);
 
-  const feed = useActiveServices(javaeeTypes, expectedHashes, enabled, period);
+  const feed = useActiveServices(javaeeTypes, expectedHashes, enabled, period, connectionEpoch);
   const poolCounters = usePoolCounters(enabled);
+  const traffic = useActiveTraffic(enabled, TRAFFIC_WINDOW_MS, connectionEpoch);
 
   const serverName = useCallback(
     (objHash: number) => agentMap.get(objHash) ?? `#${objHash}`,
@@ -121,6 +148,18 @@ export const ActiveTab = memo(function ActiveTab({
       stale: mineOnly.filter(([h]) => feed.stale.has(h)).length,
     };
   }, [feed.missed, feed.stale, picked]);
+
+  /**
+   * 트래픽 차트에 «실행 중» 으로 그릴 것.
+   *
+   * **지난 값은 뺀다.** 못 닿은 서버의 직전 값은 지금도 돌고 있는지 모르는 것이라,
+   * 차트에서 «지금 여기까지 왔다» 로 그리면 없는 것을 있다고 말하게 된다.
+   * 목록에서는 흐리게라도 남기지만(사라지면 «다 끝났다» 로 읽힌다) 점은 다르다.
+   */
+  const liveNow = useMemo(
+    () => (feed.stale.size === 0 ? mine : mine.filter(r => !feed.stale.has(r.obj_hash))),
+    [mine, feed.stale],
+  );
 
   const counts = useMemo(() => stepCounts(mine), [mine]);
   const groups = useMemo(() => groupByResource(mine), [mine]);
@@ -225,10 +264,24 @@ export const ActiveTab = memo(function ActiveTab({
         />
       </section>
 
+      {/* 트래픽 — 게이지 바로 아래다. 게이지는 «지금 몇 건이 걸려 있나» 를 세고,
+          이건 «그 사이에 몇 건이 지나갔나» 를 보여준다. 둘이 붙어 있어야
+          «목록은 비었는데 점은 빽빽하다» 가 한눈에 읽힌다. */}
+      <section className="px-3 pt-3">
+        <TrafficChart
+          done={traffic.done}
+          live={liveNow}
+          picked={picked}
+          windowMs={TRAFFIC_WINDOW_MS}
+          onPickDone={x => onOpenXLog?.(x)}
+          onPickLive={setDetail}
+        />
+      </section>
+
       {/* 풀 줄 — 자리가 뜻이다. 위(게이지)가 «얼마나», 아래(목록)가 «무엇 때문에» 고,
           그 사이에 «자원이 남아 있나» 가 놓인다. */}
       <section aria-label={t('커넥션 풀')} className="px-3 pt-3">
-        <PoolStrip pools={pools} noneSelected={poolHashes.length === 0} />
+        <PoolStrip pools={pools} anyDatasource={anyDatasource} />
       </section>
 
       {/* 본문 — 왼쪽은 접은 것, 오른쪽은 편 것 */}

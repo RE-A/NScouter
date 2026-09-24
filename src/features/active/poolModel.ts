@@ -113,3 +113,24 @@ export function buildPools(
 export function poolsOfServer(pools: readonly Pool[], serverObjName: string): Pool[] {
   return pools.filter(p => p.parentName === serverObjName);
 }
+
+/**
+ * 고른 WAS **아래에 달린** 풀 오브젝트들.
+ *
+ * 풀을 보려고 왼쪽 목록에서 풀 오브젝트까지 따로 골라야 했다. 무엇을 골라야
+ * 하는지가 목록만 봐서는 안 보인다 — `datasource` 는 이름이 `HikariPool-1` 처럼
+ * 다 비슷하고, WAS·reqproc 과 섞여 있다.
+ *
+ * **이름으로 잇는 것은 추측이 아니다.** 에이전트가 풀 이름을
+ * `Configure.getObjName() + "/" + 풀이름` 으로 짓는다 (`TomcatJMXPerf` 바이트코드,
+ * 실측 F-41). 그래서 부모를 **정확히 한 겹** 위로만 본다 — 접두사 비교로 넓게 잡으면
+ * `/a/app` 이 `/a/app-batch` 의 풀까지 제 것으로 삼는다.
+ */
+export function poolsUnder(
+  pools: readonly { objHash: number; objName: string }[],
+  parentNames: readonly string[],
+): number[] {
+  const parents = new Set(parentNames.filter(n => n !== ''));
+  if (parents.size === 0) return [];
+  return pools.filter(p => parents.has(parentObjName(p.objName))).map(p => p.objHash);
+}

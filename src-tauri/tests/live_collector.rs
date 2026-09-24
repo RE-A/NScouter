@@ -7887,3 +7887,65 @@ fn live_mixed_object_types() {
     assert!(javaee_types.len() >= 2, "WAS 종류가 둘이 아니다 — probe_set_group_type 을 먼저 돌릴 것");
     assert!(objects >= 2, "종류마다 물었는데 오브젝트가 {objects}개뿐이다");
 }
+
+/// 탐침: 커넥션 풀이 **부모 WAS 이름 아래**에 붙는가.
+///
+/// Active 탭은 고른 WAS 아래의 풀을 스스로 찾아 카운터를 받는다(0.5.5). 그 근거가
+/// 이름 규칙이다 — 에이전트가 풀 오브젝트 이름을 `Configure.getObjName() + "/" + 풀이름`
+/// 으로 짓는다(`TomcatJMXPerf` 바이트코드, F-41). **이름으로 잇는 것이 추측이 아님을**
+/// 실제 콜렉터 데이터로 확인한다.
+///
+/// 화면(`poolModel.poolsUnder`)과 같은 규칙을 여기서 그대로 다시 쓴다:
+/// 마지막 마디를 뗀 것이 부모이고, 그 부모가 javaee 오브젝트여야 한다.
+#[test]
+#[ignore]
+fn probe_pool_parent_names() {
+    let mut conn = login();
+    let session = conn.session;
+    conn.send_request(CMD_OBJECT_LIST_REAL_TIME, session, &MapPack::new())
+        .expect("오브젝트 목록 요청 실패");
+
+    let mut all: Vec<(String, String)> = Vec::new(); // (objType, objName)
+    while let Some(pack) = conn.read_next_pack().expect("오브젝트 응답 수신 실패") {
+        if let AnyPack::Object(obj) = pack {
+            all.push((obj.obj_type, obj.obj_name));
+        }
+    }
+
+    let javaee: Vec<&String> = all
+        .iter()
+        .filter(|(t, _)| matches!(t.as_str(), "tomcat" | "java" | "jboss" | "jetty" | "resin"))
+        .map(|(_, n)| n)
+        .collect();
+    let pools: Vec<&String> = all
+        .iter()
+        .filter(|(t, _)| t == "datasource")
+        .map(|(_, n)| n)
+        .collect();
+
+    println!("javaee {}개 · datasource {}개", javaee.len(), pools.len());
+    for n in &javaee {
+        println!("  WAS  {n}");
+    }
+
+    let mut linked = 0usize;
+    for pool in &pools {
+        // 화면과 같은 규칙: 마지막 마디를 뗀 것이 부모다.
+        let parent = match pool.rfind('/') {
+            Some(0) | None => String::new(),
+            Some(cut) => pool[..cut].to_string(),
+        };
+        let ok = javaee.iter().any(|w| **w == parent);
+        if ok {
+            linked += 1;
+        }
+        println!("  POOL {pool}\n       부모={parent} → {}", if ok { "이어짐" } else { "**못 이음**" });
+    }
+
+    assert!(!pools.is_empty(), "datasource 오브젝트가 없다 — jmx_counter_enabled 와 register-mbeans 확인");
+    assert_eq!(
+        linked,
+        pools.len(),
+        "이름만으로 부모를 못 찾은 풀이 있다. 화면의 자동 표시가 그만큼 빈다"
+    );
+}

@@ -1,7 +1,7 @@
 # 설정 가이드 (간략)
 
 > NScouter 화면에 **무언가가 안 보이거나 이상할 때** 바꿀 설정을 증상별로 모았다.
-> 왜 그런지·근거·주의점은 [상세 설명](settings-reference.md)에, 앱 자체 설정은 [사용자 가이드 §7](user-guide.md#7-설정-) 에 있다.
+> 왜 그런지·근거·주의점은 [상세 설명](settings-reference.md)에, 앱 자체 설정은 [사용자 가이드 §8](user-guide.md#8-설정-) 에 있다.
 >
 > 표기 — **[콜]** 콜렉터 설정 · **[에]** 자바 에이전트 설정 · **[앱]** 모니터링 대상 애플리케이션 · **[JVM]** JVM 옵션
 
@@ -48,13 +48,13 @@
 | 갱신마다 떴다 사라졌다 · «연결을 못 얻어 못 물어본 서버» | 콜렉터 로그에 `[S501] Cannot find a tcp agent` | [콜] `net_tcp_get_agent_connection_wait_ms` ↑ · [에] `net_collector_tcp_session_count` ↑ |
 | 갱신마다 떴다 사라졌다 · «콜렉터가 비활성으로 보는 서버» · 왼쪽 목록의 살아 있음 표시도 깜빡인다 | 하트비트는 **UDP 6100** 으로 간다 — 방화벽·보안그룹·NAT·MTU 로 유실되는지 | [콜] `object_deadtime_ms` ↑ (기본 8초). 근본은 UDP 유실을 없애는 것 |
 | 어떤 서버의 서비스가 한 번도 안 뜬다 | ① 그 서버에 S501 이 계속 찍히나 ② 위쪽에 «콜렉터가 비활성으로 보는 서버» 로 나오나 | ① 위와 같음 ② 하트비트(UDP) |
-| 짧은 쿼리가 거의 안 보인다 | — | **정상이다.** 순간 스냅샷이다 |
+| 짧은 쿼리가 거의 안 보인다 | — | **정상이다.** 순간 스냅샷이라 2초 안에 끝나는 것은 안 잡힌다. 그 사이에 몇 건이 지나갔는지는 위의 «실시간 트래픽» 점으로 본다 |
 
 ## 4. Counter · Visualize · 토폴로지
 
 | 증상 | 바꿀 설정 |
 |---|---|
-| 커넥션 풀이 안 잡힌다 | [앱] `spring.datasource.hikari.register-mbeans=true` **와** [에] `jmx_counter_enabled=true` — 둘 다 |
+| 커넥션 풀이 안 잡힌다 | [앱] `spring.datasource.hikari.register-mbeans=true` **와** [에] `jmx_counter_enabled=true` — 둘 다. (고른 WAS 아래 풀은 따로 고르지 않아도 값이 온다) |
 | 토폴로지(서버 간 호출)가 비어 있다 | [에] `counter_interaction_enabled=true` |
 | `PermPercent` 만 안 온다 (`PermUsed` 는 옴) | [JVM] `-XX:MaxMetaspaceSize=<크기>` |
 | `ProcCpu` 가 안 온다 | 설정으로 안 된다 — 에이전트가 보내지 않는다 |
@@ -98,4 +98,4 @@
 | 바인드 값을 문장에 채울지 따로 볼지 | ⚙ 설정 → SQL 바인딩 파라미터 |
 | 비밀번호 저장 | «자동 연결» 을 켠 서버만, **config.json 에 평문** — 공용 PC 에서는 끈다 |
 
-자세한 것은 [사용자 가이드 §7](user-guide.md#7-설정-).
+자세한 것은 [사용자 가이드 §8](user-guide.md#8-설정-).

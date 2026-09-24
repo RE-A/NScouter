@@ -14,7 +14,7 @@ import { connectToServer } from '../api/connectFlow';
 import { t } from '../../../i18n';
 
 interface ConnectionDialogProps {
-  onConnected: (serverId: string, objHashes: number[]) => void;
+  onConnected: (serverId: string) => void;
   onDisconnected: () => void;
   isConnected: boolean;
   /**
@@ -71,8 +71,8 @@ export function ConnectionDialog({
     setLoading(true);
     setError(null);
     try {
-      const hashes = await connectToServer(p);
-      onConnected('scouter', hashes);
+      await connectToServer(p);
+      onConnected('scouter');
       // 붙은 곳은 목록에 남긴다 — 다음에 갈아탈 때 다시 치지 않게.
       onConnectedProfile?.({ name: '', ...p }, savePass);
     } catch (err) {
@@ -174,7 +174,7 @@ export function ConnectionDialog({
     setError(null);
     try {
       await startMockStream();
-      onConnected('demo', [0x1001, 0x1002, 0x1003]);
+      onConnected('demo');
     } catch (err) {
       setError(String(err));
     } finally {

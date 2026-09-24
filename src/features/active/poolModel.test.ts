@@ -7,6 +7,7 @@ import {
   poolLevel,
   poolShortName,
   poolsOfServer,
+  poolsUnder,
   usagePct,
   type PoolCounters,
 } from './poolModel';
@@ -109,5 +110,32 @@ describe('목록', () => {
       '/a/a/pool',
       '/b/b/pool',
     ]);
+  });
+});
+
+describe('고른 WAS 아래 풀 찾기', () => {
+  const pools = [
+    { objHash: 11, objName: '/shop-app/shop-app/HikariPool-1' },
+    { objHash: 12, objName: '/shop-app/shop-app/HikariPool-2' },
+    { objHash: 21, objName: '/order-app/order-app/HikariPool-1' },
+  ];
+
+  it('부모가 고른 WAS 인 풀만 준다', () => {
+    expect(poolsUnder(pools, ['/shop-app/shop-app'])).toEqual([11, 12]);
+  });
+
+  it('여러 WAS 를 골랐으면 모두 모은다', () => {
+    expect(poolsUnder(pools, ['/shop-app/shop-app', '/order-app/order-app'])).toEqual([11, 12, 21]);
+  });
+
+  it('이름이 비슷한 이웃의 풀을 제 것으로 삼지 않는다', () => {
+    // 접두사로 넓게 잡으면 `/a/app` 이 `/a/app-batch` 의 풀까지 가져간다.
+    const neighbours = [{ objHash: 31, objName: '/a/app-batch/HikariPool-1' }];
+    expect(poolsUnder(neighbours, ['/a/app'])).toEqual([]);
+  });
+
+  it('고른 WAS 가 없으면 아무것도 고르지 않는다', () => {
+    expect(poolsUnder(pools, [])).toEqual([]);
+    expect(poolsUnder(pools, [''])).toEqual([]);
   });
 });

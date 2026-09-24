@@ -63,6 +63,10 @@ export class FakeCanvasContext {
   fill(): void {
     this.record('fill');
   }
+  /** 동그란 점 (Active 탭 트래픽 차트) */
+  arc(x: number, y: number, r: number, start: number, end: number): void {
+    this.record('arc', x, y, r, start, end);
+  }
   /** 고해상도 보정. `scale` 과 같은 이유로 좌표를 바꾸지 않는다 */
   setTransform(): void {
     this.record('setTransform');

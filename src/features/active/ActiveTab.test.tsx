@@ -11,11 +11,19 @@ import type { ActiveService } from '../xlog/types/object';
 
 const api = vi.hoisted(() => ({
   getTypeActiveServices: vi.fn(),
-  // 풀 값은 이미 도는 카운터 스트림에서 줍는다. 여기서는 흘려보내기만 한다.
+  // 풀 값과 트래픽 점은 이미 도는 스트림에서 줍는다. 여기서는 흘려보내기만 한다.
   onCounterData: vi.fn(() => Promise.resolve(() => {})),
+  onXLogData: vi.fn(() => Promise.resolve(() => {})),
   getThreadDetail: vi.fn(() => Promise.resolve(null)),
 }));
 vi.mock('../xlog/api/scouterApi', () => api);
+// 트래픽 차트는 Canvas 다(그리기는 `TrafficChart.test.tsx` 가 본다).
+// 여기서 볼 것은 **무엇을 넘기는가** 하나뿐이다.
+vi.mock('./TrafficChart', () => ({
+  TrafficChart: ({ live }: { live: readonly { obj_hash: number }[] }) => (
+    <div>차트 실행 중:{live.length}</div>
+  ),
+}));
 // 스택 창은 따로 검증된다. 여기서는 열렸는지만 본다.
 vi.mock('../xlog/components/ThreadDetailDialog', () => ({
   ThreadDetailDialog: ({ service }: { service: string }) => <div>상세:{service}</div>,
@@ -80,6 +88,7 @@ function draw(
       expectedHashes={expectedHashes}
       agentMap={AGENTS}
       poolHashes={poolHashes}
+      anyDatasource={poolHashes.length > 0}
     />,
   );
 }
@@ -233,12 +242,29 @@ describe('ActiveTab — 정직하게 말하기', () => {
 describe('ActiveTab — 커넥션 풀 줄', () => {
   const pool = () => within(screen.getByRole('region', { name: '커넥션 풀' }));
 
-  it('풀을 안 골랐으면 왜 비었는지 말한다 — 줄을 숨기지 않는다', async () => {
-    // 숨기면 «이 앱은 커넥션 풀을 못 본다» 로 읽힌다. 값이 안 오는 이유는 둘 뿐이고,
-    // 그중 하나(안 고름)는 사용자가 바로 고칠 수 있다.
+  it('풀 오브젝트가 아예 없으면 관문 둘을 짚는다 — 줄을 숨기지 않는다', async () => {
+    // 숨기면 «이 앱은 커넥션 풀을 못 본다» 로 읽힌다. 고른 WAS 아래 풀은 앱이 스스로
+    // 찾으므로(App 의 poolHashes), 그러고도 비었으면 수집 자체가 안 되는 것이다.
     draw();
     await screen.findAllByText('12.4초');
-    expect(pool().getByText(/왼쪽에서 커넥션 풀을 함께 골라야/)).toBeTruthy();
+    expect(pool().getByText(/register-mbeans/)).toBeTruthy();
+  });
+
+  it('풀 오브젝트는 있는데 못 이었으면 다른 말을 한다', async () => {
+    // 고치는 곳이 다르다 — 앞은 에이전트·앱 설정이고, 이건 이름이 부모 아래로 안 붙는 것이다.
+    render(
+      <ActiveTab
+        enabled
+        javaeeTypes={['tomcat']}
+        picked={new Set<number>()}
+        expectedHashes={[1, 2]}
+        agentMap={AGENTS}
+        poolHashes={[]}
+        anyDatasource
+      />,
+    );
+    await screen.findAllByText('12.4초');
+    expect(pool().getByText(/왼쪽에서 그 풀을 직접 고르세요/)).toBeTruthy();
   });
 
   it('고른 풀은 값이 오기 전에도 줄에 남는다', async () => {
@@ -296,5 +322,27 @@ describe('ActiveTab — 떴다 사라졌다 하지 않게', () => {
     fireEvent.click(screen.getByRole('button', { name: '지금 받기' }));
     await waitFor(() => expect(txns().getByText('지난 값')).toBeTruthy());
     expect(txns().getByText('/shop/ping<GET>')).toBeTruthy();
+  });
+});
+
+describe('ActiveTab — 트래픽 차트와 목록의 관계', () => {
+  it('«지난 값» 인 행은 차트의 실행 중 점에서 뺀다', async () => {
+    // 못 닿은 서버의 직전 값은 지금도 돌고 있는지 모른다. 목록에는 흐리게 남기지만
+    // (사라지면 «다 끝났다» 로 읽힌다) 점으로 그리면 없는 것을 있다고 말하게 된다.
+    api.getTypeActiveServices.mockResolvedValueOnce(reply(ROWS));
+    draw();
+    await screen.findAllByText('12.4초');
+    expect(screen.getByText('차트 실행 중:4')).toBeTruthy();
+
+    // 다음 갱신에서 1번 서버를 못 받는다 → 그 서버의 3건은 «지난 값» 이 된다.
+    api.getTypeActiveServices.mockResolvedValue(
+      reply(ROWS.filter(r => r.obj_hash === 2), { incomplete: [1], answered: [2] }),
+    );
+    // 폴링 주기(2초)를 기다리지 않고 «지금 받기» 로 한 번 더 받는다.
+    fireEvent.click(screen.getByRole('button', { name: '지금 받기' }));
+
+    // 목록에는 남고(흐리게), 차트의 실행 중 점은 답한 서버의 1건뿐이다.
+    await waitFor(() => expect(screen.getByText('차트 실행 중:1')).toBeTruthy());
+    expect(screen.getAllByText('12.4초').length).toBeGreaterThan(0);
   });
 });

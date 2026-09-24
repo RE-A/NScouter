@@ -218,3 +218,35 @@ describe('ProfileStepList — 긴 문장 펼치기', () => {
     }
   });
 });
+
+describe('ProfileStepList — SQL 아닌 스텝의 본문', () => {
+  /** SAP PO 어댑터가 남기는 payload 모양. 실제로는 수천 자다 */
+  const payload = `[RECEIVER_PAYLOAD(BODY)] <ns1:MT_COM0280_FS xmlns:ns1='urn:/com.fs.cjfreshway.co.kr/FI'>${'<XROWS>21</XROWS>'.repeat(20)}</ns1:MT_COM0280_FS>`;
+
+  const messageStep = (message: string): ProfileStep => ({
+    kind: 'Message',
+    parent: -1,
+    index: 0,
+    start_time: 0,
+    start_cpu: 0,
+    message,
+    hash: 0,
+  });
+
+  it('긴 메시지는 전문을 열 수 있다 — 툴팁에 밀어 넣지 않는다', () => {
+    render(<ProfileStepList steps={[messageStep(payload)]} texts={{}} totalElapsed={100} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '전문 보기' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('MT_COM0280_FS');
+    // 받은 그대로의 길이를 적는다. 화면이 자른 만큼만 보여 주면 «이게 전부» 로 읽힌다.
+    expect(dialog.textContent).toContain(`${payload.length.toLocaleString()}자`);
+  });
+
+  it('짧은 메시지는 그대로 한 줄이다', () => {
+    // 한 줄이면 접을 것도 열 것도 없다. 단추만 늘면 목록이 시끄러워진다.
+    render(<ProfileStepList steps={[messageStep('[RESULT] OK')]} texts={{}} totalElapsed={10} />);
+    expect(screen.getByText('[RESULT] OK')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '전문 보기' })).toBeNull();
+  });
+});

@@ -45,10 +45,18 @@ export const EN: Record<string, string> = {
     'The collector could not get this agent’s connection in time. Check S501 in the collector log.',
   '사용 중': 'In use',
   '유휴': 'Idle',
-  '왼쪽에서 커넥션 풀을 함께 골라야 값이 옵니다.':
-    'Select the connection pools on the left as well to receive values.',
+  '고른 서버 아래에 커넥션 풀이 없습니다. 풀 오브젝트는 있으니, 이름이 WAS 아래로 안 붙는 경우라면 왼쪽에서 그 풀을 직접 고르세요.':
+    'No connection pool sits under the selected servers. Pool objects do exist, so if their names are not nested under the WAS, select those pools on the left.',
   '커넥션 풀이 안 잡힙니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.':
     'No connection pools detected. Turn on both spring.datasource.hikari.register-mbeans in the app and jmx_counter_enabled in the agent.',
+  // ── Active 탭 · 실시간 트래픽 차트 ────────────────────
+  '실시간 트래픽': 'Live traffic',
+  '세로축': 'y-axis',
+  '○ 실행 중': '○ running',
+  '● 끝난 것': '● finished',
+  '끝남': 'Finished',
+  '눌러서 상세 보기': 'click to open details',
+
   '가장 오래된 것': 'Longest running',
   '무엇을 기다리나': 'Waiting on',
   '가지': ' kinds',
@@ -727,6 +735,13 @@ export const EN: Record<string, string> = {
   // '서버'·'전체' 는 위에 이미 있다. 같은 말을 두 번 적으면 사전이 갈린다.
   '전체 보기': 'Show all',
   '그릴 서버를 고릅니다': 'Choose which servers to plot',
+
+  // ── 프로파일 스텝 본문 (전문 보기) ────────────────────
+  '전문 보기': 'Open full body',
+  '본문 전체 보기': 'Full body',
+  '정렬해 보기': 'Format',
+  '줄 바꿔 보기': 'Wrap lines',
+  '본문에서 찾기': 'Find in this body',
 
   // ── 상세 안에서 찾기 ──────────────────────────────────
   '이 안에서 찾기': 'Find in this profile',
