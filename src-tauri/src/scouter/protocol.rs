@@ -208,5 +208,13 @@ pub mod text_type {
 pub const DEFAULT_COLLECTOR_PORT: u16 = 6100;
 /// TCP 연결 타임아웃 (ms) — ASIS: ClientTCP.java
 pub const CONNECT_TIMEOUT_MS: u64 = 3000;
+
+/// 한 번의 읽기·쓰기가 기다리는 한계.
+///
+/// 붙는 데 걸리는 시간(`CONNECT_TIMEOUT_MS`)과 **성격이 다르다.** 이건 이미 붙은
+/// 연결에서 다음 바이트를 기다리는 시간이고, 콜렉터가 수만 건을 모으는 동안에는
+/// 그 사이가 길어질 수 있다. 끊긴 연결을 알아채는 것이 목적이므로 넉넉히 둔다 —
+/// 짧게 잡으면 정상 응답을 중간에 끊는다.
+pub const IO_TIMEOUT_MS: u64 = 60_000;
 /// SHA-256 솔트 — ASIS: CipherUtil.java
 pub const PASSWORD_SALT: &str = "qwertyuiop!@#$%^&*()zxcvbnm,.";

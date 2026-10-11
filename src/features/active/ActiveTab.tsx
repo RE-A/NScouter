@@ -15,7 +15,7 @@
 // 잡힌다. 적어 두지 않으면 «왜 대부분 비어 있냐» 가 된다.
 // 바인드 값은 목록 응답에는 없고 스레드 상세에는 있다 — 쿼리 상세 창이 그걸 묻는다.
 
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActiveService } from '../xlog/types/object';
 import type { SXLog } from '../xlog/types/xlog';
 import { ThreadDetailDialog } from '../xlog/components/ThreadDetailDialog';
@@ -77,6 +77,8 @@ interface ActiveTabProps {
    * 없으면 끝난 점은 눌러도 아무 일도 하지 않는다(눌러도 안 되는 링크는 안 만든다).
    */
   onOpenXLog?: (xlog: SXLog) => void;
+  /** F5 — 값이 바뀌면 주기를 기다리지 않고 지금 한 번 더 묻는다 */
+  refreshSignal?: number;
 }
 
 /**
@@ -102,6 +104,7 @@ export const ActiveTab = memo(function ActiveTab({
   anyDatasource,
   connectionEpoch = 0,
   onOpenXLog,
+  refreshSignal = 0,
 }: ActiveTabProps) {
   const [period, setPeriod] = useState<PollMs>(DEFAULT_POLL_MS);
   const [query, setQuery] = useState('');
@@ -113,6 +116,20 @@ export const ActiveTab = memo(function ActiveTab({
   const feed = useActiveServices(javaeeTypes, expectedHashes, enabled, period, connectionEpoch);
   const poolCounters = usePoolCounters(enabled);
   const traffic = useActiveTraffic(enabled, TRAFFIC_WINDOW_MS, connectionEpoch);
+
+  /**
+   * F5 를 누르면 지금 한 번 더 받는다.
+   *
+   * **처음 마운트될 때는 부르지 않는다** — 훅이 이미 첫 조회를 하고 있어서,
+   * 여기서 또 부르면 열자마자 두 번 묻는다(에이전트에 부담이 가는 요청이다).
+   */
+  const lastRefresh = useRef(refreshSignal);
+  const refresh = feed.refresh;
+  useEffect(() => {
+    if (lastRefresh.current === refreshSignal) return;
+    lastRefresh.current = refreshSignal;
+    refresh();
+  }, [refreshSignal, refresh]);
 
   const serverName = useCallback(
     (objHash: number) => agentMap.get(objHash) ?? `#${objHash}`,

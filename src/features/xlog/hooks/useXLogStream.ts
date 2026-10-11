@@ -15,10 +15,26 @@ interface UseXLogStreamResult {
   clearError: () => void;
 }
 
+/**
+ * 오류 배너를 띄워 두는 시간.
+ *
+ * 스트림은 끊겨도 **1초마다 스스로 다시 붙는다**(Rust `run_xlog_stream`). 그래서 한 번의
+ * 출렁임으로 뜬 배너가 그대로 남으면 «지금도 고장» 으로 읽힌다 — 실제로는 이미 복구됐다.
+ * 트래픽이 한가하면 복구돼도 새 XLog 가 없어 데이터로는 알 수 없으므로, 시간으로도 지운다.
+ * 계속 끊겨 있으면 다음 오류가 곧바로 다시 띄운다.
+ */
+const ERROR_LINGER_MS = 10_000;
+
 export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
   const storeRef = useRef(new XLogDataStore());
   const [streamError, setStreamError] = useState<string | null>(null);
   const { bufferMax } = useViewOptions();
+
+  useEffect(() => {
+    if (streamError === null) return;
+    const id = setTimeout(() => setStreamError(null), ERROR_LINGER_MS);
+    return () => clearTimeout(id);
+  }, [streamError]);
 
   /**
    * 설정에서 바꾼 상한을 **살아 있는 저장소에** 물린다.
@@ -37,6 +53,8 @@ export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
       // **열로 받아 여기서 행으로 엮는다.** 건당 이벤트면 10,000건에 콜백이 1만 번 돈다.
       onXLogData(cols => {
         storeRef.current.addBatch(xlogColumnsToSXLogs(cols));
+        // 데이터가 다시 오면 지난 오류는 끝난 이야기다. 그대로 두면 «지금도 끊겨 있다» 로 읽힌다.
+        setStreamError(null);
       }),
       onXLogError(msg => {
         setStreamError(msg);

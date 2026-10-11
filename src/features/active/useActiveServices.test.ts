@@ -101,6 +101,16 @@ describe('대상이 바뀔 때', () => {
     expect(result.current.rows.map(r => r.service).sort()).toEqual(['/ORDER-JVM', '/tomcat']);
   });
 
+  it('처음 열 때는 한 번만 묻는다 — 에이전트에 부담이 가는 요청이다', async () => {
+    // F5 신호를 보는 쪽(ActiveTab)이 마운트 때도 «다시 받기» 를 부르면 열자마자 두 번 묻는다.
+    api.getTypeActiveServices.mockResolvedValue(reply([row(1, '/shop')]));
+
+    const { result } = renderHook(() => useActiveServices(['tomcat'], [1], true, 2_000));
+    await waitFor(() => expect(result.current.at).not.toBeNull());
+
+    expect(api.getTypeActiveServices.mock.calls.length).toBe(1);
+  });
+
   it('탭을 떠나면 묻지 않고 받아 둔 것도 버린다', async () => {
     // 에이전트에 부담을 주는 요청이다. 안 보는 화면 때문에 계속 묻지 않는다.
     api.getTypeActiveServices.mockResolvedValue(reply([row(1, '/shop')]));

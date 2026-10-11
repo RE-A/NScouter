@@ -8,7 +8,7 @@
 
 import { memo, useLayoutEffect, useRef, useState } from 'react';
 import { CopyButton } from '../../../components/CopyButton';
-import { StepDetailDialog } from './StepDetailDialog';
+import { FullTextButton } from './FullTextButton';
 import { t } from '../../../i18n';
 
 /**
@@ -43,7 +43,6 @@ export const StepBody = memo(function StepBody({
 }: StepBodyProps) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
-  const [full, setFull] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
 
   useLayoutEffect(() => {
@@ -90,23 +89,10 @@ export const StepBody = memo(function StepBody({
           </button>
         )}
         {/* 정렬·검색·긴 본문은 창에서 본다. 목록 안에서 다 하려 들면 한 스텝이
-            화면을 다 먹는다. */}
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            setFull(true);
-          }}
-          className="rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-        >
-          {t('전문 보기')}
-        </button>
+            화면을 다 먹는다. **이미 길어서 여기 온 본문**이므로 길이를 다시 묻지 않는다. */}
+        <FullTextButton kind={kind} title={title} body={body} min={0} />
         <CopyButton text={body} />
       </div>
-
-      {full && (
-        <StepDetailDialog kind={kind} title={title} body={body} onClose={() => setFull(false)} />
-      )}
     </div>
   );
 });

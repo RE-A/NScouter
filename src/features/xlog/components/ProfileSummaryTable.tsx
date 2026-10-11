@@ -8,6 +8,8 @@ import { memo, useMemo, useState } from 'react';
 import type { ProfileStep } from '../types/profile';
 import { sortSummary, summarizeSteps, type SummarySort } from './profileSummary';
 import { durationTone } from './durationTone';
+import { FullTextButton } from './FullTextButton';
+import { previewLine } from './textFormat';
 import { t } from '../../../i18n';
 
 interface ProfileSummaryTableProps {
@@ -108,8 +110,15 @@ export const ProfileSummaryTable = memo(function ProfileSummaryTable({
                     }
                   : undefined
               }
-              title={onPick ? `${row.name}
-${t('누르면 목록에서 이 스텝으로 갑니다')}` : row.name}
+              // **전문을 툴팁에 밀어 넣지 않는다.** 여기 이름은 SQL 문장이나 메시지
+              // 통째일 수 있어, 그대로 달면 수천 자짜리 툴팁이 화면을 덮는다.
+              // 전문은 옆의 «전문 보기» 가 창으로 연다 (스텝 목록과 같은 창이다).
+              title={
+                onPick
+                  ? `${previewLine(row.name, 120)}
+${t('누르면 목록에서 이 스텝으로 갑니다')}`
+                  : previewLine(row.name, 120)
+              }
               className={`grid grid-cols-[28px_minmax(0,1fr)_40px_56px_56px] items-baseline gap-x-2 px-2 py-1 hover:bg-hover/60 ${
                 onPick ? 'cursor-pointer' : ''
               }`}
@@ -117,7 +126,15 @@ ${t('누르면 목록에서 이 스텝으로 갑니다')}` : row.name}
               <span className={`font-mono text-micro font-semibold ${KIND_CLS[row.kind]}`}>
                 {KIND_LABEL[row.kind]}
               </span>
-              <span className="truncate text-small text-fg">{row.name}</span>
+              <span className="flex min-w-0 items-baseline gap-1">
+                <span className="min-w-0 truncate text-small text-fg">{row.name}</span>
+                <FullTextButton
+                  kind={KIND_LABEL[row.kind] ?? '·'}
+                  title={previewLine(row.name, 60)}
+                  body={row.name}
+                  className="shrink-0 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+                />
+              </span>
               <span className="tnum text-right font-mono text-small text-fg-muted">{row.count}</span>
               <span className={`tnum text-right font-mono text-small ${durationTone(row.sum)}`}>
                 {row.sum.toLocaleString()}

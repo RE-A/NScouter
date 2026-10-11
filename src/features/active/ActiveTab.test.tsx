@@ -346,3 +346,39 @@ describe('ActiveTab — 트래픽 차트와 목록의 관계', () => {
     expect(screen.getAllByText('12.4초').length).toBeGreaterThan(0);
   });
 });
+
+describe('ActiveTab — F5', () => {
+  it('신호가 바뀌면 주기를 기다리지 않고 한 번 더 묻는다', async () => {
+    const view = render(
+      <ActiveTab
+        enabled
+        javaeeTypes={['tomcat']}
+        picked={new Set<number>()}
+        expectedHashes={[1, 2]}
+        agentMap={AGENTS}
+        poolHashes={[]}
+        anyDatasource={false}
+        refreshSignal={0}
+      />,
+    );
+    await screen.findAllByText('12.4초');
+    const calls = api.getTypeActiveServices.mock.calls.length;
+
+    view.rerender(
+      <ActiveTab
+        enabled
+        javaeeTypes={['tomcat']}
+        picked={new Set<number>()}
+        expectedHashes={[1, 2]}
+        agentMap={AGENTS}
+        poolHashes={[]}
+        anyDatasource={false}
+        refreshSignal={1}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(api.getTypeActiveServices.mock.calls.length).toBeGreaterThan(calls),
+    );
+  });
+});

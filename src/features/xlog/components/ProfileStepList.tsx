@@ -499,9 +499,10 @@ function SqlBody({
       {/* 채우지 않는 설정이면 값은 따로 보여준다 — 안 보여주면 정보가 사라진다.
           **채웠더라도 아귀가 안 맞으면 원본을 같이 보여준다.** 자리와 값의 수가 다르면
           어느 값이 어디로 갔는지가 곧 의심 대상인데, 채운 문장만 보여 주면 확인할
-          방법이 없다 — 온 값 그대로가 유일한 근거다. */}
+          방법이 없다 — 온 값 그대로가 유일한 근거다.
+          줄로 다 보여주므로 title 을 또 달지 않는다 — 값이 수백 자면 툴팁이 화면을 덮는다. */}
       {params !== '' && (!inline || mismatched) && (
-        <code className="mt-0.5 block break-all font-mono text-micro text-fg-dim" title={params}>
+        <code className="mt-0.5 block break-all font-mono text-micro text-fg-dim">
           <span className="text-fg-faint">{t('바인딩')}</span> {params}
         </code>
       )}
@@ -517,7 +518,7 @@ function SqlBody({
         </span>
       )}
       {bound && bound.leftover.length > 0 && (
-        <span className="mt-0.5 block text-micro text-warn" title={bound.leftover.join(', ')}>
+        <span className="mt-0.5 block text-micro text-warn">
           {t('쓰이지 않은 값')} {bound.leftover.length}{t('개:')} {bound.leftover.join(', ')}
         </span>
       )}

@@ -48,6 +48,15 @@ import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
 import { durationTone } from './features/xlog/components/durationTone';
 import { SelectionSummary } from './features/xlog/components/SelectionSummary';
+import {
+  DEFAULT_SORT,
+  nextSort,
+  sortMark,
+  sortXLogs,
+  type SortKey,
+  type SortNames,
+  type SortState,
+} from './features/xlog/components/xlogSort';
 import { selectionStats } from './features/xlog/components/selectionStats';
 // ko-KR 로케일은 "4시 36분 18초" 를 낸다 — 폭을 먹고 줄바꿈되며 차트 X축(04:36:18)과도 어긋난다.
 import { formatTime, formatTimeMs } from './features/xlog/utils/colorPalette';
@@ -97,6 +106,7 @@ import {
   DEFAULT_CHART_CONFIG,
   DEFAULT_FILTER,
   formatYValue,
+  Y_AXIS_CONFIGS,
   xlogPackToSXLog,
   yAxisShortLabel,
 } from './features/xlog/types/xlog';
@@ -205,6 +215,13 @@ export default function App() {
   const [clearSignal, setClearSignal] = useState(0);
   /** 실시간 / 과거. 과거면 pastRange 가 실제 조회 구간이다 */
   const [xlogMode, setXLogMode] = useState<XLogMode>('live');
+  /**
+   * F5 를 누른 횟수 — **지금 보는 화면의 데이터만** 다시 받게 하는 신호.
+   *
+   * 웹뷰를 통째로 reload 하면 접속·고른 서버·열어 둔 상세가 다 날아간다.
+   * 보는 화면마다 «다시 받는다» 의 뜻이 달라서, 각 화면이 이 값을 보고 제 일을 한다.
+   */
+  const [refreshSignal, setRefreshSignal] = useState(0);
   const [pastRange, setPastRange] = useState<PastRange | null>(null);
   const [agentMap, setAgentMap] = useState<Map<number, string>>(new Map());
   /** 카운터 요청 대상. Family 별로 나눠 둔다 — 화면도 Family 로 나눈다 */
@@ -836,10 +853,35 @@ export default function App() {
    * 으로 보여 새 서버에서 스트림을 안 열고, 화면이 조용히 빈 채로 남는다.
    */
   const streamEpochRef = useRef(connectionEpoch);
+  /**
+   * F5 를 누른 횟수.
+   *
+   * 실시간은 «다시 받을 것» 이 없어 보이지만, **끊긴 스트림을 되살리는 수단**이 된다.
+   * 스트림이 죽은 채로 있으면 화면은 조용히 비어 가는데, 그때 누를 것이 없었다.
+   */
+  const streamReloadRef = useRef(refreshSignal);
   useEffect(() => {
-    if (!isConnected) { streamHashesRef.current = ''; return; }
+    // **과거를 보는 동안에는 받지 않는다.** 과거 구간을 조회하는 중에도 실시간 폴링이
+    // 500ms 마다 돌고 있었다 — 보지도 않을 것을 받느라 콜렉터·네트워크를 같이 쓰고,
+    // 운영에서는 그 폴링이 먼저 끊겨 «스트리밍 오류» 배너가 조회를 덮었다.
+    //
+    // **Active 탭은 예외다.** 거기 트래픽 차트가 이 스트림을 쓰므로, XLog 탭을
+    // 보면서 과거 모드일 때만 멈춘다.
+    const viewingPast = activeTab === 'xlog' && xlogMode === 'past';
+    if (!isConnected || viewingPast) {
+      if (streamHashesRef.current !== '') {
+        streamHashesRef.current = '';
+        stopXLogStream().catch(() => {});
+      }
+      return;
+    }
     if (streamEpochRef.current !== connectionEpoch) {
       streamEpochRef.current = connectionEpoch;
+      streamHashesRef.current = '';
+    }
+    if (streamReloadRef.current !== refreshSignal) {
+      // 같은 목록이라도 다시 연다 — 되살리는 것이 목적이다.
+      streamReloadRef.current = refreshSignal;
       streamHashesRef.current = '';
     }
     // **고른 것이 곧 받는 것이다.** 예전에는 빈 선택을 «전부» 로 읽어 접속하자마자
@@ -860,7 +902,7 @@ export default function App() {
     if (key === streamHashesRef.current) return;
     streamHashesRef.current = key;
     startXLogStream(hashes).catch(() => {});
-  }, [isConnected, filter.objHashSet, connectionEpoch]);
+  }, [isConnected, filter.objHashSet, connectionEpoch, activeTab, xlogMode, refreshSignal]);
 
   /**
    * 과거 조회 대상.
@@ -975,8 +1017,14 @@ export default function App() {
 
   /** Ctrl+F 로 옮겨 갈 자리 */
   const searchInputRef = useRef<HTMLInputElement>(null);
-  /** F5 — 값이 바뀌면 차트가 같은 구간을 다시 받는다 */
-  const [refreshSignal, setRefreshSignal] = useState(0);
+  /**
+   * 트랜잭션 목록이 어느 열로 서 있는가.
+   *
+   * **실시간과 과거가 한 상태를 쓴다.** 모드마다 따로 두면 오갈 때마다 목록이
+   * 뒤집혀 읽던 자리를 잃는다 (`xlogSort.DEFAULT_SORT` 주석).
+   */
+  const [tableSort, setTableSort] = useState<SortState>(DEFAULT_SORT);
+  const handleSort = useCallback((key: SortKey) => setTableSort(cur => nextSort(cur, key)), []);
 
   /**
    * 격자에서 서버 한 대를 눌렀을 때.
@@ -1032,7 +1080,14 @@ export default function App() {
     'tab-alert': () => setActiveTab('alert'),
     'open-settings': () => setShowSettings(true),
     'toggle-mode': () => setXLogMode(m => (m === 'live' ? 'past' : 'live')),
-    // 실시간은 계속 흘러오므로 다시 받을 것이 없다. 과거 구간에서만 뜻이 있다.
+    /**
+     * F5 — **웹뷰를 통째로 다시 띄우지 않는다.** 그러면 접속·고른 서버·열어 둔 상세가
+     * 다 날아간다. 지금 보는 화면의 **데이터만** 다시 받는다:
+     *   XLog 과거  구간을 다시 조회
+     *   XLog 실시간 스트림을 다시 연다 (끊긴 것을 되살리는 수단)
+     *   Active     지금 한 번 더 묻는다
+     *   Counter·Visualize  패널들을 다시 세워 받는다
+     */
     reload: () => setRefreshSignal(n => n + 1),
   });
 
@@ -1347,6 +1402,8 @@ export default function App() {
                       textVersion={textVersion}
                       onRowClick={handleRowClick}
                       yAxisMode={config.yAxisMode}
+                      sort={tableSort}
+                      onSort={handleSort}
                     />
                   </div>
                 </div>
@@ -1414,6 +1471,7 @@ export default function App() {
               anyDatasource={counterHashes.datasource.length > 0}
               connectionEpoch={connectionEpoch}
               onOpenXLog={handleOpenXLogFromActive}
+              refreshSignal={refreshSignal}
             />
           )}
         </div>
@@ -1429,7 +1487,12 @@ export default function App() {
           ) : nothingPicked ? (
             <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
           ) : (
+            /* **F5 는 패널을 다시 세운다.** 이 탭의 패널마다 조회 훅이 따로 있어
+               신호를 일일이 내려보내면 손이 많이 가고 빠뜨리기 쉽다. 다시 세우면
+               전부가 한 번에 다시 받는다 — 대신 패널 안의 펼침·정렬 같은 상태는
+               초기화된다(접속·고른 서버·필터는 이 바깥에 있어 그대로다). */
             <VisualizeTab
+              key={`visualize-${refreshSignal}`}
               enabled={activeTab === 'visualize'}
               javaeeTypes={pickedJavaeeTypes}
               hostTypes={pickedHostTypes}
@@ -1452,7 +1515,8 @@ export default function App() {
           ) : nothingPicked ? (
             <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            /* F5 — Visualize 탭과 같은 규칙으로 패널을 다시 세운다 */
+            <div key={`counter-${refreshSignal}`} className="min-h-0 flex-1 overflow-y-auto p-3">
               {/* 추세(카운터 차트)보다 **지금**이 먼저다. 장애 중이면 여기부터 본다. */}
               <ActiveServicePanel
                 objTypes={pickedJavaeeTypes}
@@ -1706,6 +1770,9 @@ interface XLogTableProps {
   onRowClick: (xlog: SXLog) => void;
   /** 지금 차트가 그리는 축. Elapsed 가 아니면 그 값을 한 칸 더 보여준다 */
   yAxisMode: YAxisMode;
+  /** 어느 열로 서 있는가. 실시간·과거가 같은 상태를 쓴다 */
+  sort: SortState;
+  onSort: (key: SortKey) => void;
 }
 
 /**
@@ -1730,14 +1797,56 @@ const XLOG_COLS_Y =
 /** 목록에 실제로 그리는 최대 행 수. 넘으면 **느린 것부터** 자른다 */
 const XLOG_TABLE_LIMIT = 500;
 
+/**
+ * 누를 수 있는 열 머리.
+ *
+ * **정렬 중인 열에만 화살표를 단다.** 모든 열에 달면 어느 것이 켜졌는지 안 보인다.
+ */
+function SortHead({
+  sort,
+  onSort,
+  col,
+  label,
+  align = 'left',
+  tone = '',
+  title,
+}: {
+  sort: SortState;
+  onSort: (key: SortKey) => void;
+  col: SortKey;
+  label: string;
+  align?: 'left' | 'right';
+  tone?: string;
+  title?: string;
+}) {
+  const mark = sortMark(sort, col);
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(col)}
+      title={title ?? t('눌러서 이 열로 정렬합니다')}
+      aria-label={`${label}${mark === '' ? '' : mark === '▲' ? ' ▲' : ' ▼'}`}
+      className={`flex min-w-0 items-baseline gap-0.5 truncate rounded hover:text-fg ${
+        align === 'right' ? 'justify-end' : ''
+      } ${mark === '' ? '' : 'text-fg'} ${tone}`}
+    >
+      <span className="truncate">{label}</span>
+      {mark !== '' && <span className="shrink-0 text-accent">{mark}</span>}
+    </button>
+  );
+}
+
 function XLogTable({
   xlogs,
   searchHits,
   agentMap,
   activeXlog,
   getCached,
+  textVersion,
   onRowClick,
   yAxisMode,
+  sort,
+  onSort,
 }: XLogTableProps) {
   // Elapsed 축이면 목록의 Elapsed 가 곧 점 높이라 더 보여줄 것이 없다.
   const showY = yAxisMode !== 'elapsed';
@@ -1745,27 +1854,62 @@ function XLogTable({
   // 촘촘한 구간을 고르면 수천 건이 잡힌다. 시간 순으로 앞에서 500건을 자르면
   // **가장 오래된 500건**만 남는다 — 1ms 짜리 잡음이다.
   // 구간을 드래그하는 이유는 "무엇이 느렸나" 이므로 느린 순으로 자른다.
-  const shown = useMemo(() => {
+  //
+  // **자르는 기준과 보는 기준은 다르다.** 500건을 고르는 기준은 언제나 «느린 순» 이고
+  // (시간순으로 앞에서 자르면 1ms 짜리 잡음만 남는다), 그 위에 사용자가 고른 기준으로
+  // 다시 늘어놓는다. 잘렸으면 머리에 그렇게 적는다 — 안 적으면 «이게 전부» 로 읽힌다.
+  const picked = useMemo(() => {
     const base = searchHits === null ? xlogs : xlogs.filter(x => searchHits.has(x.txid));
     return [...base].sort((a, b) => b.elapsed - a.elapsed).slice(0, XLOG_TABLE_LIMIT);
   }, [xlogs, searchHits]);
 
+  const sortNames = useMemo<SortNames>(
+    () => ({
+      server: h => agentMap.get(h) ?? `[0x${h.toString(16)}]`,
+      url: h => getCached('service', h) ?? `[0x${h.toString(16)}]`,
+      yValue: x => Y_AXIS_CONFIGS[yAxisMode].valueExtractor(x),
+    }),
+    // 텍스트 캐시가 채워지면 이름이 달라지므로 그때 다시 세운다.
+    [agentMap, getCached, yAxisMode, textVersion],
+  );
+
+  const shown = useMemo(() => sortXLogs(picked, sort, sortNames), [picked, sort, sortNames]);
+  /** 느린 순으로 잘라 낸 뒤인가 — 머리에 적어야 «이게 전부» 로 안 읽힌다 */
+  const cut = (searchHits === null ? xlogs.length : picked.length) > XLOG_TABLE_LIMIT
+    ? xlogs.length
+    : 0;
+
   return (
     <div className="flex h-full flex-col bg-surface">
+      {/* **잘랐으면 잘랐다고 적는다.** 정렬을 바꿔도 화면에 있는 것은 여전히
+          «느린 상위 500건» 이라, 안 적으면 «시간순 전부» 로 읽힌다. */}
+      {cut > 0 && (
+        <p className="shrink-0 border-b border-line bg-warn/10 px-3 py-1 text-micro text-warn">
+          {t('느린 순으로 고른')} {XLOG_TABLE_LIMIT.toLocaleString()}{t('건')} / {cut.toLocaleString()}
+          {t('건')}
+        </p>
+      )}
+
       {/* 선택 개수와 해제 버튼은 Pane 타이틀바로 올렸다 — 머리가 둘이면 목록이 그만큼 짧아진다 */}
       <div
         className={`${cols} shrink-0 items-center border-b border-line px-3 py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <span>{t('시간')}</span>
-        <span>{t('서버')}</span>
-        <span>URL</span>
-        <span>IP</span>
-        <span className="text-right">Elapsed</span>
+        <SortHead sort={sort} onSort={onSort} col="time" label={t('시간')} />
+        <SortHead sort={sort} onSort={onSort} col="server" label={t('서버')} />
+        <SortHead sort={sort} onSort={onSort} col="url" label="URL" />
+        <SortHead sort={sort} onSort={onSort} col="ip" label="IP" />
+        <SortHead sort={sort} onSort={onSort} col="elapsed" label="Elapsed" align="right" />
         {/* 지금 점 높이가 무엇인지 — 축 이름을 그대로 쓴다 */}
         {showY && (
-          <span className="truncate text-right text-accent normal-case" title={t('차트 Y축이 그리는 값입니다')}>
-            {yAxisShortLabel(yAxisMode)}
-          </span>
+          <SortHead
+            sort={sort}
+            onSort={onSort}
+            col="y"
+            label={yAxisShortLabel(yAxisMode)}
+            align="right"
+            tone="text-accent normal-case"
+            title={t('차트 Y축이 그리는 값입니다')}
+          />
         )}
       </div>
 

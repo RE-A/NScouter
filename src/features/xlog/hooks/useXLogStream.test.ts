@@ -105,4 +105,25 @@ describe('useXLogStream', () => {
     act(() => result.current.clearError());
     expect(result.current.streamError).toBeNull();
   });
+
+  it('데이터가 다시 오면 지난 오류는 스스로 사라진다', () => {
+    // 스트림은 끊겨도 1초마다 스스로 다시 붙는다. 배너가 남아 있으면
+    // 이미 복구된 뒤에도 «지금도 고장» 으로 읽힌다.
+    const { result } = renderHook(() => useXLogStream(DEFAULT_CHART_CONFIG));
+    act(() => bus.error?.('스트리밍 오류: connection timed out'));
+    expect(result.current.streamError).not.toBeNull();
+
+    act(() => bus.data?.(columns([Date.now()])));
+    expect(result.current.streamError).toBeNull();
+  });
+
+  it('한가해서 새 데이터가 없어도 오래 붙들지 않는다', () => {
+    // 복구됐는지 데이터로는 알 수 없는 구간이 있다. 시간으로도 지운다 —
+    // 계속 끊겨 있으면 다음 오류가 곧바로 다시 띄운다.
+    const { result } = renderHook(() => useXLogStream(DEFAULT_CHART_CONFIG));
+    act(() => bus.error?.('스트리밍 오류: connection timed out'));
+
+    act(() => void vi.advanceTimersByTime(10_000));
+    expect(result.current.streamError).toBeNull();
+  });
 });

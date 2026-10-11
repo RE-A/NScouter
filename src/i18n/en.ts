@@ -57,6 +57,10 @@ export const EN: Record<string, string> = {
   '끝남': 'Finished',
   '눌러서 상세 보기': 'click to open details',
 
+  // ── 트랜잭션 목록 정렬 ────────────────────────────────
+  '눌러서 이 열로 정렬합니다': 'Click to sort by this column',
+  '느린 순으로 고른': 'Slowest',
+
   '가장 오래된 것': 'Longest running',
   '무엇을 기다리나': 'Waiting on',
   '가지': ' kinds',

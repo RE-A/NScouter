@@ -76,6 +76,18 @@ impl ScouterConnection {
         let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(CONNECT_TIMEOUT_MS))?;
         stream.set_nodelay(true)?;
 
+        // **읽기·쓰기에 기한을 둔다.** 이것이 없으면 상대가 조용히 사라졌을 때
+        // OS 가 TCP 재전송을 포기할 때까지(수십 분) 그 요청이 매달려 있는다 —
+        // 그동안 화면은 «조회 중» 인 채로 멈춘 것처럼 보이고, 한참 뒤에야
+        // `connection timed out` 이 뜬다. 운영에서 실제로 그렇게 보였다.
+        //
+        // 값은 **넉넉해야 한다.** 콜렉터가 수만 건을 모아 보내는 중일 수 있어서,
+        // 짧게 잡으면 정상 응답을 중간에 끊어 버린다. 끊긴 연결을 «빨리» 알아채는
+        // 것이 목적이지 느린 응답을 자르는 것이 아니다.
+        let timeout = Duration::from_millis(IO_TIMEOUT_MS);
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+
         let reader = BufReader::new(stream.try_clone()?);
         let mut writer = BufWriter::new(stream);
 

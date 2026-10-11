@@ -9,6 +9,8 @@
 import { memo } from 'react';
 import { flattenFlow, type FlowNode } from '../trace/flowTree';
 import { durationTone } from './durationTone';
+import { FullTextButton } from './FullTextButton';
+import { previewLine } from './textFormat';
 import { t } from '../../../i18n';
 
 interface FlowTreeViewProps {
@@ -74,13 +76,24 @@ export const FlowTreeView = memo(function FlowTreeView({
                 style={{ paddingLeft: n.depth * 12 }}
                 className={`min-w-0 ${n.depth > 0 ? 'border-l border-line/50' : ''}`}
               >
-                <span
-                  className={`block truncate text-small ${
-                    n.kind === 'service' ? 'text-fg' : 'text-fg-muted'
-                  }`}
-                  title={n.name}
-                >
-                  {n.name}
+                {/* **전문을 툴팁에 밀어 넣지 않는다.** 잎은 SQL 문장이나 API 주소
+                    통째라 그대로 달면 툴팁이 화면을 덮는다 — 전문은 창에서 연다
+                    (스텝 목록·요약과 같은 창이다). */}
+                <span className="flex min-w-0 items-baseline gap-1">
+                  <span
+                    className={`min-w-0 truncate text-small ${
+                      n.kind === 'service' ? 'text-fg' : 'text-fg-muted'
+                    }`}
+                    title={previewLine(n.name, 120)}
+                  >
+                    {n.name}
+                  </span>
+                  <FullTextButton
+                    kind={kind.label}
+                    title={previewLine(n.name, 60)}
+                    body={n.name}
+                    className="shrink-0 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+                  />
                 </span>
                 {n.agent && (
                   <span className="block truncate text-micro text-fg-dim" title={n.agent}>
