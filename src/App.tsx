@@ -668,16 +668,6 @@ export default function App() {
     if (xlogs.length === 1) openDetail(xlogs[0]);
   }, [openDetail, resetSearch]);
   const handleRowClick = useCallback((xlog: SXLog) => { openDetail(xlog); }, [openDetail]);
-  /**
-   * Active 탭의 트래픽 차트에서 끝난 점을 눌렀을 때.
-   *
-   * 상세 패널은 XLog 탭에 있다 — 여기서 열면 화면이 두 곳에 생긴다. 탭을 옮겨
-   * **원래 상세를 보던 자리**에서 열어 준다.
-   */
-  const handleOpenXLogFromActive = useCallback((xlog: SXLog) => {
-    openDetail(xlog);
-    setActiveTab('xlog');
-  }, [openDetail]);
   // 목록만 지우면 캔버스에 선택 사각형이 남는다. 둘 다 지운다.
   const handleClearSelection = useCallback(() => {
     setSelectedXLogs([]);
@@ -1470,7 +1460,6 @@ export default function App() {
               poolHashes={poolHashes}
               anyDatasource={counterHashes.datasource.length > 0}
               connectionEpoch={connectionEpoch}
-              onOpenXLog={handleOpenXLogFromActive}
               refreshSignal={refreshSignal}
             />
           )}

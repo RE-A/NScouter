@@ -49,13 +49,20 @@ export const EN: Record<string, string> = {
     'No connection pool sits under the selected servers. Pool objects do exist, so if their names are not nested under the WAS, select those pools on the left.',
   '커넥션 풀이 안 잡힙니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.':
     'No connection pools detected. Turn on both spring.datasource.hikari.register-mbeans in the app and jmx_counter_enabled in the agent.',
-  // ── Active 탭 · 실시간 트래픽 차트 ────────────────────
+  // ── Active 탭 · 실시간 트래픽 ─────────────────────────
   '실시간 트래픽': 'Live traffic',
   '세로축': 'y-axis',
-  '○ 실행 중': '○ running',
-  '● 끝난 것': '● finished',
-  '끝남': 'Finished',
+  '돌고 있음': 'In flight',
+  '초당 처리': 'per second',
   '눌러서 상세 보기': 'click to open details',
+  '왼쪽에서 들어와 가운데서 처리되고 오른쪽으로 빠집니다 · 오래 걸릴수록 위로 뜹니다':
+    'Requests fly in from the left, sit in the middle while they run, and exit right · the longer they take, the higher they float',
+
+  // ── 실시간 일시정지 ──────────────────────────────────
+  '화면을 멈춥니다. 받는 것은 계속합니다': 'Freeze the view. Data keeps arriving',
+  '다시 흐르게 합니다': 'Resume the live view',
+  '재개': 'Resume',
+  '멈춘 뒤': 'since paused',
 
   // ── 트랜잭션 목록 정렬 ────────────────────────────────
   '눌러서 이 열로 정렬합니다': 'Click to sort by this column',

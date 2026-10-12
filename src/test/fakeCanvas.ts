@@ -63,7 +63,11 @@ export class FakeCanvasContext {
   fill(): void {
     this.record('fill');
   }
-  /** 동그란 점 (Active 탭 트래픽 차트) */
+  /** 면을 닫는다 (Active 탭 처리 흐름 차트의 적층 영역) */
+  closePath(): void {
+    this.record('closePath');
+  }
+  /** 동그란 점 */
   arc(x: number, y: number, r: number, start: number, end: number): void {
     this.record('arc', x, y, r, start, end);
   }

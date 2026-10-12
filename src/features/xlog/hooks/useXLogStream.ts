@@ -8,11 +8,19 @@ import { XLogDataStore } from '../store/XLogDataStore';
 import { useViewOptions } from './useViewOptions';
 import { xlogColumnsToSXLogs } from '../types/xlog';
 import type { XLogChartConfig } from '../types/xlog';
+import { NOT_PAUSED, pruneRangeMs, type PauseState } from './pauseModel';
 
 interface UseXLogStreamResult {
   store: XLogDataStore;
   streamError: string | null;
   clearError: () => void;
+  /**
+   * 지금까지 **받은** 누적 건수.
+   *
+   * 저장소의 건수와 다르다 — 창 밖으로 밀려나거나 상한에 걸려 버려진 것이 빠지기
+   * 때문이다. «멈춘 사이 몇 건 왔나» 는 이 값으로만 셀 수 있다 (`pauseModel`).
+   */
+  receivedTotal: number;
 }
 
 /**
@@ -25,10 +33,22 @@ interface UseXLogStreamResult {
  */
 const ERROR_LINGER_MS = 10_000;
 
-export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
+/**
+ * @param pause 화면을 멈춘 상태. 멈춰 있으면 **지우는 범위를 늘려** 고정된 창을 덮는다 —
+ *              안 그러면 멈춰 놓고 보는 중에 창 왼쪽부터 점이 사라진다.
+ */
+export function useXLogStream(
+  config: XLogChartConfig,
+  pause: PauseState = NOT_PAUSED,
+): UseXLogStreamResult {
   const storeRef = useRef(new XLogDataStore());
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [receivedTotal, setReceivedTotal] = useState(0);
   const { bufferMax } = useViewOptions();
+
+  // 지우기는 흐르는 타이머 안에서 도므로, 멈춤 상태를 ref 로 들고 본다.
+  const pauseRef = useRef(pause);
+  pauseRef.current = pause;
 
   useEffect(() => {
     if (streamError === null) return;
@@ -52,7 +72,9 @@ export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
     const off = subscribe(
       // **열로 받아 여기서 행으로 엮는다.** 건당 이벤트면 10,000건에 콜백이 1만 번 돈다.
       onXLogData(cols => {
-        storeRef.current.addBatch(xlogColumnsToSXLogs(cols));
+        const rows = xlogColumnsToSXLogs(cols);
+        storeRef.current.addBatch(rows);
+        setReceivedTotal(n => n + rows.length);
         // 데이터가 다시 오면 지난 오류는 끝난 이야기다. 그대로 두면 «지금도 끊겨 있다» 로 읽힌다.
         setStreamError(null);
       }),
@@ -63,7 +85,8 @@ export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
 
     // 주기적으로 시간 윈도우 밖 데이터 정리
     const pruneInterval = setInterval(() => {
-      storeRef.current.prune(Date.now(), config.timeRangeMs);
+      const now = Date.now();
+      storeRef.current.prune(now, pruneRangeMs(pauseRef.current, config.timeRangeMs, now));
     }, 5000);
 
     return () => {
@@ -78,5 +101,6 @@ export function useXLogStream(config: XLogChartConfig): UseXLogStreamResult {
     store: storeRef.current,
     streamError,
     clearError,
+    receivedTotal,
   };
 }

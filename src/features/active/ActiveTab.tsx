@@ -17,15 +17,14 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActiveService } from '../xlog/types/object';
-import type { SXLog } from '../xlog/types/xlog';
 import { ThreadDetailDialog } from '../xlog/components/ThreadDetailDialog';
 import { ActiveGauge } from './ActiveGauge';
 import { ActiveList } from './ActiveList';
 import { PoolStrip } from './PoolStrip';
 import { QueryDetailDialog } from './QueryDetailDialog';
 import { ResourceGroups } from './ResourceGroups';
-import { TrafficChart } from './TrafficChart';
-import { useActiveTraffic } from './useActiveTraffic';
+import { FlowChart } from './FlowChart';
+import { useTps } from './useTps';
 import {
   groupByResource,
   matchesRow,
@@ -70,24 +69,9 @@ interface ActiveTabProps {
   anyDatasource: boolean;
   /** 접속할 때마다 올라가는 번호. 바뀌면 이전 서버의 행을 버린다 */
   connectionEpoch?: number;
-  /**
-   * 트래픽 차트에서 **끝난** 점을 눌렀을 때.
-   *
-   * 상세 패널은 XLog 탭에 있다 — 여기서 열 수 없으므로 App 이 탭을 옮기고 연다.
-   * 없으면 끝난 점은 눌러도 아무 일도 하지 않는다(눌러도 안 되는 링크는 안 만든다).
-   */
-  onOpenXLog?: (xlog: SXLog) => void;
   /** F5 — 값이 바뀌면 주기를 기다리지 않고 지금 한 번 더 묻는다 */
   refreshSignal?: number;
 }
-
-/**
- * 트래픽 차트가 담아 두는 시간.
- *
- * 1분이다. 이 화면은 «지금» 을 보는 자리라 더 넓히면 XLog 탭과 하는 일이 겹치고,
- * 좁히면 «방금 지나간 것» 이 남지 않아 목록이 빈 순간을 설명하지 못한다.
- */
-const TRAFFIC_WINDOW_MS = 60_000;
 
 /** 주기 고르개에 적을 글자. `0` 은 멈춤 */
 function pollLabel(ms: PollMs): string {
@@ -103,7 +87,6 @@ export const ActiveTab = memo(function ActiveTab({
   poolHashes,
   anyDatasource,
   connectionEpoch = 0,
-  onOpenXLog,
   refreshSignal = 0,
 }: ActiveTabProps) {
   const [period, setPeriod] = useState<PollMs>(DEFAULT_POLL_MS);
@@ -115,7 +98,7 @@ export const ActiveTab = memo(function ActiveTab({
 
   const feed = useActiveServices(javaeeTypes, expectedHashes, enabled, period, connectionEpoch);
   const poolCounters = usePoolCounters(enabled);
-  const traffic = useActiveTraffic(enabled, TRAFFIC_WINDOW_MS, connectionEpoch);
+  const tps = useTps(enabled, picked);
 
   /**
    * F5 를 누르면 지금 한 번 더 받는다.
@@ -166,19 +149,20 @@ export const ActiveTab = memo(function ActiveTab({
     };
   }, [feed.missed, feed.stale, picked]);
 
+  const counts = useMemo(() => stepCounts(mine), [mine]);
+
   /**
-   * 트래픽 차트에 «실행 중» 으로 그릴 것.
+   * 그림에 «실행 중» 으로 그릴 것 — **이번에 실제로 받은 것만.**
    *
-   * **지난 값은 뺀다.** 못 닿은 서버의 직전 값은 지금도 돌고 있는지 모르는 것이라,
-   * 차트에서 «지금 여기까지 왔다» 로 그리면 없는 것을 있다고 말하게 된다.
-   * 목록에서는 흐리게라도 남기지만(사라지면 «다 끝났다» 로 읽힌다) 점은 다르다.
+   * 목록은 못 닿은 서버의 «지난 값» 을 흐리게 이어 보여준다(사라지면 «다 끝났다» 로
+   * 읽힌다). 그런데 이 그림에서는 다르다 — 점이 매 프레임 **자란다**. 지금 돌고 있는지
+   * 모르는 것을 자라게 두면, 연결이 끊긴 동안에도 «계속 일하는 중» 이라고 말하게 된다.
    */
   const liveNow = useMemo(
     () => (feed.stale.size === 0 ? mine : mine.filter(r => !feed.stale.has(r.obj_hash))),
     [mine, feed.stale],
   );
 
-  const counts = useMemo(() => stepCounts(mine), [mine]);
   const groups = useMemo(() => groupByResource(mine), [mine]);
   const sorted = useMemo(() => sortRows(mine), [mine]);
   const oldest = sorted[0] ?? null;
@@ -281,18 +265,10 @@ export const ActiveTab = memo(function ActiveTab({
         />
       </section>
 
-      {/* 트래픽 — 게이지 바로 아래다. 게이지는 «지금 몇 건이 걸려 있나» 를 세고,
-          이건 «그 사이에 몇 건이 지나갔나» 를 보여준다. 둘이 붙어 있어야
-          «목록은 비었는데 점은 빽빽하다» 가 한눈에 읽힌다. */}
+      {/* 흐름 — 게이지 바로 아래다. 게이지가 «지금 몇 건» 이라면 이건 «그게 쌓이는 중인가,
+          빠지는 중인가» 다. 둘이 붙어 있어야 지금 수가 많은 것인지 아닌지 읽힌다. */}
       <section className="px-3 pt-3">
-        <TrafficChart
-          done={traffic.done}
-          live={liveNow}
-          picked={picked}
-          windowMs={TRAFFIC_WINDOW_MS}
-          onPickDone={x => onOpenXLog?.(x)}
-          onPickLive={setDetail}
-        />
+        <FlowChart live={liveNow} polledAt={feed.at} tps={tps} onPickLive={setDetail} />
       </section>
 
       {/* 풀 줄 — 자리가 뜻이다. 위(게이지)가 «얼마나», 아래(목록)가 «무엇 때문에» 고,

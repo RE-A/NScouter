@@ -1,8 +1,15 @@
 // src/features/xlog/components/XLogChart.tsx
 
-import React, { memo, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useXLogCanvas } from '../hooks/useXLogCanvas';
 import { useXLogStream } from '../hooks/useXLogStream';
+import {
+  arrivedWhilePaused,
+  frozenWindow,
+  NOT_PAUSED,
+  pause,
+  type PauseState,
+} from '../hooks/pauseModel';
 
 import { usePastXLog } from '../hooks/usePastXLog';
 import { useConnectionReset } from '../hooks/useConnectionReset';
@@ -103,7 +110,19 @@ export const XLogChart = memo(function XLogChart({
   refreshSignal = 0,
   connectionEpoch = 0,
 }: XLogChartProps) {
-  const { store: liveStore, streamError, clearError } = useXLogStream(config);
+  /**
+   * 화면을 멈춘 상태.
+   *
+   * **차트가 들고 있다.** 멈춤은 «이 그림을 세워 둔다» 는 뜻이라 그리는 쪽에 붙어야
+   * 하고, 과거 모드로 갔다 오면 저절로 풀리는 편이 자연스럽다(과거는 원래 고정이다).
+   */
+  const [pauseState, setPauseState] = useState<PauseState>(NOT_PAUSED);
+  const {
+    store: liveStore,
+    streamError,
+    clearError,
+    receivedTotal,
+  } = useXLogStream(config, pauseState);
 
   const isPast = pastRange !== null;
   /** Ctrl+휠이 딛고 설 값 */
@@ -153,11 +172,31 @@ export const XLogChart = memo(function XLogChart({
     },
   );
 
-  // 과거는 고정 구간, 실시간은 흐르는 창.
+  // 과거는 고정 구간, 실시간은 흐르는 창. **멈춰 두면 실시간도 고정 창이다** —
+  // 그리기 쪽에서 둘은 같은 일이라 렌더러를 손댈 것이 없다 (`pauseModel` 머리말).
   const timeWindow = useMemo(
-    () => (pastRange ? { start: pastRange.stime, end: pastRange.etime } : null),
-    [pastRange],
+    () =>
+      pastRange
+        ? { start: pastRange.stime, end: pastRange.etime }
+        : frozenWindow(pauseState, config.timeRangeMs),
+    [pastRange, pauseState, config.timeRangeMs],
   );
+
+  /**
+   * 멈춤을 토글한다.
+   *
+   * 과거 구간을 보는 중에는 뜻이 없다 — 이미 고정된 그림이다.
+   */
+  const togglePause = useCallback(() => {
+    setPauseState(cur => (cur.at === null ? pause(Date.now(), receivedTotal) : NOT_PAUSED));
+  }, [receivedTotal]);
+
+  // 과거로 가면 멈춤을 푼다. 돌아왔을 때 «왜 안 흐르지» 가 되지 않게.
+  React.useEffect(() => {
+    if (isPast) setPauseState(NOT_PAUSED);
+  }, [isPast]);
+
+  const pausedFor = arrivedWhilePaused(pauseState, receivedTotal);
 
   /**
    * 휠 = 확대/축소, Shift+휠 = 좌우 이동.
@@ -278,6 +317,39 @@ export const XLogChart = memo(function XLogChart({
           cursor: 'crosshair',
         }}
       />
+
+      {/* **멈춤은 차트 위에 둔다.** 멈춘 그림 바로 옆에 있어야 «왜 안 흐르지» 가 안 생긴다.
+          실시간일 때만 뜻이 있다 — 과거 구간은 원래 고정된 그림이다. */}
+      {!isPast && (
+        <div className="absolute top-2 left-2 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={togglePause}
+            aria-pressed={pauseState.at !== null}
+            title={
+              pauseState.at === null
+                ? t('화면을 멈춥니다. 받는 것은 계속합니다')
+                : t('다시 흐르게 합니다')
+            }
+            className={`rounded border px-2 py-0.5 text-micro shadow-lg ${
+              pauseState.at === null
+                ? 'border-line-strong bg-overlay text-fg-dim hover:text-fg'
+                : 'border-accent bg-accent/20 text-accent'
+            }`}
+          >
+            {pauseState.at === null ? `⏸ ${t('멈춤')}` : `▶ ${t('재개')}`}
+          </button>
+
+          {/* **멈춘 사이에도 받고 있다**는 것을 수로 보여준다. 안 보여주면 멈춘 동안
+              아무 일도 없었던 것으로 읽히고, 재개할 이유도 흐려진다. */}
+          {pauseState.at !== null && (
+            <span className="rounded border border-line-strong bg-overlay px-2 py-0.5 text-micro text-fg-muted shadow-lg">
+              {t('멈춘 뒤')} <span className="tnum font-mono text-fg">{pausedFor.toLocaleString()}</span>
+              {t('건')}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 과거 조회는 수만 건이라 몇 초 걸린다. 진행 상황이 없으면 멈춘 것처럼 보인다. */}
       {isPast && (past.loading || past.error) && (

@@ -9,6 +9,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useXLogStream } from './useXLogStream';
+import { NOT_PAUSED, pause, type PauseState } from './pauseModel';
 import { DEFAULT_CHART_CONFIG } from '../types/xlog';
 
 const bus = vi.hoisted(() => ({
@@ -115,6 +116,39 @@ describe('useXLogStream', () => {
 
     act(() => bus.data?.(columns([Date.now()])));
     expect(result.current.streamError).toBeNull();
+  });
+
+  it('멈춰 둔 동안에도 받고, 받은 누적을 센다', () => {
+    // 멈추는 것은 화면뿐이다. 수집까지 멈추면 «방금 그 점을 보려고» 멈춘 사이의
+    // 구간을 영영 못 본다. 그리고 저장소 건수로는 셀 수 없다 — 버려진 것이 빠진다.
+    const { result, rerender } = renderHook(
+      ({ p }: { p: PauseState }) => useXLogStream(DEFAULT_CHART_CONFIG, p),
+      { initialProps: { p: NOT_PAUSED } },
+    );
+
+    act(() => bus.data?.(columns([Date.now(), Date.now()])));
+    expect(result.current.receivedTotal).toBe(2);
+
+    rerender({ p: pause(Date.now(), result.current.receivedTotal) });
+    act(() => bus.data?.(columns([Date.now()])));
+
+    expect(result.current.receivedTotal).toBe(3);
+    expect(result.current.store.getAll().length).toBe(3);
+  });
+
+  it('멈춰 있으면 고정된 창의 점을 지우지 않는다', () => {
+    // 지우는 범위를 늘리지 않으면 멈춰 놓고 보는 중에 창 왼쪽부터 점이 사라진다.
+    const now = Date.now();
+    const pausedAt = pause(now, 0);
+    const { result } = renderHook(() => useXLogStream(DEFAULT_CHART_CONFIG, pausedAt));
+
+    // 창(기본 5분)의 거의 왼쪽 끝에 있는 점
+    act(() => bus.data?.(columns([now - DEFAULT_CHART_CONFIG.timeRangeMs + 1_000])));
+    expect(result.current.store.getAll().length).toBe(1);
+
+    // 멈춘 채로 1분이 흐르고 정리가 돈다 — 흐르는 창이었다면 밀려났을 자리다.
+    act(() => void vi.advanceTimersByTime(60_000));
+    expect(result.current.store.getAll().length).toBe(1);
   });
 
   it('한가해서 새 데이터가 없어도 오래 붙들지 않는다', () => {
