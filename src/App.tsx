@@ -51,6 +51,7 @@ import { SelectionSummary } from './features/xlog/components/SelectionSummary';
 import {
   DEFAULT_SORT,
   nextSort,
+  pickTableRows,
   sortMark,
   sortXLogs,
   type SortKey,
@@ -1847,10 +1848,10 @@ function XLogTable({
   // **자르는 기준과 보는 기준은 다르다.** 500건을 고르는 기준은 언제나 «느린 순» 이고
   // (시간순으로 앞에서 자르면 1ms 짜리 잡음만 남는다), 그 위에 사용자가 고른 기준으로
   // 다시 늘어놓는다. 잘렸으면 머리에 그렇게 적는다 — 안 적으면 «이게 전부» 로 읽힌다.
-  const picked = useMemo(() => {
-    const base = searchHits === null ? xlogs : xlogs.filter(x => searchHits.has(x.txid));
-    return [...base].sort((a, b) => b.elapsed - a.elapsed).slice(0, XLOG_TABLE_LIMIT);
-  }, [xlogs, searchHits]);
+  const picked = useMemo(
+    () => pickTableRows(xlogs, searchHits, XLOG_TABLE_LIMIT),
+    [xlogs, searchHits],
+  );
 
   const sortNames = useMemo<SortNames>(
     () => ({
@@ -1862,11 +1863,12 @@ function XLogTable({
     [agentMap, getCached, yAxisMode, textVersion],
   );
 
-  const shown = useMemo(() => sortXLogs(picked, sort, sortNames), [picked, sort, sortNames]);
-  /** 느린 순으로 잘라 낸 뒤인가 — 머리에 적어야 «이게 전부» 로 안 읽힌다 */
-  const cut = (searchHits === null ? xlogs.length : picked.length) > XLOG_TABLE_LIMIT
-    ? xlogs.length
-    : 0;
+  const shown = useMemo(
+    () => sortXLogs(picked.rows, sort, sortNames),
+    [picked.rows, sort, sortNames],
+  );
+  /** 잘라 내기 전의 수. 상한 이하면 0 — 머리에 적어야 «이게 전부» 로 안 읽힌다 */
+  const cut = picked.matched > XLOG_TABLE_LIMIT ? picked.matched : 0;
 
   return (
     <div className="flex h-full flex-col bg-surface">

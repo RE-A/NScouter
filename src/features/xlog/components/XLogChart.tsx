@@ -166,6 +166,9 @@ export const XLogChart = memo(function XLogChart({
     () => {
       liveStore.clear();
       pastStore.clear();
+      // **멈춤도 푼다.** 안 그러면 고정된 창이 **이전 서버의 시각**에 머물러,
+      // 새 서버의 점이 들어와도 화면은 빈 채로 남는다 — «왜 아무것도 안 보이지» 가 된다.
+      setPauseState(NOT_PAUSED);
     },
     () => {
       if (isPast) pastReload();

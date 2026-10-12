@@ -93,3 +93,26 @@ export function sortXLogs(
     return b.endTime - a.endTime;
   });
 }
+
+/**
+ * 목록에 그릴 것을 고른다 — **자르기 전의 수를 함께 돌려준다.**
+ *
+ * 자른 뒤의 배열로는 «잘렸는가» 를 알 수 없다. 길이가 상한을 넘을 수 없어서 늘
+ * «안 잘림» 이 되기 때문이다 — 실제로 그렇게 짜서, 검색으로 상한보다 많이 걸러도
+ * 안내가 영영 안 떴다.
+ *
+ * 고르는 기준은 언제나 **느린 순**이다. 구간을 드래그하는 이유가 «무엇이 느렸나» 라서,
+ * 시간순으로 앞에서 자르면 1ms 짜리 잡음만 남는다. 보는 순서는 그 위에서 따로 정한다.
+ */
+export function pickTableRows(
+  xlogs: readonly SXLog[],
+  /** 검색에 걸린 txid 들. `null` 은 «검색을 안 했다» 라서 전부 본다 (빈 것과 다르다) */
+  searchHits: { has(txid: string): boolean } | null,
+  limit: number,
+): { matched: number; rows: SXLog[] } {
+  const base = searchHits === null ? xlogs : xlogs.filter(x => searchHits.has(x.txid));
+  return {
+    matched: base.length,
+    rows: [...base].sort((a, b) => b.elapsed - a.elapsed).slice(0, limit),
+  };
+}

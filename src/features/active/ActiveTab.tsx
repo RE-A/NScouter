@@ -268,7 +268,15 @@ export const ActiveTab = memo(function ActiveTab({
       {/* 흐름 — 게이지 바로 아래다. 게이지가 «지금 몇 건» 이라면 이건 «그게 쌓이는 중인가,
           빠지는 중인가» 다. 둘이 붙어 있어야 지금 수가 많은 것인지 아닌지 읽힌다. */}
       <section className="px-3 pt-3">
-        <FlowChart live={liveNow} polledAt={feed.at} tps={tps} onPickLive={setDetail} />
+        {/* **접속이 바뀌면 다시 세운다.** 흐름 차트는 «무엇이 사라졌나» 로 완료를 아는데,
+            추적표를 들고 가면 이전 서버의 점이 새 서버에서 끝난 것처럼 빠져나간다. */}
+        <FlowChart
+          key={connectionEpoch}
+          live={liveNow}
+          polledAt={feed.at}
+          tps={tps}
+          onPickLive={setDetail}
+        />
       </section>
 
       {/* 풀 줄 — 자리가 뜻이다. 위(게이지)가 «얼마나», 아래(목록)가 «무엇 때문에» 고,

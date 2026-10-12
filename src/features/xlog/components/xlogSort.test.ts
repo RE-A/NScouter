@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SORT,
   nextSort,
+  pickTableRows,
   sortMark,
   sortXLogs,
   type SortNames,
@@ -112,6 +113,41 @@ describe('정렬', () => {
   it('원본을 건드리지 않는다', () => {
     const before = rows.map(r => r.txid);
     sortXLogs(rows, { key: 'elapsed', dir: 'asc' }, NAMES);
+    expect(rows.map(r => r.txid)).toEqual(before);
+  });
+});
+
+describe('목록에 그릴 것 고르기', () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => x({ txid: `t${i}`, elapsed: i, endTime: i }));
+
+  it('느린 순으로 자른다 — 시간순으로 앞에서 자르면 잡음만 남는다', () => {
+    const { rows } = pickTableRows(many(10), null, 3);
+    expect(rows.map(r => r.elapsed)).toEqual([9, 8, 7]);
+  });
+
+  it('**자르기 전의 수**를 돌려준다', () => {
+    // 자른 뒤의 배열로는 «잘렸는가» 를 알 수 없다 — 길이가 상한을 넘을 수 없다.
+    expect(pickTableRows(many(10), null, 3).matched).toBe(10);
+    expect(pickTableRows(many(2), null, 3).matched).toBe(2);
+  });
+
+  it('검색 중에도 잘림을 알 수 있다', () => {
+    // 이 자리가 실제로 틀려 있었다: 검색으로 상한보다 많이 걸러도 안내가 영영 안 떴다.
+    const hits = new Set(many(10).map(r => r.txid));
+    const got = pickTableRows(many(10), hits, 3);
+    expect(got.matched).toBe(10);
+    expect(got.rows).toHaveLength(3);
+  });
+
+  it('검색 결과가 비면 0건이다 — «안 찾았다» 와 다르다', () => {
+    expect(pickTableRows(many(10), new Set<string>(), 3).matched).toBe(0);
+  });
+
+  it('원본을 건드리지 않는다', () => {
+    const rows = many(5);
+    const before = rows.map(r => r.txid);
+    pickTableRows(rows, null, 3);
     expect(rows.map(r => r.txid)).toEqual(before);
   });
 });
