@@ -69,7 +69,7 @@ export const TopServices = memo(function TopServices({
             title={t(s.hint)}
             aria-pressed={by === s.by}
             className={`rounded px-1.5 py-0.5 text-micro ${
-              by === s.by ? 'bg-accent/20 text-accent' : 'text-fg-faint hover:bg-hover hover:text-fg'
+              by === s.by ? 'bg-accent/20 text-accent-bright' : 'text-fg-faint hover:bg-hover hover:text-fg'
             }`}
           >
             {t(s.label)}

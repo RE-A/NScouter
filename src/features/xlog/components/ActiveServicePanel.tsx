@@ -158,7 +158,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
                 max={`${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}`}
                 onChange={e => setDay(e.target.value.split('-').join(''))}
                 title={t('그날 하루의 누적을 봅니다')}
-                className="rounded border border-line-strong bg-input px-1 py-0.5 text-micro text-fg"
+                className="rounded border border-line-control bg-input px-1 py-0.5 text-micro text-fg"
               />
               {!isToday && (
                 <button
@@ -294,7 +294,7 @@ function TodaySpark({ series }: { series: { times: number[]; values: (number | n
         stroke="currentColor"
         strokeWidth={1.2}
         vectorEffect="non-scaling-stroke"
-        className="text-accent"
+        className="text-accent-bright"
       />
     </svg>
   );

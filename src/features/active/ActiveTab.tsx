@@ -197,16 +197,14 @@ export const ActiveTab = memo(function ActiveTab({
               key={ms}
               onClick={() => setPeriod(ms)}
               aria-pressed={period === ms}
-              className={`rounded px-1.5 py-0.5 font-mono text-micro ${
-                period === ms ? 'bg-accent/20 text-accent' : 'text-fg-faint hover:bg-hover hover:text-fg'
-              }`}
+              className="btn-ghost px-1.5 py-0.5 font-mono text-micro"
             >
               {pollLabel(ms)}
             </button>
           ))}
           <button
             onClick={feed.refresh}
-            className="ml-1 rounded px-1.5 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+            className="btn ml-1 px-1.5 py-0.5 text-micro"
           >
             {t('지금 받기')}
           </button>

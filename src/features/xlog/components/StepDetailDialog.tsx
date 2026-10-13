@@ -120,7 +120,7 @@ export const StepDetailDialog = memo(function StepDetailDialog({
               onClick={() => setPretty(p => !p)}
               aria-pressed={pretty}
               className={`rounded px-2 py-0.5 text-micro ${
-                pretty ? 'bg-accent/15 text-accent' : 'text-fg-dim hover:bg-hover hover:text-fg'
+                pretty ? 'bg-accent/15 text-accent-bright' : 'text-fg-dim hover:bg-hover hover:text-fg'
               }`}
             >
               {t('정렬해 보기')}
@@ -131,7 +131,7 @@ export const StepDetailDialog = memo(function StepDetailDialog({
             onClick={() => setWrap(w => !w)}
             aria-pressed={wrap}
             className={`rounded px-2 py-0.5 text-micro ${
-              wrap ? 'bg-accent/15 text-accent' : 'text-fg-dim hover:bg-hover hover:text-fg'
+              wrap ? 'bg-accent/15 text-accent-bright' : 'text-fg-dim hover:bg-hover hover:text-fg'
             }`}
           >
             {t('줄 바꿔 보기')}

@@ -149,7 +149,7 @@ export const SettingsForm = memo(function SettingsForm({
                   </span>
                 )}
                 {changed > 0 && (
-                  <span className="shrink-0 text-micro text-accent" title={t('기본값과 다른 항목')}>
+                  <span className="shrink-0 text-micro text-accent-bright" title={t('기본값과 다른 항목')}>
                     ●{changed}
                   </span>
                 )}
@@ -352,7 +352,7 @@ function Card({
               onClick={() => onChange(e.default)}
               // 저장하면 파일에서 이 줄이 지워진다 — 기본값을 박아 두지 않고 따라가게 한다
               title={t('이 줄을 설정 파일에서 지워 기본값을 따르게 합니다')}
-              className="shrink-0 text-accent hover:underline"
+              className="shrink-0 text-accent-bright hover:underline"
             >
               {t('기본값으로')}
             </button>
@@ -376,7 +376,7 @@ function Badge({
     tone === 'warn'
       ? 'border-warn/40 text-warn'
       : tone === 'accent'
-        ? 'border-accent/40 text-accent'
+        ? 'border-accent/40 text-accent-bright'
         : 'border-line-strong text-fg-faint';
   return (
     <span title={title} className={`rounded border px-1 text-micro ${cls}`}>

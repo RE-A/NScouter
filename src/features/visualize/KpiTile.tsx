@@ -145,7 +145,7 @@ export const KpiTile = memo(function KpiTile({
       <svg
         viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
         preserveAspectRatio="none"
-        className={`mt-1 h-5 w-full ${g === 'none' || g === 'ok' ? 'text-accent' : TONE[g]}`}
+        className={`mt-1 h-5 w-full ${g === 'none' || g === 'ok' ? 'text-accent-bright' : TONE[g]}`}
         aria-hidden
       >
         {points.length >= 2 && (

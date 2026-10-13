@@ -411,7 +411,7 @@ function ErrorTable({
                 <button
                   onClick={() => onOpenTxid(r.txid, txidDate(r.txid))}
                   title={t('이 에러가 난 트랜잭션을 연다')}
-                  className="rounded px-1.5 py-0.5 text-micro text-accent hover:bg-hover"
+                  className="rounded px-1.5 py-0.5 text-micro text-accent-bright hover:bg-hover"
                 >
                   {t('열기')}
                 </button>

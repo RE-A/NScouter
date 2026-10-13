@@ -334,11 +334,8 @@ export const XLogChart = memo(function XLogChart({
                 ? t('화면을 멈춥니다. 받는 것은 계속합니다')
                 : t('다시 흐르게 합니다')
             }
-            className={`rounded border px-2 py-0.5 text-micro shadow-lg ${
-              pauseState.at === null
-                ? 'border-line-strong bg-overlay text-fg-dim hover:text-fg'
-                : 'border-accent bg-accent/20 text-accent'
-            }`}
+            // 차트 위에 떠 있는 단추라 배경을 깔아야 점과 안 섞인다.
+            className="btn bg-overlay px-2 py-0.5 text-micro shadow-lg"
           >
             {pauseState.at === null ? `⏸ ${t('멈춤')}` : `▶ ${t('재개')}`}
           </button>

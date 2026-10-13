@@ -195,7 +195,7 @@ export const FlowChart = memo(function FlowChart({
       <p className="mt-1 h-4 truncate text-micro text-fg-muted">
         {hover ? (
           <>
-            <span className="text-accent">{formatTick(hover.ty * yMaxLabel)}</span>{' '}
+            <span className="text-accent-bright">{formatTick(hover.ty * yMaxLabel)}</span>{' '}
             {hover.row.service} · {t('눌러서 상세 보기')}
           </>
         ) : (

@@ -287,7 +287,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
               disabled={busy}
               title={tr('대상 JVM 의 스레드 덤프를 지금 떠서 에이전트에 파일로 남깁니다')}
               className={`rounded border border-line-strong px-2 py-0.5 text-micro ${
-                busy ? 'cursor-not-allowed text-fg-faint' : 'text-accent hover:bg-hover'
+                busy ? 'cursor-not-allowed text-fg-faint' : 'text-accent-bright hover:bg-hover'
               }`}
             >
               {busy ? tr('뜨는 중…') : tr('지금 덤프 뜨기')}
@@ -513,7 +513,7 @@ function ThreadTable({
               {/* 처리 중인 요청. 유휴 스레드에는 없다 */}
               {t.service !== null && (
                 <span
-                  className="block truncate font-mono text-micro text-accent"
+                  className="block truncate font-mono text-micro text-accent-bright"
                   title={serviceName(t.service) ?? `0x${(t.service >>> 0).toString(16)}`}
                 >
                   {serviceName(t.service) ?? `0x${(t.service >>> 0).toString(16)}`}
@@ -843,7 +843,7 @@ function SocketTable({
             <span className="tnum text-right font-mono text-micro text-fg-muted">
               {s.count.toLocaleString()}
             </span>
-            <span className="truncate font-mono text-micro text-accent">
+            <span className="truncate font-mono text-micro text-accent-bright">
               {s.service === null ? '' : (serviceName(s.service) ?? `0x${(s.service >>> 0).toString(16)}`)}
             </span>
           </li>

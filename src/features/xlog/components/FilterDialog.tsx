@@ -123,10 +123,10 @@ export const FilterDialog = memo(function FilterDialog({
                         onClick={() => update(idx, { exclude: !r.exclude })}
                         aria-pressed={r.exclude}
                         title={t('포함과 제외를 바꿉니다')}
-                        className={`w-12 shrink-0 rounded border px-1 py-0.5 text-micro ${
+                        className={`btn w-12 shrink-0 px-1 py-0.5 text-micro hover:brightness-125 ${
                           r.exclude
-                            ? 'border-warn/60 text-warn'
-                            : 'border-accent/60 text-accent'
+                            ? 'border-warn bg-warn/10 text-warn'
+                            : 'border-accent-bright bg-accent/10 text-accent-bright'
                         }`}
                       >
                         {r.exclude ? t('제외') : t('포함')}
@@ -138,7 +138,7 @@ export const FilterDialog = memo(function FilterDialog({
                         spellCheck={false}
                         placeholder={placeholder}
                         onChange={e => update(idx, { text: e.target.value })}
-                        className="min-w-0 flex-1 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
+                        className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
                       />
                       <button
                         onClick={() => remove(idx)}
@@ -172,7 +172,11 @@ export const FilterDialog = memo(function FilterDialog({
               <button
                 onClick={() => onChange({ elapsedExclude: !filter.elapsedExclude })}
                 aria-pressed={filter.elapsedExclude}
-                className="rounded border border-line-strong px-1.5 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
+                className={`btn px-1.5 py-0.5 text-micro hover:brightness-125 ${
+                  filter.elapsedExclude
+                    ? 'border-warn bg-warn/10 text-warn'
+                    : 'border-accent-bright bg-accent/10 text-accent-bright'
+                }`}
               >
                 {filter.elapsedExclude ? t('미만') : t('이상')}
               </button>
@@ -188,7 +192,7 @@ export const FilterDialog = memo(function FilterDialog({
                     elapsedMs: Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 0,
                   });
                 }}
-                className="w-20 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg"
+                className="w-20 rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg"
               />
               <span className="text-micro text-fg-faint">{t('초')}</span>
             </div>
@@ -264,13 +268,13 @@ export const FilterDialog = memo(function FilterDialog({
               onKeyDown={e => {
                 if (e.key === 'Enter' && saveName.trim() !== '') onSave(saveName);
               }}
-              className="min-w-0 flex-1 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
+              className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
             />
             <button
               onClick={() => onSave(saveName)}
               disabled={saveName.trim() === ''}
               title={t('같은 이름이면 덮어씁니다')}
-              className="shrink-0 rounded border border-accent px-2 py-0.5 text-micro text-accent hover:bg-hover disabled:cursor-not-allowed disabled:border-line disabled:text-fg-faint"
+              className="btn shrink-0 border-accent-bright px-2 py-0.5 text-micro text-accent-bright"
             >
               {saved.some(f => f.name === saveName.trim()) ? t('덮어쓰기') : t('담기')}
             </button>

@@ -62,7 +62,7 @@ export const XLogSearchBar = memo(function XLogSearchBar({
         <button
           onClick={() => onRun(draft)}
           disabled={!canRun}
-          className="rounded border border-line-strong px-2 py-0.5 text-micro text-accent hover:bg-hover disabled:cursor-not-allowed disabled:text-fg-faint"
+          className="btn border-accent-bright px-2 py-0.5 text-micro text-accent-bright"
         >
           {t('검색')}
         </button>

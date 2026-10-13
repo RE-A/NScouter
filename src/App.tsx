@@ -1106,7 +1106,7 @@ export default function App() {
       <header className="flex shrink-0 items-center gap-4 border-b border-line bg-overlay px-3 py-1.5">
         {/* 정체 */}
         <div className="flex items-center gap-2">
-          <span className="text-title leading-none font-semibold tracking-tight text-accent">N</span>
+          <span className="text-title leading-none font-semibold tracking-tight text-accent-bright">N</span>
           <span className="text-body leading-none font-medium tracking-tight text-fg">scouter</span>
           {serverId && (
             <span className="flex items-center gap-1.5 text-micro text-fg-muted">
@@ -1130,8 +1130,9 @@ export default function App() {
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 aria-current={active ? 'page' : undefined}
-                className={`rounded px-2.5 py-1 text-body transition-colors ${
-                  active ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg-muted'
+                // 탭은 늘 윤곽을 두르면 다섯 개가 상자로 늘어선다. 고른 것만 세운다.
+                className={`btn-ghost px-2.5 py-1 text-body transition-colors ${
+                  active ? 'border-accent bg-accent/15 text-accent-bright' : ''
                 }`}
               >
                 {TAB_LABELS[tab]}
@@ -1172,7 +1173,7 @@ export default function App() {
             <button
               onClick={() => setShowCollectorConfig(true)}
               title={t('지금 붙은 콜렉터의 설정을 보고 고칩니다')}
-              className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+              className="btn px-2 py-0.5 text-micro"
             >
               {t('콜렉터 설정')}
             </button>
@@ -1181,7 +1182,7 @@ export default function App() {
             onClick={() => setShowSettings(true)}
             title={t('설정')}
             aria-label={t('설정')}
-            className="rounded px-1.5 py-1 text-fg-dim hover:text-fg"
+            className="btn-ghost px-1.5 py-1"
           >
             ⚙
           </button>
@@ -1821,7 +1822,7 @@ function SortHead({
       } ${mark === '' ? '' : 'text-fg'} ${tone}`}
     >
       <span className="truncate">{label}</span>
-      {mark !== '' && <span className="shrink-0 text-accent">{mark}</span>}
+      {mark !== '' && <span className="shrink-0 text-accent-bright">{mark}</span>}
     </button>
   );
 }
@@ -1898,7 +1899,7 @@ function XLogTable({
             col="y"
             label={yAxisShortLabel(yAxisMode)}
             align="right"
-            tone="text-accent normal-case"
+            tone="text-accent-bright normal-case"
             title={t('차트 Y축이 그리는 값입니다')}
           />
         )}
@@ -1962,7 +1963,7 @@ function XLogTable({
                   {x.elapsed.toLocaleString()}ms
                 </span>
                 {showY && (
-                  <span className="tnum truncate text-right font-mono text-accent">
+                  <span className="tnum truncate text-right font-mono text-accent-bright">
                     {formatYValue(yAxisMode, x)}
                   </span>
                 )}
@@ -1972,7 +1973,7 @@ function XLogTable({
                   알 수 없어 매번 상세를 열어 봐야 한다. */}
               {hit && (
                 <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
-                  <span className="shrink-0 rounded-sm bg-accent/15 px-1 font-mono text-micro text-accent">
+                  <span className="shrink-0 rounded-sm bg-accent/15 px-1 font-mono text-micro text-accent-bright">
                     {hit.first.kind}
                   </span>
                   <span

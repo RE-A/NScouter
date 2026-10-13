@@ -154,14 +154,14 @@ export const WideSearchDialog = memo(function WideSearchDialog({
             type="datetime-local"
             value={stime}
             onChange={e => setStime(e.target.value)}
-            className="rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg"
+            className="rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg"
           />
           <span className="text-fg-faint">–</span>
           <input
             type="datetime-local"
             value={etime}
             onChange={e => setEtime(e.target.value)}
-            className="rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg"
+            className="rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg"
           />
         </Row>
         {badRange && (
@@ -172,7 +172,7 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           <select
             value={objHash}
             onChange={e => setObjHash(Number(e.target.value))}
-            className="min-w-0 flex-1 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg"
+            className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg"
           >
             {/* 서버가 **하나만** 받는다. 목록으로 좁힐 수 없다 */}
             <option value={0}>{t('전체')}</option>
@@ -239,7 +239,7 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           <button
             onClick={submit}
             disabled={badRange || running}
-            className="rounded border border-accent px-3 py-1 text-small text-accent hover:bg-hover disabled:cursor-not-allowed disabled:border-line disabled:text-fg-faint"
+            className="btn border-accent-bright px-3 py-1 text-small text-accent-bright"
           >
             {running ? t('찾는 중…') : t('찾기')}
           </button>
@@ -274,7 +274,7 @@ function Text({
       spellCheck={false}
       placeholder={placeholder}
       onChange={e => onChange(e.target.value)}
-      className="min-w-0 flex-1 rounded border border-line-strong bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
+      className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
     />
   );
 }

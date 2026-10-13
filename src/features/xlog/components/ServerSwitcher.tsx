@@ -80,7 +80,7 @@ export const ServerSwitcher = memo(function ServerSwitcher({
         disabled={busy}
         aria-expanded={open}
         title={t('붙을 서버를 고릅니다')}
-        className="max-w-[10rem] truncate rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
+        className="btn max-w-[10rem] truncate px-2 py-0.5 text-micro"
       >
         {busy ? t('바꾸는 중…') : (current ?? t('서버 고르기'))} ▾
       </button>

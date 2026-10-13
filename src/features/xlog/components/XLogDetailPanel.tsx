@@ -368,7 +368,7 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                       >
                         ‹
                       </button>
-                      <span className="tnum font-mono text-micro text-accent">
+                      <span className="tnum font-mono text-micro text-accent-bright">
                         {hitIdx + 1}/{stepHits.length}
                       </span>
                       <button

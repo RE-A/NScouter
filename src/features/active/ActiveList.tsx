@@ -157,7 +157,7 @@ export const ActiveList = memo(function ActiveList({
                       <span className="min-w-0 flex-1 truncate font-mono text-micro text-fg-muted">
                         {res.label}
                       </span>
-                      <span className="shrink-0 text-micro text-accent">{t('상세')}</span>
+                      <span className="shrink-0 text-micro text-accent-bright">{t('상세')}</span>
                     </button>
                     {/* «3초째 같은 쿼리» — 방금 넘어온 것과 계속 매달린 것을 가른다 */}
                     {held !== null && (

@@ -25,6 +25,8 @@
   --color-line-strong: var(--border-strong);
   --color-search: var(--bg-search);
   --color-line-search: var(--border-search);
+  /* 누를 수 있는 것의 경계 — 구분선(line)과 **역할이 다르다** (tokens.css 주석) */
+  --color-line-control: var(--border-control);
 
   /* 글자 */
   --color-fg: var(--text);
@@ -34,6 +36,7 @@
 
   /* 의미 */
   --color-accent: var(--accent);
+  --color-accent-bright: var(--accent-bright);
   --color-ok: var(--success);
   --color-warn: var(--warn);
   --color-danger: var(--error);
@@ -117,6 +120,84 @@
   /* 숫자·ID 는 자릿수가 흔들리면 비교가 어렵다 */
   .tnum {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ── 누를 수 있는 것 ────────────────────────────────────────
+ * **«버튼이 버튼인지 모르겠다».** 세어 보니 버튼 133개 중 56개가 평상시에 윤곽이
+ * 전혀 없었고, 테두리를 그린 것들도 `--border` 가 배경과 1.19:1 이라 안 보이기는
+ * 마찬가지였다. 호버 배경도 1.19:1 — 눌리는 자리를 알리는 신호가 사실상 없었다.
+ *
+ * 색 문제는 토큰에서 풀었다(`--border-control`). 여기서는 **모양을 한 곳에 모은다** —
+ * 검색칸(`.search-field`)에서 쓴 방식 그대로다. 크기(글자·여백)는 쓰는 쪽이 정한다.
+ *
+ * 두 가지로 나눈다:
+ *   `.btn`        늘 윤곽이 있다. 헤더·툴바처럼 **찾아서 누르는** 자리
+ *   `.btn-ghost`  평상시 조용하고 **닿으면 윤곽이 생긴다**. 목록 안의 보조 버튼 —
+ *                 수백 줄짜리 목록의 «복사»·«펼치기» 까지 상자를 두르면 화면이 상자로 덮인다
+ *
+ * **포커스는 둘 다 같다.** 전체에서 포커스 스타일이 아홉 곳뿐이라, 키보드로 옮기면
+ * 지금 어디에 있는지 알 수 없었다. 여기 넣으면 쓰는 곳마다 따라온다.
+ */
+@layer components {
+  .btn,
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background-color: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .btn {
+    border-color: var(--border-control);
+  }
+
+  .btn:hover:not(:disabled),
+  .btn-ghost:hover:not(:disabled) {
+    /* 경계가 밝아지는 것 자체가 «눌린다» 는 신호다 */
+    border-color: var(--border-control-hover);
+    background-color: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .btn:focus-visible,
+  .btn-ghost:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+
+  /* 눌려 있는 토글. `aria-pressed` 를 그대로 쓴다 — 화면과 보조기술이 같은 것을 본다 */
+  .btn[aria-pressed='true'],
+  .btn-ghost[aria-pressed='true'] {
+    border-color: var(--accent-bright);
+    background-color: var(--accent-soft);
+    /* 글자에는 밝은 쪽을 쓴다 — `--accent` 는 어두운 바탕 위 작은 글씨에서 4.5 를 못 넘는다 */
+    color: var(--accent-bright);
+  }
+
+  .btn:disabled,
+  .btn-ghost:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* 되돌릴 수 없는 것(GC·덤프·연결 해제)은 색으로도 구분한다 */
+  .btn-danger {
+    border-color: var(--error);
+    color: var(--error);
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    border-color: var(--error);
+    background-color: var(--error-soft);
+    color: var(--error);
   }
 }
 

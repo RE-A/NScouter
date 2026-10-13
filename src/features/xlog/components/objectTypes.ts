@@ -75,7 +75,7 @@ export function typeLabel(objType: string): string {
 export function typeTone(objType: string): string {
   switch (objectFamily(objType)) {
     case 'javaee':
-      return 'text-accent';
+      return 'text-accent-bright';
     case 'host':
       return 'text-[var(--cat-api)]';
     case 'datasource':

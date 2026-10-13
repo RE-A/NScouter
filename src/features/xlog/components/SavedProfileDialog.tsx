@@ -157,7 +157,7 @@ export const SavedProfileDialog = memo(function SavedProfileDialog({
                     {sizeLabel(row.size)}
                   </span>
                   {opening === row.path && (
-                    <span className="shrink-0 text-micro text-accent">{t('여는 중…')}</span>
+                    <span className="shrink-0 text-micro text-accent-bright">{t('여는 중…')}</span>
                   )}
                 </button>
               </li>

@@ -48,7 +48,7 @@ const Y_AXIS_OPTIONS: YAxisMode[] = [
  * 축·범위(무엇을 그리나)와 에러·최소(무엇을 거르나)를 구분선으로 나눈다.
  */
 const CONTROL =
-  'rounded border border-line-strong bg-input px-1.5 py-0.5 text-body text-fg';
+  'rounded border border-line-control bg-input px-1.5 py-0.5 text-body text-fg';
 
 export function XLogToolbar({
   config,
@@ -80,7 +80,7 @@ export function XLogToolbar({
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-raised px-3 py-1">
       {/* 모드가 나머지 전부의 의미를 바꾸므로 맨 앞이다 */}
-      <div className="flex overflow-hidden rounded border border-line-strong">
+      <div className="flex overflow-hidden rounded border border-line-control">
         {(['live', 'past'] as XLogMode[]).map(m => (
           <button
             key={m}
@@ -91,6 +91,7 @@ export function XLogToolbar({
               if (m === 'live') onPastRangeChange(null);
             }}
             aria-pressed={mode === m}
+            // 묶음 안이라 저마다 테두리를 두르지 않는다 — 가른 선은 묶음이 갖고 있다.
             className={`px-2 py-0.5 text-micro transition-colors ${
               mode === m ? 'bg-accent text-white' : 'text-fg-dim hover:bg-hover hover:text-fg-muted'
             }`}
@@ -105,7 +106,7 @@ export function XLogToolbar({
       <button
         onClick={onWideSearch}
         title={t('구간과 조건을 정해 서버에서 찾습니다')}
-        className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
+        className="btn px-2 py-0.5 text-micro"
       >
         {t('찾기')}
       </button>
@@ -115,7 +116,7 @@ export function XLogToolbar({
       <button
         onClick={onOpenSaved}
         title={t('파일로 남겨 둔 프로파일을 엽니다')}
-        className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
+        className="btn px-2 py-0.5 text-micro"
       >
         {t('저장본')}
       </button>
@@ -145,10 +146,8 @@ export function XLogToolbar({
             onClick={() => onPastRangeChange({ ...draft })}
             disabled={!check.ok}
             title={check.reason ?? t('이 구간을 조회합니다')}
-            className={`rounded border px-2 py-0.5 text-micro ${
-              check.ok
-                ? 'border-accent text-accent hover:bg-hover'
-                : 'cursor-not-allowed border-line text-fg-faint'
+            className={`btn px-2 py-0.5 text-micro ${
+              check.ok ? 'border-accent text-accent-bright' : ''
             }`}
           >
             {t('조회')}
@@ -293,7 +292,7 @@ export function XLogToolbar({
       <button
         onClick={onOpenFilters}
         title={t('포함·제외를 여러 줄로 겁니다')}
-        className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-muted hover:bg-hover hover:text-fg"
+        className="btn px-2 py-0.5 text-micro"
       >
         {t('필터')}
         {extraRules > 0 ? ` +${extraRules}` : ''}
@@ -327,10 +326,20 @@ function Direction({
       onClick={() => onChange(!exclude)}
       aria-pressed={exclude}
       title={exclude ? t('제외 조건 — 눌러서 포함으로') : t('포함 조건 — 눌러서 제외로')}
-      className={`rounded border px-1.5 py-0.5 text-micro transition-colors ${
+      /* **양쪽 다 색을 준다.**
+       *
+       * 한쪽만 칠해 두니(제외=warn, 포함=회색) «이상/포함/포함» 이 찾기·저장본·필터 같은
+       * 평범한 버튼과 같은 회색이라, 셋 중 어느 것이 눌러서 뒤집히는 것인지 구분이 안 됐다.
+       * 규칙을 하나로 둔다 — **회색은 일을 시키는 버튼, 색이 있는 것은 상태를 쥔 버튼.**
+       *
+       * 색이 방향을 말한다: 들이는 쪽은 accent(조건을 건다), 거르는 쪽은 warn(빼낸다).
+       *
+       * `.btn` 의 호버(테두리·배경이 밝아짐)는 여기 색에 덮인다 — 레이어가 뒤라 유틸이 이긴다.
+       * 그래서 호버 신호를 밝기로 따로 준다. 없으면 «눌리는 것» 임을 색으로만 알게 된다. */
+      className={`btn px-1.5 py-0.5 text-micro transition-all hover:brightness-125 ${
         exclude
-          ? 'border-warn/60 bg-warn/10 text-warn'
-          : 'border-line-strong text-fg-dim hover:text-fg'
+          ? 'border-warn bg-warn/10 text-warn'
+          : 'border-accent-bright bg-accent/10 text-accent-bright'
       }`}
     >
       {exclude ? offLabel : onLabel}
@@ -349,11 +358,30 @@ function TextCond({
   placeholder: string;
   onChange: (v: TextFilter) => void;
 }) {
+  /**
+   * **글자가 비면 방향을 담아 둘 줄이 없다.**
+   *
+   * 조건 한 줄은 글자가 있을 때만 존재한다(setFirstRule — 빈 글자는 줄을 지운다).
+   * 그래서 빈 칸에서 «포함»을 눌러도 상위 상태가 그대로라 버튼이 안 뒤집혔다.
+   * 방향을 먼저 정하고 글자를 치는 순서가 막히면 안 되므로, 줄이 없는 동안만
+   * 화면이 방향을 들고 있다가 글자가 들어올 때 그 방향으로 줄을 만든다.
+   */
+  const [draftExclude, setDraftExclude] = useState(value.exclude);
+  const exclude = value.text === '' ? draftExclude : value.exclude;
+
+  // 줄이 살아 있는 동안의 방향은 상위가 진짜다 — 필터 창에서 뒤집으면 여기도 따라간다
+  useEffect(() => {
+    if (value.text !== '') setDraftExclude(value.exclude);
+  }, [value.text, value.exclude]);
+
   return (
     <Field label={label}>
       <Direction
-        exclude={value.exclude}
-        onChange={v => onChange({ ...value, exclude: v })}
+        exclude={exclude}
+        onChange={v => {
+          setDraftExclude(v);
+          onChange({ text: value.text, exclude: v });
+        }}
         onLabel={t('포함')}
         offLabel={t('제외')}
       />
@@ -363,7 +391,7 @@ function TextCond({
         placeholder={placeholder}
         spellCheck={false}
         className={`${CONTROL} w-28`}
-        onChange={e => onChange({ ...value, text: e.target.value })}
+        onChange={e => onChange({ text: e.target.value, exclude })}
       />
       {value.text !== '' && (
         // **글자 크기가 곧 누를 수 있는 넓이가 아니다.** 미니 아이콘 하나만 두면

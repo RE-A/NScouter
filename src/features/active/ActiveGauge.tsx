@@ -15,7 +15,7 @@ import { t } from '../../i18n';
 
 /** 단계별 색·이름. `ActiveServicePanel` 의 STEP 과 같은 값이다 */
 const STEP: Record<SpeedStep, { bar: string; text: string; label: string }> = {
-  1: { bar: 'bg-accent', text: 'text-accent', label: '1초 미만' },
+  1: { bar: 'bg-accent', text: 'text-accent-bright', label: '1초 미만' },
   2: { bar: 'bg-warn', text: 'text-warn', label: '1~3초' },
   3: { bar: 'bg-danger', text: 'text-danger', label: '3초 이상' },
 };

@@ -125,7 +125,7 @@ export const ConfigSettingsDialog = memo(function ConfigSettingsDialog({
           )}
 
           {!editingText && (
-            <div className="flex items-center gap-0.5 rounded border border-line-strong p-0.5">
+            <div className="flex items-center gap-0.5 rounded border border-line-control p-0.5">
               {(['form', 'text'] as const).map(m => (
                 <button
                   key={m}
@@ -193,7 +193,7 @@ export const ConfigSettingsDialog = memo(function ConfigSettingsDialog({
                 <button
                   onClick={() => setEditingText(true)}
                   title={t('설정 파일을 통째로 바꿉니다')}
-                  className="rounded border border-line-strong px-2 py-0.5 text-small text-fg-dim hover:bg-hover hover:text-fg"
+                  className="btn px-2 py-0.5 text-small"
                 >
                   {t('원문 편집')}
                 </button>

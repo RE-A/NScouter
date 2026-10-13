@@ -200,7 +200,7 @@ export const VisualizeTab = memo(function VisualizeTab({
             <button
               onClick={() => setShowThresholds(true)}
               title={t('어떤 수부터 노랗고 빨간지 정합니다')}
-              className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+              className="btn px-2 py-0.5 text-micro"
             >
               {t('임계값')}
             </button>
@@ -280,7 +280,7 @@ export const VisualizeTab = memo(function VisualizeTab({
               <button
                 onClick={insight.reload}
                 title={t('같은 구간을 다시 셉니다')}
-                className="rounded border border-line-strong px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+                className="btn px-2 py-0.5 text-micro"
               >
                 {t('다시')}
               </button>

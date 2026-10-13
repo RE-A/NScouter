@@ -21,7 +21,7 @@ interface FlowTreeViewProps {
 
 const KIND: Record<string, { label: string; cls: string }> = {
   user: { label: '⌂', cls: 'text-fg-dim' },
-  service: { label: '▣', cls: 'text-accent' },
+  service: { label: '▣', cls: 'text-accent-bright' },
   sql: { label: 'SQL', cls: 'text-[var(--cat-sql)]' },
   apicall: { label: 'API', cls: 'text-[var(--cat-api)]' },
   thread: { label: 'THR', cls: 'text-[var(--cat-api)]' },

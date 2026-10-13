@@ -442,7 +442,7 @@ function NodeTip({ hover, drillable }: { hover: HoverState; drillable: boolean }
           {t('에러')} {node.errors.toLocaleString()} ({(rate * 100).toFixed(rate < 0.1 ? 1 : 0)}%)
         </p>
       )}
-      {drillable && <p className="text-micro text-accent">{t('눌러서 이 앱의 트랜잭션 보기')}</p>}
+      {drillable && <p className="text-micro text-accent-bright">{t('눌러서 이 앱의 트랜잭션 보기')}</p>}
     </div>
   );
 }

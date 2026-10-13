@@ -228,7 +228,7 @@ function StepRow({
           <button
             onClick={() => onOpenThread(threadTxid)}
             title={`${t('이 스레드로 이어진 작업을 엽니다')} — ${previewLine(label, 120)}`}
-            className="block max-w-full truncate text-left text-small text-accent underline decoration-dotted underline-offset-2 hover:bg-hover"
+            className="block max-w-full truncate text-left text-small text-accent-bright underline decoration-dotted underline-offset-2 hover:bg-hover"
           >
             {label}
           </button>

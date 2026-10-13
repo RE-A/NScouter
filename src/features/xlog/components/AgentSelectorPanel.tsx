@@ -163,7 +163,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
           ) : (
             '—'
           )}
-          {loading && <span className="ml-1 animate-pulse text-accent">•</span>}
+          {loading && <span className="ml-1 animate-pulse text-accent-bright">•</span>}
         </span>
         {/* **«전부» 라는 상태는 없다.** 고른 것이 곧 보는 것이라, 여기 적히는 수가
             화면에 그려지는 서버 수와 같다. 0 이면 화면도 비어 있다. */}
@@ -171,7 +171,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
           <button
             onClick={handleClearFilter}
             title={t('고른 서버를 모두 풉니다')}
-            className="rounded px-1.5 py-0.5 text-micro text-accent hover:bg-hover"
+            className="rounded px-1.5 py-0.5 text-micro text-accent-bright hover:bg-hover"
           >
             <span className="tnum font-mono">{selectedHashes.size}</span>
             {t('대 선택 · 해제')}
@@ -200,7 +200,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 }
                 className={`rounded px-1.5 py-0.5 text-micro ${
                   groupBy === b
-                    ? 'bg-accent/20 text-accent'
+                    ? 'bg-accent/20 text-accent-bright'
                     : 'text-fg-faint hover:bg-hover hover:text-fg'
                 }`}
               >
@@ -237,7 +237,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 <button
                   onClick={() => setPickedTypes(new Set())}
                   title={t('종류 조건을 풉니다')}
-                  className="rounded px-1 py-0.5 text-micro text-accent hover:bg-hover"
+                  className="rounded px-1 py-0.5 text-micro text-accent-bright hover:bg-hover"
                 >
                   ✕
                 </button>

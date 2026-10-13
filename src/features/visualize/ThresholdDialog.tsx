@@ -149,7 +149,7 @@ export const ThresholdDialog = memo(function ThresholdDialog({
             disabled={saving || blocked}
             // 눌리지 않는 버튼은 이유를 말해야 한다. 어느 줄이 남았는지는 그 줄이 비어 있어 보인다.
             title={unfinished ? t('켜 둔 지표 중 빈 칸이 있습니다') : undefined}
-            className="rounded border border-accent px-3 py-0.5 text-micro text-accent hover:bg-hover disabled:cursor-not-allowed disabled:border-line disabled:text-fg-faint"
+            className="btn border-accent-bright px-3 py-0.5 text-micro text-accent-bright"
           >
             {saving ? t('저장 중…') : t('저장')}
           </button>
