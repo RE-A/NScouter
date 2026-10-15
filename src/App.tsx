@@ -7,7 +7,6 @@ import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './components/p
 import { ConnectionDialog } from './features/xlog/components/ConnectionDialog';
 import { SettingsDialog } from './features/settings/SettingsDialog';
 import { ConfigSettingsDialog } from './features/config/ConfigSettingsDialog';
-import { LogLevelSelector } from './features/xlog/components/LogLevelSelector';
 import { XLogChart } from './features/xlog/components/XLogChart';
 import { XLogToolbar } from './features/xlog/components/XLogToolbar';
 import { AgentSelectorPanel } from './features/xlog/components/AgentSelectorPanel';
@@ -1167,7 +1166,9 @@ export default function App() {
             onMarkRead={alertStream.markRead}
             onBadgeClick={handleAlertBadgeClick}
           />
-          <LogLevelSelector />
+          {/* 로그 레벨은 **설정 창으로 옮겼다.** 여기 있던 것은 라벨이 없어서,
+              «로그 좀 받아 주세요» 를 받은 사람이 설정 창을 뒤지다 못 찾았다.
+              두 군데 두면 각자 제 상태를 들고 있어 서로 다른 값을 보여준다. */}
           {/* 콜렉터 설정 — **붙어 있을 때만.** 데모는 콜렉터가 없어 물을 곳이 없다 */}
           {isConnected && !isDemo && (
             <button

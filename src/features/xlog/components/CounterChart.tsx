@@ -10,6 +10,7 @@ import { deriveStreamStatus } from '../utils/streamStatus';
 import { sampleX, totalLineVisible } from './counterGeometry';
 import { aggregate, totalMode } from './counterTotal';
 import { CANVAS, SERIES } from '../../../styles/tokens';
+import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
 
 /** 카운터 폴링이 2초라 넉넉히 잡는다 */
@@ -69,6 +70,9 @@ export const CounterChart = memo(function CounterChart({
   const mode = totalMode(counter);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 테마가 바뀜 때 한 번 더 그린다 — 캔버스에 칠해 둔 픽셀은 CSS 변수를 따라오지 않는다
+  const themeEpoch = useThemeEpoch();
+
   const seriesRef = useRef<Map<number, AgentSamples>>(new Map());
   const [agentCount, setAgentCount] = useState(0);
   // rAF 클로저에서 읽으므로 state 가 아니라 ref 여야 한다 (state 면 값이 고정된다).
@@ -218,7 +222,7 @@ export const CounterChart = memo(function CounterChart({
 
     rafId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(rafId);
-  }, [height, agentMap, totalOne, mode]);
+  }, [height, agentMap, totalOne, mode, themeEpoch]);
 
   // javaee / host 어느 Family 든 여기서 찾는다.
   const meta = counterMeta(counter);

@@ -50,6 +50,12 @@ pub struct AppConfig {
     /// 바뀌는 건 우리가 붙인 설명과 레이블이다.
     #[serde(default = "default_lang")]
     pub ui_language: String,
+    /// 색 벌. `"dark"`(기본) · `"light"` · `"slate"` · `"warm"` · `"contrast"`.
+    ///
+    /// **모르는 값은 화면이 기본으로 되돌린다**(`toTheme`). 여기서 막지 않는 것은
+    /// 테마가 늘어날 때마다 양쪽을 고쳐야 하면 한쪽을 빼먹기 때문이다.
+    #[serde(default = "default_theme")]
+    pub ui_theme: String,
     /// 끌어서 정한 패널 크기와 마지막에 보던 탭.
     ///
     /// **매번 다시 맞추는 게 가장 번거로운 부분이라 남긴다.**
@@ -291,6 +297,11 @@ fn default_lang() -> String {
     "ko".to_string()
 }
 
+/// 기본 테마. 지금까지 쓰던 색이라, 올리는 사람은 아무것도 달라지지 않아야 한다.
+fn default_theme() -> String {
+    "dark".to_string()
+}
+
 /// **파생 Default 를 쓰면 안 된다.** bool 의 파생 기본값은 false 라
 /// 설정 파일이 아예 없는 첫 실행에서 SQL 채우기가 꺼진 채로 뜬다.
 impl Default for AppConfig {
@@ -306,6 +317,7 @@ impl Default for AppConfig {
             ui_font_scale: 1.0,
             xlog_buffer_max: default_buffer_max(),
             ui_language: "ko".to_string(),
+            ui_theme: default_theme(),
             ui_layout: UiLayout::default(),
             xlog_chart: XLogChartPrefs::default(),
             servers: Vec::new(),

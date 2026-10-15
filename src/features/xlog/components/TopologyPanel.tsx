@@ -22,6 +22,7 @@ import {
   type NodeLayer,
 } from './topologyGraph';
 import { CANVAS } from '../../../styles/tokens';
+import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 
@@ -70,6 +71,9 @@ export const TopologyPanel = memo(function TopologyPanel({
   const [error, setError] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 테마가 바뀜 때 한 번 더 그린다 — 캔버스에 칠해 둔 픽셀은 CSS 변수를 따라오지 않는다
+  const themeEpoch = useThemeEpoch();
+
   /**
    * 마지막으로 그린 노드 상자들.
    *
@@ -126,7 +130,7 @@ export const TopologyPanel = memo(function TopologyPanel({
 
     const graph = buildGraph(rows, [...agentMap.keys()]);
     layoutRef.current = drawTopology(canvas, graph, label, hover?.node.hash ?? null);
-  }, [rows, agentMap, getCached, textVersion, open, hover]);
+  }, [rows, agentMap, getCached, textVersion, open, hover, themeEpoch]);
 
   /** 커서 아래의 노드. 없으면 null */
   const hit = useCallback((e: React.MouseEvent<HTMLCanvasElement>): NodeBox | null => {

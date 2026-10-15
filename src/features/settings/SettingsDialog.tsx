@@ -11,6 +11,8 @@ import { T, F, FONT_MONO } from '../../styles/tokens';
 import { t, toLang, type Lang } from '../../i18n';
 import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../xlog/store/XLogDataStore';
 import { SHORTCUT_HELP, type ShortcutAction } from '../xlog/hooks/shortcuts';
+import { LogLevelSelector } from '../xlog/components/LogLevelSelector';
+import { THEMES, toTheme, type ThemeId } from '../../styles/theme';
 
 /**
  * 단축키가 무엇을 하는지.
@@ -63,6 +65,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   const [fontScale, setFontScale] = useState(1);
   /** 화면 언어 */
   const [lang, setLangValue] = useState<Lang>('ko');
+  /** 색 벌 */
+  const [theme, setTheme] = useState<ThemeId>('dark');
   /** XLog 버퍼에 담아 둘 최대 건수 */
   const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);
   const [saving, setSaving] = useState(false);
@@ -76,6 +80,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setBindInline(cfg.sql_bind_inline ?? true);
       setFontScale(clampFontScale(cfg.ui_font_scale ?? 1));
       setLangValue(toLang(cfg.ui_language));
+      setTheme(toTheme(cfg.ui_theme));
       setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
     }).catch(() => {});
   }, []);
@@ -91,6 +96,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         sql_bind_inline: bindInline,
         ui_font_scale: fontScale,
         ui_language: lang,
+        ui_theme: theme,
         xlog_buffer_max: bufferMax,
       };
       await saveConfig(next);
@@ -167,6 +173,42 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                     }}
                   >
                     {v === 'ko' ? '한국어' : 'English'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 테마 — **고르기 전에 보여준다.**
+              이름만 적어 두면 «슬레이트» 가 무슨 색인지 눌러 봐야 안다. 조각마다
+              `data-theme` 를 걸어 그 테마의 진짜 변수로 그린다 (tokens.css 참고). */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>{t('테마')}</div>
+            <div style={sectionDescStyle}>
+              {t('화면 전체와 차트에 함께 적용됩니다.')}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+              {THEMES.map(th => {
+                const on = th.id === theme;
+                return (
+                  <button
+                    key={th.id}
+                    onClick={() => setTheme(th.id)}
+                    aria-pressed={on}
+                    title={t(th.hint)}
+                    style={{
+                      ...themeBtnStyle,
+                      borderColor: on ? T.accent : T.borderControl,
+                      background: on ? T.bgHover : 'transparent',
+                    }}
+                  >
+                    {/* 미리보기 — 바탕·강조·글자 세 가지면 성격이 드러난다 */}
+                    <span data-theme={th.id} style={swatchStyle}>
+                      <span style={{ ...swatchCell, background: 'var(--bg-surface)' }} />
+                      <span style={{ ...swatchCell, background: 'var(--accent)' }} />
+                      <span style={{ ...swatchCell, background: 'var(--text)' }} />
+                    </span>
+                    <span style={{ color: on ? T.text : T.textDim }}>{t(th.label)}</span>
                   </button>
                 );
               })}
@@ -299,6 +341,16 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                   ? `${dataDir.trim()}\\logs\\nscouter.log`
                   : `${t('(실행파일 경로)')}\\logs\\nscouter.log`}
               </span>
+            </div>
+            {/* **레벨을 경로 옆에 둔다.** 헤더에도 같은 선택기가 있지만 라벨이 없어서,
+                «로그 좀 받아 주세요» 를 받은 사람이 설정 창을 뒤지다 못 찾았다.
+                로그 이야기를 하러 오는 자리는 여기다 — 파일이 어디 있는지 바로 위에 적혀 있다. */}
+            <div style={pathRowStyle}>
+              <span style={pathLabelStyle}>{t('기록 수준')}</span>
+              <LogLevelSelector />
+            </div>
+            <div style={sectionDescStyle}>
+              {t('평소에는 ERROR 로 둡니다. 문제를 재현해 보여 줄 때만 DEBUG 로 올리고, 끝나면 되돌리세요 — 파일이 빠르게 커집니다.')}
             </div>
             <div style={{ ...sectionDescStyle, marginTop: 8, color: T.warn }}>
               {t('※ 경로 변경은 앱 재시작 후 적용됩니다.')}
@@ -501,6 +553,32 @@ const scaleBtnStyle: React.CSSProperties = {
   border: `1px solid ${T.border}`,
   cursor: 'pointer',
   lineHeight: 1.2,
+};
+
+const themeBtnStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '4px 10px 4px 5px',
+  borderRadius: 4,
+  border: '1px solid',
+  cursor: 'pointer',
+  fontSize: F.small,
+  lineHeight: 1.2,
+};
+
+/** 세 칸짜리 색 조각. 테두리는 그 테마의 구분선이라 조각 자체가 밝기 차를 보여준다 */
+const swatchStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  overflow: 'hidden',
+  borderRadius: 3,
+  border: '1px solid var(--border-strong)',
+};
+
+const swatchCell: React.CSSProperties = {
+  display: 'block',
+  width: 9,
+  height: 16,
 };
 
 const saveBtnStyle: React.CSSProperties = {

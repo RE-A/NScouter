@@ -11,6 +11,7 @@ import { getTodayCounter, type CounterSeries } from '../api/scouterApi';
 import { counterMeta, type CounterName } from '../types/counter';
 import { hasAnyValue, seriesMax, trimAll, type TrimmedSeries } from './fiveMinSeries';
 import { CANVAS, SERIES } from '../../../styles/tokens';
+import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
 
 const POLL_MS = 60_000;
@@ -38,6 +39,9 @@ export const FiveMinCounterChart = memo(function FiveMinCounterChart({
   const typesKey = [...objTypes].sort().join('\u0000');
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 테마가 바뀜 때 한 번 더 그린다 — 캔버스에 칠해 둔 픽셀은 CSS 변수를 따라오지 않는다
+  const themeEpoch = useThemeEpoch();
+
 
   useEffect(() => {
     const types = typesKey === '' ? [] : typesKey.split('\u0000');
@@ -71,7 +75,7 @@ export const FiveMinCounterChart = memo(function FiveMinCounterChart({
       return name.split('/').pop() ?? name;
     };
     draw(canvas, trimmed, height, label);
-  }, [load.kind, trimmed, height, agentMap]);
+  }, [load.kind, trimmed, height, agentMap, themeEpoch]);
 
   const collected = hasAnyValue(trimmed);
   const points = trimmed.reduce((s, t) => s + t.times.length, 0);

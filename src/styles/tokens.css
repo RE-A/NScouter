@@ -93,6 +93,17 @@
   --row-api: #1a2a3a;
   --row-neutral: #2a2a3a;
 
+  /* ── 계열색 (카운터 차트의 에이전트별 선) ─────
+     의미색과 목적이 다르다 — 여기선 **서로 구분되기만** 하면 된다.
+     순서를 바꾸면 기존 화면의 선 색이 바뀜다.
+     Canvas 용이라 `tokens.ts` 가 실행 시점에 읽어 간다. */
+  --series-1: #4f72ff;
+  --series-2: #3dd68c;
+  --series-3: #ff4d4f;
+  --series-4: #f5a623;
+  --series-5: #9b59b6;
+  --series-6: #1abc9c;
+
   /* ── 타이포 스케일 ──────────────────────────────── */
   /* 통합 전 9종(9~20px) → 5단계
      설정의 글자 크기가 --fs-scale 을 흔든다. 한 곳에서 곱해야 **단계 사이 비율이 유지된다** */
@@ -118,4 +129,206 @@
   --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
   /* 숫자·ID 는 자릿수가 흔들리면 읽기 어렵다 */
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+}
+
+/* ── 테마 ─────────────────────────────────────────────────────
+   위 `:root` 가 기본(dark)이고, 아래는 **색 토큰만** 덮어쓴다.
+   크기·간격·폰트는 테마와 무관하므로 한 벌만 둔다 — 테마마다 베끼면 어긋난다.
+
+   **지켜야 할 네 가지.** 테마를 더할 때도 같다 (`themes.test.ts` 가 숫자로 막는다):
+     1. 글자(text·muted·dim·faint)는 모든 배경에서 4.5:1 이상
+     2. `--border-control` 은 모든 배경에서 3:1 이상 (WCAG 1.4.11)
+     3. `--accent-bright` 는 글자로 쓰이므로 모든 배경에서 4.5:1 이상
+     4. `--border` 는 2:1 **미만** — 구분선이 또렷해지면 목록이 격자로 덮인다
+
+   **선택자를 `:root` 에 묶지 않는다.** 그렇게 두면 설정 창의 미리보기 조각에
+   `data-theme` 를 걸어 **그 테마의 진짜 색**으로 그릴 수 있다 — 미리보기용 색을
+   따로 베끼면 고칠 때마다 어긋난다.
+
+   Canvas 는 `var()` 를 못 읽으므로 `tokens.ts` 가 실행 시점에 계산값을 읽어 간다.
+   그래서 여기 값만 고치면 차트도 따라온다 — 베껴 둔 상수는 없다. */
+
+/* 라이트 — 위로 갈수록 희어진다. 어두운 테마의 깊이 순서를 뒤집은 것이다 */
+[data-theme='light'] {
+  --bg-base: #e7eaf0;
+  --bg-surface: #f1f3f7;
+  --bg-raised: #f7f8fb;
+  --bg-overlay: #fbfcfd;
+  --bg-input: #ffffff;
+  --bg-hover: #e2e6ee;
+
+  --border: #e3e6ec;
+  --border-strong: #d2d7e0;
+  --border-control: #6b7280;
+  --border-control-hover: #434a56;
+
+  --bg-search: #ffffff;
+  --border-search: #5b6472;
+
+  --text: #15171c;
+  --text-muted: #3c424d;
+  --text-dim: #4e5562;
+  --text-faint: #5d6472;
+
+  --accent: #2242c7;
+  --accent-soft: rgba(34, 66, 199, 0.12);
+  --accent-bright: #1c38ad;
+  --success: #14703f;
+  --warn: #8a5300;
+  --error: #b4232b;
+  --error-soft: rgba(180, 35, 43, 0.10);
+
+  --cat-method: #4a5578;
+  --cat-sql: #8a5300;
+  --cat-api: #0f5f85;
+  --cat-socket: #7030a0;
+  --cat-msg: #565a6e;
+
+  --row-ok: #dcecdc;
+  --row-err: #f6dcdc;
+  --row-api: #dce7f4;
+  --row-neutral: #e4e6ee;
+
+  /* 흰 바탕에서는 밝은 선이 사라진다. 한 단계 어둡히고 채도를 올렸다 */
+  --series-1: #2242c7;
+  --series-2: #10824e;
+  --series-3: #c0272d;
+  --series-4: #9a5b00;
+  --series-5: #7030a0;
+  --series-6: #0d7a6a;
+}
+
+/* 뉴트럴 슬레이트 — 보라 기운을 빼고 중립 회색에 청록 강조.
+   색으로 떠들지 않아서 주황·빨강(위험)만 눈에 들어온다 */
+[data-theme='slate'] {
+  --bg-base: #0b0d10;
+  --bg-surface: #111419;
+  --bg-raised: #161a20;
+  --bg-overlay: #1b2028;
+  --bg-input: #1f242d;
+  --bg-hover: #242a34;
+
+  --border: #20252c;
+  --border-strong: #2a313a;
+  --border-control: #747c88;
+  --border-control-hover: #a7aeb9;
+
+  --bg-search: #262c36;
+  --border-search: #6e7684;
+
+  --text: #e6e9ef;
+  --text-muted: #b4bbc6;
+  --text-dim: #9aa2af;
+  --text-faint: #8e96a3;
+
+  --accent: #2b93a8;
+  --accent-soft: rgba(79, 184, 200, 0.14);
+  --accent-bright: #5cc2d4;
+  --success: #46c98a;
+  --warn: #e8a33c;
+  --error: #f2585f;
+  --error-soft: rgba(242, 88, 95, 0.12);
+
+  --cat-method: #7f8a9c;
+  --cat-sql: #d9a441;
+  --cat-api: #5cc2d4;
+  --cat-socket: #a78bc9;
+  --cat-msg: #7a828e;
+
+  --row-ok: #16301f;
+  --row-err: #331a1c;
+  --row-api: #162a33;
+  --row-neutral: #242a34;
+}
+
+/* 웜 다크 — 푸른빛을 빼서 야간 당직 화면에 맞춘다 */
+[data-theme='warm'] {
+  --bg-base: #12100c;
+  --bg-surface: #1a1712;
+  --bg-raised: #201c16;
+  --bg-overlay: #27221a;
+  --bg-input: #2d271e;
+  --bg-hover: #342d23;
+
+  --border: #272219;
+  --border-strong: #342d23;
+  --border-control: #8a7c66;
+  --border-control-hover: #b9ab94;
+
+  --bg-search: #352e23;
+  --border-search: #8a7c66;
+
+  --text: #f0e8db;
+  --text-muted: #c8bca8;
+  --text-dim: #ad9f8a;
+  --text-faint: #a89a85;
+
+  --accent: #b9802a;
+  --accent-soft: rgba(217, 164, 65, 0.14);
+  --accent-bright: #e0ad51;
+  --success: #86b84a;
+  --warn: #e5922f;
+  --error: #ef5f52;
+  --error-soft: rgba(239, 95, 82, 0.12);
+
+  --cat-method: #9b8f78;
+  --cat-sql: #e0ad51;
+  --cat-api: #74b8a6;
+  --cat-socket: #c2869c;
+  --cat-msg: #8d8270;
+
+  --row-ok: #27301a;
+  --row-err: #3a211c;
+  --row-api: #1f2e2a;
+  --row-neutral: #342d23;
+}
+
+/* 하이 컨트라스트 — 상황실·벽면 모니터. 멀리서도 읽히는 것이 유일한 기준이다 */
+[data-theme='contrast'] {
+  --bg-base: #000000;
+  --bg-surface: #080808;
+  --bg-raised: #0f0f0f;
+  --bg-overlay: #161616;
+  --bg-input: #1c1c1c;
+  --bg-hover: #242424;
+
+  --border: #1d1d1d;
+  --border-strong: #2e2e2e;
+  --border-control: #8f8f8f;
+  --border-control-hover: #d0d0d0;
+
+  --bg-search: #262626;
+  --border-search: #8f8f8f;
+
+  --text: #ffffff;
+  --text-muted: #dcdcdc;
+  --text-dim: #c0c0c0;
+  --text-faint: #a4a4a4;
+
+  --accent: #2f7fd8;
+  --accent-soft: rgba(77, 166, 255, 0.18);
+  --accent-bright: #6cb4ff;
+  --success: #4ee08a;
+  --warn: #ffc233;
+  --error: #ff6b6b;
+  --error-soft: rgba(255, 107, 107, 0.15);
+
+  --cat-method: #a9b4cc;
+  --cat-sql: #ffc233;
+  --cat-api: #6cd4ff;
+  --cat-socket: #cfa0ff;
+  --cat-msg: #9a9a9a;
+
+  --row-ok: #0d2d16;
+  --row-err: #33100f;
+  --row-api: #0d2233;
+  --row-neutral: #242424;
+
+  /* 멀리서 보는 화면이라 선도 채도를 올렸다 */
+  --series-1: #4da6ff;
+  --series-2: #4ee08a;
+  --series-3: #ff6b6b;
+  --series-4: #ffc233;
+  --series-5: #c98bff;
+  --series-6: #3ddbd0;
 }

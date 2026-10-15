@@ -10,6 +10,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { counterMeta } from '../xlog/types/counter';
 import { CANVAS, SERIES } from '../../styles/tokens';
+import { useThemeEpoch } from '../../styles/useThemeEpoch';
 import { t } from '../../i18n';
 import { formatKpi } from './kpi';
 import {
@@ -48,6 +49,9 @@ export const StackedTimeline = memo(function StackedTimeline({
   agentMap,
 }: StackedTimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 테마가 바뀜 때 한 번 더 그린다 — 캔버스에 칠해 둔 픽셀은 CSS 변수를 따라오지 않는다
+  const themeEpoch = useThemeEpoch();
+
   /** 마우스 x (캔버스 좌표). 밖으로 나가면 null */
   const hoverRef = useRef<number | null>(null);
   const [height, setHeight] = useState(0);
@@ -234,7 +238,7 @@ export const StackedTimeline = memo(function StackedTimeline({
   // 데이터가 바뀌면 다시 그린다.
   useEffect(() => {
     schedule();
-  }, [rows, range, agentMap, height, schedule]);
+  }, [rows, range, agentMap, height, schedule, themeEpoch]);
 
   // 창 크기가 바뀌면 캔버스 폭이 달라진다. **다시 안 그리면 늘어난 자리가 빈 채로 남는다.**
   useEffect(() => {

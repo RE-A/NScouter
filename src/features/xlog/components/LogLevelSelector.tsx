@@ -47,7 +47,7 @@ export function LogLevelSelector() {
 
 const selectStyle: React.CSSProperties = {
   background: T.bgInput,
-  border: '1px solid #444',
+  border: `1px solid ${T.borderControl}`,
   borderRadius: 4,
   color: T.textMuted,
   padding: '3px 6px',

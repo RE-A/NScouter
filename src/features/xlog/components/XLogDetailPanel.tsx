@@ -4,6 +4,7 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import type { XLogDetailState } from '../hooks/useXLogDetail';
 import { ProfileStepList } from './ProfileStepList';
+import { ProfileTextDialog } from './ProfileTextDialog';
 import { ProfileSummaryTable } from './ProfileSummaryTable';
 import { firstStepIndexOf } from './profileSummary';
 import { CallTreeView } from './CallTreeView';
@@ -74,6 +75,8 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
   const { getCached } = useTextResolver();
   const trace = useCallTrace(state.xlog);
   const [profileMode, setProfileMode] = useState<ProfileMode>('list');
+  /** 전문 창을 열었는가. 목록·요약과 달리 **모양이 아니라 꺼내는 일**이라 토글에 안 섮는다 */
+  const [showText, setShowText] = useState(false);
 
   /**
    * 이 패널 안에서만 쓰는 검색어.
@@ -397,6 +400,16 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                     </button>
                     ))}
                   </div>
+                  {/* **모양이 아니라 꺼내는 일**이라 목록/요약 토글에 안 섮는다.
+                      셀을 하나 더 놓으면 «세 번째 보기 모양» 으로 읽혀 돌아올 길을 찾게 된다. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowText(true)}
+                    title={t('보고서에 붙일 수 있게 전문을 글자로 엽니다')}
+                    className="btn px-1.5 py-0.5 text-micro"
+                  >
+                    {t('전체 보기')}
+                  </button>
                 </div>
               ) : null
             }
@@ -442,6 +455,19 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
             </dl>
           </Section>
         </div>
+      )}
+
+      {/* 전문 창. **패널 안이 아니라 위에 뜨운다** — 상세 패널은 좁아서
+          고정폭 표가 접히면 전문의 뜻이 없어진다. */}
+      {showText && xlog && (
+        <ProfileTextDialog
+          xlog={xlog}
+          steps={profile?.steps ?? []}
+          texts={texts}
+          objName={agentMap.get(xlog.objHash) ?? `#${xlog.objHash}`}
+          serviceName={serviceName}
+          onClose={() => setShowText(false)}
+        />
       )}
     </div>
   );

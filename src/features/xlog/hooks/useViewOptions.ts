@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../api/scouterApi';
 import { setLang, toLang, type Lang } from '../../../i18n';
+import { applyTheme, toTheme, DEFAULT_THEME, type ThemeId } from '../../../styles/theme';
 import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../store/XLogDataStore';
 
 export interface ViewOptions {
@@ -20,6 +21,8 @@ export interface ViewOptions {
   lang: Lang;
   /** XLog 버퍼에 담아 둘 최대 건수 */
   bufferMax: number;
+  /** 색 벌 */
+  theme: ThemeId;
 }
 
 /** 화면에서 고를 수 있는 배율. 사이 값이 오면 가장 가까운 것으로 붙인다 */
@@ -47,6 +50,7 @@ const DEFAULTS: ViewOptions = {
   fontScale: 1,
   lang: 'ko',
   bufferMax: DEFAULT_MAX_ITEMS,
+  theme: DEFAULT_THEME,
 };
 
 let current: ViewOptions = DEFAULTS;
@@ -55,6 +59,8 @@ const listeners = new Set<(v: ViewOptions) => void>();
 
 function emit(): void {
   applyFontScale(current.fontScale);
+  // 테마는 **문서 뿌리에 걸고 Canvas 색까지 갈아 끼우는 일**이라 한 자리에서 부른다.
+  applyTheme(current.theme);
   // t() 는 모듈 함수라 여기서 언어를 심어 둔다. 컴포넌트마다 넘기면 빠뜨리는 자리가 생긴다.
   setLang(current.lang);
   for (const fn of listeners) fn(current);
@@ -66,6 +72,7 @@ function fromConfig(cfg: AppConfig): ViewOptions {
     fontScale: clampFontScale(cfg.ui_font_scale ?? DEFAULTS.fontScale),
     lang: toLang(cfg.ui_language),
     bufferMax: clampMaxItems(cfg.xlog_buffer_max ?? DEFAULTS.bufferMax),
+    theme: toTheme(cfg.ui_theme),
   };
 }
 
@@ -107,6 +114,7 @@ export async function setViewOption<K extends keyof ViewOptions>(
       ui_font_scale: current.fontScale,
       ui_language: current.lang,
       xlog_buffer_max: current.bufferMax,
+      ui_theme: current.theme,
     });
   } catch {
     // 저장 실패는 화면을 되돌릴 이유가 못 된다. 다음 실행에 기본값으로 돌아갈 뿐이다.
