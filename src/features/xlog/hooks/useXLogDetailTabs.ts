@@ -8,7 +8,7 @@
 // 다시 갖춰야 하고, 창이 살아 있는 동안 그걸 관리해야 한다. 탭은 지금 있는
 // 사전을 그대로 쓴다.
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useTextResolver } from './useTextResolver';
 import { loadXLogDetail, type XLogDetailState } from './useXLogDetail';
 import type { SavedProfile } from '../api/scouterApi';
@@ -22,6 +22,26 @@ import type { SXLog } from '../types/xlog';
  * 방금 본 것은 남는다.
  */
 export const MAX_DETAIL_TABS = 8;
+
+/**
+ * 두 탭 목록이 같은 것을 말하는가.
+ *
+ * **네 필드가 `DetailTab` 의 전부다.** 하나라도 늘어나면 여기도 늘려야 한다 —
+ * 안 그러면 바뀐 것을 «안 바뀌었다» 로 보고 화면이 멈춘다.
+ */
+function sameTabs(a: readonly DetailTab[], b: readonly DetailTab[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i];
+    return (
+      x.key === y.key &&
+      x.title === y.title &&
+      x.state === y.state &&
+      x.touchedAt === y.touchedAt
+    );
+  });
+}
 
 export interface DetailTab {
   /** 탭 식별자. 한 트랜잭션은 txid 하나다 */
@@ -245,11 +265,27 @@ export function useXLogDetailTabs(): XLogDetailTabs {
   // 제목은 사전이 나중에 채워지기도 한다 — 그릴 때 한 번 더 본다.
   // **저장본은 건드리지 않는다.** 이름은 파일 안에 이미 있고, 지금 붙은 서버의
   // 사전이 같은 해시에 다른 이름을 갖고 있을 수 있다.
-  const tabs = state.tabs.map(t =>
+  const titled = state.tabs.map(t =>
     t.state.xlog && !t.key.startsWith('file:')
       ? { ...t, title: getCached('service', t.state.xlog.service) ?? t.title }
       : t,
   );
+
+  /**
+   * **바뀐 게 없으면 같은 배열을 돌려준다.**
+   *
+   * 위 `map` 은 렌더마다 새 배열을 만든다 — 탭이 0개여도 새 빈 배열이다.
+   * 그 배열이 App 의 저장 효과 의존성이라, 화면이 다시 그려질 때마다(실시간에서는
+   * 초당 여러 번) 600ms 디바운스가 리셋되고 간격이 벌어지는 순간마다
+   * config.json 이 통째로 다시 쓰였다 — 운영 로그에서 **36초에 20번**.
+   *
+   * 사전이 나중에 채워지는 것은 그대로 둔다(위 `map` 은 매번 돈다). 여기서 막는 것은
+   * **아무것도 안 바뀐 렌더가 새 정체성을 만드는 것**뿐이다.
+   */
+  const tabsRef = useRef(titled);
+  if (!sameTabs(tabsRef.current, titled)) tabsRef.current = titled;
+  const tabs = tabsRef.current;
+
   const active = tabs.find(t => t.key === state.activeKey)?.state ?? null;
 
   return {

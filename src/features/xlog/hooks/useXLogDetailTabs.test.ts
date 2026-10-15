@@ -44,6 +44,44 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+describe('탭 목록의 정체성', () => {
+  // **바뀜 게 없으면 같은 배열이어야 한다.**
+  //
+  // 제목을 사전에서 다시 찾느라 매 렌더 `map` 으로 새 배열을 만들고 있었다.
+  // 그 배열은 App 의 저장 효과 의존성이라, 화면이 다시 그려질 때마다
+  // 600ms 디바운스가 리셋되고 간격이 벌어지는 순간마다 config.json 이 통째로
+  // 다시 써졌다 — 운영 로그에서 **36초에 20번**. 탭이 0개여도 새 빈 배열이라 터졌다.
+  it('탭이 없을 때 다시 그려도 같은 배열이다', () => {
+    const { result, rerender } = renderHook(() => useXLogDetailTabs());
+    const first = result.current.tabs;
+    rerender();
+    rerender();
+    expect(result.current.tabs).toBe(first);
+  });
+
+  it('탭이 열려 있을 때도 내용이 같으면 같은 배열이다', async () => {
+    const { result, rerender } = renderHook(() => useXLogDetailTabs());
+    act(() => result.current.open(xlog('a')));
+    await waitFor(() => expect(result.current.tabs[0].state.isLoading).toBe(false));
+
+    const settled = result.current.tabs;
+    rerender();
+    rerender();
+    expect(result.current.tabs).toBe(settled);
+  });
+
+  it('탭이 늘면 새 배열이다 — 굳혀 버리면 화면이 안 바뀜다', async () => {
+    const { result } = renderHook(() => useXLogDetailTabs());
+    act(() => result.current.open(xlog('a')));
+    await waitFor(() => expect(result.current.tabs[0].state.isLoading).toBe(false));
+    const before = result.current.tabs;
+
+    act(() => result.current.open(xlog('b')));
+    await waitFor(() => expect(result.current.tabs).toHaveLength(2));
+    expect(result.current.tabs).not.toBe(before);
+  });
+});
+
 describe('useXLogDetailTabs', () => {
   it('연 트랜잭션이 탭이 되고 그 탭이 활성이다', async () => {
     const { result } = renderHook(() => useXLogDetailTabs());
