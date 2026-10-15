@@ -1,6 +1,7 @@
 // src-tauri/src/state.rs
 // Tauri AppState - 연결 및 스트리밍 상태 관리
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -105,6 +106,23 @@ pub struct AppState {
     pub config: Mutex<AppConfig>,
     /// config.json 파일 경로
     pub config_path: PathBuf,
+    /// 종류별 «사라졌다 돌아온» 추적 (ActiveTrace 주석 참고)
+    pub active_trace: Mutex<HashMap<String, ActiveTrace>>,
+}
+
+/// 액티브 목록에서 **사라졌다 돌아온** 트랜잭션을 찾기 위한 자취.
+///
+/// 행 수만 적어서는 «지나간 것» 과 «빠졌다 돌아온 것» 을 가를 수 없다 —
+/// 1건이 1건으로 유지되어도 속은 다른 트랜잭션일 수 있다. txid 로 짚어야 한다.
+///
+/// **디버그 로그가 켜져 있을 때만 쌓는다.** 운영 기본값(Error)에서는 비용이 0 이어야 한다.
+#[derive(Default)]
+pub struct ActiveTrace {
+    /// 이 종류를 몇 번 조회했는가. 종류마다 세야 한다 —
+    /// 종류가 둘이면 한 번의 폴링에 틱이 두 번 올라 멀줦한 행이 «빠졌다» 로 잍힌다.
+    pub tick: u64,
+    /// txid → 마지막으로 보인 틱
+    pub last_seen: HashMap<i64, u64>,
 }
 
 impl AppState {
@@ -127,6 +145,7 @@ impl AppState {
             conn_pass: Mutex::new(String::new()),
             config: Mutex::new(config),
             config_path,
+            active_trace: Mutex::new(HashMap::new()),
         }
     }
 

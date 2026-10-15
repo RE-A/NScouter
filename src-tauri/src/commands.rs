@@ -1795,26 +1795,65 @@ pub async fn get_type_active_services(
     let mut rows = Vec::new();
     let mut incomplete = Vec::new();
     let mut answered = Vec::new();
+    // 틱마다 «어느 오브젝트가 몇 행을 줬나». 행 수가 줄어든 틱에 이 줄만 보면
+    // **줄어든 자리가 어디인지** 가 드러난다 — 답을 안 한 것인지(오브젝트가 목록에서 빠짐),
+    // 빈손인지(`!`), 답은 했는데 행이 없는 것인지(`=0`). 셋은 고치는 자리가 다르다.
+    let mut per_object = Vec::with_capacity(maps.len());
     for m in &maps {
         // **팩이 왔다는 것 자체가 신호다.** 행이 0건이어도 «물어봤고 한가하다» 는 뜻이라,
         // 팩이 아예 없는 오브젝트(콜렉터가 비활성으로 보고 건너뛴 것)와 구별해야 한다.
         let hash = m.get_decimal("objHash").unwrap_or(0) as i32;
         answered.push(hash);
-        if !is_complete(m) {
+        let complete = is_complete(m);
+        if !complete {
             incomplete.push(hash);
         }
-        rows.extend(parse_active_services(m));
+        let got = parse_active_services(m);
+        per_object.push(format!("{hash}={}{}", got.len(), if complete { "" } else { "!" }));
+        rows.extend(got);
     }
 
     // 느린 것부터. 액티브 목록을 여는 이유는 "무엇이 안 끝나고 있나" 하나다.
     rows.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
 
     log::debug!(
-        "get_type_active_services: {obj_type} → {}행 (답한 오브젝트 {} · 그중 빈손 {})",
+        "get_type_active_services: {obj_type} → {}행 (답한 오브젝트 {} · 그중 빈손 {}) [{}]",
         rows.len(),
         answered.len(),
-        incomplete.len()
+        incomplete.len(),
+        per_object.join(" ")
     );
+
+    // **행 수만으로는 «지나간 것» 과 «빠졌다 돌아온 것» 을 가를 수 없다.**
+    // 1건이 1건으로 유지되어도 속은 다른 트랜잭션일 수 있다. txid 로 짚어야
+    // «사라졌다 돌아왔다» 가 실재하는지 알 수 있고, 그래야 행 단위로 이어 붙일지
+    // (그 경우 돌아온다) 아니면 그냥 끝난 것인지 (이어 붙이면 거짓이 된다) 정해진다.
+    if log::log_enabled!(log::Level::Debug) {
+        let mut traces = state.active_trace.lock().await;
+        let trace = traces.entry(obj_type.clone()).or_default();
+        trace.tick += 1;
+        let now = trace.tick;
+
+        let mut returned = Vec::new();
+        for r in &rows {
+            let Some(txid) = r.txid else { continue };
+            if let Some(&prev) = trace.last_seen.get(&txid) {
+                // 바로 앞 틱에 있었으면 이어진 것이다. 한 틱이라도 건너뛰었으면 돌아온 것이다.
+                if now > prev + 1 {
+                    returned.push((txid, now - prev - 1, r.obj_hash, r.elapsed));
+                }
+            }
+            trace.last_seen.insert(txid, now);
+        }
+        // 끝난 트랜잭션까지 들고 있으면 표가 무한정 커진다. 한참 전 것은 버린다.
+        trace.last_seen.retain(|_, seen| now.saturating_sub(*seen) <= 30);
+
+        for (txid, gap, obj_hash, elapsed) in returned {
+            log::debug!(
+                "액티브 복귀: {obj_type} obj={obj_hash} txid={txid} — {gap}틱 빠졌다 돌아옴 (지금 elapsed={elapsed}ms)"
+            );
+        }
+    }
     Ok(TypeActiveServices { rows, incomplete, answered })
 }
 
