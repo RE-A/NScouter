@@ -152,11 +152,15 @@ export const ActiveTab = memo(function ActiveTab({
   const counts = useMemo(() => stepCounts(mine), [mine]);
 
   /**
-   * 그림에 «실행 중» 으로 그릴 것 — **이번에 실제로 받은 것만.**
+   * 그림에 «실행 중» 으로 그릴 것.
    *
-   * 목록은 못 닿은 서버의 «지난 값» 을 흐리게 이어 보여준다(사라지면 «다 끝났다» 로
-   * 읽힌다). 그런데 이 그림에서는 다르다 — 점이 매 프레임 **자란다**. 지금 돌고 있는지
-   * 모르는 것을 자라게 두면, 연결이 끊긴 동안에도 «계속 일하는 중» 이라고 말하게 된다.
+   * **못 닿은 서버의 행은 뺀다.** 점은 매 프레임 자라는데, 지금 돌고 있는지 모르는 것을
+   * 자라게 두면 연결이 끊긴 동안에도 «계속 일하는 중» 이라고 말하게 된다.
+   *
+   * **행 단위로 이어 붙인 것은 뺴지 않는다.** 그건 서버가 멀쩡히 답한 경우라
+   * «돌고 있다» 가 확인된 것이다(운영 로그에서 txid 로 확인). 여기서 빼면 점이
+   * 오른쪽으로 날아가 «끝났다» 가 되고, 몇 틱 뒤 왼쪽에서 새 점으로 다시 들어온다 —
+   * 그게 바로 고치려던 깜빡임이다.
    */
   const liveNow = useMemo(
     () => (feed.stale.size === 0 ? mine : mine.filter(r => !feed.stale.has(r.obj_hash))),
@@ -316,6 +320,7 @@ export const ActiveTab = memo(function ActiveTab({
             <ActiveList
               rows={shown}
               stale={feed.stale}
+              carriedRows={feed.carriedRows}
               holds={feed.holds}
               at={feed.at}
               maxElapsed={counts.maxElapsed}

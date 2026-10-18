@@ -1662,6 +1662,52 @@ SQL·apicall 프로파일은 `profile_off`가 마스터 스위치이고 기본 �
 
 ---
 
+
+### F-58. 이름이 같으면 콜렉터는 **세션 큐에서 하나를 꺼내** 묻는다 — 인스턴스가 N대면 1/N만 답한다
+
+`objHash = hash(objName)` 이라 이름이 같으면 몇 대를 띄우든 콜렉터에게는 한 대다.
+에이전트가 미리 열어 둔 TCP 세션은 **objHash 키 하나의 큐**에 모인다.
+
+```
+TcpAgentManager:  IntKeyLinkedMap<RequestQueue<TcpAgentWorker>>  // objHash → 세션 큐
+AgentCall.call :  get(objHash) → 사용 → add(objHash, worker)      // 꺼내 쓰고 꼬리에 되돌림
+RequestQueue   :  LinkedList 기반 FIFO
+```
+
+꺼내 쓰고 되돌리므로 **라운드로빈**이고, 인스턴스가 4대면 각 대가 4번에 1번 답한다.
+답한 인스턴스는 자기 기준으로 완전한 목록을 주므로 **`complete=true` 가 붙는다** —
+콜렉터도 에이전트도 오류를 내지 않아 화면이 경고할 근거가 없다.
+
+운영에서 이렇게 드러났다: 37분째 도는 트랜잭션이 **정확히 3틱씩** 사라졌다 돌아옴
+(같은 txid·elapsed 가 벽시계와 일치). 그 서버는 ECS 컨테이너 4개였다.
+
+- 영향: 액티브 목록·스레드·환경변수·힙덤프는 매번 랜덤한 1대.
+  **카운터는 여러 대가 같은 키로 보내 서로 덮어쓴다.** XLog 는 txid 로 쌓여 정상.
+- 콜렉터가 이미 경고한다: `MAYBE_OBJ_DUP` → `"Maybe duplicated objNames!! Please check"`
+  (`scouter.server.core.AgentManager`)
+- 고치는 법·함정은 [이름 중복 가이드](duplicate-objname-guide.md)
+- 근거: scouter 2.21.3 `scouter-server-2.21.3.jar` 바이트코드 (`javap`)
+
+### F-59. 에이전트 설정의 `${...}` 치환은 **깨져 있다** — 환경변수 전체가 값에 박힌다
+
+`obj_name=app-${HOSTNAME}` 으로 띄우면 이렇게 등록된다:
+
+```
+/order-app/order-app-{container=podman, PATH=/opt/java/openjdk/bin:...,
+ DB_NAME=orderdb, java.vm.vendor=Eclipse Adoptium, ...}
+```
+
+오버로드 선택이 원인이다. `ConfigValueUtil.replaceSysProp` 이 `Map<Object, Object>` 를
+넘기는데 `ParamText` 의 키 조회 오버로드는 `getText(Map<String, ?>)` 라 안 맞는다.
+그래서 `getText(Object arg)` 가 잡히고, 그건 `${...}` 자리마다 인자를 그대로 `toString()` 한다.
+
+**대신 기동 인자로 넣는다.** 단, `scouter.conf` 에 그 키가 있으면 파일이 이긴다 —
+`replaceSysProp` 이 env·시스템속성을 깐 **다음** 파일 값으로 덮어쓰기 때문이다.
+
+- 재현: 에이전트 2.21.3 + `obj_name=order-app-${HOSTNAME}` → 오브젝트 목록 확인
+- 근거: `ConfigValueUtil.replaceSysProp` / `ParamText` (scouter.common 소스)
+
+
 ## 도구 / 환경
 
 ### F-13. podman-compose는 Windows에서 `build:` 섹션이 동작하지 않는다

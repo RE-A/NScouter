@@ -1,0 +1,155 @@
+# 같은 이름을 여러 인스턴스가 쓸 때 (ECS·K8s·오토스케일)
+
+> **대상**: 한 서비스를 컨테이너/파드 여러 개로 띄우면서 scouter 에이전트 설정을
+> 이미지에 한 벌만 굽는 운영 담당자.
+>
+> 증상이 Active 탭에만 보여서 화면 버그로 오해하기 쉽다. **화면 문제가 아니라
+> 에이전트 이름 문제**이고, 카운터(CPU·메모리·TPS)까지 틀리게 만든다.
+
+---
+
+## 1. 증상
+
+- Active 탭에서 **돌고 있는 트랜잭션이 몇 틱씩 사라졌다 나타난다.**
+  6초짜리가 다음 갱신에 없어지고 그다음에 10초로 돌아온다.
+- 화면 위에 **경고 배너가 안 뜬다.** 「연결을 못 얻어 못 물어본 서버」도,
+  「콜렉터가 비활성으로 보는 서버」도 아니다.
+- 서버 목록에 **인스턴스 수보다 적게** 나온다 (4대를 띄웠는데 1대).
+- 콜렉터 로그에 `MAYBE_OBJ_DUP` 이 반복해서 찍힌다.
+
+---
+
+## 2. 왜 그런가
+
+scouter 는 **서버를 이름으로 식별한다.** `objHash = hash(objName)` 이고,
+이름이 같으면 몇 대를 띄우든 콜렉터에게는 **한 대**다.
+
+```
+컨테이너 4개 ── 같은 obj_name ──▶ objHash 하나
+                                      │
+          콜렉터: agentTable[objHash] = 세션 큐 [A][B][C][D]
+                                      │
+          조회할 때마다 큐에서 하나 꺼내 쓰고 뒤에 되돌림 (FIFO)
+                                      ▼
+                    매 요청이 4대 중 1대에게만 간다
+```
+
+에이전트는 콜렉터로 TCP 세션을 미리 열어 두고, 콜렉터는 조회할 때 그 세션을
+하나 꺼내 쓴다. 이름이 같으면 **네 인스턴스의 세션이 한 큐에 섞인다.**
+
+꺼내 쓰고 꼬리에 되돌리므로 라운드로빈이 되고, **각 인스턴스는 4번에 1번** 답한다.
+답한 인스턴스는 자기 기준으로 완전한 목록을 주므로 `complete=true` 가 붙는다 —
+그래서 콜렉터도 에이전트도 오류를 내지 않고, 화면도 경고할 근거가 없다.
+
+> 근거: `scouter.server.netio.service.net.TcpAgentManager`
+> (`IntKeyLinkedMap<RequestQueue<TcpAgentWorker>>`, `get(int)` / `add(int, worker)`),
+> `scouter.server.netio.AgentCall` (get → 사용 → add), `scouter.util.RequestQueue`
+> (LinkedList FIFO). scouter 2.21.3 바이트코드에서 확인.
+>
+> 콜렉터의 경고 문구: `MAYBE_OBJ_DUP` → `"Maybe duplicated objNames!! Please check"`
+> (`scouter.server.core.AgentManager`)
+
+### 영향 범위
+
+| 기능 | 지금 | 이름을 나눈 뒤 |
+|---|---|---|
+| 액티브 목록 · 스레드 목록 · 환경변수 · 힙덤프 | 매번 랜덤한 1대 | 각 대를 정확히 |
+| **카운터 (CPU·Heap·TPS)** | 여러 대가 같은 키로 보내 **서로 덮어씀** | 대별로 따로 |
+| 서버 목록 | 1대로 보임 | 인스턴스 수만큼 |
+| XLog | 정상 (txid 로 쌓임) | 정상 |
+
+**카운터가 가장 위험하다.** 그래프가 실제 부하가 아니라 «마지막에 보고한 1대» 의
+값을 그리고 있을 수 있다. 용량 산정에 쓰고 있었다면 다시 보는 게 좋다.
+
+---
+
+## 3. 고치는 법
+
+인스턴스마다 `obj_name` 이 달라지게 한다. **두 가지를 같이 해야 한다.**
+
+### ① `scouter.conf` 에서 `obj_name` 줄을 지운다
+
+```diff
+- obj_name=주문서비스
+  obj_type=tomcat
+```
+
+설정을 읽을 때 환경변수·시스템속성을 먼저 깔고 **그 위에 파일 값을 덮어쓴다**
+(`ConfigValueUtil.replaceSysProp`). 파일에 `obj_name` 이 남아 있으면
+기동 인자로 아무리 넣어도 파일이 이긴다.
+
+### ② 기동 인자로 넣되, 쉘이 확장하게 한다
+
+```dockerfile
+ENTRYPOINT ["sh","-c","exec java \
+  -javaagent:/scouter/scouter.agent.jar \
+  -Dscouter.config=/scouter/conf/scouter.conf \
+  -Dobj_name=주문서비스-$HOSTNAME \
+  -jar /app/app.jar"]
+```
+
+- **`sh -c` 가 필요하다.** exec 배열 형식(`["java", ...]`)은 쉘을 안 거쳐서
+  `$HOSTNAME` 이 글자 그대로 들어간다.
+- **`exec` 를 빼면 안 된다.** 빼면 쉘이 PID 1 이 되고 JVM 이 자식이 되어,
+  ECS/K8s 가 보내는 종료 신호를 JVM 이 못 받는다 (graceful shutdown 실패).
+- ECS·K8s 에서 `HOSTNAME` 은 컨테이너 ID / 파드 이름이라 **인스턴스마다 다르다.**
+
+### 확인
+
+기동 후 NScouter 서버 목록에 인스턴스 수만큼 뜨면 된다.
+콜렉터 로그의 `MAYBE_OBJ_DUP` 도 멎는다.
+
+---
+
+## 4. 하면 안 되는 것
+
+### ✗ `obj_name` 안에 `${HOSTNAME}` 쓰기
+
+```properties
+# 이렇게 하면 안 된다
+obj_name=주문서비스-${HOSTNAME}
+```
+
+scouter 2.21.3 에서 이 치환은 **깨져 있다.** 변수 값 대신
+**환경변수 + 시스템속성 전체가 한 덩어리 문자열로** 이름에 박힌다:
+
+```
+/order-app/order-app-{container=podman, PATH=/opt/java/openjdk/bin:...,
+ DB_NAME=orderdb, java.vm.vendor=Eclipse Adoptium, ...}
+```
+
+원인은 오버로드 선택이다. `ConfigValueUtil.replaceSysProp` 이
+`Map<Object, Object>` 를 넘기는데, `ParamText` 의 키 조회 오버로드는
+`getText(Map<String, ?>)` 라 안 맞는다. 그래서 **`getText(Object arg)`** 가 잡히고,
+그건 `${...}` 자리마다 인자를 그대로 `toString()` 한다.
+
+> 재현: 에이전트 2.21.3 + `obj_name=order-app-${HOSTNAME}` 으로 기동 후
+> 콜렉터의 오브젝트 목록 확인.
+
+### ✗ `obj_name_auto_pid_enabled=true`
+
+PID 를 이름에 붙이는 옵션이지만(`SysJMX.getProcessPID`), **컨테이너에서는 소용없다.**
+컨테이너마다 PID 네임스페이스가 따로라 JVM 이 대부분 **PID 1** 이다 —
+넷 다 같은 이름이 된다. 한 호스트에서 JVM 여러 개를 띄울 때 쓰는 옵션이다.
+
+---
+
+## 5. 바꾸기 전에 알아 둘 것
+
+**objHash 가 바뀌므로 과거 데이터와 끊긴다.** 해시는 이름에서만 만들어지니,
+이름을 바꾸면 그 서버의 이전 통계·XLog 는 옛 해시 아래 남고 새 이름은 빈 상태로 시작한다.
+과거 비교가 필요하면 바꾸는 시점을 기록해 두는 게 좋다.
+
+**이름에 인스턴스 ID 가 들어가면 목록이 길어진다.** 오토스케일로 뜨고 지는 환경에서는
+죽은 인스턴스 이름이 쌓인다. 콜렉터의 오브젝트 보관 기간 설정으로 정리한다.
+
+---
+
+## 6. 화면 쪽에서 해 둔 것
+
+이름을 바로 못 바꾸는 경우를 위해, NScouter 는 **서버가 완전히 답했는데 그 줄만
+빠진 경우**를 몇 틱 이어 보여준다 (흐리게). 기준은 「한 주기를 넘겨 살아남은 행」이라
+금방 끝나는 트랜잭션은 메우지 않는다 — 안 그러면 끝난 것들이 목록에 쌓인다.
+
+**이건 Active 목록만 덮는 임시 조치다.** 카운터가 1/N 만 보여주는 것은
+이름을 나눠야만 풀린다.

@@ -21,6 +21,7 @@ import {
   stepCounts,
   stepOf,
   type Hold,
+  type CarryState,
 } from './activeModel';
 import type { ActiveService } from '../xlog/types/object';
 
@@ -228,7 +229,7 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
       answered: [1, 2],
       empty: [],
       expected: [1, 2],
-      now: at,
+      now: at, periodMs: 2_000,
     });
   }
 
@@ -239,7 +240,7 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
       answered: [1, 2],
       empty: [1],
       expected: [1, 2],
-      now: T0 + 2_000,
+      now: T0 + 2_000, periodMs: 2_000,
     });
     expect(next.rows.map(r => r.txid).sort()).toEqual(['a1', 'b1']);
     expect([...next.stale]).toEqual([1]);
@@ -254,7 +255,7 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
       answered: [2],
       empty: [],
       expected: [1, 2],
-      now: T0 + 2_000,
+      now: T0 + 2_000, periodMs: 2_000,
     });
     expect(next.rows.map(r => r.txid).sort()).toEqual(['a1', 'b1']);
     expect([...next.stale]).toEqual([1]);
@@ -267,14 +268,14 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
       answered: [2],
       empty: [],
       expected: [1, 2],
-      now: T0 + 2_000,
+      now: T0 + 2_000, periodMs: 2_000,
     });
     expect(next.stale.has(2)).toBe(false);
   });
 
   it('정해진 시간을 넘기면 지난 값을 버린다 — 죽은 서버가 영원히 «실행 중» 으로 남지 않게', () => {
     const miss = (at: number, prev = bothAnswered().next) =>
-      carryUnreached(prev, { fresh: [], answered: [], empty: [], expected: [1], now: at });
+      carryUnreached(prev, { fresh: [], answered: [], empty: [], expected: [1], now: at, periodMs: 2_000 });
 
     expect(miss(T0 + CARRY_MS).rows).toHaveLength(1);
     const over = miss(T0 + CARRY_MS + 1);
@@ -292,7 +293,7 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
         answered: [],
         empty: [],
         expected: [1],
-        now: T0 + i * 1_000,
+        now: T0 + i * 1_000, periodMs: 2_000,
       });
       expect(r.rows).toHaveLength(1);
       state = r.next;
@@ -305,39 +306,57 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
       answered: [],
       empty: [],
       expected: [1],
-      now: T0 + 10_000,
+      now: T0 + 10_000, periodMs: 2_000,
     });
     const back = carryUnreached(missed.next, {
       fresh: [a1],
       answered: [1],
       empty: [],
       expected: [1],
-      now: T0 + 12_000,
+      now: T0 + 12_000, periodMs: 2_000,
     });
     const later = carryUnreached(back.next, {
       fresh: [],
       answered: [],
       empty: [],
       expected: [1],
-      now: T0 + 12_000 + CARRY_MS,
+      now: T0 + 12_000 + CARRY_MS, periodMs: 2_000,
     });
     expect(later.rows).toHaveLength(1);
     expect(later.stale.has(1)).toBe(true);
   });
 
-  it('0건이라 행이 없는 서버도 답한 것이다 — 옛 행을 붙들지 않는다', () => {
+  it('0건으로 답한 서버를 «못 받았다» 로 보지 않는다', () => {
     // 한가해진 서버는 응답에 행이 하나도 없다. 「행이 있다」 로 답했음을 가르면
     // 방금 끝난 트랜잭션이 지난 값으로 계속 남는다.
+    //
+    // **짧은 것은 그 자리에서 사라진다.** 긴 것은 행 단위 창(아래 describe)만큼만
+    // 남는데, 그건 서버가 못 답한 것과 다른 일이라 `stale`·`missed` 에는 안 들어간다.
     const idle = carryUnreached(bothAnswered().next, {
       fresh: [],
       answered: [1, 2],
       empty: [],
       expected: [1, 2],
-      now: T0 + 2_000,
+      now: T0 + 2_000, periodMs: 2_000,
     });
-    expect(idle.rows).toHaveLength(0);
+    // b1 은 900ms 짜리라 바로 사라진다. a1(5초)은 창 안에서만 남는다.
+    expect(idle.rows.map(r => r.txid)).toEqual(['a1']);
     expect(idle.stale.size).toBe(0);
     expect(idle.missed.size).toBe(0);
+  });
+
+  it('한가해진 서버의 긴 행도 창이 지나면 사라진다', () => {
+    let last = carryUnreached(bothAnswered().next, {
+      fresh: [], answered: [1, 2], empty: [], expected: [1, 2],
+      now: T0 + 2_000, periodMs: 2_000,
+    });
+    for (let i = 2; i <= 10; i++) {
+      last = carryUnreached(last.next, {
+        fresh: [], answered: [1, 2], empty: [], expected: [1, 2],
+        now: T0 + 2_000 * i, periodMs: 2_000,
+      });
+    }
+    expect(last.rows).toHaveLength(0);
   });
 
   it('처음부터 못 받은 서버는 이어 붙일 것이 없다 — 지어내지 않는다', () => {
@@ -346,7 +365,7 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
       answered: [],
       empty: [],
       expected: [7],
-      now: T0,
+      now: T0, periodMs: 2_000,
     });
     expect(r.rows).toHaveLength(0);
     expect(r.stale.size).toBe(0);
@@ -360,8 +379,82 @@ describe('못 닿은 서버 — 떴다 사라졌다 하지 않게', () => {
       answered: [2],
       empty: [],
       expected: [2],
-      now: T0,
+      now: T0, periodMs: 2_000,
     });
     expect(r.missed.size).toBe(0);
+  });
+});
+
+// ─── 서버는 답했는데 그 줄만 빠질 때 ──────────────────────────
+//
+// 운영에서 확인된 자리다. 한 이름을 여러 인스턴스가 나눠 쓰면(ECS 컨테이너 4개)
+// 콜렉터는 그 이름의 세션 큐에서 하나를 꺼내 묻는다 — 매번 다른 쪽이 답하고,
+// 각자는 자기 기준으로 «완전히» 답한다. 그래서 빈손도 경고도 없이
+// 37분째 도는 트랜잭션이 3틱씩 사라졌다 (txid 로 같은 것임을 확인).
+
+describe('행 단위 이어 보이기', () => {
+  const T0 = 2_000_000;
+  const P = 2_000;
+  /** 오래 돌고 있는 것 — 한 주기를 넘겨 살아남았다 */
+  const long = row({ obj_hash: 1, id: 7, txid: 'long', elapsed: 17_000 });
+  /** 금방 끝나는 것 — 다음 조회에 없는 게 정상이다 */
+  const quick = row({ obj_hash: 1, id: 8, txid: 'quick', elapsed: 120 });
+
+  function tick(prev: CarryState, fresh: ActiveService[], at: number) {
+    return carryUnreached(prev, {
+      fresh, answered: [1], empty: [], expected: [1], now: at, periodMs: P,
+    });
+  }
+
+  it('긴 트랜잭션이 한 틱 빠지면 이어 보여준다', () => {
+    const first = tick(EMPTY_CARRY, [long], T0);
+    const next = tick(first.next, [], T0 + P);
+
+    expect(next.rows.map(r => r.txid)).toEqual(['long']);
+    expect([...next.carriedRows]).toHaveLength(1);
+    // 서버는 멀쩡히 답했다 — 서버 단위 경고를 띄우면 거짓말이다
+    expect(next.stale.size).toBe(0);
+    expect(next.missed.size).toBe(0);
+  });
+
+  it('짧은 것은 메우지 않는다 — 끝나서 사라진 것이다', () => {
+    const first = tick(EMPTY_CARRY, [quick], T0);
+    const next = tick(first.next, [], T0 + P);
+
+    // 초당 수십 건이 이렇게 끝난다. 다 들고 있으면 목록이 유령으로 덮인다.
+    expect(next.rows).toEqual([]);
+    expect(next.carriedRows.size).toBe(0);
+  });
+
+  it('돌아오면 이어 붙이기를 그만둔다', () => {
+    const first = tick(EMPTY_CARRY, [long], T0);
+    const gap = tick(first.next, [], T0 + P);
+    const back = tick(gap.next, [long], T0 + P * 2);
+
+    expect(back.rows.map(r => r.txid)).toEqual(['long']);
+    expect(back.carriedRows.size).toBe(0);
+  });
+
+  it('돌아오지 않으면 창이 지나고 사라진다 — 끝난 것을 영원히 들고 있지 않는다', () => {
+    let state = tick(EMPTY_CARRY, [long], T0).next;
+    let last = tick(state, [], T0 + P);
+    // 자취의 시각은 안 올라가므로 창은 첫 목격부터 잰다
+    for (let i = 2; i <= 12; i++) {
+      last = tick(last.next, [], T0 + P * i);
+      state = last.next;
+    }
+    expect(last.rows).toEqual([]);
+  });
+
+  it('서버째로 못 받은 자리는 두 번 세지 않는다', () => {
+    const first = tick(EMPTY_CARRY, [long], T0);
+    // 이번엔 그 서버가 빈손이다 — 서버 단위 carry 가 이미 그 행을 넣는다
+    const next = carryUnreached(first.next, {
+      fresh: [], answered: [1], empty: [1], expected: [1], now: T0 + P, periodMs: P,
+    });
+
+    expect(next.rows.map(r => r.txid)).toEqual(['long']);
+    expect(next.carriedRows.size).toBe(0);
+    expect([...next.stale]).toEqual([1]);
   });
 });

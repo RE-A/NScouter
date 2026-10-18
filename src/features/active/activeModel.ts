@@ -273,12 +273,36 @@ export type MissKind =
   /** 팩이 아예 없다 — 콜렉터가 살아 있지 않다고 보고 묻지 않음 */
   | 'silent';
 
+/**
+ * 행 하나를 메울 창 — **폴링 횟수로 재다.**
+ *
+ * 위의 `CARRY_MS` 는 «서버가 안 답한다» 에 쓰여 하트비트 시간이 기준이지만,
+ * 여기는 다르다. 운영에서 본 공백은 **항상 3틱**이었고, 그건 컨테이너 수(4)에서
+ * 나온 수라 주기를 바꿔도 그대로다 — 그래서 횟수로 재야 한다.
+ */
+export const ROW_CARRY_TICKS = 4;
+/** 주기가 너무 짧거나 길 때의 양끝 */
+export const ROW_CARRY_MIN_MS = 6_000;
+export const ROW_CARRY_MAX_MS = 20_000;
+
+/**
+ * 행을 메울 창(ms).
+ *
+ * 주기를 고를 수 있어서(1·2·5초) 횟수로 재되 양끝은 둔다.
+ */
+export function rowCarryMs(periodMs: number): number {
+  const base = periodMs > 0 ? periodMs : 2_000;
+  return Math.min(Math.max(base * ROW_CARRY_TICKS, ROW_CARRY_MIN_MS), ROW_CARRY_MAX_MS);
+}
+
 export interface CarryState {
   /** 오브젝트별로 마지막에 **실제로 받은** 행과 그 시각 */
   lastRows: ReadonlyMap<number, { rows: readonly ActiveService[]; at: number }>;
+  /** 행별로 마지막에 본 것. 한두 틱 빠진 긴 트랜잭션을 메우는 데 쓴다 */
+  lastSeen: ReadonlyMap<string, { row: ActiveService; at: number }>;
 }
 
-export const EMPTY_CARRY: CarryState = { lastRows: new Map() };
+export const EMPTY_CARRY: CarryState = { lastRows: new Map(), lastSeen: new Map() };
 
 export interface CarryInput {
   /** 이번에 받은 행 전부 */
@@ -290,6 +314,8 @@ export interface CarryInput {
   /** 물었어야 할 오브젝트 — 여기 있는데 답이 없으면 «묻지도 않았다» 다 */
   expected: readonly number[];
   now: number;
+  /** 폴링 주기(ms). 행을 메울 창과 «긴 트랜잭션» 기준이 여기서 나온다 */
+  periodMs: number;
 }
 
 export interface CarryResult {
@@ -299,6 +325,13 @@ export interface CarryResult {
   stale: ReadonlySet<number>;
   /** 이번에 못 받은 서버와 그 이유 (지난 값이 있든 없든) */
   missed: ReadonlyMap<number, MissKind>;
+  /**
+   * 서버는 멀쩡히 답했는데 **그 행만** 빠져서 이어 붙인 것 (`rowKey`).
+   *
+   * 서버 단위 `stale` 과 뜻이 다르다 — 저쪽은 «이 서버를 못 믿겠다» 이고
+   * 이쪽은 «이 줄은 아직 돌고 있는데 이번 답에만 없다» 다.
+   */
+  carriedRows: ReadonlySet<string>;
   next: CarryState;
 }
 
@@ -309,7 +342,7 @@ export interface CarryResult {
  * 영영 안 지워진다 — 0건인 서버는 행으로 드러나지 않기 때문이다.
  */
 export function carryUnreached(prev: CarryState, input: CarryInput): CarryResult {
-  const { fresh, answered, empty, expected, now } = input;
+  const { fresh, answered, empty, expected, now, periodMs } = input;
   const answeredSet = new Set(answered);
 
   const missed = new Map<number, MissKind>();
@@ -347,5 +380,35 @@ export function carryUnreached(prev: CarryState, input: CarryInput): CarryResult
     stale.add(h);
   }
 
-  return { rows, stale, missed, next: { lastRows } };
+  // ── 행 단위 ──────────────────────────────────────────────────
+  //
+  // **서버가 멀쩡히 답해도 그 안에서 행이 빠진다.** 한 이름을 여러 인스턴스가 나눠 쓰면
+  // (ECS 컨테이너 4개 등) 콜렉터는 그 이름의 세션 큐에서 하나를 꺼내 묻는다 —
+  // 매번 다른 인스턴스가 답하고, 각자는 자기 기준으로 «완전히» 답한다.
+  // 그래서 빈손도 아니고 경고도 없이 37분째 도는 트랜잭션이 3틱씩 사라졌다.
+  //
+  // **짧은 것은 메우지 않는다.** 100ms 짜리가 다음 조회에 없는 건 끝났기 때문이다.
+  // 초당 수십 건이 그렇게 끝나는데 그걸 다 들고 있으면 목록이 유령으로 덮인다.
+  // 기준은 «한 주기를 넘겨 살아남았는가» 다 — 그건 끝나서 사라진 것일 수가 없다.
+  const window = rowCarryMs(periodMs);
+  const longEnough = periodMs > 0 ? periodMs : 2_000;
+  const present = new Set(rows.map(rowKey));
+  const lastSeen = new Map<string, { row: ActiveService; at: number }>();
+  const carriedRows = new Set<string>();
+
+  for (const r of rows) lastSeen.set(rowKey(r), { row: r, at: now });
+
+  for (const [key, seen] of prev.lastSeen) {
+    if (present.has(key)) continue;
+    // 서버째로 못 받은 자리는 위에서 이미 다뤘다. 여기서 또 메우면 두 번 센다.
+    if (missed.has(seen.row.obj_hash)) continue;
+    if (now - seen.at > window) continue;
+    if (seen.row.elapsed < longEnough) continue;
+    // **자취의 시각은 올리지 않는다.** 올리면 돌아오지 않는 행이 영영 남는다.
+    lastSeen.set(key, seen);
+    rows.push(seen.row);
+    carriedRows.add(key);
+  }
+
+  return { rows, stale, missed, carriedRows, next: { lastRows, lastSeen } };
 }

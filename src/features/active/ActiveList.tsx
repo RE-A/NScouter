@@ -47,6 +47,13 @@ interface ActiveListProps {
    * 지금도 붙들고 있는지 모른다.
    */
   stale: ReadonlySet<number>;
+  /**
+   * 서버는 답했는데 **그 줄만** 빠져서 이어 붙인 행 (`rowKey`).
+   *
+   * `stale` 과 흐리게 두는 이유가 같지만 원인이 다르다 — 저쪽은 서버를 못 믿는 것이고
+   * 이쪽은 그 서버가 여러 인스턴스로 나뉘어 번갈아 답하는 것이다.
+   */
+  carriedRows: ReadonlySet<string>;
   holds: ReadonlyMap<string, Hold>;
   /** 마지막으로 받은 시각. 붙들고 있은 시간을 이 시각 기준으로 잰다 */
   at: number | null;
@@ -62,6 +69,7 @@ interface ActiveListProps {
 export const ActiveList = memo(function ActiveList({
   rows,
   stale,
+  carriedRows,
   holds,
   at,
   maxElapsed,
@@ -82,7 +90,8 @@ export const ActiveList = memo(function ActiveList({
       {rows.map(row => {
         const step = stepOf(row.elapsed);
         const res = resourceOf(row);
-        const old = stale.has(row.obj_hash);
+        // 어느 쪽이든 «이번에 받은 값이 아니다» 라 다루는 법이 같다
+        const old = stale.has(row.obj_hash) || carriedRows.has(rowKey(row));
         const held = at === null || old ? null : heldMs(holds, row, at);
         const server = serverName(row.obj_hash);
 
