@@ -26,3 +26,22 @@ describe('clampFontScale', () => {
     expect(clampFontScale(0.1)).toBe(0.8);
   });
 });
+
+// ─── 테마가 설정에서 화면까지 닿는가 ──────────────────────────
+//
+// 「바꿔도 안 먹는다」가 나와서 끊어 본다. 설정 창은 저장할 때
+// `applyConfigToViewOptions` 하나만 부른다 — 거기서 문서 뿌리까지 가야 한다.
+
+describe('applyConfigToViewOptions 가 테마를 건다', () => {
+  it('설정의 ui_theme 가 문서 뿌리에 걸린다', async () => {
+    const { applyConfigToViewOptions } = await import('./useViewOptions');
+    applyConfigToViewOptions({ ui_theme: 'light' });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
+  it('모르는 값이면 기본 테마로 건다 — 비워 두지 않는다', async () => {
+    const { applyConfigToViewOptions } = await import('./useViewOptions');
+    applyConfigToViewOptions({ ui_theme: '없는테마' });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+  });
+});

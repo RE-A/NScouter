@@ -1,6 +1,6 @@
 // src/features/settings/SettingsDialog.tsx
 
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
 import {
   applyConfigToViewOptions,
@@ -12,7 +12,7 @@ import { t, toLang, type Lang } from '../../i18n';
 import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../xlog/store/XLogDataStore';
 import { SHORTCUT_HELP, type ShortcutAction } from '../xlog/hooks/shortcuts';
 import { LogLevelSelector } from '../xlog/components/LogLevelSelector';
-import { THEMES, toTheme, type ThemeId } from '../../styles/theme';
+import { THEMES, toTheme, applyTheme, currentTheme, type ThemeId } from '../../styles/theme';
 
 /**
  * 단축키가 무엇을 하는지.
@@ -67,6 +67,13 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   const [lang, setLangValue] = useState<Lang>('ko');
   /** 색 벌 */
   const [theme, setTheme] = useState<ThemeId>('dark');
+  /**
+   * 마지막으로 **저장된** 테마.
+   *
+   * 고르는 즉시 화면에 걸지만(색 조합은 봐야 고를 수 있다), 저장 없이 닫으면
+   * 되돌려야 한다 — «구경만 했는데 바뀜어 있다» 가 되면 어디서 바뎀지 모른다.
+   */
+  const savedTheme = useRef<ThemeId>('dark');
   /** XLog 버퍼에 담아 둘 최대 건수 */
   const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);
   const [saving, setSaving] = useState(false);
@@ -80,9 +87,16 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setBindInline(cfg.sql_bind_inline ?? true);
       setFontScale(clampFontScale(cfg.ui_font_scale ?? 1));
       setLangValue(toLang(cfg.ui_language));
-      setTheme(toTheme(cfg.ui_theme));
+      const th = toTheme(cfg.ui_theme);
+      setTheme(th);
+      savedTheme.current = th;
       setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
     }).catch(() => {});
+  }, []);
+
+  // 저장 없이 닫으면 구경하던 테마를 두고 가지 않는다.
+  useEffect(() => () => {
+    if (currentTheme() !== savedTheme.current) applyTheme(savedTheme.current);
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -104,6 +118,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       // **저장만 하면 열려 있는 화면은 안 바뀐다.** 설정을 닫고 다시 열어야
       // 반영되면 저장이 안 된 것으로 읽힌다.
       applyConfigToViewOptions(next);
+      savedTheme.current = theme;
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -111,7 +126,9 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     } finally {
       setSaving(false);
     }
-  }, [config, dataDir, bindInline, fontScale, lang, bufferMax]);
+    // **여기 빠뜨리면 조용히 옛 값이 저장된다.** `theme` 이 빠져 있어서, 테마를 고르고
+    // 저장하면 처음 값(dark)이 그대로 쓰였다 — 화면에서는 「바꿔도 안 먹는다」로 보인다.
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, theme]);
 
   // ESC 닫기
   useEffect(() => {
@@ -193,7 +210,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                 return (
                   <button
                     key={th.id}
-                    onClick={() => setTheme(th.id)}
+                    onClick={() => { setTheme(th.id); applyTheme(th.id); }}
                     aria-pressed={on}
                     title={t(th.hint)}
                     style={{

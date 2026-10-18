@@ -37,10 +37,16 @@ export function toTheme(v: unknown): ThemeId {
  * 옛 색으로 남아 있다 — 멈춰 있는 과거 조회 화면이 그렇다. 이 번호를 구독해 다시 그린다.
  */
 let epoch = 0;
+let applied: ThemeId = DEFAULT_THEME;
 const listeners = new Set<(n: number) => void>();
 
 export function themeEpoch(): number {
   return epoch;
+}
+
+/** 지금 걸려 있는 테마. 「미리 보다가 저장 안 하고 닫기」를 되돌릴 때 쓴다 */
+export function currentTheme(): ThemeId {
+  return applied;
 }
 
 export function subscribeTheme(fn: (n: number) => void): () => void {
@@ -58,6 +64,7 @@ export function applyTheme(id: ThemeId): void {
   if (typeof document !== 'undefined') {
     document.documentElement.dataset.theme = id;
   }
+  applied = id;
   // 속성을 건 **다음에** 읽어야 새 테마 값이 나온다.
   refreshCanvasTokens();
   epoch += 1;
