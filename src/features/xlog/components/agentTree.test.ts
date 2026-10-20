@@ -4,7 +4,7 @@
 // 10초마다 목록을 다시 받는데 그때마다 순서가 바뀌면 누르려던 항목이 도망간다.
 
 import { describe, it, expect } from 'vitest';
-import { groupAgents, groupNameOf, shortName } from './agentTree';
+import { groupAgents, groupNameOf, shortName, NO_GROUP } from './agentTree';
 import type { AgentObject } from '../types/xlog';
 
 function agent(name: string, type: string, alive = true): AgentObject {
@@ -178,5 +178,58 @@ describe('groupAgents — 묶는 기준', () => {
     const g = groupAgents(agents, 'ORDER', 'group');
     expect(g).toHaveLength(1);
     expect(g[0].agents).toHaveLength(2);
+  });
+});
+
+// ─── 서비스로 묶기 ─────────────────────────────────────────────
+//
+// ECS 에서 한 애플리케이션이 Task 여러 개로 뜬다. 이름을 Task 마다 유니크하게 나누고
+// 나면 같은 서비스가 여러 줄로 흩어지는데, 그걸 다시 한 마디로 모은다.
+
+describe('서비스로 묶기', () => {
+  const task = (name: string, alive = true): AgentObject =>
+    ({
+      obj_hash: name.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0),
+      obj_type: 'tomcat',
+      obj_name: name,
+      address: '',
+      version: '',
+      alive,
+      wakeup: 0,
+      tags: [],
+    });
+
+  const tasks = [
+    task('/CJFW/SAFS-ip-10-0-0-1'),
+    task('/CJFW/SAFS-ip-10-0-0-2'),
+    task('/CJFW/jdbc_SAFS_R'),
+  ];
+
+  it('같은 서비스의 Task 가 한 마디에 모인다', () => {
+    const g = groupAgents(tasks, '', 'service');
+    expect(g.find(x => x.type === 'SAFS')?.agents).toHaveLength(2);
+  });
+
+  it('규칙에 안 걸린 것은 «그룹 없음» 으로 떨어진다 — 조용히 숨기지 않는다', () => {
+    const g = groupAgents(tasks, '', 'service');
+    expect(g.find(x => x.type === NO_GROUP)?.agents.map(a => shortName(a.obj_name)))
+      .toEqual(['jdbc_SAFS_R']);
+  });
+
+  it('서비스 마디만 통째로 고를 수 있다 — 나머지는 그냥 접는 칸이다', () => {
+    const g = groupAgents(tasks, '', 'service');
+    expect(g.find(x => x.type === 'SAFS')?.kind).toBe('service');
+    expect(g.find(x => x.type === NO_GROUP)?.kind).toBe('type');
+  });
+
+  it('검색으로 한 대만 남아도 묶음은 유지된다 — 거르기 전의 전체로 묶는다', () => {
+    // 걸러낸 뒤에 묶으면 «이 Task 는 혼자» 로 보여 서비스가 아닌 것처럼 읽힌다
+    const g = groupAgents(tasks, '10-0-0-1', 'service');
+    expect(g.find(x => x.type === 'SAFS')?.agents).toHaveLength(1);
+  });
+
+  it('묶음은 이름순 — 살아 있는 수로 정렬하면 10초마다 목록이 춤춘다', () => {
+    const g = groupAgents([...tasks, task('/CJFW/AAA-ip-10-0-0-9'), task('/CJFW/AAA-ip-10-0-0-8')], '', 'service');
+    expect(g.map(x => x.type)).toEqual([...g.map(x => x.type)].sort((a, b) => a.localeCompare(b)));
   });
 });

@@ -189,14 +189,16 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               겹치기도 하지만, 그때도 그룹 쪽이 한 겹 더 잘게 나눈다. */}
           <div className="mb-1.5 flex items-center gap-1">
             <span className="text-micro text-fg-dim">{t('묶기')}</span>
-            {(['type', 'group'] as const).map(b => (
+            {(['type', 'group', 'service'] as const).map(b => (
               <button
                 key={b}
                 onClick={() => onGroupByChange(b)}
                 title={
                   b === 'type'
                     ? t('오브젝트 종류로 묶습니다 (tomcat · datasource · linux)')
-                    : t('이름의 부모 경로로 묶습니다 (/CJFW/PRD-FSCP)')
+                    : b === 'group'
+                      ? t('이름의 부모 경로로 묶습니다 (/CJFW/PRD-FSCP)')
+                      : t('같은 서비스의 ECS Task 들을 한 마디로 묶습니다')
                 }
                 className={`rounded px-1.5 py-0.5 text-micro ${
                   groupBy === b
@@ -204,7 +206,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                     : 'text-fg-faint hover:bg-hover hover:text-fg'
                 }`}
               >
-                {b === 'type' ? t('타입') : t('그룹')}
+                {b === 'type' ? t('타입') : b === 'group' ? t('그룹') : t('서비스')}
               </button>
             ))}
           </div>

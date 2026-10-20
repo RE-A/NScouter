@@ -340,6 +340,23 @@ export const EN: Record<string, string> = {
   '기록 수준': 'Log level',
   // 테마 — 이름과 설명은 `THEMES` 가 변수로 넘기므로 훑기 검사가 못 잡는다. 손으로 넣는다.
   '테마': 'Theme',
+  // 서비스 묶기 (ECS Task 들을 한 서비스로)
+  '서비스': 'Service',
+  '같은 서비스의 ECS Task 들을 한 마디로 묶습니다':
+    'Groups ECS tasks of the same service into one node',
+  // XLog 탭 줄
+  'XLog 탭 목록': 'XLog tabs',
+  '탭 닫기': 'Close tab',
+  '탭': 'tab',
+  '지금 조건을 복제해 탭을 하나 더 엽니다 — 날짜만 바꿔 견주는 데 씁니다':
+    'Opens another tab with the same conditions — change just the date to compare',
+  '탭은 최대 6개입니다. 탭마다 조회한 것을 따로 들고 있어 더 늘리면 메모리를 먹습니다':
+    'Up to 6 tabs. Each keeps its own query results, so more would eat memory',
+  // XLog 툴바 — 자주 안 쓰는 조건은 접어 둔다
+  '조건 더보기': 'More filters',
+  '조건 접기': 'Fewer filters',
+  'Y최대·밀집·응답·서비스·IP 조건을 여닫습니다':
+    'Show or hide Y-max, density, response time, service and IP filters',
   // 프로파일 전문 창
   '프로파일 전문': 'Full profile text',
   '개 스텝': ' steps',

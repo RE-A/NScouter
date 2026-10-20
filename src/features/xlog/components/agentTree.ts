@@ -20,14 +20,31 @@
 // 그때도 그룹 쪽이 한 겹 더 잘게 나눈다.
 
 import type { AgentObject } from '../types/xlog';
+import { DEFAULT_GROUP_RULE, groupByService, type GroupRule } from './instanceGroup';
 import { UNKNOWN_TYPE } from './objectTypes';
 
 /** 무엇으로 묶을 것인가 */
-export type GroupBy = 'type' | 'group';
+/**
+ * 무엇으로 묶을까.
+ *
+ * `type` 오브젝트 종류 · `group` 호스트(이름의 첫 마디) ·
+ * `service` **논리 서비스** — ECS 에서 Task 여럿이 한 애플리케이션인 경우를 묶는다.
+ */
+/** 규칙에 안 걸린 것들이 모이는 마디. **조용히 숨기지 않는다** — 묶이지 않았음을 말해야 한다 */
+export const NO_GROUP = '(그룹 없음)';
+
+export type GroupBy = 'type' | 'group' | 'service';
 
 export interface AgentGroup {
   /** 묶음 이름. 기준에 따라 obj_type 이거나 이름의 부모 경로다 */
   type: string;
+  /**
+   * 무엇으로 묶인 마디인가.
+   *
+   * 화면이 구별해야 한다 — **서비스 마디는 통째로 고를 수 있고**(그게 이 기능의 요점이다),
+   * 종류·호스트 마디는 그냥 접는 칸이다.
+   */
+  kind: 'type' | 'host' | 'service';
   agents: AgentObject[];
   /** 살아 있는 수. 접힌 채로도 이건 보여야 한다 */
   aliveCount: number;
@@ -88,7 +105,7 @@ function matchesType(agent: AgentObject, types?: ReadonlySet<string>): boolean {
  */
 export function groupNameOf(objName: string): string {
   const parts = objName.split('/').filter(Boolean);
-  if (parts.length <= 1) return '(그룹 없음)';
+  if (parts.length <= 1) return NO_GROUP;
   return `/${parts[0]}`;
 }
 
@@ -104,22 +121,39 @@ export function groupAgents(
   query: string,
   by: GroupBy = 'type',
   types?: ReadonlySet<string>,
+  rule: GroupRule = DEFAULT_GROUP_RULE,
 ): AgentGroup[] {
   const needle = query.trim().toLowerCase();
   const buckets = new Map<string, AgentObject[]>();
 
+  // 서비스로 묶을 때는 **거르기 전의 전체**로 묶음을 정한다.
+  // 걸러낸 뒤에 세면 검색어가 한 대만 남길 때 묶음이 사라져 «이 Task 는 혼자» 로 보인다.
+  const services = by === 'service' ? groupByService(agents, rule) : null;
+  const serviceOf = new Map<number, string>();
+  if (services) {
+    for (const [name, list] of services) for (const a of list) serviceOf.set(a.obj_hash, name);
+  }
+
   for (const a of agents) {
     if (!matches(a, needle)) continue;
     if (!matchesType(a, types)) continue;
-    const key = by === 'group' ? groupNameOf(a.obj_name) : a.obj_type || UNKNOWN_TYPE;
+    const key =
+      by === 'service'
+        ? (serviceOf.get(a.obj_hash) ?? NO_GROUP)
+        : by === 'group'
+          ? groupNameOf(a.obj_name)
+          : a.obj_type || UNKNOWN_TYPE;
     const list = buckets.get(key);
     if (list) list.push(a);
     else buckets.set(key, [a]);
   }
 
+  const kind: AgentGroup['kind'] = by === 'service' ? 'service' : by === 'group' ? 'host' : 'type';
   return [...buckets.entries()]
     .map(([type, list]) => ({
       type,
+      // 묶이지 않은 것들의 마디는 서비스가 아니다 — 통째로 고를 수 없어야 한다.
+      kind: type === NO_GROUP ? ('type' as const) : kind,
       agents: [...list].sort((x, y) => {
         if (x.alive !== y.alive) return x.alive ? -1 : 1;
         return shortName(x.obj_name).localeCompare(shortName(y.obj_name));
