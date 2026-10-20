@@ -100,3 +100,26 @@ export function groupByService(
   }
   return buckets;
 }
+
+/**
+ * 목록 한 줄에 적을 **인스턴스 이름**.
+ *
+ * 그룹으로 묶어 보면 서비스 이름이 줄마다 반복된다 — 이미 왼쪽에서 고른 것이라
+ * 거기서 알 수 있고, 줄에서 알고 싶은 것은 **넷 중 어느 Task 인가** 다.
+ * 그래서 서비스 부분을 떼고 남는 것을 쓴다.
+ *
+ * 떼어낼 것이 없으면(묶이지 않은 오브젝트) 짧은 이름을 그대로 쓴다 —
+ * 빈 칸으로 두면 «못 받았다» 로 읽힌다.
+ */
+export function instanceLabel(objName: string, rule: GroupRule): string {
+  const short = shortName(objName);
+  const svc = serviceNameOf(
+    { obj_name: objName, tags: [] } as unknown as AgentObject,
+    rule,
+  );
+  if (svc === null || !short.startsWith(svc)) return short;
+
+  // 서비스와 인스턴스를 가르는 글자(`-`·`_`·`.`)까지 같이 뗀다
+  const rest = short.slice(svc.length).replace(/^[-_.]+/, '');
+  return rest === '' ? short : rest;
+}

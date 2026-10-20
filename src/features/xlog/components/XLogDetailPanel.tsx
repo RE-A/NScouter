@@ -445,6 +445,10 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
 
           <Section title={t('속성')}>
             <dl className="px-3 py-1.5">
+              {/* **어느 Task 에서 돌았나.** 서비스를 그룹으로 묶어 보면 목록은
+                  넷을 합쳐 보여 주므로, 문제 난 한 대를 짚으려면 여기에 이름이 있어야 한다.
+                  전체 경로로 적는다 — 보고서에 붙일 때 짧은 이름은 어느 환경인지를 안 말해 준다. */}
+              <Attr label={t('서버')} value={agentMap.get(xlog.objHash) ?? `[0x${xlog.objHash.toString(16)}]`} />
               <Attr label="CPU" value={`${xlog.cpu}ms`} />
               <Attr label="Heap" value={`${xlog.allocKBytes}KB`} />
               <Attr label="IP" value={xlog.ipAddr || '—'} mono />

@@ -104,7 +104,7 @@ import {
   toggleService,
   type GroupSelection,
 } from './features/xlog/hooks/groupSelection';
-import { DEFAULT_GROUP_RULE } from './features/xlog/components/instanceGroup';
+import { DEFAULT_GROUP_RULE, instanceLabel } from './features/xlog/components/instanceGroup';
 import {
   fromTabs as detailsFromTabs,
   normalize as normalizeOpenDetails,
@@ -2114,7 +2114,11 @@ function XLogTable({
         )}
         {shown.map((x, i) => {
           const svcName = getCached('service', x.service) ?? `[0x${x.service.toString(16)}]`;
-          const agentName = agentMap.get(x.objHash) ?? `[0x${x.objHash.toString(16)}]`;
+          // **전체 경로가 아니라 인스턴스 부분만.** 그룹으로 묶어 보면 서비스 이름이
+          // 줄마다 반복된다 — 줄에서 알고 싶은 것은 «넷 중 어느 Task 인가» 다.
+          // 전체 이름은 title 에 남겨 둔다.
+          const fullName = agentMap.get(x.objHash) ?? `[0x${x.objHash.toString(16)}]`;
+          const agentName = instanceLabel(fullName, DEFAULT_GROUP_RULE);
           const isActive = activeXlog?.txid === x.txid;
           const hasErr = x.error !== 0;
           const hit = searchHits?.get(x.txid);
@@ -2135,7 +2139,7 @@ function XLogTable({
                 <span className="tnum font-mono text-micro text-fg-dim">
                   {formatTimeMs(x.endTime)}
                 </span>
-                <span className="truncate text-fg-muted" title={agentName}>
+                <span className="truncate text-fg-muted" title={fullName}>
                   {agentName}
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">

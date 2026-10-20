@@ -11,7 +11,7 @@
 //   · **한 대짜리는 그룹을 만들지 않는다** — 묶을 것이 없는데 깊이만 한 겹 는다
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_GROUP_RULE, groupByService, serviceNameOf } from './instanceGroup';
+import { DEFAULT_GROUP_RULE, groupByService, instanceLabel, serviceNameOf } from './instanceGroup';
 import type { AgentObject } from '../types/xlog';
 
 function agent(obj_name: string, tags: [string, string][] = [], alive = true): AgentObject {
@@ -90,5 +90,21 @@ describe('서비스로 묶기', () => {
       DEFAULT_GROUP_RULE,
     );
     expect(g.get('SAFS')).toHaveLength(2);
+  });
+});
+
+describe('줄에 적을 인스턴스 이름', () => {
+  it('서비스 부분을 뗀다 — 그룹으로 보면 줄마다 같은 말이 반복된다', () => {
+    expect(
+      instanceLabel('/CJFW_QA/SAFS-ip-10-75-113-103.ap-northeast-2.compute.internal', DEFAULT_GROUP_RULE),
+    ).toBe('ip-10-75-113-103.ap-northeast-2.compute.internal');
+  });
+
+  it('묶이지 않은 것은 짧은 이름을 그대로 쓴다 — 빈 칸은 «못 받았다» 로 읽힌다', () => {
+    expect(instanceLabel('/CJFW/jdbc_SAFS_R', DEFAULT_GROUP_RULE)).toBe('jdbc_SAFS_R');
+  });
+
+  it('떼고 나서 빈 이름이 되면 짧은 이름을 쓴다', () => {
+    expect(instanceLabel('/CJFW/SAFS', { tagKey: 'x', pattern: '^(SAFS)' })).toBe('SAFS');
   });
 });
