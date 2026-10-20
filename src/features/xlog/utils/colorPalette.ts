@@ -1,17 +1,18 @@
 // src/features/xlog/utils/colorPalette.ts
 // ASIS XLogViewPainter.drawXPerfData() 의 **색상 규칙**을 포팅한다.
 //
-// 규칙(에이전트별 색 순환 / 에러는 빨강 / xType 3·4 는 흐리게)은 그대로지만
+// 규칙(에이전트별 색 순환 / 에러는 빨강 / xType 3·4 는 흐리게)는 그대로지만
 // **색값은 다르다.** ASIS 는 흰 배경 위에 그렸다.
-// 앱 전체가 다크인데 차트만 흰 판이면 그 자체로 시선을 뺏고,
-// 흰 배경용으로 고른 어두운 채도색(RoyalBlue, DarkViolet, SeaGreen …)은
-// #0d0d1a 위에서 서로 구분되지 않는다. 다크 배경용으로 다시 고른다.
 //
-// Canvas 는 var() 를 못 읽어 실제 색 문자열이 필요하다.
-// 이건 의미색이 아니라 **분류색**이라 tokens.css 가 아니라 여기에 둔다 (SERIES 와 같은 취급).
+// **판·눈금·글자는 테마를 따른다.** 예전에는 여기 다크 전용 색을 박아 두어,
+// 테마를 바꿔도 XLog 차트만 검은 판으로 남았다. Canvas 는 `var()` 를 못 읽으므로
+// `refreshXLogColors()` 가 문서 뿌리의 계산값을 읽어 채운다 (CANVAS 와 같은 방식).
+//
+// 다만 **에이전트별 순환색은 테마와 무관하게 고정**이다. 그건 의미색이 아니라
+// **분류색**이라, 테마를 바꿨다고 «어제 파랑이던 서버» 가 초록이 되면 안 된다.
 
 export const XLOG_COLORS = {
-  /** 에러는 다른 어떤 점과도 헷갈리면 안 된다 — 아래 팔레트에서 붉은 계열을 뺐다 */
+  /** 에러는 다른 어떤 점과도 헷갈리면 안 된다 — 아래 팔레트에서 붉은 계열을 미리 뺀다 */
   ERROR:        '#ff4d4f',
   ERROR_LIGHT:  '#8f3436',
   NORMAL_LIGHT: '#454563',
@@ -22,10 +23,58 @@ export const XLOG_COLORS = {
   META_TEXT:    '#606080',
   SELECT_FILL:  'rgba(79, 114, 255, 0.18)',
   SELECT_STROKE:'rgba(79, 114, 255, 0.9)',
-} as const;
+};
 
 /** 차트 판 색 — 패널 본문보다 한 단 낮춰 눌린 면으로 읽히게 한다 */
-export const XLOG_BACKGROUND = '#0d0d1a';
+export const XLOG_PLATE = { bg: '#0d0d1a' };
+
+/** CSS 변수 이름 → 위 자리. 테마마다 tokens.css 가 정한다 */
+const FROM_TOKEN: Record<string, keyof typeof XLOG_COLORS> = {
+  '--xlog-grid': 'GRID',
+  '--xlog-grid-wide': 'GRID_WIDE',
+  '--xlog-border': 'BORDER',
+  '--xlog-meta': 'META_TEXT',
+  '--xlog-dim': 'NORMAL_LIGHT',
+  '--xlog-dim-error': 'ERROR_LIGHT',
+  '--xlog-ignore': 'IGNORE_AREA',
+};
+
+/** `#rrggbb` → `rgba(r, g, b, a)` */
+function withAlpha(hex: string, alpha: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+/**
+ * 문서 뿌리의 계산값을 읽어 채운다. **테마를 걸은 뒤에 불러야 한다.**
+ *
+ * 값이 비면 건드리지 않는다 — jsdom 에서는 빈 문자열이 오고,
+ * 그때는 기본값이 남는 쪽이 낫다.
+ */
+export function refreshXLogColors(): void {
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return;
+  const cs = getComputedStyle(document.documentElement);
+  const read = (name: string): string => cs.getPropertyValue(name).trim();
+
+  for (const [token, key] of Object.entries(FROM_TOKEN)) {
+    const v = read(token);
+    if (v !== '') XLOG_COLORS[key] = v;
+  }
+  const bg = read('--xlog-bg');
+  if (bg !== '') XLOG_PLATE.bg = bg;
+
+  // 의미색은 테마의 것을 그대로 따른다 — 목록·배지와 같은 빨강이어야 짚어 볼 수 있다.
+  const err = read('--error');
+  if (err !== '') XLOG_COLORS.ERROR = err;
+
+  const accent = read('--accent');
+  if (accent !== '') {
+    XLOG_COLORS.SELECT_FILL = withAlpha(accent, 0.18);
+    XLOG_COLORS.SELECT_STROKE = withAlpha(accent, 0.9);
+  }
+}
 
 // 에이전트별 색상 팔레트 (objHash 기반 순환 할당).
 // 다크 배경에서 서로 구분되는 밝은 색만 쓴다. 붉은 계열은 에러 전용이라 제외.

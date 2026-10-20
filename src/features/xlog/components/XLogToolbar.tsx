@@ -69,6 +69,25 @@ export function XLogToolbar({
   // 타이핑할 때마다 수만 건을 다시 받으면 안 된다.
   const [draft, setDraft] = useState<PastRange>(() => defaultPastRange(Date.now()));
 
+  /**
+   * 접어 둔 줄에서 **지금 걸려 있는** 조건 수.
+   *
+   * 접히는 것과 꺼지는 것은 다르다 — 접어 둔 조건이 여전히 거르고 있는데
+   * 화면에 아무 표시가 없으면 «왜 이만큼만 나오지» 의 답이 숨는다.
+   */
+  const hiddenActive =
+    (filter.elapsedMs > 0 ? 1 : 0) +
+    (config.showDensity ? 1 : 0) +
+    filter.patterns.filter(r => r.text.trim() !== '').length;
+
+  /**
+   * 두 줄째를 펼친가.
+   *
+   * **걸려 있는 것이 있으면 열고 시작한다.** 접은 줄 안에 조건이 숨은 채로
+   * 시작하면, 지난번에 걸어 둔 조건을 모르고 «데이터가 안 나온다» 로 읽는다.
+   */
+  const [showMore, setShowMore] = useState(() => hiddenActive > 0);
+
   // 휠로 확대하면 구간이 밖에서 바뀐다. 입력칸이 따라가지 않으면
   // 화면이 보여주는 구간과 입력값이 어긋나 어느 쪽이 진짜인지 알 수 없다.
   useEffect(() => {
@@ -78,7 +97,8 @@ export function XLogToolbar({
   const check = checkRange(draft, Date.now());
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-raised px-3 py-1">
+    <div className="shrink-0 border-b border-line bg-raised px-3 py-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {/* 모드가 나머지 전부의 의미를 바꾸므로 맨 앞이다 */}
       <div className="flex overflow-hidden rounded border border-line-control">
         {(['live', 'past'] as XLogMode[]).map(m => (
@@ -165,7 +185,6 @@ export function XLogToolbar({
           <span className="h-4 w-px bg-line" aria-hidden />
         </>
       )}
-
       <Field label={t('Y축')}>
         <select
           className={CONTROL}
@@ -180,31 +199,6 @@ export function XLogToolbar({
           ))}
         </select>
       </Field>
-
-      {/* 축보다 큰 점은 **천장에 붙어** 그려진다(예전에는 통째로 사라졌다).
-          축은 사람이 정한다 — 자동으로 늘리면 튀는 것 하나에 나머지가 바닥에 깔린다.
-          Ctrl+휠로도 움직인다. */}
-      <Field label={t('Y최대')}>
-        <select
-          className={CONTROL}
-          title={t('세로축의 최대값. 이보다 큰 것은 맨 위에 붙습니다 (Ctrl+휠로도 조절)')}
-          value={String(config.yMax)}
-          onChange={e => onConfigChange({ yMax: Number(e.target.value) })}
-        >
-          {Y_MAX_PRESETS_SEC.map(sec => (
-            <option key={sec} value={sec}>
-              {sec}{t('초')}
-            </option>
-          ))}
-          {/* 프리셋에 없는 값(Ctrl+휠로 만든 것)도 목록에 보여야 «지금 얼마인지» 를 안다 */}
-          {!Y_MAX_PRESETS_SEC.includes(config.yMax as (typeof Y_MAX_PRESETS_SEC)[number]) && (
-            <option value={config.yMax}>
-              {config.yMax}{t('초')}
-            </option>
-          )}
-        </select>
-      </Field>
-
       <Field label={t('범위')}>
         <select
           className={CONTROL}
@@ -218,7 +212,6 @@ export function XLogToolbar({
           <option value={1_800_000}>{t('30분')}</option>
         </select>
       </Field>
-
       <span className="h-4 w-px bg-line" aria-hidden />
 
       <label
@@ -233,60 +226,19 @@ export function XLogToolbar({
         {t('에러만')}
       </label>
 
-      {/* 점 하나가 5x5 를 막아 촘촘한 구간에서는 대부분이 안 그려진다 —
-          화면은 «여기 좀 있네» 인데 실제로는 한 덩어리다.
-          **늘 켜 두지 않는다**: 열이 깔리면 점 색(어느 서버인가)이 읽기 어려워진다. */}
-      <label
-        className="flex cursor-pointer items-center gap-1.5 text-body text-fg-muted hover:text-fg"
-        title={t('겹쳐서 안 그려진 것까지 세어 붐비는 자리를 밝기로 보여줍니다')}
+
+      {/* **접어 둔 조건이 몇 개인지를 적어 둔다.** 안 적으면 «왜 이만큼만 보이지» 의
+          답이 접힌 줄 안에 숨는다 — 거르고 있는 것은 항상 드러나야 한다. */}
+      <button
+        type="button"
+        onClick={() => setShowMore(v => !v)}
+        aria-expanded={showMore}
+        title={t('Y최대·밀집·응답·서비스·IP 조건을 여닫습니다')}
+        className="btn px-2 py-0.5 text-micro"
       >
-        <input
-          type="checkbox"
-          checked={config.showDensity}
-          onChange={e => onConfigChange({ showDensity: e.target.checked })}
-        />
-        {t('밀집')}
-      </label>
-
-      {/* 응답시간은 초로 받는다 — Y축이 Elapsed(sec) 라 눈으로 본 값을 그대로 옮기게 된다.
-          내부는 ms 다. 0.2 같은 소수도 받으므로 예전 ms 입력이 하던 일을 잃지 않는다. */}
-      <Field label={t('응답')}>
-        <Direction
-          exclude={filter.elapsedExclude}
-          onChange={v => onFilterChange({ elapsedExclude: v })}
-          onLabel={t('이상')}
-          offLabel={t('미만')}
-        />
-        <input
-          type="number"
-          className={`${CONTROL} tnum w-16 text-right font-mono`}
-          value={filter.elapsedMs === 0 ? '' : filter.elapsedMs / 1000}
-          min={0}
-          step={0.1}
-          placeholder="0"
-          title={t('0 이나 빈 칸이면 조건 없음')}
-          onChange={e => {
-            const sec = Number(e.target.value);
-            onFilterChange({ elapsedMs: Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 0 });
-          }}
-        />
-        <span className="text-micro text-fg-faint">{t('초')}</span>
-      </Field>
-
-      {/* 인라인 칸은 **첫 줄짜리 뷰**다. 팝업에서 여러 줄을 걸어 둔 사람이 여기서
-          글자를 고쳤다고 나머지 줄이 사라지면 안 된다(setFirstRule). */}
-      <TextCond
-        label={t('서비스')}
-        value={firstRule(filter, 'service')}
-        placeholder={t('URL 일부')}
-        onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'service', v) })}
-      />
-      <TextCond
-        label="IP"
-        value={firstRule(filter, 'ip')}
-        placeholder="10.89."
-        onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'ip', v) })}
-      />
+        {showMore ? t('조건 접기') : t('조건 더보기')}
+        {hiddenActive > 0 ? ` ${hiddenActive}` : ''}
+      </button>
 
       {/* 조건이 두 줄을 넘어가면 인라인으로는 못 다룬다 — 거기서부터는 창이 맡는다 */}
       <button
@@ -297,6 +249,90 @@ export function XLogToolbar({
         {t('필터')}
         {extraRules > 0 ? ` +${extraRules}` : ''}
       </button>
+      </div>
+
+      {/* 두 줄째 — 자주 안 건드리는 것들. 접어 두면 찾는 줄이 한 눈에 들어온다. */}
+      {showMore && (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-1">
+        {/* 축보다 큰 점은 **천장에 붙어** 그려진다(예전에는 통째로 사라졌다).
+            축은 사람이 정한다 — 자동으로 늘리면 튀는 것 하나에 나머지가 바닥에 깔린다.
+            Ctrl+휠로도 움직인다. */}
+        <Field label={t('Y최대')}>
+          <select
+            className={CONTROL}
+            title={t('세로축의 최대값. 이보다 큰 것은 맨 위에 붙습니다 (Ctrl+휠로도 조절)')}
+            value={String(config.yMax)}
+            onChange={e => onConfigChange({ yMax: Number(e.target.value) })}
+          >
+            {Y_MAX_PRESETS_SEC.map(sec => (
+              <option key={sec} value={sec}>
+                {sec}{t('초')}
+              </option>
+            ))}
+            {/* 프리셋에 없는 값(Ctrl+휠로 만든 것)도 목록에 보여야 «지금 얼마인지» 를 안다 */}
+            {!Y_MAX_PRESETS_SEC.includes(config.yMax as (typeof Y_MAX_PRESETS_SEC)[number]) && (
+              <option value={config.yMax}>
+                {config.yMax}{t('초')}
+              </option>
+            )}
+          </select>
+        </Field>
+        {/* 점 하나가 5x5 를 막아 촘촘한 구간에서는 대부분이 안 그려진다 —
+            화면은 «여기 좀 있네» 인데 실제로는 한 덩어리다.
+            **늘 켜 두지 않는다**: 열이 깔리면 점 색(어느 서버인가)이 읽기 어려워진다. */}
+        <label
+          className="flex cursor-pointer items-center gap-1.5 text-body text-fg-muted hover:text-fg"
+          title={t('겹쳐서 안 그려진 것까지 세어 붐비는 자리를 밝기로 보여줍니다')}
+        >
+          <input
+            type="checkbox"
+            checked={config.showDensity}
+            onChange={e => onConfigChange({ showDensity: e.target.checked })}
+          />
+          {t('밀집')}
+        </label>
+
+        {/* 응답시간은 초로 받는다 — Y축이 Elapsed(sec) 라 눈으로 본 값을 그대로 옮기게 된다.
+            내부는 ms 다. 0.2 같은 소수도 받으므로 예전 ms 입력이 하던 일을 잃지 않는다. */}
+        <Field label={t('응답')}>
+          <Direction
+            exclude={filter.elapsedExclude}
+            onChange={v => onFilterChange({ elapsedExclude: v })}
+            onLabel={t('이상')}
+            offLabel={t('미만')}
+          />
+          <input
+            type="number"
+            className={`${CONTROL} tnum w-16 text-right font-mono`}
+            value={filter.elapsedMs === 0 ? '' : filter.elapsedMs / 1000}
+            min={0}
+            step={0.1}
+            placeholder="0"
+            title={t('0 이나 빈 칸이면 조건 없음')}
+            onChange={e => {
+              const sec = Number(e.target.value);
+              onFilterChange({ elapsedMs: Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 0 });
+            }}
+          />
+          <span className="text-micro text-fg-faint">{t('초')}</span>
+        </Field>
+        {/* 인라인 칸은 **첫 줄짜리 뷰**다. 팝업에서 여러 줄을 걸어 둔 사람이 여기서
+            글자를 고쳤다고 나머지 줄이 사라지면 안 된다(setFirstRule). */}
+        <TextCond
+          label={t('서비스')}
+          value={firstRule(filter, 'service')}
+          placeholder={t('URL 일부')}
+          onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'service', v) })}
+        />
+        <TextCond
+          label="IP"
+          value={firstRule(filter, 'ip')}
+          placeholder="10.89."
+          onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'ip', v) })}
+        />
+
+        </div>
+      )}
     </div>
   );
 }

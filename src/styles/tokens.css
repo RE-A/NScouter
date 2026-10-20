@@ -93,6 +93,21 @@
   --row-api: #1a2a3a;
   --row-neutral: #2a2a3a;
 
+  /* ── XLog 산점도 ───────────────────────────
+     Canvas 라 의미색과 따로 둔다 — 차트 판·눈금은 패널보다 **한 단 낮추어**
+     눌린 면으로 읽히게 하고, 점이 깔리는 바닥이라 선은 은은해야 한다.
+     `tokens.ts` 가 실행 시점에 읽어 간다. */
+  --xlog-bg: #0d0d1a;
+  --xlog-grid: #1a1a30;
+  --xlog-grid-wide: #252542;
+  --xlog-border: #252542;
+  --xlog-meta: #8686ae;
+  /** 눈에 덜 띄어야 하는 점(xType 3·4) */
+  --xlog-dim: #454563;
+  --xlog-dim-error: #8f3436;
+  /** 무시 구간 덮개 — 바탕보다 밝거나 어두워야 해서 테마마다 방향이 다르다 */
+  --xlog-ignore: rgba(255, 255, 255, 0.035);
+
   /* ── 계열색 (카운터 차트의 에이전트별 선) ─────
      의미색과 목적이 다르다 — 여기선 **서로 구분되기만** 하면 된다.
      순서를 바꾸면 기존 화면의 선 색이 바뀜다.
@@ -196,6 +211,16 @@
   --series-4: #9a5b00;
   --series-5: #7030a0;
   --series-6: #0d7a6a;
+
+  /* 흰 판 위의 산점도 — 무시 구간은 밝히는 게 아니라 **어둡혀야** 드러난다 */
+  --xlog-bg: #f7f8fb;
+  --xlog-grid: #e3e6ec;
+  --xlog-grid-wide: #ccd2dc;
+  --xlog-border: #ccd2dc;
+  --xlog-meta: #5d6472;
+  --xlog-dim: #a8aebb;
+  --xlog-dim-error: #e08f92;
+  --xlog-ignore: rgba(0, 0, 0, 0.045);
 }
 
 /* 뉴트럴 슬레이트 — 보라 기운을 빼고 중립 회색에 청록 강조.
@@ -239,6 +264,14 @@
   --row-err: #331a1c;
   --row-api: #162a33;
   --row-neutral: #242a34;
+
+  --xlog-bg: #0e1116;
+  --xlog-grid: #1b2028;
+  --xlog-grid-wide: #2a313a;
+  --xlog-border: #2a313a;
+  --xlog-meta: #828b99;
+  --xlog-dim: #4a515c;
+  --xlog-dim-error: #8f4044;
 }
 
 /* 웜 다크 — 푸른빛을 빼서 야간 당직 화면에 맞춘다 */
@@ -281,6 +314,14 @@
   --row-err: #3a211c;
   --row-api: #1f2e2a;
   --row-neutral: #342d23;
+
+  --xlog-bg: #171410;
+  --xlog-grid: #231f18;
+  --xlog-grid-wide: #342d23;
+  --xlog-border: #342d23;
+  --xlog-meta: #968a77;
+  --xlog-dim: #574e40;
+  --xlog-dim-error: #8f4a3f;
 }
 
 /* 하이 컨트라스트 — 상황실·벽면 모니터. 멀리서도 읽히는 것이 유일한 기준이다 */
@@ -331,4 +372,13 @@
   --series-4: #ffc233;
   --series-5: #c98bff;
   --series-6: #3ddbd0;
+
+  --xlog-bg: #050505;
+  --xlog-grid: #171717;
+  --xlog-grid-wide: #2e2e2e;
+  --xlog-border: #3a3a3a;
+  --xlog-meta: #9a9a9a;
+  --xlog-dim: #5a5a5a;
+  --xlog-dim-error: #9c4545;
+  --xlog-ignore: rgba(255, 255, 255, 0.06);
 }

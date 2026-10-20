@@ -41,7 +41,8 @@ describe('applyConfigToViewOptions 가 테마를 건다', () => {
 
   it('모르는 값이면 기본 테마로 건다 — 비워 두지 않는다', async () => {
     const { applyConfigToViewOptions } = await import('./useViewOptions');
+    const { DEFAULT_THEME } = await import('../../../styles/theme');
     applyConfigToViewOptions({ ui_theme: '없는테마' });
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe(DEFAULT_THEME);
   });
 });

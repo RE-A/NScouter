@@ -16,6 +16,16 @@ interface AgentSelectorPanelProps {
   isConnected: boolean;
   selectedHashes: Set<number>;
   onSelectionChange: (hashes: Set<number>) => void;
+  /**
+   * 통째로 고른 **서비스 이름**들. 없으면 예전처럼 해시만 다뢬다.
+   *
+   * 해시가 아니라 이름을 드는 이유는 `groupSelection.ts` 참고 —
+   * ECS 에서 Task 는 계속 갈린다.
+   */
+  selectedServices?: ReadonlySet<string>;
+  onToggleService?: (name: string) => void;
+  /** 펼쳐서 낱개를 누를 때. 그룹이 켜져 있으면 그걸 푸는 일까지 한다 */
+  onPickTask?: (agent: AgentObject) => void;
   onAgentsLoaded?: (agents: AgentObject[]) => void;
   /** 무엇으로 묶을지. 껐다 켜도 남는다 */
   groupBy: GroupBy;
@@ -26,6 +36,9 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   isConnected,
   selectedHashes,
   onSelectionChange,
+  selectedServices,
+  onToggleService,
+  onPickTask,
   onAgentsLoaded,
   groupBy,
   onGroupByChange,
@@ -69,10 +82,14 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   }, [isConnected, onAgentsLoaded]);
 
   const handleToggle = useCallback((hash: number) => {
+    // 서비스 묶기를 쓰는 중이면 «그룹을 풀고 낱개로» 까지 다뤄야 한다(`pickTask`).
+    // 그냥 해시만 뒤집으면 그룹이 다음 갱신에 다시 채워 «꺼도 그대로» 가 된다.
+    const agent = onPickTask ? agents.find(a => a.obj_hash === hash) : undefined;
+    if (onPickTask && agent) { onPickTask(agent); return; }
     const next = new Set(selectedHashes);
     if (next.has(hash)) next.delete(hash); else next.add(hash);
     onSelectionChange(next);
-  }, [selectedHashes, onSelectionChange]);
+  }, [selectedHashes, onSelectionChange, onPickTask, agents]);
 
   /** 고른 것을 전부 푼다. **«전부 표시» 가 아니라 «아무것도 안 봄» 이다** (agentFilter.ts) */
   const handleClearFilter = useCallback(() => onSelectionChange(new Set()), [onSelectionChange]);
@@ -286,6 +303,9 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
           // **보이는 것만 고른다.** 검색으로 걸러 낸 상태에서 묶음을 켜면
           // 안 보이는 서버까지 딸려 오는데, 그건 무엇을 골랐는지 알 수 없게 만든다.
           const groupHashes = group.agents.map(a => a.obj_hash);
+          // 서비스 마디만 **이름으로** 고른다 — 그래야 Task 가 드나들어도 따라간다.
+          // 종류·호스트 마디는 그저 접는 칸이라 지금까지처럼 해시로 다룬다.
+          const isService = group.kind === 'service' && onToggleService !== undefined;
           return (
             <div key={group.type}>
               {/* 묶음 머리 — 접혀 있어도 **살아 있는 수**는 보여야 한다.
@@ -294,14 +314,32 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               <div className="flex items-center gap-1.5 border-b border-line/60 bg-surface/60 px-2 py-1">
                 <input
                   type="checkbox"
-                  checked={groupCheck(selectedHashes, groupHashes) === 'all'}
+                  checked={
+                    // 서비스 마디는 **이름으로** 켜져 있다. 해시로 보면 풀린 뒤에도
+                    // 낱개가 다 골라 있으면 «그룹이 켜진 것» 으로 보여 서로 어긋난다.
+                    isService
+                      ? (selectedServices?.has(group.type) ?? false)
+                      : groupCheck(selectedHashes, groupHashes) === 'all'
+                  }
                   ref={el => {
                     // 일부만 고른 묶음은 «켜짐» 도 «꺼짐» 도 아니다. 둘 중 하나로 그리면
                     // 눌렀을 때 무슨 일이 날지 화면이 말해 주지 못한다.
-                    if (el) el.indeterminate = groupCheck(selectedHashes, groupHashes) === 'some';
+                    if (!el) return;
+                    el.indeterminate = isService
+                      ? !(selectedServices?.has(group.type) ?? false) &&
+                        groupCheck(selectedHashes, groupHashes) !== 'none'
+                      : groupCheck(selectedHashes, groupHashes) === 'some';
                   }}
-                  onChange={() => handleToggleGroup(groupHashes)}
-                  title={t('이 묶음을 통째로 고릅니다')}
+                  onChange={() =>
+                    isService && onToggleService
+                      ? onToggleService(group.type)
+                      : handleToggleGroup(groupHashes)
+                  }
+                  title={
+                    isService
+                      ? t('이 서비스를 통째로 고릅니다. Task 가 드나들면 저절로 따라갑니다')
+                      : t('이 묶음을 통째로 고릅니다')
+                  }
                   aria-label={group.type}
                   className="shrink-0 cursor-pointer"
                 />

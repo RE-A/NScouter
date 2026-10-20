@@ -1,6 +1,5 @@
 // src/features/xlog/types/xlog.ts
 
-import { XLOG_BACKGROUND, XLOG_COLORS } from '../utils/colorPalette';
 
 /** Rust XLogPack 직렬화 구조 (txid/caller/gxid는 string) */
 export interface XLogPack {
@@ -238,8 +237,6 @@ export interface XLogChartConfig {
    */
   showDensity: boolean;
   ignoreThresholdMs: number;
-  backgroundColor: string;
-  gridColor: string;
 }
 
 export const DEFAULT_CHART_CONFIG: XLogChartConfig = {
@@ -249,9 +246,6 @@ export const DEFAULT_CHART_CONFIG: XLogChartConfig = {
   showIgnoreArea: false,
   showDensity: false,
   ignoreThresholdMs: 0,
-  // 값은 colorPalette.ts 하나에만 둔다 (여기와 두 벌이 되면 그리드만 흰 배경용으로 남는다).
-  backgroundColor: XLOG_BACKGROUND,
-  gridColor: XLOG_COLORS.GRID,
 };
 
 export interface ChartLayout {

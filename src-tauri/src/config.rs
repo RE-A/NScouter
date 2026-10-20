@@ -73,6 +73,13 @@ pub struct AppConfig {
     /// 마지막으로 걸어 두었던 조회 조건
     #[serde(default)]
     pub xlog_filter: XLogFilterPrefs,
+    /// 열어 둔 XLog 탭들의 **조건만**. 받아 둔 데이터는 담지 않는다 —
+    /// 수십만 건을 파일에 넣을 수도 없고, 열어 보면 이미 지나간 것이다.
+    ///
+    /// 비어 있으면 위의 `xlog_chart`·`xlog_filter` 한 벌로 탭 하나를 만든다
+    /// (판이 올라가기 전 파일을 읽기 위해 남겨 둔다).
+    #[serde(default)]
+    pub xlog_tabs: Vec<XLogTabPrefs>,
     /// Visualize 탭의 지표 임계값
     #[serde(default)]
     pub kpi_thresholds: Vec<KpiThresholdPrefs>,
@@ -204,6 +211,18 @@ pub struct XLogFilterPrefs {
     pub mode: String,
 }
 
+/// 탭 하나의 조건. 화면의 `XLogTab` 과 1:1 이다.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XLogTabPrefs {
+    pub chart: XLogChartPrefs,
+    pub filter: XLogFilterPrefs,
+    /// 과거 구간(epoch ms). **둘 다 0 이면 구간을 정하지 않은 것**이다 —
+    /// 실시간인지는 `filter.mode` 가 따로 말한다.
+    pub stime: i64,
+    pub etime: i64,
+}
+
 impl Default for XLogFilterPrefs {
     fn default() -> Self {
         Self {
@@ -323,6 +342,7 @@ impl Default for AppConfig {
             servers: Vec::new(),
             last_server: String::new(),
             xlog_filter: XLogFilterPrefs::default(),
+            xlog_tabs: Vec::new(),
             // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)
             // 여기서 같은 수를 한 벌 더 적으면 두 곳이 갈린다.
             kpi_thresholds: Vec::new(),

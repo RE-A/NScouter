@@ -40,6 +40,14 @@ const ERROR_LINGER_MS = 10_000;
 export function useXLogStream(
   config: XLogChartConfig,
   pause: PauseState = NOT_PAUSED,
+  /**
+   * 지금 보고 있는 탭인가.
+   *
+   * 탭을 여러 개 띄우면 모두 같은 스트림을 듣는다 — 그대로 두면 탭 수만큼
+   * 같은 데이터가 쌓인다(버퍼는 탭마다 따로다). 안 보는 탭은 받지 않고,
+   * 그 동안의 공백은 화면이 그대로 보여 준다 — «안 보는 것은 받지 않는다».
+   */
+  active = true,
 ): UseXLogStreamResult {
   const storeRef = useRef(new XLogDataStore());
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -69,6 +77,8 @@ export function useXLogStream(
   useEffect(() => {
     // 해지 함수가 Promise 로 오므로 직접 담아 두면 안 된다 — 정리가 먼저 돌면
     // 리스너가 살아남아 XLog 가 저장소에 두 번 들어간다. `subscribe` 참고.
+    if (!active) return;
+
     const off = subscribe(
       // **열로 받아 여기서 행으로 엮는다.** 건당 이벤트면 10,000건에 콜백이 1만 번 돈다.
       onXLogData(cols => {
@@ -93,7 +103,7 @@ export function useXLogStream(
       off();
       clearInterval(pruneInterval);
     };
-  }, [config.timeRangeMs]);
+  }, [config.timeRangeMs, active]);
 
   const clearError = useCallback(() => setStreamError(null), []);
 

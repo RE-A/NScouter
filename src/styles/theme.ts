@@ -6,6 +6,7 @@
 // 이미 그려 둔 차트는 스스로 다시 그리지 않으므로 신호를 줘야 한다(`themeEpoch`).
 
 import { refreshCanvasTokens } from './tokens';
+import { refreshXLogColors } from '../features/xlog/utils/colorPalette';
 
 export type ThemeId = 'dark' | 'light' | 'slate' | 'warm' | 'contrast';
 
@@ -23,7 +24,13 @@ export const THEMES: ReadonlyArray<{ id: ThemeId; label: string; hint: string }>
   { id: 'contrast', label: '고대비', hint: '순흑 바탕. 상황실·벽면 모니터용' },
 ];
 
-export const DEFAULT_THEME: ThemeId = 'dark';
+/**
+ * 기본 테마.
+ *
+ * 다크였는데 밝은 곳에서 보는 사람이 더 많고, 문서·티켓에 화면을 붙일 일이 잦다.
+ * 두 경우 모두 흰 쪽이 기본이어야 고르는 수고가 줄어든다.
+ */
+export const DEFAULT_THEME: ThemeId = 'light';
 
 /** 설정 파일을 손으로 고쳐 모르는 값이 와도 화면이 깨지면 안 된다 */
 export function toTheme(v: unknown): ThemeId {
@@ -67,6 +74,7 @@ export function applyTheme(id: ThemeId): void {
   applied = id;
   // 속성을 건 **다음에** 읽어야 새 테마 값이 나온다.
   refreshCanvasTokens();
+  refreshXLogColors();
   epoch += 1;
   for (const fn of listeners) fn(epoch);
 }

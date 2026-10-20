@@ -64,6 +64,8 @@ const COLOR_TOKENS = [
   '--success', '--warn', '--error', '--error-soft',
   '--cat-method', '--cat-sql', '--cat-api', '--cat-socket', '--cat-msg',
   '--row-ok', '--row-err', '--row-api', '--row-neutral',
+  '--xlog-bg', '--xlog-grid', '--xlog-grid-wide', '--xlog-border',
+  '--xlog-meta', '--xlog-dim', '--xlog-dim-error',
 ] as const;
 
 function get(theme: string, name: string): string {
@@ -118,6 +120,16 @@ describe.each([...THEMES.keys()])('%s 테마', theme => {
       if (r < 4.5) bad.push(`${bg} = ${r.toFixed(2)}`);
     }
     expect(bad).toEqual([]);
+  });
+
+  it('XLog 판 위의 글자가 읽힌다 — 차트만 옆 테마 색으로 남으면 안 된다', () => {
+    // 판은 패널과 따로 놓인 면이라 그 위의 눈금 글자를 따로 재야 한다.
+    const ratio = contrast(get(theme, '--xlog-meta'), get(theme, '--xlog-bg'));
+    expect(ratio, `${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('XLog 눈금은 은은하다 — 점이 깔리는 바닥이다', () => {
+    expect(contrast(get(theme, '--xlog-grid'), get(theme, '--xlog-bg'))).toBeLessThan(2);
   });
 
   it('구분선은 은은하다 — 또렷해지면 목록이 격자로 덮인다', () => {

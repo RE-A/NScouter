@@ -12,8 +12,12 @@ import {
   toFilterState,
   fromFilterState,
   DEFAULT_LAYOUT,
+  toTabs,
+  fromTabs,
 } from './uiState';
-import { DEFAULT_CHART_CONFIG } from '../types/xlog';
+import { MAX_XLOG_TABS } from './xlogTabs';
+import { DEFAULT_CHART_CONFIG, DEFAULT_FILTER } from '../types/xlog';
+import type { XLogChartPrefs, XLogFilterPrefs } from '../api/scouterApi';
 
 describe('toLayout', () => {
   it('저장해 둔 값을 그대로 쓴다', () => {
@@ -147,8 +151,9 @@ describe('toChartConfig', () => {
     expect(c.ignoreThresholdMs).toBe(0);
   });
 
-  it('색은 저장해 둔 것을 쓰지 않는다', () => {
-    // 팔레트는 colorPalette.ts 한 곳에만 있어야 한다
+  it('색은 설정에 들어 있지 않다 — 테마가 정한다', () => {
+    // 설정에 색을 남기면 앱이 뜨는 순간의 값이 굳어져, 테마를 바꿔도
+    // XLog 차트만 옆 테마 색으로 남는다. 그릴 때 `colorPalette` 에서 읽는다.
     const c = toChartConfig({
       y_axis_mode: 'elapsed',
       time_range_ms: 300_000,
@@ -157,8 +162,8 @@ describe('toChartConfig', () => {
       show_density: false,
       ignore_threshold_ms: 0,
     });
-    expect(c.backgroundColor).toBe(DEFAULT_CHART_CONFIG.backgroundColor);
-    expect(c.gridColor).toBe(DEFAULT_CHART_CONFIG.gridColor);
+    expect('backgroundColor' in c).toBe(false);
+    expect('gridColor' in c).toBe(false);
   });
 
   it('넣었다 뺐을 때 값이 같다', () => {
@@ -244,5 +249,57 @@ describe('toFilterState — 껐다 켜도 조건이 남는다', () => {
     const back = toFilterState(fromFilterState(filter, 'past'));
     expect(back.filter).toEqual(filter);
     expect(back.mode).toBe('past');
+  });
+});
+
+// ─── XLog 탭 저장·복원 ─────────────────────────────────────────
+
+describe('XLog 탭', () => {
+  // 파일은 사람이 여는 곳이라 항목이 빠질 수 있지만, 타입은 한 벌을 다 요구한다.
+  // 시험에서는 기본값 위에 바꿀 것만 얹는다.
+  const chart = (p: Partial<XLogChartPrefs>): XLogChartPrefs =>
+    ({ ...fromChartConfig(DEFAULT_CHART_CONFIG), ...p });
+  const filt = (p: Partial<XLogFilterPrefs>): XLogFilterPrefs =>
+    ({ ...fromFilterState(DEFAULT_FILTER, 'live'), ...p });
+
+  it('넣었다 뺐을 때 조건이 같다', () => {
+    const s = toTabs(
+      [
+        { chart: chart({ y_axis_mode: 'cpu' }), filter: filt({ mode: 'past' }), stime: 100, etime: 200 },
+        { chart: chart({ y_axis_mode: 'elapsed' }), filter: filt({ mode: 'live' }), stime: 0, etime: 0 },
+      ],
+      undefined,
+      undefined,
+    );
+    expect(s.tabs).toHaveLength(2);
+    expect(s.tabs[0].mode).toBe('past');
+    expect(s.tabs[0].pastRange).toEqual({ stime: 100, etime: 200 });
+    expect(s.tabs[1].pastRange).toBeNull();
+
+    const back = fromTabs(s);
+    expect(back[0].stime).toBe(100);
+    expect(back[1].stime).toBe(0);
+  });
+
+  it('탭 목록이 없으면 옛 한 벌로 탭 하나를 만든다 — 빈 화면으로 시작하면 «설정이 날아갔다» 다', () => {
+    const s = toTabs(undefined, chart({ y_axis_mode: 'sqlTime' }), filt({ mode: 'past' }));
+    expect(s.tabs).toHaveLength(1);
+    expect(s.tabs[0].config.yAxisMode).toBe('sqlTime');
+    expect(s.tabs[0].mode).toBe('past');
+  });
+
+  it('구간이 0 이면 «안 정했다» 로 되돌린다', () => {
+    const s = toTabs([{ stime: 0, etime: 0 }], undefined, undefined);
+    expect(s.tabs[0].pastRange).toBeNull();
+  });
+
+  it('파일에 탭이 너무 많아도 상한까지만 연다', () => {
+    const many = Array.from({ length: 20 }, () => ({ stime: 0, etime: 0 }));
+    expect(toTabs(many, undefined, undefined).tabs.length).toBeLessThanOrEqual(MAX_XLOG_TABS);
+  });
+
+  it('처음 탭이 활성이다', () => {
+    const s = toTabs([{ stime: 0, etime: 0 }, { stime: 1, etime: 2 }], undefined, undefined);
+    expect(s.activeKey).toBe(s.tabs[0].key);
   });
 });

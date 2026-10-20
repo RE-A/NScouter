@@ -70,6 +70,13 @@ interface XLogChartProps {
    */
   refreshSignal?: number;
   /**
+   * 지금 보고 있는 탭인가.
+   *
+   * 탭을 여러 개 띄우면 안 보는 판도 붙어 있다 — 그래야 돌아왔을 때 다시 조회하지
+   * 않는다. 다만 받고 그리는 것은 보는 판만 한다.
+   */
+  active?: boolean;
+  /**
    * 연결할 때마다 올라가는 번호. **바뀌면 받아 둔 XLog 를 버린다.**
    *
    * 서버를 갈아타도 저장소가 그대로라, 같은 서비스 이름(= 같은 objHash)을 쓰는
@@ -108,6 +115,7 @@ export const XLogChart = memo(function XLogChart({
   onConfigChange,
   onPastRangeChange,
   refreshSignal = 0,
+  active = true,
   connectionEpoch = 0,
 }: XLogChartProps) {
   /**
@@ -122,7 +130,7 @@ export const XLogChart = memo(function XLogChart({
     streamError,
     clearError,
     receivedTotal,
-  } = useXLogStream(config, pauseState);
+  } = useXLogStream(config, pauseState, active);
 
   const isPast = pastRange !== null;
   /** Ctrl+휠이 딛고 설 값 */
@@ -239,6 +247,7 @@ export const XLogChart = memo(function XLogChart({
     filter,
     connected,
     timeWindow,
+    active,
   );
 
   /**

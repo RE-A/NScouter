@@ -32,6 +32,8 @@ export function useXLogCanvas(
   filter: XLogFilterState,
   connected: boolean,
   timeWindow?: TimeWindow | null,
+  /** 보고 있는 탭인가. 숨겨둔 판에 매 프레임 그릴 이유가 없다 */
+  active = true,
 ): UseXLogCanvasResult {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<XLogChartRenderer | null>(null);
@@ -142,6 +144,9 @@ export function useXLogCanvas(
 
   // rAF 루프
   useEffect(() => {
+    // 숨겨둔 판은 크기가 0 이라 그려봐야 보이지도 않는다 — 탭을 여러 개 띄우면 그만큼 헛돈다.
+    if (!active) return;
+
     let running = true;
 
     // **그리는 조건이 바뀌었으므로 한 번은 다시 그려야 한다.**
@@ -202,7 +207,7 @@ export function useXLogCanvas(
       running = false;
       cancelAnimationFrame(rafRef.current);
     };
-  }, [store, filter, selection, connected, timeWindow, config.timeRangeMs]);
+  }, [store, filter, selection, connected, timeWindow, config.timeRangeMs, active]);
 
   const clearSelection = useCallback(() => {
     setSelection(null);

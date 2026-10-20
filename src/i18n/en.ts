@@ -340,8 +340,10 @@ export const EN: Record<string, string> = {
   '기록 수준': 'Log level',
   // 테마 — 이름과 설명은 `THEMES` 가 변수로 넘기므로 훑기 검사가 못 잡는다. 손으로 넣는다.
   '테마': 'Theme',
+  '고른 서비스에 살아 있는 Task 가 없습니다.': 'No live tasks in the selected service.',
+  '이 서비스를 통째로 고릅니다. Task 가 드나들면 저절로 따라갑니다':
+    'Selects the whole service — follows along as tasks come and go',
   // 서비스 묶기 (ECS Task 들을 한 서비스로)
-  '서비스': 'Service',
   '같은 서비스의 ECS Task 들을 한 마디로 묶습니다':
     'Groups ECS tasks of the same service into one node',
   // XLog 탭 줄

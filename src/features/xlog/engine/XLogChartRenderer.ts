@@ -16,7 +16,7 @@ import type { StreamStatus } from '../utils/streamStatus';
 import { CANVAS } from '../../../styles/tokens';
 import type { ChartLayout, SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import { buildLayout, Y_AXIS_CONFIGS } from '../types/xlog';
-import { getDotColor, XLOG_COLORS } from '../utils/colorPalette';
+import { getDotColor, XLOG_COLORS, XLOG_PLATE } from '../utils/colorPalette';
 
 const DOT_SIZE = 5;
 
@@ -148,7 +148,9 @@ export class XLogChartRenderer {
   /** 1단계: 배경 */
   private drawBackground(): void {
     const { canvasWidth, canvasHeight } = this.layout;
-    this.ctx.fillStyle = this.config.backgroundColor;
+    // **설정에서 읽지 않는다.** 설정은 앱이 뜨는 순간 한 번 만들어져
+    // 테마를 바꿔도 그때 색이 그대로 남는다 — 그릴 때 읽어야 따라온다.
+    this.ctx.fillStyle = XLOG_PLATE.bg;
     this.ctx.fillRect(0, 0, canvasWidth, canvasHeight);
   }
 
@@ -170,7 +172,7 @@ export class XLogChartRenderer {
     const grid = GridCalculator.calcValueGrid(0, this.effectiveYMax, plotAreaHeight);
 
     this.ctx.save();
-    this.ctx.strokeStyle = this.config.gridColor;
+    this.ctx.strokeStyle = XLOG_COLORS.GRID;
     this.ctx.lineWidth = 1;
     this.ctx.setLineDash([2, 3]);
     this.ctx.fillStyle = XLOG_COLORS.META_TEXT;
@@ -200,7 +202,7 @@ export class XLogChartRenderer {
     );
 
     this.ctx.save();
-    this.ctx.strokeStyle = this.config.gridColor;
+    this.ctx.strokeStyle = XLOG_COLORS.GRID;
     this.ctx.lineWidth = 1;
     this.ctx.setLineDash([2, 3]);
     this.ctx.fillStyle = XLOG_COLORS.META_TEXT;

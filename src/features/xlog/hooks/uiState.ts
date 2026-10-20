@@ -9,10 +9,12 @@ import type {
   UiLayout,
   XLogChartPrefs,
   XLogFilterPrefs,
+  XLogTabPrefs,
 } from '../api/scouterApi';
 import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
 import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
+import { initialTabs, MAX_XLOG_TABS, type XLogTabsState } from './xlogTabs';
 import type { XLogMode } from '../types/timeRange';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
@@ -205,4 +207,50 @@ export function fromFilterState(filter: XLogFilterState, mode: XLogMode): XLogFi
     patterns: filter.patterns.map(r => ({ field: r.field, text: r.text, exclude: r.exclude })),
     mode,
   };
+}
+
+// ─── XLog 탭 ───────────────────────────────────────────────────
+//
+// **조건만 담는다.** 받아 둔 데이터는 안 담는다 — 수십만 건을 파일에 넣을 수도 없고,
+// 열어 보면 이미 지나간 것이다. 열면 그 조건으로 다시 조회한다.
+
+export function fromTabs(s: XLogTabsState): XLogTabPrefs[] {
+  return s.tabs.map(t => ({
+    chart: fromChartConfig(t.config),
+    filter: fromFilterState(t.filter, t.mode),
+    // 구간이 없으면 0 으로 적는다. 읽는 쪽이 «안 정했다» 로 되돌린다.
+    stime: t.pastRange?.stime ?? 0,
+    etime: t.pastRange?.etime ?? 0,
+  }));
+}
+
+/**
+ * 파일에서 탭들을 되살린다.
+ *
+ * **빈 목록이면 옛 한 벌로 탭 하나를 만든다.** 판이 올라가기 전 파일에는 `xlog_tabs`
+ * 가 없는데, 그때 빈 화면으로 시작하면 «설정이 날아갔다» 로 읽힌다.
+ */
+export function toTabs(
+  saved: XLogTabPrefs[] | undefined,
+  legacyChart: XLogChartPrefs | undefined,
+  legacyFilter: XLogFilterPrefs | undefined,
+): XLogTabsState {
+  const rows = saved && saved.length > 0
+    ? saved
+    : [{ chart: legacyChart, filter: legacyFilter, stime: 0, etime: 0 }];
+
+  const base = initialTabs();
+  const tabs = rows.slice(0, MAX_XLOG_TABS).map((row, i) => {
+    const f = toFilterState(row.filter);
+    const hasRange = (row.stime ?? 0) > 0 && (row.etime ?? 0) > 0;
+    return {
+      // 첫 탭은 처음 만든 키를 그대로 쓴다 — 키가 흔들리면 차트가 통째로 다시 선다
+      key: i === 0 ? base.tabs[0].key : `${base.tabs[0].key}-r${i}`,
+      mode: f.mode,
+      pastRange: hasRange ? { stime: row.stime as number, etime: row.etime as number } : null,
+      config: toChartConfig(row.chart),
+      filter: f.filter,
+    };
+  });
+  return { tabs, activeKey: tabs[0].key };
 }

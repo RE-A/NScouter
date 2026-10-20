@@ -97,6 +97,15 @@ import {
 import { XLogTabBar } from './features/xlog/components/XLogTabBar';
 import { mergeObjects } from './features/xlog/hooks/objectRefresh';
 import {
+  EMPTY_SELECTION,
+  pickTask,
+  resolveSelection,
+  selectionState,
+  toggleService,
+  type GroupSelection,
+} from './features/xlog/hooks/groupSelection';
+import { DEFAULT_GROUP_RULE } from './features/xlog/components/instanceGroup';
+import {
   fromTabs as detailsFromTabs,
   normalize as normalizeOpenDetails,
   type OpenDetail,
@@ -285,6 +294,15 @@ export default function App() {
    * 매번 옥 값을 보게 된다(효과는 접속당 한 번만 선다).
    */
   const objectsRef = useRef<AgentObject[]>([]);
+  /** 화면이 구독하는 명단. 그룹을 다시 푸는 일이 이 값에 달려 있다 */
+  const [objects, setObjects] = useState<AgentObject[]>([]);
+  /**
+   * 무엇을 보기로 골랐나 — **그룹 이름과 낱개 해시**로 들고 있는다.
+   *
+   * 고를 때의 해시를 집어넣으면 ECS 에서 바로 틀어진다(`groupSelection.ts`).
+   * 아래로 내려보내는 것은 여전히 **해시 집합 하나**라 네 화면의 계약은 그대로다.
+   */
+  const [groupSel, setGroupSel] = useState<GroupSelection>(EMPTY_SELECTION);
   /** 카운터 요청 대상. Family 별로 나눠 둔다 — 화면도 Family 로 나눈다 */
   const [counterHashes, setCounterHashes] = useState<{
     javaee: number[];
@@ -430,6 +448,7 @@ export default function App() {
         setIsConnected(false); setServerId('');
         setSelectedXLogs([]); setAgentMap(new Map());
         objectsRef.current = [];
+        setObjects([]); setGroupSel(EMPTY_SELECTION);
         setCounterHashes({ javaee: [], host: [], datasource: [] });
         setObjTypeOf(new Map()); clearDetail();
         // 콜렉터마다 사이트 정의가 다르다. 다른 콜렉터의 종류 표를 들고 가면 안 된다.
@@ -464,6 +483,7 @@ export default function App() {
         // 서버가 화면에서 통째로 사라지면 «장애» 로 읽힌다.
         const list = mergeObjects(objectsRef.current, fresh, Date.now());
         objectsRef.current = list;
+        setObjects(list);
         registerObjectTypeFamilies(families);
         learnFamiliesFromObjects(list);
         // Family 를 나눠 둔다. 요청은 합쳐 보내도 되지만(실측 확인),
@@ -642,8 +662,39 @@ export default function App() {
   // **모든 탭에 적는다.** 고르기는 탭 바깥인데 거름(`filter`)은 탭마다라
   // 그 안에 같이 산다. 지금 탭에만 적으면 다른 탭에서 예전 선택이 되살아난다.
   const handleAgentSelectionChange = useCallback((hashes: Set<number>) => {
-    setXLogTabs(s => setTabSelection(s, hashes));
+    // 왼쪽 목록이 해시만 넘기는 경로(«전부 풀기» 등). 그룹은 건드리지 않는다.
+    setGroupSel(prev => ({ services: hashes.size === 0 ? new Set() : prev.services, hashes }));
   }, []);
+
+  const handleToggleService = useCallback(
+    (name: string) => setGroupSel(prev => toggleService(prev, name)),
+    [],
+  );
+  const handlePickTask = useCallback(
+    (agent: AgentObject) =>
+      setGroupSel(prev => pickTask(prev, agent, objectsRef.current, DEFAULT_GROUP_RULE)),
+    [],
+  );
+
+  /**
+   * 고른 것을 **지금 명단 기준으로** 풀어 모든 탭에 적는다.
+   *
+   * 명단이 10초마다 갱신되므로, 새 Task 는 다시 고르지 않아도 저절로 들어오고
+   * 죽은 Task 는 빠진다. «명단을 사진으로 찍어 두지 않는다» 가 이 기능의 핵심이다.
+   */
+  const pickedHashes = useMemo(
+    () => resolveSelection(groupSel, objects, DEFAULT_GROUP_RULE),
+    [groupSel, objects],
+  );
+  useEffect(() => {
+    setXLogTabs(s => setTabSelection(s, pickedHashes));
+  }, [pickedHashes]);
+
+  /** «안 골랐다» 와 «골랐는데 살아 있는 게 없다» 는 다른 일이다 */
+  const pickState = useMemo(
+    () => selectionState(groupSel, objects, DEFAULT_GROUP_RULE),
+    [groupSel, objects],
+  );
   // 구간을 바꾸면 이전 구간에서 고른 트랜잭션은 의미가 없다. 같이 비운다.
   const handlePastRangeChange = useCallback((r: PastRange | null) => {
     setPastRange(r);
@@ -1087,6 +1138,18 @@ export default function App() {
 
   /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
   const nothingPicked = filter.objHashSet.size === 0;
+  /**
+   * 빈 화면에 적을 말.
+   *
+   * **«안 골랐다» 와 «고른 서비스가 통째로 내려갔다» 는 다른 일이다.**
+   * 둘 다 비어 보이지만 할 일이 다르다 — 앞은 고르면 되고, 뒤는 그 서비스가
+   * 지금 한 대도 안 떠 있다는 뜻이다. 같은 문구를 보여 주면 «앱이 고장났나» 를
+   * 먼저 의심하게 된다.
+   */
+  const emptyPickText =
+    pickState === 'empty-group'
+      ? t('고른 서비스에 살아 있는 Task 가 없습니다.')
+      : t('왼쪽에서 볼 서버를 고르세요.');
 
   /**
    * 고른 서버들이 속한 Family.
@@ -1344,6 +1407,9 @@ export default function App() {
             isConnected={isConnected}
             selectedHashes={filter.objHashSet}
             onSelectionChange={handleAgentSelectionChange}
+            selectedServices={groupSel.services}
+            onToggleService={handleToggleService}
+            onPickTask={handlePickTask}
             onAgentsLoaded={handleAgentsLoaded}
             groupBy={agentGroupBy}
             onGroupByChange={setAgentGroupBy}
@@ -1403,7 +1469,7 @@ export default function App() {
                 {/* **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
                     트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다. */}
                 {nothingPicked && isConnected ? (
-                  <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+                  <EmptyState text={emptyPickText} />
                 ) : (
                 /* **탭을 전부 띄워 둔다.** 보는 것만 달면 돌아올 때마다 다시 조회해야 해,
                    여러 날짜를 오가며 견주는 일이 매번 몇 초씩 기다리는 일이 된다.
@@ -1569,7 +1635,7 @@ export default function App() {
           {!isConnected ? (
             <EmptyState text={t('연결 후 사용 가능합니다.')} />
           ) : nothingPicked ? (
-            <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+            <EmptyState text={emptyPickText} />
           ) : (
             <ActiveTab
               enabled={activeTab === 'active'}
@@ -1594,7 +1660,7 @@ export default function App() {
           {!isConnected ? (
             <EmptyState text={t('연결 후 사용 가능합니다.')} />
           ) : nothingPicked ? (
-            <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+            <EmptyState text={emptyPickText} />
           ) : (
             /* **F5 는 패널을 다시 세운다.** 이 탭의 패널마다 조회 훅이 따로 있어
                신호를 일일이 내려보내면 손이 많이 가고 빠뜨리기 쉽다. 다시 세우면
@@ -1622,7 +1688,7 @@ export default function App() {
           {!isConnected ? (
             <EmptyState text={t('연결 후 사용 가능합니다.')} />
           ) : nothingPicked ? (
-            <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
+            <EmptyState text={emptyPickText} />
           ) : (
             /* F5 — Visualize 탭과 같은 규칙으로 패널을 다시 세운다 */
             <div key={`counter-${refreshSignal}`} className="min-h-0 flex-1 overflow-y-auto p-3">

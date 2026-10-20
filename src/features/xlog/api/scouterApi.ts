@@ -657,6 +657,8 @@ export interface AppConfig {
   ui_language?: string;
   /** 색 벌. 모르는 값은 `toTheme` 이 기본으로 되돌린다 */
   ui_theme?: string;
+  /** 열어 둔 XLog 탭들의 **조건만**. 받아 둔 데이터는 안 담는다 */
+  xlog_tabs?: XLogTabPrefs[];
   /** XLog 버퍼 최대 건수. 없으면 300,000 */
   xlog_buffer_max?: number;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
@@ -692,6 +694,15 @@ export interface UiLayout {
  * 색은 넣지 않는다 — 팔레트는 `colorPalette.ts` 한 곳에만 있어야 한다.
  * 설정 파일에 두 벌이 되면 테마를 바꿔도 저장해 둔 색이 이긴다.
  */
+/** 탭 하나의 조건. Rust `XLogTabPrefs` 와 짝이다 */
+export interface XLogTabPrefs {
+  chart?: XLogChartPrefs;
+  filter?: XLogFilterPrefs;
+  /** 과거 구간(epoch ms). 둘 다 0 이면 구간을 정하지 않은 것이다 */
+  stime?: number;
+  etime?: number;
+}
+
 export interface XLogChartPrefs {
   y_axis_mode: string;
   time_range_ms: number;

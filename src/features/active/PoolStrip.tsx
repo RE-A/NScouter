@@ -52,7 +52,11 @@ export const PoolStrip = memo(function PoolStrip({ pools, anyDatasource }: PoolS
             : t('커넥션 풀이 안 잡힙니다. 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')}
         </p>
       ) : (
-        <ul className="flex flex-wrap gap-2">
+        /* **높이를 가둔다.** 줄바꿈이라 풀이 늘어날수록 이 칸이 자라고,
+           밑의 트랜잭션 목록을 그만큼 밀어낸다 — 풀이 열여덛 개면 목록이 거의 안 보였다.
+           보는 순서는 «얼마나(게이지) → 자원이 남았나(여기) → 무엇 때문인가(목록)» 인데,
+           가운데가 끝을 먹으면 순서가 뒤집힌다. */
+        <ul className="flex max-h-[7.5rem] flex-wrap gap-2 overflow-y-auto">
           {pools.map(p => {
             const level = poolLevel(p);
             const pct = usagePct(p);

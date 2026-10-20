@@ -18,6 +18,7 @@ import {
   DEFAULT_FILTER,
 } from '../types/xlog';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
+import { XLOG_PLATE } from '../utils/colorPalette';
 import { XLOG_COLORS } from '../utils/colorPalette';
 import {
   installFakeOffscreenCanvas,
@@ -120,7 +121,8 @@ describe('XLogChartRenderer — 단계 순서', () => {
     const first = h.ctx.ops[0];
     expect(first.op).toBe('fillRect');
     expect(first.args).toEqual([0, 0, W, H]);
-    expect(first.fillStyle).toBe(DEFAULT_CHART_CONFIG.backgroundColor);
+    // 판 색은 설정이 아니라 **테마**에서 온다 — 그릴 때 읽어야 테마를 따라온다.
+    expect(first.fillStyle).toBe(XLOG_PLATE.bg);
   });
 
   it('그림 영역 테두리를 두른다', () => {

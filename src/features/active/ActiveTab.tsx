@@ -283,7 +283,7 @@ export const ActiveTab = memo(function ActiveTab({
 
       {/* 풀 줄 — 자리가 뜻이다. 위(게이지)가 «얼마나», 아래(목록)가 «무엇 때문에» 고,
           그 사이에 «자원이 남아 있나» 가 놓인다. */}
-      <section aria-label={t('커넥션 풀')} className="px-3 pt-3">
+      <section aria-label={t('커넥션 풀')} className="shrink-0 px-3 pt-3">
         <PoolStrip pools={pools} anyDatasource={anyDatasource} />
       </section>
 
