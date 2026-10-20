@@ -18,6 +18,8 @@ const api = vi.hoisted(() => ({
 
 vi.mock('../xlog/api/scouterApi', () => ({
   getConfig: () => Promise.resolve(api.config),
+  // 서비스 묶기 미리보기가 명단을 한 번 받는다
+  getObjectList: () => Promise.resolve([]),
   saveConfig: (c: Record<string, unknown>) => {
     api.saved.push(c);
     return Promise.resolve();

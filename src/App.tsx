@@ -104,7 +104,7 @@ import {
   toggleService,
   type GroupSelection,
 } from './features/xlog/hooks/groupSelection';
-import { DEFAULT_GROUP_RULE, instanceLabel } from './features/xlog/components/instanceGroup';
+import { instanceLabel } from './features/xlog/components/instanceGroup';
 import {
   fromTabs as detailsFromTabs,
   normalize as normalizeOpenDetails,
@@ -210,7 +210,7 @@ export default function App() {
   // **여기서 한 번은 불러야 한다.** 표시 설정(언어·글자 크기)은 이걸 처음 쓰는
   // 컴포넌트가 마운트될 때 config.json 을 읽는데, 그게 상세 패널이라
   // 앱을 켜고 아무것도 안 열면 저장해 둔 설정이 적용되지 않았다.
-  useViewOptions();
+  const { groupRule } = useViewOptions();
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -672,7 +672,7 @@ export default function App() {
   );
   const handlePickTask = useCallback(
     (agent: AgentObject) =>
-      setGroupSel(prev => pickTask(prev, agent, objectsRef.current, DEFAULT_GROUP_RULE)),
+      setGroupSel(prev => pickTask(prev, agent, objectsRef.current, groupRule)),
     [],
   );
 
@@ -687,7 +687,7 @@ export default function App() {
   // Set 을 만들면 그걸 의존성으로 쓰는 탭·차트·목록이 전부 다시 선다 — Task 가
   // 하나도 안 바뀌었는데도 그렇다. ECS 에서는 그 갱신이 끝없이 돈다.
   const pickedKey = useMemo(
-    () => [...resolveSelection(groupSel, objects, DEFAULT_GROUP_RULE)].sort((a, b) => a - b).join(','),
+    () => [...resolveSelection(groupSel, objects, groupRule)].sort((a, b) => a - b).join(','),
     [groupSel, objects],
   );
   const pickedHashes = useMemo(
@@ -700,7 +700,7 @@ export default function App() {
 
   /** «안 골랐다» 와 «골랐는데 살아 있는 게 없다» 는 다른 일이다 */
   const pickState = useMemo(
-    () => selectionState(groupSel, objects, DEFAULT_GROUP_RULE),
+    () => selectionState(groupSel, objects, groupRule),
     [groupSel, objects],
   );
   // 구간을 바꾸면 이전 구간에서 고른 트랜잭션은 의미가 없다. 같이 비운다.
@@ -2031,6 +2031,9 @@ function XLogTable({
   sort,
   onSort,
 }: XLogTableProps) {
+  // 서버 열에 적을 이름을 정하는 데 쓴다. 프롭으로 내리지 않는 이유는
+  // 설정이 모듈 저장소에 한 벌만 있고, 거쳐 가는 곧마다 빠뜨릴 자리가 생기기 때문이다.
+  const { groupRule } = useViewOptions();
   // Elapsed 축이면 목록의 Elapsed 가 곧 점 높이라 더 보여줄 것이 없다.
   const showY = yAxisMode !== 'elapsed';
   const cols = showY ? XLOG_COLS_Y : XLOG_COLS;
@@ -2118,7 +2121,7 @@ function XLogTable({
           // 줄마다 반복된다 — 줄에서 알고 싶은 것은 «넷 중 어느 Task 인가» 다.
           // 전체 이름은 title 에 남겨 둔다.
           const fullName = agentMap.get(x.objHash) ?? `[0x${x.objHash.toString(16)}]`;
-          const agentName = instanceLabel(fullName, DEFAULT_GROUP_RULE);
+          const agentName = instanceLabel(fullName, groupRule);
           const isActive = activeXlog?.txid === x.txid;
           const hasErr = x.error !== 0;
           const hit = searchHits?.get(x.txid);

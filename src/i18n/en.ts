@@ -340,6 +340,23 @@ export const EN: Record<string, string> = {
   '기록 수준': 'Log level',
   // 테마 — 이름과 설명은 `THEMES` 가 변수로 넘기므로 훑기 검사가 못 잡는다. 손으로 넣는다.
   '테마': 'Theme',
+  // 서비스 묶기 설정
+  '서비스 묶기': 'Service grouping',
+  '한 서비스가 여러 대로 뜨는 곳(ECS · 쿠버네티스)에서, 어느 Task 가 어느 서비스인지를 정합니다.':
+    'Decides which task belongs to which service where one service runs as several (ECS, Kubernetes).',
+  '태그 키': 'Tag key',
+  '이름 규칙': 'Name pattern',
+  '에이전트가 이 키로 태그를 보내면 그 값이 곧 서비스 이름입니다':
+    'If the agent sends a tag with this key, its value is the service name',
+  '태그가 없을 때 쓰는 정규식. 첫 캐처 괄호 안이 서비스 이름이 됩니다':
+    'Regex used when there is no tag. The first capture group becomes the service name',
+  '접속하면 지금 붙어 있는 서버로 미리 보여 드립니다.':
+    'Connect to preview with the servers you have now.',
+  '정규식이 잘못됐습니다. 저장해도 묶이지 않습니다.':
+    'That regex is invalid. Saving it will not group anything.',
+  '지금 규칙으로는 묶이는 것이 없습니다.': 'Nothing groups under the current rule.',
+  '개 서비스 · ': ' services, ',
+  '대': ' instances',
   '고른 서비스에 살아 있는 Task 가 없습니다.': 'No live tasks in the selected service.',
   '이 서비스를 통째로 고릅니다. Task 가 드나들면 저절로 따라갑니다':
     'Selects the whole service — follows along as tasks come and go',

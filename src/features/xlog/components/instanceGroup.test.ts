@@ -10,6 +10,8 @@
 //   · 설정 파일이 깨져 있어도 던지지 않는다
 //   · **한 대짜리는 그룹을 만들지 않는다** — 묶을 것이 없는데 깊이만 한 겹 는다
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_GROUP_RULE, groupByService, instanceLabel, serviceNameOf } from './instanceGroup';
 import type { AgentObject } from '../types/xlog';
@@ -106,5 +108,18 @@ describe('줄에 적을 인스턴스 이름', () => {
 
   it('떼고 나서 빈 이름이 되면 짧은 이름을 쓴다', () => {
     expect(instanceLabel('/CJFW/SAFS', { tagKey: 'x', pattern: '^(SAFS)' })).toBe('SAFS');
+  });
+});
+
+describe('기본 규칙은 한 벌이다', () => {
+  // Rust `GroupRulePrefs::default()` 와 화면 `DEFAULT_GROUP_RULE` 이 **같아야 한다.**
+  // 한쪽만 바꾸면 설정을 안 건드린 사람의 화면이 말없이 달라진다 (tokens.test.ts 와 같은 방식).
+  it('Rust 기본값과 값이 같다', () => {
+    const rs = readFileSync(join(__dirname, '../../../../src-tauri/src/config.rs'), 'utf-8');
+    const tag = rs.match(/tag_key:\s*"([^"]*)"\.to_string\(\)/)?.[1];
+    const pat = rs.match(/pattern:\s*"([^"]*)"\.to_string\(\)/)?.[1];
+    expect(tag).toBe(DEFAULT_GROUP_RULE.tagKey);
+    // Rust 문자열 리터럴의 역슬래시는 그대로다 — 지금 패턴에는 없지만 들어오면 여기서 깨진다
+    expect(pat).toBe(DEFAULT_GROUP_RULE.pattern);
   });
 });

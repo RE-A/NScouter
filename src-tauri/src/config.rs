@@ -80,6 +80,12 @@ pub struct AppConfig {
     /// (판이 올라가기 전 파일을 읽기 위해 남겨 둔다).
     #[serde(default)]
     pub xlog_tabs: Vec<XLogTabPrefs>,
+    /// 어느 Task 가 어느 논리 서비스인가를 정하는 규칙.
+    ///
+    /// 사이트마다 이름 짃는 법이 다르다 — ECS 가 아닐 수도 있고
+    /// `svc-1`·`svc-2` 일 수도 있어서 고칠 수 있게 둔다.
+    #[serde(default)]
+    pub group_rule: GroupRulePrefs,
     /// Visualize 탭의 지표 임계값
     #[serde(default)]
     pub kpi_thresholds: Vec<KpiThresholdPrefs>,
@@ -209,6 +215,27 @@ pub struct XLogFilterPrefs {
     pub patterns: Vec<PatternPrefs>,
     /// `"live"` 또는 `"past"`
     pub mode: String,
+}
+
+/// 논리 서비스 묶기 규칙. 화면의 `GroupRule` 과 1:1 이다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GroupRulePrefs {
+    /// 이 키의 태그가 있으면 그 값이 곧 서비스 이름이다
+    pub tag_key: String,
+    /// 태그가 없을 때 짧은 이름에 거는 정규식. **첫 캐처 그룹이 서비스 이름**이다
+    pub pattern: String,
+}
+
+impl Default for GroupRulePrefs {
+    fn default() -> Self {
+        // 화면의 `DEFAULT_GROUP_RULE` 과 **같은 값이어야 한다.**
+        // 한쪽만 바꾸면 설정을 안 건드린 사람의 화면이 말없이 달라진다.
+        Self {
+            tag_key: "service".to_string(),
+            pattern: "^(?<svc>.+?)-ip-[0-9-]+".to_string(),
+        }
+    }
 }
 
 /// 탭 하나의 조건. 화면의 `XLogTab` 과 1:1 이다.
@@ -343,6 +370,7 @@ impl Default for AppConfig {
             last_server: String::new(),
             xlog_filter: XLogFilterPrefs::default(),
             xlog_tabs: Vec::new(),
+            group_rule: GroupRulePrefs::default(),
             // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)
             // 여기서 같은 수를 한 벌 더 적으면 두 곳이 갈린다.
             kpi_thresholds: Vec::new(),

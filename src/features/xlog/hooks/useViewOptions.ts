@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../api/scouterApi';
 import { setLang, toLang, type Lang } from '../../../i18n';
 import { applyTheme, toTheme, DEFAULT_THEME, type ThemeId } from '../../../styles/theme';
+import { DEFAULT_GROUP_RULE, type GroupRule } from '../components/instanceGroup';
 import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../store/XLogDataStore';
 
 export interface ViewOptions {
@@ -23,6 +24,8 @@ export interface ViewOptions {
   bufferMax: number;
   /** 색 벌 */
   theme: ThemeId;
+  /** 어느 Task 가 어느 논리 서비스인가 */
+  groupRule: GroupRule;
 }
 
 /** 화면에서 고를 수 있는 배율. 사이 값이 오면 가장 가까운 것으로 붙인다 */
@@ -51,6 +54,7 @@ const DEFAULTS: ViewOptions = {
   lang: 'ko',
   bufferMax: DEFAULT_MAX_ITEMS,
   theme: DEFAULT_THEME,
+  groupRule: DEFAULT_GROUP_RULE,
 };
 
 let current: ViewOptions = DEFAULTS;
@@ -73,6 +77,10 @@ function fromConfig(cfg: AppConfig): ViewOptions {
     lang: toLang(cfg.ui_language),
     bufferMax: clampMaxItems(cfg.xlog_buffer_max ?? DEFAULTS.bufferMax),
     theme: toTheme(cfg.ui_theme),
+    groupRule: {
+      tagKey: cfg.group_rule?.tag_key ?? DEFAULT_GROUP_RULE.tagKey,
+      pattern: cfg.group_rule?.pattern ?? DEFAULT_GROUP_RULE.pattern,
+    },
   };
 }
 
@@ -115,6 +123,7 @@ export async function setViewOption<K extends keyof ViewOptions>(
       ui_language: current.lang,
       xlog_buffer_max: current.bufferMax,
       ui_theme: current.theme,
+      group_rule: { tag_key: current.groupRule.tagKey, pattern: current.groupRule.pattern },
     });
   } catch {
     // 저장 실패는 화면을 되돌릴 이유가 못 된다. 다음 실행에 기본값으로 돌아갈 뿐이다.

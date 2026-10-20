@@ -1,6 +1,6 @@
 // src/features/settings/SettingsDialog.tsx
 
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
 import {
   applyConfigToViewOptions,
@@ -13,6 +13,9 @@ import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../xlog/store/XLogDataStore';
 import { SHORTCUT_HELP, type ShortcutAction } from '../xlog/hooks/shortcuts';
 import { LogLevelSelector } from '../xlog/components/LogLevelSelector';
 import { THEMES, toTheme, applyTheme, currentTheme, type ThemeId } from '../../styles/theme';
+import { DEFAULT_GROUP_RULE, groupByService, type GroupRule } from '../xlog/components/instanceGroup';
+import { getObjectList } from '../xlog/api/scouterApi';
+import type { AgentObject } from '../xlog/types/xlog';
 
 /**
  * 단축키가 무엇을 하는지.
@@ -74,6 +77,30 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
    * 되돌려야 한다 — «구경만 했는데 바뀜어 있다» 가 되면 어디서 바뎀지 모른다.
    */
   const savedTheme = useRef<ThemeId>('dark');
+  /** 논리 서비스 묶기 규칙 */
+  const [groupRule, setGroupRule] = useState<GroupRule>(DEFAULT_GROUP_RULE);
+  /**
+   * 미리보기용 명단.
+   *
+   * **정규식은 눈으로만 보고 맞추기 어렵다.** 지금 붙어 있는 서버들로
+   * 몇 개 묶음이 나오는지를 보여 줌다 — 0 이면 규칙이 안 맞는 것이다.
+   */
+  const [sample, setSample] = useState<AgentObject[]>([]);
+
+  /** 지금 규칙으로 몇 개가 묶이나 — 정규식이 깨져 있으면 그것도 여기서 말한다 */
+  const rulePreview = useMemo(() => {
+    if (sample.length === 0) return t('접속하면 지금 붙어 있는 서버로 미리 보여 드립니다.');
+    try {
+      new RegExp(groupRule.pattern);
+    } catch {
+      return t('정규식이 잘못됐습니다. 저장해도 묶이지 않습니다.');
+    }
+    const g = groupByService(sample, groupRule);
+    const members = [...g.values()].reduce((n, l) => n + l.length, 0);
+    return g.size === 0
+      ? t('지금 규칙으로는 묶이는 것이 없습니다.')
+      : `${g.size}${t('개 서비스 · ')}${members}${t('대')}`;
+  }, [sample, groupRule]);
   /** XLog 버퍼에 담아 둘 최대 건수 */
   const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);
   const [saving, setSaving] = useState(false);
@@ -89,9 +116,15 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setLangValue(toLang(cfg.ui_language));
       const th = toTheme(cfg.ui_theme);
       setTheme(th);
+      setGroupRule({
+        tagKey: cfg.group_rule?.tag_key ?? DEFAULT_GROUP_RULE.tagKey,
+        pattern: cfg.group_rule?.pattern ?? DEFAULT_GROUP_RULE.pattern,
+      });
       savedTheme.current = th;
       setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
     }).catch(() => {});
+    // 미리보기는 지금 붙어 있을 때만 된다. 안 붙어 있으면 조용히 비워 둔다.
+    getObjectList().then(setSample).catch(() => {});
   }, []);
 
   // 저장 없이 닫으면 구경하던 테마를 두고 가지 않는다.
@@ -111,6 +144,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         ui_font_scale: fontScale,
         ui_language: lang,
         ui_theme: theme,
+        group_rule: { tag_key: groupRule.tagKey, pattern: groupRule.pattern },
         xlog_buffer_max: bufferMax,
       };
       await saveConfig(next);
@@ -128,7 +162,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     }
     // **여기 빠뜨리면 조용히 옛 값이 저장된다.** `theme` 이 빠져 있어서, 테마를 고르고
     // 저장하면 처음 값(dark)이 그대로 쓰였다 — 화면에서는 「바꿔도 안 먹는다」로 보인다.
-  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, theme]);
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, theme, groupRule]);
 
   // ESC 닫기
   useEffect(() => {
@@ -230,6 +264,39 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                 );
               })}
             </div>
+          </div>
+
+          {/* 서비스 묶기 — ECS 처럼 한 서비스가 Task 여러 개로 뜨는 곳용 */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>{t('서비스 묶기')}</div>
+            <div style={sectionDescStyle}>
+              {t('한 서비스가 여러 대로 뜨는 곳(ECS · 쿠버네티스)에서, 어느 Task 가 어느 서비스인지를 정합니다.')}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+              <label style={pathRowStyle}>
+                <span style={pathLabelStyle}>{t('태그 키')}</span>
+                <input
+                  value={groupRule.tagKey}
+                  onChange={e => setGroupRule(r => ({ ...r, tagKey: e.target.value }))}
+                  spellCheck={false}
+                  title={t('에이전트가 이 키로 태그를 보내면 그 값이 곧 서비스 이름입니다')}
+                  style={ruleInputStyle}
+                />
+              </label>
+              <label style={pathRowStyle}>
+                <span style={pathLabelStyle}>{t('이름 규칙')}</span>
+                <input
+                  value={groupRule.pattern}
+                  onChange={e => setGroupRule(r => ({ ...r, pattern: e.target.value }))}
+                  spellCheck={false}
+                  title={t('태그가 없을 때 쓰는 정규식. 첫 캐처 괄호 안이 서비스 이름이 됩니다')}
+                  style={{ ...ruleInputStyle, fontFamily: FONT_MONO }}
+                />
+              </label>
+            </div>
+            {/* **정규식은 눈으로만 보고 맞추기 어렵다.** 지금 붙어 있는 서버로
+                몇 개로 묶이는지를 바로 보여 준다 — 0 이면 규칙이 안 맞는 것이다. */}
+            <div style={{ ...sectionDescStyle, marginTop: 6 }}>{rulePreview}</div>
           </div>
 
           {/* 글자 크기 */}
@@ -570,6 +637,18 @@ const scaleBtnStyle: React.CSSProperties = {
   border: `1px solid ${T.border}`,
   cursor: 'pointer',
   lineHeight: 1.2,
+};
+
+/** 규칙 입력칸 — 길어서 한 줄을 다 쓴다 */
+const ruleInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  background: T.bgInput,
+  border: `1px solid ${T.borderControl}`,
+  borderRadius: 4,
+  color: T.text,
+  padding: '3px 6px',
+  fontSize: F.small,
 };
 
 const themeBtnStyle: React.CSSProperties = {

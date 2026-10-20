@@ -659,6 +659,8 @@ export interface AppConfig {
   ui_theme?: string;
   /** 열어 둔 XLog 탭들의 **조건만**. 받아 둔 데이터는 안 담는다 */
   xlog_tabs?: XLogTabPrefs[];
+  /** 논리 서비스 묶기 규칙. Rust `GroupRulePrefs` 와 짝이다 */
+  group_rule?: { tag_key?: string; pattern?: string };
   /** XLog 버퍼 최대 건수. 없으면 300,000 */
   xlog_buffer_max?: number;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
