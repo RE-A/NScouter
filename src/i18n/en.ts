@@ -344,11 +344,11 @@ export const EN: Record<string, string> = {
   '비활성 자동 정리': 'Auto-remove inactive',
   '비활성 정리': 'Remove inactive',
   '정리 중…': 'Removing…',
-  '끄기': 'Off',
+  '안 함': 'Off',
   '분': ' min',
   '콜렉터는 내려간 서버를 스스로 지우지 않습니다. Task 가 자주 갈리는 곳에서는 목록이 계속 늘어납니다.':
     'The collector never removes downed servers on its own. Where tasks churn, the list keeps growing.',
-  '※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 끄기입니다.':
+  '※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 «안 함» 입니다.':
     '※ Removal is collector-wide — it also disappears for anyone else watching the same servers. That is why the default is off.',
   '콜렉터에서 내려간 서버를 지웁니다. **같은 콜렉터를 보는 다른 사람 화면에서도** 사라집니다':
     'Removes downed servers from the collector — they also disappear for anyone else watching it',

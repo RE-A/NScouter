@@ -311,7 +311,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
               {t('콜렉터는 내려간 서버를 스스로 지우지 않습니다. Task 가 자주 갈리는 곳에서는 목록이 계속 늘어납니다.')}
               <br />
               <span style={{ color: T.warn }}>
-                {t('※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 끄기입니다.')}
+                {t('※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 «안 함» 입니다.')}
               </span>
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -328,7 +328,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
                     background: cleanupMin === m ? T.bgHover : 'transparent',
                   }}
                 >
-                  {m === 0 ? t('끄기') : m < 60 ? `${m}${t('분')}` : `${m / 60}${t('시간')}`}
+                  {m === 0 ? t('안 함') : m < 60 ? `${m}${t('분')}` : `${m / 60}${t('시간')}`}
                 </button>
               ))}
             </div>
