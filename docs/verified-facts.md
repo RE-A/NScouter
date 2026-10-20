@@ -1729,9 +1729,20 @@ ASIS 가 목록을 다루는 법도 같이 적어 둔다 (`AgentModelThread`):
 - 다만 **이름은 따로 영구 보관**한다: `TextProxy.object.putText(objHash, objName)` 를
   «없을 때만» 넣고 지우지 않는다. 그래서 오브젝트가 사라져도 지난 XLog 의 이름은 풀린다.
 
+**제거는 두 곳을 건드린다** (`AgentManager$$anonfun$removeAgents$1`):
+`ObjectMap.remove`(살아 있는 목록)와 `ObjectWR$.remove`(**오늘자 오브젝트 DB**).
+그래서 지우고 나면 **오늘 받은 XLog 의 서버 이름이 콜렉터 쪽에서는 안 풀린다.**
+지난 날짜는 그날 DB 에 남아 있어 괜찮다.
+
+실측(테스트 환경): 살아 있는 5건에서 정리하면 **5건 그대로**,
+한 대를 내리고 25초 뒤 정리하면 **5→3건**(그 WAS 와 그 datasource).
+명령은 파라미터가 없고, 응답 팩이 안 와도 정상이다.
+
 - 근거: scouter 2.21.3 `scouter-server-2.21.3.jar` 바이트코드,
   `scouter.client/.../AgentModelThread.java`
-- 화면 쪽 대응: `objectRefresh.ts`(죽은 것 잠시 유지), 비활성 정리는 미구현
+- 재현: `cargo test --test live_collector live_remove_inactive -- --ignored --nocapture`
+- 화면 쪽 대응: `objectRefresh.ts`(죽은 것 잠시 유지),
+  `agentNames.ts`(이름 영구 보관 — 정리해도 이름이 안 끊기게)
 
 ## 도구 / 환경
 

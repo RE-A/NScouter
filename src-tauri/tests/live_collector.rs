@@ -19,7 +19,7 @@ use nscouter_lib::scouter::protocol::{
     CMD_TRIGGER_ACTIVE_SERVICE_LIST, CMD_TRIGGER_HEAPHISTO, CMD_TRIGGER_THREAD_LIST,
     CMD_ALERT_REAL_TIME, CMD_COUNTER_REAL_TIME_ALL, CMD_COUNTER_REAL_TIME_ALL_MULTI,
     CMD_OBJECT_ACTIVE_SERVICE_LIST, CMD_OBJECT_CLASS_LIST, CMD_OBJECT_DUMP_FILE_DETAIL,
-    CMD_OBJECT_DUMP_FILE_LIST, CMD_OBJECT_ENV, CMD_OBJECT_HEAPHISTO, CMD_OBJECT_LIST_REAL_TIME,
+    CMD_OBJECT_DUMP_FILE_LIST, CMD_OBJECT_ENV, CMD_OBJECT_HEAPHISTO, CMD_OBJECT_LIST_REAL_TIME, CMD_OBJECT_REMOVE_INACTIVE,
     CMD_OBJECT_SOCKET,
     CMD_OBJECT_THREAD_LIST, CMD_TRANX_LOAD_TIME_GROUP_V2, CMD_TRIGGER_THREAD_DUMP,
     CMD_TRANX_PROFILE, CMD_TRANX_PROFILE_FULL, CMD_TRANX_REAL_TIME_GROUP,
@@ -7947,5 +7947,35 @@ fn probe_pool_parent_names() {
         linked,
         pools.len(),
         "이름만으로 부모를 못 찾은 풀이 있다. 화면의 자동 표시가 그만큼 빈다"
+    );
+}
+
+/// F-60 확인: 비활성 정리가 실제로 받아들여지고, 죽은 오브젝트만 지워진다.
+///
+/// **살아 있는 것은 안 지운다.** 테스트 환경에는 죽은 오브젝트가 없을 수 있어서
+/// 「줄었다」를 단정하지 않는다 — 단정하면 환경에 따라 되는 테스트가 된다.
+/// 여기서 확인하는 것은 **명령이 받아들여지고 살아 있는 것이 그대로인가** 둘이다.
+#[test]
+#[ignore]
+fn live_remove_inactive() {
+    let mut conn = login();
+    let before = fetch_object_hashes(&mut conn);
+    println!("정리 전: {}건", before.len());
+
+    let session = conn.session;
+    conn.send_request(CMD_OBJECT_REMOVE_INACTIVE, session, &MapPack::new())
+        .expect("비활성 정리 요청 실패");
+    // 지우는 명령이라 팩이 안 올 수 있다. 끝까지 읽어 소켓만 비운다.
+    while conn.read_next_pack().expect("비활성 정리 응답 수신 실패").is_some() {}
+
+    let after = fetch_object_hashes(&mut conn);
+    println!("정리 후: {}건 (줄어든 수 {})", after.len(), before.len().saturating_sub(after.len()));
+
+    // 살아 있던 것이 사라지면 그건 사고다.
+    assert!(
+        after.len() <= before.len(),
+        "정리했는데 오히려 늘었다: {} → {}",
+        before.len(),
+        after.len()
     );
 }

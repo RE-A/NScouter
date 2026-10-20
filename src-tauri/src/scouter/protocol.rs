@@ -54,6 +54,11 @@ pub const CMD_GET_TEXT_100: &str = "GET_TEXT_100";
 /// "GET_" 접두가 붙은 커맨드는 존재하지 않는다. 잘못된 이름을 보내면
 /// Collector가 응답 없이 TCP 연결을 끊는다.
 pub const CMD_OBJECT_LIST_REAL_TIME: &str = "OBJECT_LIST_REAL_TIME";
+/// 비활성 오브젝트를 콜렉터에서 지운다. **파라미터가 없다.**
+///
+/// 콜렉터는 죽은 오브젝트를 스스로 지우지 않는다(F-60). ECS 처럼 Task 가
+/// 계속 갈리는 곳에서는 재배포마다 명단이 늘어난다.
+pub const CMD_OBJECT_REMOVE_INACTIVE: &str = "OBJECT_REMOVE_INACTIVE";
 
 // 오브젝트 단건 명령 — 콜렉터가 에이전트로 중계한다.
 // 응답은 전부 MapPack (실측: probe_object_mappack_keys).

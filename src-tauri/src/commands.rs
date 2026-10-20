@@ -283,6 +283,22 @@ async fn request_map(
     Ok(found)
 }
 
+/// 비활성 오브젝트를 콜렉터에서 지운다.
+///
+/// **전역이다.** 같은 콜렉터에 붙은 다른 사람 화면에서도 사라진다.
+/// 그리고 `ObjectWR`(오늘자 오브젝트 DB)까지 지우므로, 지운 뒤에는
+/// 오늘 받은 XLog 의 서버 이름이 콜렉터 쪽에서는 안 풀린다 —
+/// 화면은 그래서 이름을 따로 들고 있다(`agentNames.ts`).
+///
+/// **응답이 없을 수 있다.** 지우는 명령이지 조회가 아니라, 팩이 안 와도
+/// 실패가 아니다 (F-35 의 «응답 없음» 부류와 같다).
+#[tauri::command]
+pub async fn remove_inactive_objects(state: State<'_, AppState>) -> Result<(), String> {
+    request_map(&state, CMD_OBJECT_REMOVE_INACTIVE, MapPack::new()).await?;
+    log::info!("remove_inactive_objects: 비활성 정리 요청");
+    Ok(())
+}
+
 /// 에이전트 JVM 의 시스템 프로퍼티
 #[tauri::command]
 pub async fn get_object_env(

@@ -80,6 +80,7 @@ pub fn run() {
             get_past_counter,
             resolve_texts,
             get_object_list,
+            remove_inactive_objects,
             get_object_env,
             get_object_thread_list,
             get_object_sockets,
