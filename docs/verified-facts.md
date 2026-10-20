@@ -1708,6 +1708,31 @@ RequestQueue   :  LinkedList 기반 FIFO
 - 근거: `ConfigValueUtil.replaceSysProp` / `ParamText` (scouter.common 소스)
 
 
+### F-60. 콜렉터는 죽은 오브젝트를 **영원히 들고 있다** — 지우는 것은 수동 명령뿐이다
+
+`object_deadtime_ms` 는 «죽었다고 표시» 할 시점만 정한다. **지우지 않는다.**
+콜렉터 설정에 자동 삭제 항목이 없고(`scouter.server.Configure` 에 object 관련은
+`object_deadtime_ms`·`object_inactive_alert_level`·`object_zipkin_deadtime_ms`·
+`telegraf_object_deadtime_ms` 뿐), 제거는 `AgentManager.clearInactive()` 하나인데
+그걸 부르는 길은 `OBJECT_REMOVE_INACTIVE` **수동 명령**뿐이다.
+
+ASIS 클라이언트도 그래서 «Remove Inactive» 를 사람이 누르게 해 두었다
+(`AgentModelThread.removeInactive()`).
+
+**ECS·K8s 에서는 이게 곧 목록 증가다.** Task 가 갈릴 때마다 이름이 달라지므로
+(권장 설정이 그렇다 — `duplicate-objname-guide.md`) 죽은 오브젝트가 한 줄씩 쌓인다.
+재배포 한 번에 Task 수만큼 는다.
+
+ASIS 가 목록을 다루는 법도 같이 적어 둔다 (`AgentModelThread`):
+- **2초마다** 전체를 다시 읽고 `agentMap` 을 **통째로 갈아 끼운다** — 죽은 것을
+  클라이언트가 따로 들고 있지 않는다. 콜렉터가 주는 것이 전부다.
+- 다만 **이름은 따로 영구 보관**한다: `TextProxy.object.putText(objHash, objName)` 를
+  «없을 때만» 넣고 지우지 않는다. 그래서 오브젝트가 사라져도 지난 XLog 의 이름은 풀린다.
+
+- 근거: scouter 2.21.3 `scouter-server-2.21.3.jar` 바이트코드,
+  `scouter.client/.../AgentModelThread.java`
+- 화면 쪽 대응: `objectRefresh.ts`(죽은 것 잠시 유지), 비활성 정리는 미구현
+
 ## 도구 / 환경
 
 ### F-13. podman-compose는 Windows에서 `build:` 섹션이 동작하지 않는다

@@ -682,9 +682,17 @@ export default function App() {
    * 명단이 10초마다 갱신되므로, 새 Task 는 다시 고르지 않아도 저절로 들어오고
    * 죽은 Task 는 빠진다. «명단을 사진으로 찍어 두지 않는다» 가 이 기능의 핵심이다.
    */
-  const pickedHashes = useMemo(
-    () => resolveSelection(groupSel, objects, DEFAULT_GROUP_RULE),
+  //
+  // **내용이 같으면 같은 Set 을 돌려준다.** 명단은 10초마다 갱신되는데, 그때마다 새
+  // Set 을 만들면 그걸 의존성으로 쓰는 탭·차트·목록이 전부 다시 선다 — Task 가
+  // 하나도 안 바뀌었는데도 그렇다. ECS 에서는 그 갱신이 끝없이 돈다.
+  const pickedKey = useMemo(
+    () => [...resolveSelection(groupSel, objects, DEFAULT_GROUP_RULE)].sort((a, b) => a - b).join(','),
     [groupSel, objects],
+  );
+  const pickedHashes = useMemo(
+    () => new Set(pickedKey === '' ? [] : pickedKey.split(',').map(Number)),
+    [pickedKey],
   );
   useEffect(() => {
     setXLogTabs(s => setTabSelection(s, pickedHashes));
