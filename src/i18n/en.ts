@@ -356,7 +356,7 @@ export const EN: Record<string, string> = {
     'That regex is invalid. Saving it will not group anything.',
   '지금 규칙으로는 묶이는 것이 없습니다.': 'Nothing groups under the current rule.',
   '개 서비스 · ': ' services, ',
-  '대': ' instances',
+  '대 묶임': ' instances grouped',
   '고른 서비스에 살아 있는 Task 가 없습니다.': 'No live tasks in the selected service.',
   '이 서비스를 통째로 고릅니다. Task 가 드나들면 저절로 따라갑니다':
     'Selects the whole service — follows along as tasks come and go',

@@ -99,7 +99,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     const members = [...g.values()].reduce((n, l) => n + l.length, 0);
     return g.size === 0
       ? t('지금 규칙으로는 묶이는 것이 없습니다.')
-      : `${g.size}${t('개 서비스 · ')}${members}${t('대')}`;
+      : `${g.size}${t('개 서비스 · ')}${members}${t('대 묶임')}`;
   }, [sample, groupRule]);
   /** XLog 버퍼에 담아 둘 최대 건수 */
   const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);

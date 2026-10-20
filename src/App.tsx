@@ -96,6 +96,7 @@ import {
 } from './features/xlog/hooks/xlogTabs';
 import { XLogTabBar } from './features/xlog/components/XLogTabBar';
 import { mergeObjects } from './features/xlog/hooks/objectRefresh';
+import { allNames, clearNames, rememberNames } from './features/xlog/hooks/agentNames';
 import {
   EMPTY_SELECTION,
   pickTask,
@@ -446,7 +447,8 @@ export default function App() {
       onConnected(id => { setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1); }),
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
-        setSelectedXLogs([]); setAgentMap(new Map());
+        // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
+        setSelectedXLogs([]); clearNames(); setAgentMap(new Map());
         objectsRef.current = [];
         setObjects([]); setGroupSel(EMPTY_SELECTION);
         setCounterHashes({ javaee: [], host: [], datasource: [] });
@@ -499,9 +501,13 @@ export default function App() {
         // **이름도 여기서 채운다.** 예전에는 AgentSelectorPanel(XLog 탭)만 채웠는데,
         // 그 패널은 XLog 탭에서만 마운트된다 — 카운터 탭으로 시작하면(마지막에 보던 탭이
         // 복원되면 흔하다) 차트 범례와 서버 고르기가 **해시 숫자로** 남았다.
+        // **이름은 명단보다 오래 산다.** 목록에서 사라진 오브젝트가 남긴 XLog 는
+        // 화면에 그대로 있어서, 거기서 이름을 못 풀면 `#해시` 로 덮인다 (`agentNames.ts`).
+        rememberNames(list);
+        const names = allNames();
         setAgentMap(prev => {
-          if (prev.size === list.length && list.every(a => prev.has(a.obj_hash))) return prev;
-          return new Map(list.map(a => [a.obj_hash, a.obj_name]));
+          if (prev.size === names.size && [...names.keys()].every(h => prev.has(h))) return prev;
+          return names;
         });
       })
       .catch(() => {});
@@ -711,7 +717,8 @@ export default function App() {
     clearDetail();
   }, [clearDetail]);
   const handleAgentsLoaded = useCallback((agents: AgentObject[]) => {
-    setAgentMap(new Map(agents.map(a => [a.obj_hash, a.obj_name])));
+    rememberNames(agents);
+    setAgentMap(allNames());
     // **목록에서 사라진 서버는 선택에서도 뺀다.** 남겨 두면 «3대 골랐는데 화면은
     // 비어 있다» 로 굳고, 다른 콜렉터로 갈아탄 뒤에는 그 해시가 영영 안 온다.
     // 내려간(alive=false) 서버는 목록에 남으므로 지우지 않는다 — 잠깐 멈춘 것일 수 있다.
