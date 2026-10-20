@@ -26,6 +26,8 @@ interface AgentSelectorPanelProps {
   onToggleService?: (name: string) => void;
   /** 펼쳐서 낱개를 누를 때. 그룹이 켜져 있으면 그걸 푸는 일까지 한다 */
   onPickTask?: (agent: AgentObject) => void;
+  /** 비활성 오브젝트를 콜렉터에서 지운다. 없으면 버튼을 안 그린다 */
+  onCleanup?: () => Promise<void>;
   onAgentsLoaded?: (agents: AgentObject[]) => void;
   /** 무엇으로 묶을지. 껐다 켜도 남는다 */
   groupBy: GroupBy;
@@ -39,6 +41,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   selectedServices,
   onToggleService,
   onPickTask,
+  onCleanup,
   onAgentsLoaded,
   groupBy,
   onGroupByChange,
@@ -57,6 +60,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
    * 둘을 묶으면 datasource 를 목록에서 잠깐 치우려다 차트가 비어 버린다.
    */
   const [pickedTypes, setPickedTypes] = useState<ReadonlySet<string>>(new Set());
+  /** 정리 직후처럼 **지금 당장** 다시 읽어야 할 때 올린다 */
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     if (!isConnected) { setAgents([]); return; }
@@ -79,7 +84,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
     load();
     const timer = setInterval(load, 10_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [isConnected, onAgentsLoaded]);
+  }, [isConnected, onAgentsLoaded, reloadTick]);
 
   const handleToggle = useCallback((hash: number) => {
     // 서비스 묶기를 쓰는 중이면 «그룹을 풀고 낱개로» 까지 다뤄야 한다(`pickTask`).
@@ -102,6 +107,18 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
 
   const filtering = selectedHashes.size > 0;
   const aliveCount = agents.filter(a => a.alive).length;
+  const [cleaning, setCleaning] = useState(false);
+  /** 정리한 뒤에는 **기다리지 않고** 다시 읽는다 — 10초 뒤에 줄어들면 안 눈 것으로 읽힌다 */
+  const handleCleanup = useCallback(async () => {
+    if (!onCleanup) return;
+    setCleaning(true);
+    try {
+      await onCleanup();
+      setReloadTick(n => n + 1);
+    } finally {
+      setCleaning(false);
+    }
+  }, [onCleanup]);
 
   /**
    * 종류가 둘 이상일 때만 종류를 말한다.
@@ -181,6 +198,19 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
             '—'
           )}
           {loading && <span className="ml-1 animate-pulse text-accent-bright">•</span>}
+          {/* 죽은 것이 없으면 **그리지 않는다.** 누를 이유가 없는 버튼은 자리만 먹는다.
+              콜렉터는 죽은 오브젝트를 스스로 안 지운다(F-60) — ECS 에서는 재배포마다 쌓인다. */}
+          {isConnected && onCleanup && agents.length > aliveCount && (
+            <button
+              type="button"
+              onClick={handleCleanup}
+              disabled={cleaning}
+              title={t('콜렉터에서 내려간 서버를 지웁니다. **같은 콜렉터를 보는 다른 사람 화면에서도** 사라집니다')}
+              className="btn-ghost ml-2 px-1.5 py-0 text-micro"
+            >
+              {cleaning ? t('정리 중…') : `${t('비활성 정리')} ${agents.length - aliveCount}`}
+            </button>
+          )}
         </span>
         {/* **«전부» 라는 상태는 없다.** 고른 것이 곧 보는 것이라, 여기 적히는 수가
             화면에 그려지는 서버 수와 같다. 0 이면 화면도 비어 있다. */}

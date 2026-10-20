@@ -86,6 +86,12 @@ pub struct AppConfig {
     /// `svc-1`·`svc-2` 일 수도 있어서 고칠 수 있게 둔다.
     #[serde(default)]
     pub group_rule: GroupRulePrefs,
+    /// 비활성 오브젝트 자동 정리 주기(분). **0 이면 끕(기본).**
+    ///
+    /// 정리는 콜렉터 전역이라 같은 서버를 보는 **다른 사람 화면에서도** 사라진다.
+    /// 남의 화면을 건드리는 일을 기본으로 켜 둘 수는 없다.
+    #[serde(default)]
+    pub auto_remove_inactive_min: u32,
     /// Visualize 탭의 지표 임계값
     #[serde(default)]
     pub kpi_thresholds: Vec<KpiThresholdPrefs>,
@@ -371,6 +377,7 @@ impl Default for AppConfig {
             xlog_filter: XLogFilterPrefs::default(),
             xlog_tabs: Vec::new(),
             group_rule: GroupRulePrefs::default(),
+            auto_remove_inactive_min: 0,
             // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)
             // 여기서 같은 수를 한 벌 더 적으면 두 곳이 갈린다.
             kpi_thresholds: Vec::new(),

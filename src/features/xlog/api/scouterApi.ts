@@ -661,6 +661,8 @@ export interface AppConfig {
   xlog_tabs?: XLogTabPrefs[];
   /** 논리 서비스 묶기 규칙. Rust `GroupRulePrefs` 와 짝이다 */
   group_rule?: { tag_key?: string; pattern?: string };
+  /** 비활성 자동 정리 주기(분). **0 이면 끕** — 전역이라 기본값이다 */
+  auto_remove_inactive_min?: number;
   /** XLog 버퍼 최대 건수. 없으면 300,000 */
   xlog_buffer_max?: number;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
@@ -935,6 +937,15 @@ export async function saveCsvExport(input: {
   csv: string;
 }): Promise<string> {
   return invoke<string>('save_csv_export', { input });
+}
+
+/**
+ * 비활성 오브젝트를 콜렉터에서 지운다.
+ *
+ * **전역이다** — 같은 콜렉터를 보는 다른 사람 화면에서도 사라진다.
+ */
+export async function removeInactiveObjects(): Promise<void> {
+  await invoke<void>('remove_inactive_objects');
 }
 
 /** 내보내기 폴더 경로 */

@@ -46,3 +46,28 @@ describe('applyConfigToViewOptions 가 테마를 건다', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe(DEFAULT_THEME);
   });
 });
+
+// ─── 비활성 자동 정리 주기 ─────────────────────────────────────
+//
+// 정리는 **콜렉터 전역**이다. 설정 파일을 손으로 고쳐 1분이 들어오면
+// 전역 명령을 1분마다 쏘게 된다 — 목록에 없는 값은 끄기로 돌린다.
+
+describe('clampCleanupMin', () => {
+  it('고를 수 있는 값은 그대로 둔다', async () => {
+    const { clampCleanupMin, CLEANUP_MINUTES } = await import('./useViewOptions');
+    for (const m of CLEANUP_MINUTES) expect(clampCleanupMin(m)).toBe(m);
+  });
+
+  it('목록에 없는 값은 끄기로 돌린다 — 전역 명령을 1분마다 쏘면 안 된다', async () => {
+    const { clampCleanupMin } = await import('./useViewOptions');
+    expect(clampCleanupMin(1)).toBe(0);
+    expect(clampCleanupMin(-5)).toBe(0);
+    expect(clampCleanupMin('자주')).toBe(0);
+    expect(clampCleanupMin(undefined)).toBe(0);
+  });
+
+  it('기본은 끄기다 — 남의 화면을 건드리는 일을 기본으로 켜 둘 수는 없다', async () => {
+    const { CLEANUP_MINUTES } = await import('./useViewOptions');
+    expect(CLEANUP_MINUTES[0]).toBe(0);
+  });
+});

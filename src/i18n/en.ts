@@ -340,6 +340,18 @@ export const EN: Record<string, string> = {
   '기록 수준': 'Log level',
   // 테마 — 이름과 설명은 `THEMES` 가 변수로 넘기므로 훑기 검사가 못 잡는다. 손으로 넣는다.
   '테마': 'Theme',
+  // 비활성 정리
+  '비활성 자동 정리': 'Auto-remove inactive',
+  '비활성 정리': 'Remove inactive',
+  '정리 중…': 'Removing…',
+  '끄기': 'Off',
+  '분': ' min',
+  '콜렉터는 내려간 서버를 스스로 지우지 않습니다. Task 가 자주 갈리는 곳에서는 목록이 계속 늘어납니다.':
+    'The collector never removes downed servers on its own. Where tasks churn, the list keeps growing.',
+  '※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 끄기입니다.':
+    '※ Removal is collector-wide — it also disappears for anyone else watching the same servers. That is why the default is off.',
+  '콜렉터에서 내려간 서버를 지웁니다. **같은 콜렉터를 보는 다른 사람 화면에서도** 사라집니다':
+    'Removes downed servers from the collector — they also disappear for anyone else watching it',
   // 서비스 묶기 설정
   '서비스 묶기': 'Service grouping',
   '한 서비스가 여러 대로 뜨는 곳(ECS · 쿠버네티스)에서, 어느 Task 가 어느 서비스인지를 정합니다.':

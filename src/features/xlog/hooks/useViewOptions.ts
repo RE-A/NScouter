@@ -26,6 +26,8 @@ export interface ViewOptions {
   theme: ThemeId;
   /** 어느 Task 가 어느 논리 서비스인가 */
   groupRule: GroupRule;
+  /** 비활성 자동 정리 주기(분). **0 이면 끕** — 전역이라 기본값이다 */
+  autoRemoveInactiveMin: number;
 }
 
 /** 화면에서 고를 수 있는 배율. 사이 값이 오면 가장 가까운 것으로 붙인다 */
@@ -44,6 +46,20 @@ export function clampFontScale(v: unknown): number {
 }
 
 /**
+ * 고를 수 있는 정리 주기(분). **0 은 끕이다.**
+ *
+ * 자유 입력을 안 받는 이유는 글자 크기와 같다 — 1분 같은 값이 들어오면
+ * 전역 명령을 1분마다 쏘다.
+ */
+export const CLEANUP_MINUTES = [0, 30, 60, 360] as const;
+
+/** 목록에 없는 값은 끕으로 돌린다 — 설정 파일은 사람이 여는 곣이다 */
+export function clampCleanupMin(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return CLEANUP_MINUTES.includes(n as (typeof CLEANUP_MINUTES)[number]) ? n : 0;
+}
+
+/**
  * 기본값.
  *
  * **채우기가 기본이다.** `where id=?` 만 봐서는 무슨 값으로 느렸는지 알 수 없다.
@@ -55,6 +71,7 @@ const DEFAULTS: ViewOptions = {
   bufferMax: DEFAULT_MAX_ITEMS,
   theme: DEFAULT_THEME,
   groupRule: DEFAULT_GROUP_RULE,
+  autoRemoveInactiveMin: 0,
 };
 
 let current: ViewOptions = DEFAULTS;
@@ -81,6 +98,7 @@ function fromConfig(cfg: AppConfig): ViewOptions {
       tagKey: cfg.group_rule?.tag_key ?? DEFAULT_GROUP_RULE.tagKey,
       pattern: cfg.group_rule?.pattern ?? DEFAULT_GROUP_RULE.pattern,
     },
+    autoRemoveInactiveMin: clampCleanupMin(cfg.auto_remove_inactive_min),
   };
 }
 
@@ -124,6 +142,7 @@ export async function setViewOption<K extends keyof ViewOptions>(
       xlog_buffer_max: current.bufferMax,
       ui_theme: current.theme,
       group_rule: { tag_key: current.groupRule.tagKey, pattern: current.groupRule.pattern },
+      auto_remove_inactive_min: current.autoRemoveInactiveMin,
     });
   } catch {
     // 저장 실패는 화면을 되돌릴 이유가 못 된다. 다음 실행에 기본값으로 돌아갈 뿐이다.

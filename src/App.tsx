@@ -66,6 +66,7 @@ import {
   onConnected,
   onDisconnected,
   getObjectList,
+  removeInactiveObjects,
   getObjectTypeFamilies,
   getXLogDetail,
   startCounterStream,
@@ -211,7 +212,7 @@ export default function App() {
   // **여기서 한 번은 불러야 한다.** 표시 설정(언어·글자 크기)은 이걸 처음 쓰는
   // 컴포넌트가 마운트될 때 config.json 을 읽는데, 그게 상세 패널이라
   // 앱을 켜고 아무것도 안 열면 저장해 둔 설정이 적용되지 않았다.
-  const { groupRule } = useViewOptions();
+  const { groupRule, autoRemoveInactiveMin } = useViewOptions();
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -671,6 +672,33 @@ export default function App() {
     // 왼쪽 목록이 해시만 넘기는 경로(«전부 풀기» 등). 그룹은 건드리지 않는다.
     setGroupSel(prev => ({ services: hashes.size === 0 ? new Set() : prev.services, hashes }));
   }, []);
+
+  /**
+   * 비활성 정리. 지운 뒤에는 명단도 비워 **다음 갱신을 기다리지 않는다.**
+   *
+   * 이름은 안 비운다 — 지운 오브젝트가 남긴 XLog 는 화면에 그대로 있고,
+   * 그 이름을 잃으면 `#해시` 로 덮인다 (`agentNames.ts`).
+   */
+  const handleCleanupInactive = useCallback(async () => {
+    await removeInactiveObjects();
+    objectsRef.current = objectsRef.current.filter(a => a.alive);
+    setObjects(objectsRef.current);
+  }, []);
+
+  /**
+   * 자동 정리. **기본은 끕이다**(0) — 전역이라 남의 화면까지 바뀜다.
+   *
+   * 콜렉터가 죽은 오브젝트를 스스로 안 지우므로(F-60) ECS 처럼 Task 가 계속
+   * 갈리는 곳에서는 명단이 끝없이 는다. 그런 곣에서만 켜면 된다.
+   */
+  useEffect(() => {
+    if (!isConnected || autoRemoveInactiveMin <= 0) return;
+    const timer = setInterval(
+      () => { void handleCleanupInactive().catch(() => {}); },
+      autoRemoveInactiveMin * 60_000,
+    );
+    return () => clearInterval(timer);
+  }, [isConnected, autoRemoveInactiveMin, handleCleanupInactive]);
 
   const handleToggleService = useCallback(
     (name: string) => setGroupSel(prev => toggleService(prev, name)),
@@ -1425,6 +1453,7 @@ export default function App() {
             selectedServices={groupSel.services}
             onToggleService={handleToggleService}
             onPickTask={handlePickTask}
+            onCleanup={handleCleanupInactive}
             onAgentsLoaded={handleAgentsLoaded}
             groupBy={agentGroupBy}
             onGroupByChange={setAgentGroupBy}

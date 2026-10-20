@@ -5,6 +5,8 @@ import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
 import {
   applyConfigToViewOptions,
   clampFontScale,
+  clampCleanupMin,
+  CLEANUP_MINUTES,
   FONT_SCALES,
 } from '../xlog/hooks/useViewOptions';
 import { T, F, FONT_MONO } from '../../styles/tokens';
@@ -86,6 +88,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
    * 몇 개 묶음이 나오는지를 보여 줌다 — 0 이면 규칙이 안 맞는 것이다.
    */
   const [sample, setSample] = useState<AgentObject[]>([]);
+  /** 비활성 자동 정리 주기(분). 0 은 끕 */
+  const [cleanupMin, setCleanupMin] = useState(0);
 
   /** 지금 규칙으로 몇 개가 묶이나 — 정규식이 깨져 있으면 그것도 여기서 말한다 */
   const rulePreview = useMemo(() => {
@@ -116,6 +120,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setLangValue(toLang(cfg.ui_language));
       const th = toTheme(cfg.ui_theme);
       setTheme(th);
+      setCleanupMin(clampCleanupMin(cfg.auto_remove_inactive_min));
       setGroupRule({
         tagKey: cfg.group_rule?.tag_key ?? DEFAULT_GROUP_RULE.tagKey,
         pattern: cfg.group_rule?.pattern ?? DEFAULT_GROUP_RULE.pattern,
@@ -145,6 +150,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         ui_language: lang,
         ui_theme: theme,
         group_rule: { tag_key: groupRule.tagKey, pattern: groupRule.pattern },
+        auto_remove_inactive_min: cleanupMin,
         xlog_buffer_max: bufferMax,
       };
       await saveConfig(next);
@@ -162,7 +168,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     }
     // **여기 빠뜨리면 조용히 옛 값이 저장된다.** `theme` 이 빠져 있어서, 테마를 고르고
     // 저장하면 처음 값(dark)이 그대로 쓰였다 — 화면에서는 「바꿔도 안 먹는다」로 보인다.
-  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, theme, groupRule]);
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, theme, groupRule, cleanupMin]);
 
   // ESC 닫기
   useEffect(() => {
@@ -297,6 +303,35 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
             {/* **정규식은 눈으로만 보고 맞추기 어렵다.** 지금 붙어 있는 서버로
                 몇 개로 묶이는지를 바로 보여 준다 — 0 이면 규칙이 안 맞는 것이다. */}
             <div style={{ ...sectionDescStyle, marginTop: 6 }}>{rulePreview}</div>
+
+            {/* 비활성 정리 — 서비스 묶기 옆에 둔다. Task 가 갈리면서 쌓이는 것이라
+                같은 이야기의 뒷면이다. */}
+            <div style={{ ...sectionTitleStyle, marginTop: 14 }}>{t('비활성 자동 정리')}</div>
+            <div style={sectionDescStyle}>
+              {t('콜렉터는 내려간 서버를 스스로 지우지 않습니다. Task 가 자주 갈리는 곳에서는 목록이 계속 늘어납니다.')}
+              <br />
+              <span style={{ color: T.warn }}>
+                {t('※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 끄기입니다.')}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              {CLEANUP_MINUTES.map(m => (
+                <button
+                  key={m}
+                  onClick={() => setCleanupMin(m)}
+                  aria-pressed={cleanupMin === m}
+                  style={{
+                    ...scaleBtnStyle,
+                    fontSize: F.small,
+                    borderColor: cleanupMin === m ? T.accent : T.borderControl,
+                    color: cleanupMin === m ? T.text : T.textDim,
+                    background: cleanupMin === m ? T.bgHover : 'transparent',
+                  }}
+                >
+                  {m === 0 ? t('끄기') : m < 60 ? `${m}${t('분')}` : `${m / 60}${t('시간')}`}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* 글자 크기 */}
