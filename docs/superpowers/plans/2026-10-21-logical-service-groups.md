@@ -327,3 +327,87 @@ it('정규식이 깨져 있으면 저장 전에 말해 준다', () => { /* ... *
 - **datasource 중복(18번)** — 에이전트가 `getObjName() + "/" + poolName` 으로 짓는 것이 바이트코드로 확인됐다. 부모 `obj_name` 만 유니크하게 하면 자동으로 따라온다(테스트 환경에서 실측). 화면 쪽에서 할 일이 없다
 - **ECS 메타데이터 직접 조회** — 클라이언트는 ECS API 를 모른다. 태그로 들어오면 Task 1 의 ① 이 받는다
 - **그룹 단위 집계 수치** (그룹 TPS·평균 응답) — 합쳐 조회하면 기존 집계가 그대로 돈다. 그룹별 비교표는 별건이다
+
+---
+
+### Task 9: 비활성 오브젝트 정리 (수동 + 주기)
+
+**Files:**
+- Create: `src/features/xlog/hooks/agentNames.ts` — 이름 영구 캐시
+- Create: `src/features/xlog/hooks/agentNames.test.ts`
+- Modify: `src-tauri/src/commands.rs` — `remove_inactive_objects` 커맨드
+- Modify: `src-tauri/src/lib.rs` — 핸들러 등록
+- Modify: `src-tauri/src/config.rs` — `auto_remove_inactive_min: u32`
+- Modify: `src/features/xlog/api/scouterApi.ts`
+- Modify: `src/features/xlog/components/AgentSelectorPanel.tsx` — 정리 버튼
+- Modify: `src/features/settings/SettingsDialog.tsx` — 주기 설정
+- Modify: `src/App.tsx` — 주기 실행
+
+**왜 필요한가 (F-60):** 콜렉터는 죽은 오브젝트를 **영원히 들고 있다.**
+`object_deadtime_ms` 는 「죽었다고 표시」할 시점만 정하고 자동 삭제 설정이 없다.
+ECS 에서는 Task 가 갈릴 때마다 이름이 달라지므로 재배포 한 번에 Task 수만큼 쌓인다.
+
+**조심할 것 둘.**
+
+1. **전역이다.** `OBJECT_REMOVE_INACTIVE` 는 콜렉터의 목록을 지운다 — 같은 콜렉터에
+   붙은 **다른 사람 화면에서도** 사라진다. 그래서 주기 실행은 **기본 꺼짐**이고,
+   화면이 그 사실을 말해야 한다.
+2. **이름이 끊긴다.** 제거는 `ObjectMap.remove` 와 `ObjectWR.remove`(오늘자 오브젝트 DB)
+   둘을 건드린다. 지우고 나면 **오늘 받은 XLog 의 서버 이름이 안 풀린다.**
+   ASIS 가 `TextProxy.object.putText` 로 이름만 영구 캐시해 둔 이유가 이것이다.
+   → **이름 캐시가 먼저다.** 그것 없이 정리를 켜면 과거 조회가 `#해시` 로 덮인다.
+
+**Interfaces:**
+- Produces:
+  - `rememberNames(agents: readonly AgentObject[]): void` — 본 적 있는 objHash→objName 을 쌓는다. **지우지 않는다**
+  - `nameOf(objHash: number): string | undefined`
+  - `clearNames(): void` — 콜렉터를 갈아탈 때만. 해시는 이름의 해시라 서버가 달라도 같을 수 있다(F-35)
+  - Rust: `#[tauri::command] async fn remove_inactive_objects(state) -> Result<(), String>` — `request_objtype_maps` 가 아니라 단건 요청(`OBJECT_REMOVE_INACTIVE`, 파라미터 없음)
+  - 설정: `auto_remove_inactive_min` — 0 이면 끔(**기본값**), 그 외는 분 단위 주기
+
+- [ ] **Step 1: 이름 캐시의 실패하는 테스트를 쓴다**
+
+```ts
+it('한 번 본 이름은 목록에서 사라져도 남는다', () => { /* ... */ });
+it('이름이 바뀌면 새 이름으로 갱신한다 — 같은 해시면 같은 이름이지만 대비한다', () => { /* ... */ });
+it('콜렉터를 갈아타면 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다 (F-35)', () => { /* ... */ });
+```
+
+- [ ] **Step 2: 실패를 확인한다** — `npx vitest run src/features/xlog/hooks/agentNames.test.ts`
+
+- [ ] **Step 3: `agentNames.ts` 를 구현하고 `App` 의 `agentMap` 을 여기로 바꾼다**
+
+`agentMap` 은 지금 살아 있는 목록에서 매번 다시 만든다 — 그래서 오브젝트가 사라지면
+이름이 끊긴다. 캐시를 거쳐 읽게 한다.
+
+- [ ] **Step 4: 통과를 확인한다**
+
+- [ ] **Step 5: 커밋**
+
+- [ ] **Step 6: Rust 커맨드를 더하고 `live_collector` 에 실측 테스트를 쓴다**
+
+```rust
+#[ignore] #[tokio::test] async fn live_remove_inactive() { /* 응답이 오는지, 목록이 줄었는지 */ }
+```
+
+- [ ] **Step 7: 실측으로 확인한다**
+
+Run: `cargo test --test live_collector live_remove_inactive -- --ignored --nocapture`
+Expected: PASS — 명령이 받아들여지고, 직전/직후 목록 길이가 찍힌다
+
+- [ ] **Step 8: 커밋**
+
+- [ ] **Step 9: 화면 — 서버 목록에 「비활성 정리」 버튼**
+
+죽은 것이 하나도 없으면 **그리지 않는다.** 누를 이유가 없는 버튼은 자리만 먹는다.
+누르면 몇 개를 지울지 먼저 말하고 확인을 받는다 — **다른 사람 화면에서도 사라진다**는 것을
+그 자리에서 적는다.
+
+- [ ] **Step 10: 설정 — 자동 정리 주기 (기본 끔)**
+
+`0`(끔) · `30분` · `1시간` · `6시간`. 자유 입력을 받지 않는 이유는 글자 크기와 같다.
+**끔이 기본인 이유를 설명 줄에 적는다** — 전역이라 남의 화면까지 바뀐다.
+
+- [ ] **Step 11: 통과를 확인한다** — 전체 + `cargo test`
+
+- [ ] **Step 12: 커밋**
