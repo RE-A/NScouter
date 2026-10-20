@@ -85,6 +85,18 @@ import { alertWatchMessage } from './features/xlog/utils/alertWatch';
 import { useAlertStream } from './features/xlog/hooks/useAlertStream';
 import { MAX_DETAIL_TABS, useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
 import {
+  activeTab as activeXLogTab,
+  addTab as addXLogTab,
+  closeTab as closeXLogTab,
+  activate as activateXLogTab,
+  initialTabs,
+  patchActive as patchActiveTab,
+  setSelection as setTabSelection,
+  type XLogTabsState,
+} from './features/xlog/hooks/xlogTabs';
+import { XLogTabBar } from './features/xlog/components/XLogTabBar';
+import { mergeObjects } from './features/xlog/hooks/objectRefresh';
+import {
   fromTabs as detailsFromTabs,
   normalize as normalizeOpenDetails,
   type OpenDetail,
@@ -94,17 +106,15 @@ import { useShortcuts } from './features/xlog/hooks/useShortcuts';
 import {
   toLayout,
   fromLayout,
-  toChartConfig,
   fromChartConfig,
-  toFilterState,
   fromFilterState,
+  toTabs as toXLogTabs,
+  fromTabs as xlogTabsToPrefs,
 } from './features/xlog/hooks/uiState';
 import type { GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
 import type { AgentObject, SXLog, XLogChartConfig, XLogFilterState, YAxisMode } from './features/xlog/types/xlog';
 import {
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_FILTER,
   formatYValue,
   Y_AXIS_CONFIGS,
   xlogPackToSXLog,
@@ -208,13 +218,57 @@ export default function App() {
    */
   const isDemo = serverId === 'DEMO (합성 데이터)';
   const [showCollectorConfig, setShowCollectorConfig] = useState(false);
-  const [config, setConfig] = useState<XLogChartConfig>(DEFAULT_CHART_CONFIG);
-  const [filter, setFilter] = useState<XLogFilterState>(DEFAULT_FILTER);
+  /**
+   * XLog 탭들.
+   *
+   * 조건(모드·구간·차트 설정·거름)은 **탭마다** 다르다 — «어제 이 시간엔
+   * 어때나» 를 보려고 지금 조건을 지우고 되돌리는 일을 없애려는 것이다.
+   * **서버 고르기만은 탭 바깥이다**(아래 «서버 고르기는 탭 바깥이다» 참고).
+   *
+   * 아래 `config`·`filter` 등은 **활성 탭에서 파생**시킨다. 그래야 탭을
+   * 몰랐던 쪽(툴바·차트·상세)이 그대로 산다.
+   */
+  const [xlogTabs, setXLogTabs] = useState<XLogTabsState>(initialTabs);
+  const curTab = activeXLogTab(xlogTabs);
+  const config = curTab.config;
+  const filter = curTab.filter;
+  const xlogMode = curTab.mode;
+  const pastRange = curTab.pastRange;
+
+  const setConfig = useCallback(
+    (v: XLogChartConfig | ((p: XLogChartConfig) => XLogChartConfig)) =>
+      setXLogTabs(s =>
+        patchActiveTab(s, {
+          config: typeof v === 'function' ? v(activeXLogTab(s).config) : v,
+        }),
+      ),
+    [],
+  );
+  const setFilter = useCallback(
+    (v: XLogFilterState | ((p: XLogFilterState) => XLogFilterState)) =>
+      setXLogTabs(s =>
+        patchActiveTab(s, {
+          filter: typeof v === 'function' ? v(activeXLogTab(s).filter) : v,
+        }),
+      ),
+    [],
+  );
+  const setXLogMode = useCallback(
+    (v: XLogMode | ((p: XLogMode) => XLogMode)) =>
+      setXLogTabs(s =>
+        patchActiveTab(s, { mode: typeof v === 'function' ? v(activeXLogTab(s).mode) : v }),
+      ),
+    [],
+  );
+  const setPastRange = useCallback(
+    (v: PastRange | null) => setXLogTabs(s => patchActiveTab(s, { pastRange: v })),
+    [],
+  );
+
   const [selectedXLogs, setSelectedXLogs] = useState<SXLog[]>([]);
   /** 목록의 ✕ 가 캔버스의 선택 사각형까지 지우도록 보내는 신호 */
   const [clearSignal, setClearSignal] = useState(0);
   /** 실시간 / 과거. 과거면 pastRange 가 실제 조회 구간이다 */
-  const [xlogMode, setXLogMode] = useState<XLogMode>('live');
   /**
    * F5 를 누른 횟수 — **지금 보는 화면의 데이터만** 다시 받게 하는 신호.
    *
@@ -222,8 +276,15 @@ export default function App() {
    * 보는 화면마다 «다시 받는다» 의 뜻이 달라서, 각 화면이 이 값을 보고 제 일을 한다.
    */
   const [refreshSignal, setRefreshSignal] = useState(0);
-  const [pastRange, setPastRange] = useState<PastRange | null>(null);
   const [agentMap, setAgentMap] = useState<Map<number, string>>(new Map());
+  /**
+   * 지금 알고 있는 오브젝트 전부 (방금 내려간 것 포함).
+   *
+   * 그룹은 이 명단에서 **매번 다시 푸는다** — 묶음을 들고 있으면 Task 가 갈릴 때마다 틀어진다.
+   * 합치는 일에 직전 명단이 필요해서 ref 에도 둔다 — 상태만 쓰면 주기 갱신이
+   * 매번 옥 값을 보게 된다(효과는 접속당 한 번만 선다).
+   */
+  const objectsRef = useRef<AgentObject[]>([]);
   /** 카운터 요청 대상. Family 별로 나눠 둔다 — 화면도 Family 로 나눈다 */
   const [counterHashes, setCounterHashes] = useState<{
     javaee: number[];
@@ -285,11 +346,9 @@ export default function App() {
         setTableH(l.tableH);
         setActiveTab(l.activeTab);
         setAgentGroupBy(l.agentGroupBy);
-        setConfig(toChartConfig(cfg.xlog_chart));
         // 조회 조건도 되살린다. **껐다 켜면 다 날아간다** 가 현장에서 가장 많이 나온 말이다.
-        const f = toFilterState(cfg.xlog_filter);
-        setFilter(f.filter);
-        setXLogMode(f.mode);
+        // 탭은 **조건만** 되살린다 — 받아 둔 것은 열면 이미 지나간 것이라 다시 조회한다.
+        setXLogTabs(toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter));
         // 프로필 목록이 없으면 **예전 설정에서 하나 만든다** — 앱을 올리자마자
         // «어제까지 붙던 서버» 를 다시 쳐야 하는 것은 퇴보다.
         const list = normalize(cfg.servers);
@@ -326,6 +385,7 @@ export default function App() {
           await saveConfig({
             ...cfg,
             open_details: detailsFromTabs(detail.tabs, toDateString),
+            xlog_tabs: xlogTabsToPrefs(xlogTabs),
           });
         } catch {
           // 탭 저장 실패가 화면을 되돌릴 이유는 없다
@@ -369,6 +429,7 @@ export default function App() {
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
         setSelectedXLogs([]); setAgentMap(new Map());
+        objectsRef.current = [];
         setCounterHashes({ javaee: [], host: [], datasource: [] });
         setObjTypeOf(new Map()); clearDetail();
         // 콜렉터마다 사이트 정의가 다르다. 다른 콜렉터의 종류 표를 들고 가면 안 된다.
@@ -377,18 +438,32 @@ export default function App() {
     );
   }, [clearDetail]);
 
+  /**
+   * 오브젝트 목록을 **계속 따라간다.**
+   *
+   * 예전에는 접속할 때 한 번만 읽었다. 왼쪽 패널만 10초마다 다시 읽고 있어서,
+   * 새 Task 가 띄면 **거기에만 보이고** 카운터 대상에는 안 들어가고 이름이 `#해시` 로
+   * 남았다 — ECS 에서 Task 는 수시로 갈리므로 명단을 사진처럼 찍어 두면 금방 틀어진다.
+   *
+   * 주기는 왼쪽 패널과 **같은 10초**다. 다르면 화면 두 곣이 서로 다른 명단을 보여준다.
+   */
   // 카운터는 objHash 목록이 필요하다.
   // AgentSelectorPanel 은 XLog 탭에서만 마운트되므로 그쪽에 의존하면
   // 다른 탭으로 접속했을 때 카운터가 영영 시작되지 않는다. 여기서 직접 조회한다.
   useEffect(() => {
     if (!isConnected) { setCounterHashes({ javaee: [], host: [], datasource: [] }); return; }
     let cancelled = false;
+    const load = () => {
     // **종류를 가르기 전에 콜렉터의 종류→Family 표부터 받는다.** 커스텀 종류
     // (`monitoring_group_type`)는 이름 목록에 없어서, 표 없이 가르면 WAS 가 통째로 빠진다.
     // 표를 못 받아도(옛 콜렉터) 목록은 연다 — 그때는 `detected` 태그로 배운다.
     Promise.all([getObjectList(), getObjectTypeFamilies().catch(() => [])])
-      .then(([list, families]) => {
+      .then(([fresh, families]) => {
         if (cancelled) return;
+        // 사라진 Task 를 바로 지우지 않는다 — 재배포 중 몇 초 비는 사이에
+        // 서버가 화면에서 통째로 사라지면 «장애» 로 읽힌다.
+        const list = mergeObjects(objectsRef.current, fresh, Date.now());
+        objectsRef.current = list;
         registerObjectTypeFamilies(families);
         learnFamiliesFromObjects(list);
         // Family 를 나눠 둔다. 요청은 합쳐 보내도 되지만(실측 확인),
@@ -410,7 +485,11 @@ export default function App() {
         });
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    };
+
+    load();
+    const timer = setInterval(load, 10_000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [isConnected]);
 
   useEffect(() => {
@@ -536,6 +615,20 @@ export default function App() {
     [persistServers],
   );
 
+  /** 탭을 옮기면 고른 점을 버린다 — 다른 탭의 점이 남아 있으면 어느 탭 것인지 모른다 */
+  const handleXLogTabActivate = useCallback((key: string) => {
+    setXLogTabs(s => activateXLogTab(s, key));
+    setSelectedXLogs([]);
+  }, []);
+  const handleXLogTabAdd = useCallback(() => {
+    setXLogTabs(addXLogTab);
+    setSelectedXLogs([]);
+  }, []);
+  const handleXLogTabClose = useCallback((key: string) => {
+    setXLogTabs(s => closeXLogTab(s, key));
+    setSelectedXLogs([]);
+  }, []);
+
   const removeServer = useCallback(
     (profile: ServerProfile) => {
       setServers(prev => {
@@ -546,8 +639,10 @@ export default function App() {
     },
     [persistServers, currentServer],
   );
+  // **모든 탭에 적는다.** 고르기는 탭 바깥인데 거름(`filter`)은 탭마다라
+  // 그 안에 같이 산다. 지금 탭에만 적으면 다른 탭에서 예전 선택이 되살아난다.
   const handleAgentSelectionChange = useCallback((hashes: Set<number>) => {
-    setFilter(prev => ({ ...prev, objHashSet: hashes }));
+    setXLogTabs(s => setTabSelection(s, hashes));
   }, []);
   // 구간을 바꾸면 이전 구간에서 고른 트랜잭션은 의미가 없다. 같이 비운다.
   const handlePastRangeChange = useCallback((r: PastRange | null) => {
@@ -905,8 +1000,10 @@ export default function App() {
    *
    * XLog 가 보는 것은 Family 가 아니라 **지금 고른 서버**다. 아무것도 안 골랐으면
    * 조회할 것도 없다 — 실시간 스트림과 같은 규칙이다.
+   *
+   * 차트에는 **그 탭의** 것을 넣는다(탭마다 딸로 든다). 여기는 그 밖의
+   * 쓰는 곳을 위해 활성 탭 기준으로 남겨 둔다.
    */
-  const pastObjHashes = useMemo(() => [...filter.objHashSet], [filter.objHashSet]);
 
   /**
    * 지금 그릴 오브젝트를 Family 로 나눈 것.
@@ -1024,7 +1121,7 @@ export default function App() {
    * 서버를 바꿔도 유지되는 편이 맞다.
    */
   const drillToXLog = useCallback((objHash: number) => {
-    setFilter(prev => ({ ...prev, objHashSet: new Set([objHash]) }));
+    setXLogTabs(s => setTabSelection(s, new Set([objHash])));
     setActiveTab('xlog');
   }, []);
 
@@ -1274,6 +1371,14 @@ export default function App() {
       {/* ── XLog 탭 ── */}
       {activeTab === 'xlog' && (
         <div style={tabBodyStyle}>
+          {/* 탭 줄은 툴바 **위**다 — 툴바는 «지금 탭의 조건» 이라 그 안에 들어가야 한다 */}
+          <XLogTabBar
+            tabs={xlogTabs.tabs}
+            activeKey={xlogTabs.activeKey}
+            onActivate={handleXLogTabActivate}
+            onClose={handleXLogTabClose}
+            onAdd={handleXLogTabAdd}
+          />
           <XLogToolbar
             config={config}
             filter={filter}
@@ -1300,21 +1405,33 @@ export default function App() {
                 {nothingPicked && isConnected ? (
                   <EmptyState text={t('왼쪽에서 볼 서버를 고르세요.')} />
                 ) : (
-                <div className="h-full p-2">
-                  <XLogChart
-                    config={config}
-                    filter={filter}
-                    onSelect={handleXLogSelect}
-                    connected={isConnected}
-                    connectionEpoch={connectionEpoch}
-                    clearSignal={clearSignal}
-                    pastRange={pastRange}
-                    refreshSignal={refreshSignal}
-                    objHashes={pastObjHashes}
-                    onConfigChange={handleConfigChange}
-                    onPastRangeChange={setPastRange}
-                  />
-                </div>
+                /* **탭을 전부 띄워 둔다.** 보는 것만 달면 돌아올 때마다 다시 조회해야 해,
+                   여러 날짜를 오가며 견주는 일이 매번 몇 초씩 기다리는 일이 된다.
+                   다만 받고 그리는 것은 보는 판만 한다(`active`) — 안 그러면 탭 수만큼
+                   같은 스트림이 쌓이고 숨겨둔 판에 매 프레임 헛돈을 쓴다. */
+                <>
+                  {xlogTabs.tabs.map(tab => {
+                    const on = tab.key === xlogTabs.activeKey;
+                    return (
+                      <div key={tab.key} className={on ? 'h-full p-2' : 'hidden'}>
+                        <XLogChart
+                          config={tab.config}
+                          filter={tab.filter}
+                          onSelect={handleXLogSelect}
+                          connected={isConnected}
+                          connectionEpoch={connectionEpoch}
+                          clearSignal={clearSignal}
+                          pastRange={tab.pastRange}
+                          refreshSignal={refreshSignal}
+                          objHashes={[...tab.filter.objHashSet]}
+                          onConfigChange={handleConfigChange}
+                          onPastRangeChange={setPastRange}
+                          active={on}
+                        />
+                      </div>
+                    );
+                  })}
+                </>
                 )}
               </Pane>
 
