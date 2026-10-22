@@ -40,46 +40,53 @@ NScouter는 Java 기반 Scouter Eclipse 클라이언트를 **Tauri + Rust + Reac
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         프레젠테이션 레이어                            │
 │                                                                       │
-│   App.tsx          XLogChart.tsx      XLogToolbar.tsx                │
-│   (라우팅/레이아웃)  (Canvas 래핑)     (필터/Y축 모드)                 │
-│                    ConnectionDialog.tsx                              │
+│   App.tsx — 상단 탭 xlog / active / visualize / counter / alert      │
+│   features/xlog/components   XLog 차트·목록·상세·검색·오브젝트 작업  │
+│   features/active            액티브 서비스 탭                          │
+│   features/visualize         KPI·분포·타임라인 탭                     │
+│   features/settings, config  앱 설정 / 에이전트·서버 설정 편집        │
+│   components/                Pane·Divider·ContextMenu 등 공용 UI      │
 ├─────────────────────────────────────────────────────────────────────┤
 │                         훅 / 상태 레이어                              │
 │                                                                       │
-│   useXLogStream          useXLogCanvas                               │
-│   (Tauri 이벤트 수집)     (rAF 루프, ResizeObserver, 드래그)          │
+│   useXLogStream          useXLogCanvas         그 밖의 use*.ts       │
+│   (xlog-data 수집)        (rAF 루프, ResizeObserver, 드래그)          │
 │        │                      │                                       │
 │        ▼                      ▼                                       │
 │   XLogDataStore        XLogChartRenderer                             │
-│   (시간 윈도우 관리)    (Canvas 렌더링 오케스트레이터)                 │
+│   (시간 창 + 건수 상한)  (Canvas 렌더링 오케스트레이터)                │
 ├─────────────────────────────────────────────────────────────────────┤
 │                         엔진 레이어 (Canvas 렌더러)                    │
 │                                                                       │
 │   CoordinateMapper   PointMap        DotImageCache   GridCalculator  │
 │   (좌표 변환)         (O(1) 충돌감지)  (OffscreenCanvas)  (눈금 계산) │
+│   yScale  densityGrid  pixelQuery  rectSelect                        │
 ├─────────────────────────────────────────────────────────────────────┤
 │                         API 레이어 (Tauri IPC)                        │
 │                                                                       │
-│   scouterApi.ts                                                      │
-│   invoke: connect / disconnect / start_stream / stop_stream          │
-│   listen: xlog-data / xlog-error / scouter-connected / disconnected  │
+│   scouterApi.ts — invoke 래퍼 + listen 래퍼 (6장)                    │
+│   subscribe.ts  — listen 해지 Promise 를 안전하게 다룬다              │
+│   connectFlow.ts / pastXLog.ts — 접속 절차, 과거 XLog 페이지 조회     │
 ├═════════════════════════════════════════════════════════════════════╡
 │                      ──── Tauri IPC 경계 ────                         │
 ├═════════════════════════════════════════════════════════════════════╡
 │                         Tauri Command 레이어 (Rust)                   │
 │                                                                       │
-│   commands.rs                                                        │
-│   connect_scouter / disconnect_scouter                               │
-│   start_xlog_stream / stop_xlog_stream                               │
-│   resolve_texts / get_object_list                                    │
+│   commands.rs — Command 전부 (목록의 원본은 lib.rs generate_handler) │
+│   state.rs    — AppState (연결, 조회용 연결 풀, 스트림 토큰, 설정)    │
+│   config.rs   — config.json 읽기/쓰기                                │
+│   profile_store.rs / export_store.rs — 프로파일 저장, CSV 내보내기    │
 ├─────────────────────────────────────────────────────────────────────┤
-│                         Scouter 프로토콜 레이어 (Rust)                 │
+│                         Scouter 프로토콜 레이어 (Rust, scouter/)      │
 │                                                                       │
 │   connection.rs        streaming.rs       dictionary.rs              │
-│   (TCP 연결/로그인)     (폴링 루프)         (hash→text 캐시)           │
-│        │                    │                                         │
+│   (TCP 연결/로그인)     (XLog 폴링 루프)    (hash→text 캐시)           │
+│   xlog_columns.rs (열 묶음 직렬화)  counter / alert / object /       │
+│   objtype / family / past / search / profile / profile_search /     │
+│   summary / distribution / trace / configure (명령별 파라미터·파싱)  │
+│        │                                                              │
 │   pack.rs              value.rs           codec.rs                   │
-│   (XLogPack/MapPack)   (ScouterValue)     (ScouterReader/Writer)      │
+│   (XLogPack/MapPack…)  (ScouterValue)     (ScouterReader/Writer)      │
 │        │                    │                    │                    │
 │        └────────────────────┴────────────────────┘                   │
 │                         protocol.rs (상수)                            │
@@ -117,31 +124,37 @@ NScouter는 Java 기반 Scouter Eclipse 클라이언트를 **Tauri + Rust + Reac
   │                     │                       │                     │
   │                     │ invoke(start_xlog_stream)                   │
   │                     │──────────────────────►│                     │
-  │                     │                       │ 폴링 루프 시작      │
-  │                     │                       │                     │
+  │                     │                       │ 스트림 전용 연결로   │
+  │                     │                       │ 재로그인 후 폴링 시작│
+  │                     │                       │ (tokio::spawn, 즉시 │
+  │                     │                       │  반환)              │
   │                     │                       │ TRANX_REAL_TIME_GROUP_LATEST
   │                     │                       │────────────────────►│
   │                     │                       │◄────────────────────│
   │                     │                       │ XLogPack (Blob)     │
-  │                     │ emit(xlog-data, xlog) │                     │
+  │                     │ emit(xlog-data,       │                     │
+  │                     │   XLogColumns ≤500건) │                     │
   │                     │◄──────────────────────│                     │
   │ 차트에 점 표시       │                       │                     │
   │◄────────────────────│ rAF → render()        │                     │
   │                     │                       │ (500ms 후 반복...)  │
 ```
 
+일시 오류는 `xlog-error` 를 보내고 1초 뒤 다시 폴링한다. 세션 만료(`INVALID_SESSION`)면
+`xlog-error` 를 보내고 루프를 끝낸다 — 자동 재로그인은 없다 (`streaming.rs`).
+
 ### 3.2 XLog 데이터 렌더링 파이프라인
 
 ```
-Tauri 이벤트 "xlog-data"
+Tauri 이벤트 "xlog-data" (XLogColumns — 행이 아니라 열 묶음)
         │
         ▼
-useXLogStream.onXLogData()
-        │  xlogPackToSXLog() 변환
+useXLogStream (onXLogData 구독)
+        │  xlogColumnsToSXLogs() 변환
         ▼
-XLogDataStore.add(sxlog)
+XLogDataStore
   ─ dirty = true
-  ─ 100,000건 상한, 5분 윈도우 자동 prune
+  ─ 시간 창(설정 1~30분)으로 prune, 건수 상한(기본 100,000 · 설정 1만~100만)
         │
         ▼ (rAF 루프에서 dirty 감지)
 useXLogCanvas → XLogChartRenderer.render()
@@ -155,9 +168,11 @@ useXLogCanvas → XLogChartRenderer.render()
         │       ├─ XLogFilterState: 필터 통과 여부
         │       ├─ PointMap.has(): O(1) 충돌 체크
         │       ├─ getDotColor(): objHash/xType/error → 색상
-        │       └─ ctx.drawImage(OffscreenCanvas, px-2, py-2)
+        │       └─ ctx.drawImage(OffscreenCanvas, px-half, py-half)
+        ├─    drawDensity()       밀도 표시 (config.showDensity 일 때만)
         ├─ 6. drawBorder()        테두리
-        └─ 7. drawMetadata()      점 개수, Y축 모드명
+        ├─ 7. drawMetadata()      점 개수, Y축 모드명, 스트림 상태
+        └─    drawSelectionRect() 드래그 선택 영역 (선택 중일 때만)
 ```
 
 ---
@@ -170,9 +185,14 @@ useXLogCanvas → XLogChartRenderer.render()
 commands.rs
     │
     ├── state.rs (AppState)
-    │       ├── ScouterConnection (Mutex)
-    │       ├── TextCache (Mutex)
-    │       └── stream_stop (Arc<AtomicBool>)
+    │       ├── connection: Mutex<Option<ScouterConnection>>  (단건 조회·사전)
+    │       ├── query_pool: Mutex<Vec<ScouterConnection>>     (objType 조회용, 놀리는 것 최대 4개)
+    │       ├── text_cache: Mutex<TextCache>
+    │       ├── streams: StreamTokens  (XLog / Counter / Alert 별 Arc<AtomicBool> 중지 토큰)
+    │       ├── conn_host·port·user·pass  (스트림 전용 연결을 새로 열 때 쓴다)
+    │       └── config: Mutex<AppConfig> + config_path
+    │
+    ├── config.rs / profile_store.rs / export_store.rs
     │
     ├── scouter/connection.rs
     │       ├── scouter/codec.rs   (ScouterReader / ScouterWriter)
@@ -181,11 +201,19 @@ commands.rs
     │       └── scouter/protocol.rs (상수)
     │
     ├── scouter/streaming.rs
-    │       └── → connection.rs (read_next_pack, send_request)
+    │       ├── → connection.rs (read_next_pack, send_request)
+    │       └── → xlog_columns.rs (emit 직렬화)
     │
-    └── scouter/dictionary.rs
-            └── → connection.rs (send_request, read_next_pack)
+    ├── scouter/dictionary.rs
+    │       └── → connection.rs (send_request, read_next_pack)
+    │
+    └── scouter/{counter, alert, object, objtype, family, past, search,
+                 profile, profile_search, summary, distribution, trace, configure}.rs
+            └── 명령별 파라미터 조립 + 응답 파싱 (요청 자체는 commands.rs 가 connection 으로 보낸다)
 ```
+
+카운터·알림 스트림은 `streaming.rs` 가 아니라 `commands.rs` 안의 루프가 2초 간격으로 돈다.
+`mock_server.rs` 는 통합 테스트(L3)용 가짜 Collector 다.
 
 ### 4.2 ScouterConnection 내부 구조
 
@@ -273,19 +301,26 @@ Blob 길이 헤더:
 
 ### 5.1 컴포넌트 트리
 
+주요 것만 적는다. 실제 배치는 `App.tsx` 가 원본이다.
+
 ```
 App.tsx
-├── <header>
-│   ├── ConnectionDialog.tsx
-│   │   └── invoke: connect_scouter, start_xlog_stream
-│   └── 서버 ID 표시
-├── XLogToolbar.tsx
-│   └── Y축 모드 / 시간 범위 / 에러 필터
-├── <main>
-│   └── XLogChart.tsx          ← React.memo
-│       ├── useXLogStream()    ─ Tauri 이벤트 구독
-│       └── useXLogCanvas()    ─ rAF + Canvas 렌더링
-└── <aside> 선택 XLog 목록
+├── 헤더: ServerSwitcher · ConnectionDialog · AlertPanel(알림 배지)
+├── SettingsDialog / ConfigSettingsDialog / FilterDialog   (대화상자)
+├── AgentSelectorPanel                     서버 트리 (타입·그룹·서비스 묶기, 비활성 정리)
+└── 상단 탭
+    ├── xlog
+    │   ├── XLogTabBar · XLogToolbar
+    │   ├── XLogChart            ← React.memo
+    │   │   ├── useXLogStream()  ─ xlog-data 구독 → XLogDataStore
+    │   │   └── useXLogCanvas()  ─ rAF + Canvas 렌더링
+    │   ├── SelectionSummary · XLogSearchBar · XLogTable (App.tsx 안)
+    │   └── DetailTabBar + XLogDetailPanel
+    ├── active     ActiveTab (features/active)
+    ├── visualize  VisualizeTab (features/visualize)
+    ├── counter    ActiveServicePanel · SummaryPanel · TopologyPanel · ServiceGroupPanel ·
+    │              CounterChart · FiveMinCounterChart
+    └── alert      AlertFullView (App.tsx 안, 앱이 쥔 알림 버퍼를 그린다)
 ```
 
 ### 5.2 Canvas 엔진 의존 관계
@@ -319,11 +354,11 @@ XLogChartRenderer
               "xlog-data" 이벤트
                      │
               useXLogStream
-                     │  add(SXLog)
+                     │  add(SXLog[])
                      ▼
               XLogDataStore ──── dirty flag ────►  useXLogCanvas
-              (최대 100,000건)                         │
-              (5분 윈도우)                    rAF 루프 │
+              (상한 기본 100,000건)                    │
+              (시간 창 1~30분)                rAF 루프 │
                                              dirty 감지│
                                                        ▼
                                           XLogChartRenderer.render()
@@ -337,21 +372,31 @@ XLogChartRenderer
 
 ### 6.1 invoke (JS → Rust)
 
-| 커맨드 | 파라미터 | 반환 | 설명 |
-|--------|----------|------|------|
-| `connect_scouter` | `host, port, user, pass` | `void` | TCP 연결 + 로그인 |
-| `disconnect_scouter` | — | `void` | 연결 종료 |
-| `start_xlog_stream` | `objHashes: number[]` | `void` | 스트리밍 시작 |
-| `stop_xlog_stream` | — | `void` | 스트리밍 중지 |
-| `resolve_texts` | `typeKey, hashes` | `Record<number, string>` | hash → 텍스트 |
-| `get_object_list` | — | `MapPack[]` | 에이전트 목록 |
+Command 는 60개가 넘는다. **목록의 원본은 `src-tauri/src/lib.rs` 의 `generate_handler!`**,
+파라미터·반환 타입은 `src/features/xlog/api/scouterApi.ts` 의 래퍼가 원본이다. 여기는 묶음만 적는다.
+
+| 묶음 | 커맨드 |
+|------|--------|
+| 연결 | `connect_scouter` `disconnect_scouter` |
+| 스트림 | `start_xlog_stream` `stop_xlog_stream` `start_counter_stream` `stop_counter_stream` `start_alert_stream` `start_mock_stream` |
+| XLog 조회 | `load_past_xlog` `load_xlog_by_gxid` `search_xlog_list` `get_search_max` `get_xlog_distribution` `get_xlog_detail` |
+| 프로파일 | `get_xlog_profile` `get_xlog_full_profile` `search_profiles` `save_xlog_profile` `list_saved_profiles` `open_saved_profile` `get_profile_dir` |
+| 집계 | `get_summary` `get_error_summary` `get_interaction` `get_service_group` `get_active_speed` `get_active_speed_by_object` `get_past_counter` `get_today_counter` `get_today_visitor` |
+| 오브젝트 | `get_object_list` `remove_inactive_objects` `get_object_type_families` `get_object_env` `get_object_thread_list` `get_object_sockets` `get_object_class_list` `get_object_active_services` `get_type_active_services` `get_object_heap_histogram` `get_thread_detail` `get_stack_index` `get_stack_dump` |
+| 오브젝트 작업 | `trigger_dump` `object_system_gc` `object_reset_cache` `object_stack_sampling` `object_heap_dump` `get_dump_file_list` `get_dump_file_content` |
+| 원격 설정 | `get_agent_config` `save_agent_config` `get_server_config` `save_server_config` |
+| 텍스트 사전 | `resolve_texts` |
+| 앱 설정·파일 | `get_config` `save_config` `save_ui_state` `save_servers` `set_log_level` `save_csv_export` `get_export_dir` |
 
 ### 6.2 emit (Rust → JS)
 
 | 이벤트 | 페이로드 | 설명 |
 |--------|----------|------|
-| `xlog-data` | `XLogPack` (JSON) | XLog 트랜잭션 1건 |
+| `xlog-data` | `XLogColumns` (열 묶음, 최대 500건) | XLog 트랜잭션 묶음 |
 | `xlog-error` | `{ message: string }` | 스트리밍 오류 |
+| `counter-data` | `CounterUpdate` | 실시간 카운터 |
+| `counter-error` | `{ message: string }` | 카운터 스트림 오류 |
+| `alert-data` | `AlertPack` | 알림 1건 |
 | `scouter-connected` | `server_id: string` | 연결 완료 |
 | `scouter-disconnected` | — | 연결 해제 |
 
@@ -385,18 +430,22 @@ XLogPack은 Collector로부터 수신 시 **전체가 Blob으로 래핑**된 형
 
 ## 8. 색상 규칙 (XLog 점 색상)
 
-ASIS `XLogViewPainter.drawXPerfData()` 로직 포팅:
+ASIS `XLogViewPainter.drawXPerfData()` 의 **규칙**을 포팅했다. 색값은 어두운 판에 맞춰 다르다
+(원본: `src/features/xlog/utils/colorPalette.ts` `getDotColor`).
 
 ```
 xType == 3 또는 4 (비동기/백그라운드 스레드)
-    error != 0  →  #FF9999  (연한 빨강)
-    error == 0  →  #AAAAAA  (회색)
+    error != 0  →  XLOG_COLORS.ERROR_LIGHT   (흐린 빨강, 토큰 --xlog-dim-error)
+    error == 0  →  XLOG_COLORS.NORMAL_LIGHT  (흐린 회청, 토큰 --xlog-dim)
 
-xType == 0, 1, 2 (일반 Web 트랜잭션)
-    error != 0  →  #FF0000  (빨강)
+그 밖의 xType (일반 트랜잭션)
+    error != 0  →  XLOG_COLORS.ERROR         (#ff4d4f)
     error == 0  →  objHash 기반 에이전트 색상
-                   (12색 팔레트를 Math.abs(hash) % 12 로 순환)
+                   (AGENT_COLORS 를 Math.abs(objHash) % AGENT_COLORS.length 로 순환)
 ```
+
+흐린 색·판·눈금·글자는 테마 토큰을 따르고(`refreshXLogColors`), 에러색과 에이전트 순환색은
+테마와 무관하게 고정이다.
 
 ---
 
@@ -406,7 +455,8 @@ xType == 0, 1, 2 (일반 Web 트랜잭션)
 |------|------|------|
 | 점 충돌 감지 | `Uint8Array PointMap` | O(1) — 배열 순회(O(n)) 대비 수만 배 빠름 |
 | 점 렌더링 | `OffscreenCanvas drawImage` | ~4ms/50k점 — `fillRect`(12ms), `arc`(25ms) 대비 우수 |
-| 데이터 상한 | 100,000건 + 5분 윈도우 | 메모리 무한 증가 방지 |
+| 데이터 상한 | 시간 창(1~30분) + 건수 상한(기본 100,000) | 메모리 무한 증가 방지 |
+| IPC 페이로드 | `XLogColumns` 열 묶음, 500건씩 분할 emit | 직렬화 비용 감소, 첫 묶음부터 그리기 |
 | rAF dirty flag | `isDirty()` 체크 후 렌더 | 새 데이터 없으면 렌더링 스킵 |
 | Decimal 인코딩 | 1~9바이트 가변 | 네트워크 대역폭 절감 |
 | txid 직렬화 | Rust에서 String으로 | JS `Number.MAX_SAFE_INTEGER` 초과 방지 |

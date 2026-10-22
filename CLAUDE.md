@@ -19,7 +19,7 @@
 ---
 
 ## 2. Stack
-Tauri (Rust) + React 18 함수형 + TypeScript strict. `any` 금지.
+Tauri v2 (Rust) + React 19 함수형 + TypeScript strict. `any` 금지.
 
 ## 3. Architecture Constraints
 
@@ -28,7 +28,7 @@ Tauri (Rust) + React 18 함수형 + TypeScript strict. `any` 금지.
 - 차트 컴포넌트는 `React.memo`, 파생 데이터는 `useMemo`로 리렌더 차단.
 
 ### 3.2 Data Source
-Scouter Collector와 직접 통신하지 않는다. 중간 **Java Proxy Server**를 거쳐 XLog·메트릭을 WebSocket(실시간) / REST(단건)로 수신한다.
+Java Proxy(scouter.webapp) 없이 **Rust 백엔드가 Scouter Collector에 직접 TCP(:6100) 연결**한다. 실시간 XLog·카운터·알림은 Rust 폴링 루프가 Tauri 이벤트로 밀어 주고, 단건 조회는 Tauri Command(`invoke`)로 받는다. 와이어 포맷은 `docs/verified-facts.md` 가 우선한다.
 
 ### 3.3 IPC
 Rust ↔ Webview 간 크거나 잦은 페이로드 지양. 대용량은 청크 분할 또는 압축 직렬화.
