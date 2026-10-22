@@ -166,6 +166,8 @@ export const CounterChart = memo(function CounterChart({
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.offsetWidth;
       const h = chartH;
+      // 숨겨진 탭(App 의 Counter 탭)에서는 폭이 0 이다. 표본은 계속 쌓고 그리기만 쉰다.
+      if (w === 0) { rafId = requestAnimationFrame(render); return; }
 
       if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
         canvas.width = Math.round(w * dpr);
