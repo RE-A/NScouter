@@ -57,8 +57,10 @@ export const KpiStrip = memo(function KpiStrip({
   return (
     <div>
       {/* 좁은 창에서 여섯 칸을 한 줄에 밀어 넣으면 숫자가 잘린다. 접히게 둔다 —
-          접힌 두 번째 줄도 여전히 «한눈» 안이다. */}
-      <div className="flex flex-wrap gap-2">
+          접힌 두 번째 줄도 여전히 «한눈» 안이다.
+          **flex-wrap 이 아니라 격자다.** flex 로 접으면 둘째 줄에 남은 한 칸이 한 줄을 통째로
+          늘려 먹어(Heap 이 화면 폭만큼) 다른 칸과 같은 지표로 안 읽혔다. 칸 폭은 늘 같다. */}
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(188px,1fr))]">
         {KPI_DEFS.map(def => (
           <KpiTile
             key={def.id}
