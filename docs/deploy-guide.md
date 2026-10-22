@@ -123,8 +123,8 @@ rustup target add x86_64-pc-windows-msvc
 ```
 
 배포 파일:
-- `bundle/msi/Nscouter_<버전>_x64_en-US.msi` — 표준 MSI 설치 파일
-- `bundle/nsis/Nscouter_<버전>_x64-setup.exe` — 경량 설치 파일 (권장)
+- `bundle/msi/NScouter_<버전>_x64_en-US.msi` — 표준 MSI 설치 파일
+- `bundle/nsis/NScouter_<버전>_x64-setup.exe` — 경량 설치 파일 (권장)
 
 (파일 이름의 앞부분은 `tauri.conf.json` 의 `productName` 이다.)
 
@@ -170,7 +170,7 @@ sudo apt-get install -y \
 
 ```json
 {
-  "productName": "Nscouter",
+  "productName": "NScouter",
   "version": "0.5.13",            // ← 버전 업데이트
   "identifier": "com.jun.nscouter",  // ← 고유 식별자 (변경 금지)
   "build": {
@@ -182,7 +182,7 @@ sudo apt-get install -y \
   "app": {
     "windows": [
       {
-        "title": "Nscouter",
+        "title": "NScouter",
         "width": 1400,
         "height": 900,
         "minWidth": 900,
