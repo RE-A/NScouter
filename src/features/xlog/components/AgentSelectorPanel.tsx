@@ -12,6 +12,7 @@ import { ConfigSettingsDialog } from '../../config/ConfigSettingsDialog';
 import { isDatasourceObjectType, isJavaeeObjectType, learnFamiliesFromObjects } from '../types/counter';
 import { t } from '../../../i18n';
 import { getAgentColor } from '../utils/colorPalette';
+import { useViewOptions } from '../hooks/useViewOptions';
 
 interface AgentSelectorPanelProps {
   isConnected: boolean;
@@ -132,9 +133,20 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   const kinds = useMemo(() => typeCounts(agents), [agents]);
   const multiType = useMemo(() => shouldShowTypes(agents), [agents]);
 
+  // **설정의 묶기 규칙을 쓴다.** 예전에는 빠뜨려 기본 규칙으로 묶었다 — 규칙을 바꾼 사이트에서는
+  // 목록의 묶음과 실제로 조회되는 대상(App 이 설정 규칙으로 푼다)이 달랐다.
+  const { groupRule } = useViewOptions();
   const groups = useMemo(
-    () => groupAgents(agents, query, groupBy, multiType ? pickedTypes : undefined),
-    [agents, query, groupBy, multiType, pickedTypes],
+    () =>
+      groupAgents(
+        agents,
+        query,
+        groupBy,
+        multiType ? pickedTypes : undefined,
+        groupRule,
+        selectedServices ?? new Set(),
+      ),
+    [agents, query, groupBy, multiType, pickedTypes, groupRule, selectedServices],
   );
   const shown = groups.reduce((n, g) => n + g.agents.length, 0);
   const typeFiltering = multiType && pickedTypes.size > 0;
@@ -167,6 +179,31 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
       return next;
     });
   }, []);
+
+  /**
+   * 죽은 것을 펼쳐 둔 묶음.
+   *
+   * **죽은 것은 기본으로 접는다.** ECS 에서는 재배포마다 죽은 Task 가 한 줄씩 쌓여(F-60)
+   * 정리를 안 하면 살아 있는 Task 가 죽은 줄 사이에 묻힌다. 접어도 «죽은 N개» 줄과
+   * 묶음 머리의 `살아 있는 수/전체` 는 남으므로 «하나가 내려갔다» 는 신호는 사라지지 않는다.
+   */
+  const [deadOpen, setDeadOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggleDead = useCallback((type: string) => {
+    setDeadOpen(prev => {
+      const next = new Set(prev);
+      if (!next.delete(type)) next.add(type);
+      return next;
+    });
+  }, []);
+  /**
+   * 이 줄을 보이나. 검색 중이거나 펼쳤으면 전부, 아니면 살아 있는 것과 **골라 둔 것**
+   * (과거 구간을 볼 때 죽은 Task 도 고르기에 들어간다 — 고른 것이 안 보이면 안 된다).
+   */
+  const showAgent = (a: AgentObject, group: string): boolean =>
+    searching || deadOpen.has(group) || a.alive || selectedHashes.has(a.obj_hash);
+  const deadCount = (g: { agents: AgentObject[] }): number => g.agents.filter(a => !a.alive).length;
+  const hiddenDead = (g: { type: string; agents: AgentObject[] }): number =>
+    g.agents.filter(a => !showAgent(a, g.type)).length;
 
   /** 우클릭한 에이전트와 메뉴 위치 */
   const [menu, setMenu] = useState<{ agent: AgentObject; x: number; y: number } | null>(null);
@@ -393,9 +430,16 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 </span>
               </div>
 
+              {open && group.agents.length === 0 && (
+                // 골라 둔 서비스인데 목록에 Task 가 하나도 없다(agentTree keepServices).
+                // 마디는 남겨 두어 고른 것을 풀 수 있게 한다.
+                <div className="px-2.5 py-1.5 text-micro text-fg-faint">
+                  {t('목록에 Task 가 없습니다 — 정리됐거나 아직 안 떴습니다')}
+                </div>
+              )}
               {open && (
                 <div className="divide-y divide-line/40">
-                  {group.agents.map(agent => {
+                  {group.agents.filter(a => showAgent(a, group.type)).map(agent => {
                     const state = agentRowState(selectedHashes, agent.obj_hash);
                     const name = labels.get(agent.obj_hash) ?? '';
                     return (
@@ -448,6 +492,24 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
             </div>
                     );
                   })}
+                  {!searching && hiddenDead(group) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleDead(group.type)}
+                      className="flex w-full items-center gap-1.5 px-2.5 py-1 text-left text-micro text-fg-faint hover:text-fg-muted"
+                    >
+                      ▸ {t('죽은')} {hiddenDead(group)}{t('개')}
+                    </button>
+                  )}
+                  {!searching && deadOpen.has(group.type) && deadCount(group) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleDead(group.type)}
+                      className="flex w-full items-center gap-1.5 px-2.5 py-1 text-left text-micro text-fg-faint hover:text-fg-muted"
+                    >
+                      ▾ {t('죽은 것 접기')}
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -20,7 +20,7 @@
 // 그때도 그룹 쪽이 한 겹 더 잘게 나눈다.
 
 import type { AgentObject } from '../types/xlog';
-import { DEFAULT_GROUP_RULE, groupByService, type GroupRule } from './instanceGroup';
+import { DEFAULT_GROUP_RULE, groupByService, serviceNameOf, type GroupRule } from './instanceGroup';
 import { UNKNOWN_TYPE } from './objectTypes';
 
 /** 무엇으로 묶을 것인가 */
@@ -139,6 +139,10 @@ export function groupNameOf(objName: string): string {
  * 그룹은 **이름순**으로 고정한다. 살아 있는 수로 정렬하면 10초마다 목록이 춤춘다.
  * 그룹 안은 **살아 있는 것 먼저** — 죽은 것이 위에 쌓이면 스크롤이 늘어난다.
  * 이건 에이전트가 죽거나 살아날 때만 바뀌고, 그때는 자리가 바뀌는 게 오히려 신호다.
+ *
+ * `keepServices` — **골라 둔 서비스는 마디를 지킨다.** 비활성 정리로 Task 가 목록에서
+ * 빠지면 서비스가 한 대가 되거나 통째로 사라지는데, 그러면 마디가 없어져 고른 것을
+ * 풀 자리가 없다(«고른 서버 없음» 인데 선택은 살아 있다). 한 대여도, 0대여도 마디를 남긴다.
  */
 export function groupAgents(
   agents: readonly AgentObject[],
@@ -146,6 +150,7 @@ export function groupAgents(
   by: GroupBy = 'type',
   types?: ReadonlySet<string>,
   rule: GroupRule = DEFAULT_GROUP_RULE,
+  keepServices: ReadonlySet<string> = new Set(),
 ): AgentGroup[] {
   const needle = query.trim().toLowerCase();
   const buckets = new Map<string, AgentObject[]>();
@@ -156,6 +161,14 @@ export function groupAgents(
   const serviceOf = new Map<number, string>();
   if (services) {
     for (const [name, list] of services) for (const a of list) serviceOf.set(a.obj_hash, name);
+    // 골라 둔 서비스면 한 대짜리도 그 마디로 둔다 (위 keepServices 주석)
+    if (keepServices.size > 0) {
+      for (const a of agents) {
+        if (serviceOf.has(a.obj_hash)) continue;
+        const name = serviceNameOf(a, rule);
+        if (name !== null && keepServices.has(name)) serviceOf.set(a.obj_hash, name);
+      }
+    }
   }
 
   for (const a of agents) {
@@ -170,6 +183,15 @@ export function groupAgents(
     const list = buckets.get(key);
     if (list) list.push(a);
     else buckets.set(key, [a]);
+  }
+
+  // 골라 둔 서비스가 목록에 한 대도 없으면 빈 마디를 세운다. 검색 중에는 이름이 맞을 때만.
+  if (by === 'service') {
+    for (const name of keepServices) {
+      if (buckets.has(name)) continue;
+      if (needle !== '' && !name.toLowerCase().includes(needle)) continue;
+      buckets.set(name, []);
+    }
   }
 
   const kind: AgentGroup['kind'] = by === 'service' ? 'service' : by === 'group' ? 'host' : 'type';

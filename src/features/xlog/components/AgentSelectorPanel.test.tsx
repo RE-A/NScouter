@@ -19,6 +19,8 @@ const agents: AgentObject[] = [
 
 vi.mock('../api/scouterApi', () => ({
   getObjectList: () => Promise.resolve(agents),
+  // 패널이 묶기 규칙을 설정(useViewOptions)에서 읽는다. 여기서는 기본값 그대로 둔다
+  getConfig: () => new Promise(() => {}),
 }));
 
 afterEach(() => vi.clearAllMocks());
@@ -156,7 +158,10 @@ describe('AgentSelectorPanel — 종류가 하나뿐이면', () => {
     // 모든 줄에 `tomcat` 이 붙는 건 정보가 아니라 여백을 먹는 글자다.
     vi.resetModules();
     const only = agents.filter(a => a.obj_type === 'tomcat');
-    vi.doMock('../api/scouterApi', () => ({ getObjectList: () => Promise.resolve(only) }));
+    vi.doMock('../api/scouterApi', () => ({
+      getObjectList: () => Promise.resolve(only),
+      getConfig: () => new Promise(() => {}),
+    }));
     const { AgentSelectorPanel: Panel } = await import('./AgentSelectorPanel');
 
     render(
@@ -199,5 +204,99 @@ describe('AgentSelectorPanel — 설정 메뉴', () => {
   it('호스트도 연다 — JVM 전용으로 막지 않는다', async () => {
     draw();
     expect((await openMenu('test-host')).disabled).toBe(false);
+  });
+});
+
+describe('AgentSelectorPanel — ECS 에서 쌓이는 죽은 Task', () => {
+  const task = (hash: number, n: number, alive: boolean): AgentObject => ({
+    obj_hash: hash, obj_type: 'tomcat', obj_name: `/vm/safs-ip-10-0-0-${n}`,
+    address: '', version: '', alive, wakeup: 0, tags: [],
+  });
+  // 살아 있는 둘, 죽은 셋 — 재배포 두어 번 뒤의 모습
+  const fleet = [task(1, 1, true), task(2, 2, true), task(3, 3, false), task(4, 4, false), task(5, 5, false)];
+
+  async function drawWith(list: AgentObject[], opts: { selected?: number[]; services?: string[] } = {}) {
+    vi.resetModules();
+    vi.doMock('../api/scouterApi', () => ({
+      getObjectList: () => Promise.resolve(list),
+      getConfig: () => new Promise(() => {}),
+    }));
+    const { AgentSelectorPanel: Panel } = await import('./AgentSelectorPanel');
+    render(
+      <Panel
+        isConnected
+        selectedHashes={new Set(opts.selected ?? [])}
+        selectedServices={new Set(opts.services ?? [])}
+        onToggleService={() => {}}
+        onSelectionChange={() => {}}
+        groupBy="service"
+        onGroupByChange={() => {}}
+      />,
+    );
+  }
+
+  it('죽은 Task 는 접혀 있고 «죽은 N개» 만 보인다', async () => {
+    await drawWith(fleet);
+    await waitFor(() => expect(screen.getByText('safs-ip-10-0-0-1')).toBeTruthy());
+    expect(screen.queryByText('safs-ip-10-0-0-3')).toBeNull();
+    expect(screen.getByText(/죽은 3개/)).toBeTruthy();
+    // 머리의 «살아 있는 수/전체» 는 그대로다 — 접어도 내려간 것이 있다는 신호는 남는다
+    expect(screen.getByText('2/5')).toBeTruthy();
+  });
+
+  it('«죽은 N개» 를 누르면 펼쳐지고, 다시 접을 수 있다', async () => {
+    await drawWith(fleet);
+    fireEvent.click(await screen.findByText(/죽은 3개/));
+    expect(screen.getByText('safs-ip-10-0-0-3')).toBeTruthy();
+    fireEvent.click(screen.getByText(/죽은 것 접기/));
+    expect(screen.queryByText('safs-ip-10-0-0-3')).toBeNull();
+  });
+
+  it('골라 둔 죽은 Task 는 접지 않는다 — 과거 구간을 볼 때 고르기에 들어간다', async () => {
+    await drawWith(fleet, { selected: [3] });
+    await waitFor(() => expect(screen.getByText('safs-ip-10-0-0-3')).toBeTruthy());
+    expect(screen.getByText(/죽은 2개/)).toBeTruthy();
+  });
+
+  it('검색 중에는 죽은 것도 다 보인다 — 찾은 걸 숨기면 검색이 아니다', async () => {
+    await drawWith(fleet);
+    await screen.findByText('safs-ip-10-0-0-1');
+    fireEvent.change(screen.getByPlaceholderText(/찾기/), { target: { value: '10-0-0-4' } });
+    expect(screen.getByText('safs-ip-10-0-0-4')).toBeTruthy();
+  });
+
+  it('골라 둔 서비스의 Task 가 목록에 하나도 없어도 마디가 남는다 — 풀 자리가 있어야 한다', async () => {
+    await drawWith([task(9, 9, true)].map(a => ({ ...a, obj_name: '/vm/shop-app' })), { services: ['safs'] });
+    await waitFor(() => expect(screen.getByLabelText('safs')).toBeTruthy());
+    expect((screen.getByLabelText('safs') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText(/목록에 Task 가 없습니다/)).toBeTruthy();
+  });
+});
+
+describe('AgentSelectorPanel — 서비스 묶기 규칙', () => {
+  it('설정의 규칙으로 묶는다 — 기본 규칙만 쓰면 규칙을 바꾼 사이트에서 목록과 조회 대상이 갈린다', async () => {
+    vi.resetModules();
+    const named: AgentObject[] = [1, 2].map(n => ({
+      obj_hash: n, obj_type: 'tomcat', obj_name: `/h/order-${n}`,
+      address: '', version: '', alive: true, wakeup: 0, tags: [],
+    }));
+    vi.doMock('../api/scouterApi', () => ({
+      getObjectList: () => Promise.resolve(named),
+      getConfig: () => Promise.resolve({ group_rule: { tag_key: 'service', pattern: '^(?<svc>.+?)-[0-9]+$' } }),
+    }));
+    const { AgentSelectorPanel: Panel } = await import('./AgentSelectorPanel');
+    render(
+      <Panel
+        isConnected
+        selectedHashes={new Set()}
+        selectedServices={new Set()}
+        onToggleService={() => {}}
+        onSelectionChange={() => {}}
+        groupBy="service"
+        onGroupByChange={() => {}}
+      />,
+    );
+    // 기본 규칙(-ip-)이면 «그룹 없음» 에 떨어진다. 설정 규칙이면 order 로 묶인다.
+    await waitFor(() => expect(screen.getByLabelText('order')).toBeTruthy());
   });
 });
