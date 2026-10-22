@@ -349,6 +349,19 @@ describe('XLogChartRenderer — 끌어서 고르기', () => {
 
     expect(picked.map(p => p.txid)).toEqual(['in']);
   });
+
+  it('필터 없이 물으면 그림에서 걸러진 것까지 준다 — 목록이 다시 거르기 위한 원본', () => {
+    const h = setup();
+    const ok = xlog({ txid: 'ok', error: 0 });
+    const err = xlog({ txid: 'err', error: 9 });
+    h.renderer.render([ok, err], { ...DEFAULT_FILTER, errorOnly: true }, WINDOW, null);
+
+    const x = expectedX(ok.endTime);
+    const y = expectedY(4.5);
+    const box = { x1: x - 20, y1: y - 20, x2: x + 20, y2: y + 20 };
+    expect(h.renderer.querySelection(box, [ok, err]).map(p => p.txid)).toEqual(['err']);
+    expect(h.renderer.querySelectionUnfiltered(box, [ok, err]).map(p => p.txid)).toEqual(['ok', 'err']);
+  });
 });
 
 describe('XLogChartRenderer — 찍은 자리 되묻기', () => {

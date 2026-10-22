@@ -82,6 +82,7 @@ import {
   stopXLogStream,
 } from './features/xlog/api/scouterApi';
 import { subscribe } from './features/xlog/api/subscribe';
+import { passesFilter } from './features/xlog/engine/rectSelect';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
 import { useAlertStream } from './features/xlog/hooks/useAlertStream';
 import { MAX_DETAIL_TABS, useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
@@ -167,6 +168,9 @@ const C = {
 type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert';
 
 /** 열린 탭이 하나도 없을 때 상세 패널에 줄 빈 상태 */
+/** 고른 것 없음. 매 렌더 새 객체를 만들면 목록 memo 가 매번 다시 돈다 */
+const NO_PICK: { xlogs: SXLog[]; refilter: boolean } = { xlogs: [], refilter: false };
+
 const EMPTY_DETAIL = {
   isLoading: false,
   error: null,
@@ -276,7 +280,18 @@ export default function App() {
     [],
   );
 
-  const [selectedXLogs, setSelectedXLogs] = useState<SXLog[]>([]);
+  /**
+   * 목록의 원본. 차트에서 고른 것은 **필터 전 그대로** 들고(`refilter`), 보여 줄 때
+   * 지금 필터로 거른다 — 고른 뒤 필터를 바꿔도 목록이 차트와 같은 것을 말해야 한다.
+   *
+   * 넓은 구간 찾기 결과는 거르지 않는다. 그 창에서 오브젝트·서비스를 따로 정해 서버가
+   * 걸러 준 것이라, 툴바의 서버 고르기(objHashSet)를 또 걸면 고른 오브젝트가 통째로 빠진다.
+   */
+  const [picked, setPicked] = useState<{ xlogs: SXLog[]; refilter: boolean }>(NO_PICK);
+  const setSelectedXLogs = useCallback(
+    (xlogs: SXLog[]) => setPicked({ xlogs, refilter: false }),
+    [],
+  );
   /** 목록의 ✕ 가 캔버스의 선택 사각형까지 지우도록 보내는 신호 */
   const [clearSignal, setClearSignal] = useState(0);
   /** 실시간 / 과거. 과거면 pastRange 가 실제 조회 구간이다 */
@@ -336,6 +351,22 @@ export default function App() {
   const { getCached, resolve } = useTextResolver();
   // resolve 는 전역 캐시만 갱신하므로 목록을 다시 그리려면 별도 신호가 필요하다.
   const [textVersion, setTextVersion] = useState(0);
+
+  /** 차트와 같은 기준으로 판정한다 — 서비스명은 받아 둔 사전만 읽는다 */
+  const passesNow = useCallback(
+    (x: SXLog) => passesFilter(x, filter, h => getCached('service', h)),
+    [filter, getCached],
+  );
+  /**
+   * 목록에 보이는 것.
+   *
+   * `textVersion` 을 지켜본다 — 서비스명이 늦게 풀리면 판정이 달라진다(못 푼 이름은
+   * 포함 조건에서 빠진다). 풀린 뒤에 다시 걸러야 빠졌던 것이 돌아온다.
+   */
+  const selectedXLogs = useMemo(
+    () => (picked.refilter ? picked.xlogs.filter(passesNow) : picked.xlogs),
+    [picked, passesNow, textVersion],
+  );
 
   // 경계를 끌 때의 한계를 계산하려면 워크스페이스 크기가 필요하다.
   // **배치에는 쓰지 않는다** — 배치는 flex 가 하므로 이 값이 틀려도 넘치지 않는다.
@@ -798,16 +829,18 @@ export default function App() {
   }, [openByTxid]);
 
   // 목록의 서비스 컬럼은 getCached 만 쓰므로 누가 채워주지 않으면 해시가 그대로 남는다.
+  // **걸러지기 전 원본을 푼다.** 거른 것만 풀면, 이름을 몰라 빠진 것은 끝내 안 풀려
+  // 영영 빠진 채로 남는다.
   useEffect(() => {
-    if (selectedXLogs.length === 0) return;
-    const svc = [...new Set(selectedXLogs.map(x => x.service).filter(Boolean))];
+    if (picked.xlogs.length === 0) return;
+    const svc = [...new Set(picked.xlogs.map(x => x.service).filter(Boolean))];
     if (svc.length === 0) return;
     let cancelled = false;
     resolve('service', svc)
       .then(() => { if (!cancelled) setTextVersion(v => v + 1); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [selectedXLogs, resolve]);
+  }, [picked, resolve]);
 
   /**
    * 프로파일 본문 검색.
@@ -848,14 +881,16 @@ export default function App() {
    */
   const resetSearch = search.reset;
   const handleXLogSelect = useCallback((xlogs: SXLog[]) => {
-    setSelectedXLogs(xlogs);
+    setPicked({ xlogs, refilter: true });
     // 차트에서 새로 고른 것은 검색 결과가 아니다. 경고가 남아 있으면 거짓말이 된다.
     setWideTruncated(null);
     // 다른 구간을 고르면 이전 검색 결과는 그 구간의 것이 아니다. 남겨 두면
     // 목록이 엉뚱한 트랜잭션만 걸러 보여준다.
     resetSearch();
-    if (xlogs.length === 1) openDetail(xlogs[0]);
-  }, [openDetail, resetSearch]);
+    // 사각형 안에 하나뿐이어도 지금 필터에 걸려 안 보이는 것이면 열지 않는다.
+    const shown = xlogs.filter(passesNow);
+    if (shown.length === 1) openDetail(shown[0]);
+  }, [openDetail, resetSearch, passesNow]);
   const handleRowClick = useCallback((xlog: SXLog) => { openDetail(xlog); }, [openDetail]);
   // 목록만 지우면 캔버스에 선택 사각형이 남는다. 둘 다 지운다.
   const handleClearSelection = useCallback(() => {

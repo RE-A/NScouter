@@ -24,6 +24,7 @@ import { t } from '../../../i18n';
 interface XLogChartProps {
   config: XLogChartConfig;
   filter: XLogFilterState;
+  /** 고른 것을 **필터 전 그대로** 준다. 거르는 것은 받는 쪽이다 — 필터가 바뀌면 다시 거른다 */
   onSelect?: (xlogs: SXLog[]) => void;
   /** 비었을 때 "미연결"과 "데이터 없음"을 구분하는 데 쓴다 */
   connected: boolean;

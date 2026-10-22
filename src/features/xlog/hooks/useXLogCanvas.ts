@@ -17,6 +17,7 @@ const STALE_AFTER_MS = 15_000;
 interface UseXLogCanvasResult {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   selection: SelectionRect | null;
+  /** 사각형 안의 것 **전부**(필터 전). 클릭 한 번이면 그 점 하나 */
   selectedXLogs: SXLog[];
   clearSelection: () => void;
 }
@@ -280,7 +281,8 @@ export function useXLogCanvas(
       const isDrag = Math.abs(x - startX) > 3 || Math.abs(y - startY) > 3;
 
       if (isDrag) {
-        setSelectedXLogs(renderer.querySelection(sel, data));
+        // 거르지 않은 채 넘긴다 — 필터가 바뀌면 목록 쪽에서 다시 거른다.
+        setSelectedXLogs(renderer.querySelectionUnfiltered(sel, data));
         return;
       }
 
