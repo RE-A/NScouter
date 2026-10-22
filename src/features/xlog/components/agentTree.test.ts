@@ -256,6 +256,40 @@ describe('서비스로 묶기', () => {
     expect(g.find(x => x.type === 'SAFS')?.agents).toHaveLength(1);
   });
 
+  it('설정한 규칙으로 묶는다 — 기본 규칙과 다른 사이트가 있다', () => {
+    // `svc-1`·`svc-2` 처럼 짓는 곳. 기본 규칙(-ip-)으로는 하나도 안 묶인다.
+    const named = [task('/h/order-1'), task('/h/order-2')];
+    expect(groupAgents(named, '', 'service').some(g => g.type === 'order')).toBe(false);
+    const rule = { tagKey: 'service', pattern: '^(?<svc>.+?)-[0-9]+$' };
+    expect(groupAgents(named, '', 'service', undefined, rule).find(g => g.type === 'order')?.agents)
+      .toHaveLength(2);
+  });
+
+  it('골라 둔 서비스는 한 대만 남아도 그 마디에 둔다 — 정리 뒤에 풀 자리가 있어야 한다', () => {
+    const one = [task('/CJFW/SAFS-ip-10-0-0-1'), task('/CJFW/jdbc_SAFS_R')];
+    // 고르지 않았으면 한 대짜리는 묶지 않는다(표시 규칙 그대로)
+    expect(groupAgents(one, '', 'service').some(g => g.type === 'SAFS')).toBe(false);
+    const kept = groupAgents(one, '', 'service', undefined, undefined, new Set(['SAFS']));
+    expect(kept.find(g => g.type === 'SAFS')).toMatchObject({ kind: 'service' });
+    expect(kept.find(g => g.type === 'SAFS')?.agents).toHaveLength(1);
+  });
+
+  it('골라 둔 서비스가 목록에 한 대도 없으면 빈 마디를 세운다', () => {
+    const g = groupAgents([task('/CJFW/jdbc_SAFS_R')], '', 'service', undefined, undefined, new Set(['SAFS']));
+    expect(g.find(x => x.type === 'SAFS')).toMatchObject({ kind: 'service', agents: [], aliveCount: 0 });
+  });
+
+  it('빈 마디는 검색어가 그 이름과 맞을 때만 남는다', () => {
+    const keep = new Set(['SAFS']);
+    expect(groupAgents([], 'saf', 'service', undefined, undefined, keep).map(g => g.type)).toEqual(['SAFS']);
+    expect(groupAgents([], 'order', 'service', undefined, undefined, keep)).toEqual([]);
+  });
+
+  it('종류·그룹으로 묶을 때는 골라 둔 서비스를 끼우지 않는다', () => {
+    const g = groupAgents([], '', 'type', undefined, undefined, new Set(['SAFS']));
+    expect(g).toEqual([]);
+  });
+
   it('묶음은 이름순 — 살아 있는 수로 정렬하면 10초마다 목록이 춤춘다', () => {
     const g = groupAgents([...tasks, task('/CJFW/AAA-ip-10-0-0-9'), task('/CJFW/AAA-ip-10-0-0-8')], '', 'service');
     expect(g.map(x => x.type)).toEqual([...g.map(x => x.type)].sort((a, b) => a.localeCompare(b)));

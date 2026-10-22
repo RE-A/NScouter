@@ -903,6 +903,10 @@ export const EN: Record<string, string> = {
   '트랜잭션 시작 후': 'Started',
   '에 시작': 'after the transaction began',
   '고른 서비스의 Task 를 이 날짜 기록에서 찾지 못했습니다.': 'No task of the selected service was found in this date\'s records.',
+  // 서버 목록 — 죽은 Task 접기, 골라 둔 서비스의 빈 마디 (AgentSelectorPanel)
+  '죽은': 'Dead:',
+  '죽은 것 접기': 'Hide dead',
+  '목록에 Task 가 없습니다 — 정리됐거나 아직 안 떴습니다': 'No task in the list — removed, or not up yet',
   // 알림 묶음 (alertGroups.ts) — 재배포 교체와 서비스 장애
   'Task 교체': 'Task replaced',
   '교체': 'Replaced',
