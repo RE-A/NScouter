@@ -75,6 +75,63 @@ export function resolveSelection(
 }
 
 /**
+ * **과거 구간**을 볼 때 조회할 해시.
+ *
+ * 실시간과 반대로 **죽은 Task 도 넣는다.** 어제 오후를 보는데 지금 살아 있는 Task 만 물으면,
+ * ECS 처럼 그 사이 재배포가 있었던 서비스는 그때 돌던 Task 가 하나도 안 남아 빈 화면이 된다.
+ * 그 Task 들이 남긴 XLog 는 콜렉터에 그대로 있다 — 해시만 알면 물을 수 있다.
+ *
+ * `candidates` 는 «그 구간에 있었을 수 있는 오브젝트» 다. 부르는 쪽이 지금 목록,
+ * 그날 콜렉터 목록(`OBJECT_LIST_LOAD_DATE`), 이 앱이 본 기록을 합쳐 넘긴다 — 정리하면
+ * 지금 목록에서는 빠지고, 오늘자 목록은 정리 직후에도 남았지만(실측 F-61) 언제까지 남는지는
+ * 장담할 수 없어 셋째를 둔다.
+ *
+ * 구간에 실제로 있었는지는 거르지 않는다. 그 시각에 없던 Task 는 물어도 0건이라 손해가 없고,
+ * 거르려면 Task 가 언제 떴는지를 알아야 하는데 콜렉터는 그걸 남기지 않는다(`objectTimeline.ts`).
+ *
+ * 낱개로 고른 것은 **목록에 없어도 넣는다** — 사용자가 직접 짚은 Task 다.
+ */
+export function resolvePastSelection(
+  sel: GroupSelection,
+  candidates: readonly AgentObject[],
+  rule: GroupRule,
+): Set<number> {
+  const out = new Set<number>();
+  if (isEmptySelection(sel)) return out;
+
+  if (sel.services.size > 0) {
+    for (const a of candidates) {
+      const name = serviceNameOf(a, rule);
+      if (name !== null && sel.services.has(name)) out.add(a.obj_hash);
+    }
+  }
+  for (const h of sel.hashes) out.add(h);
+  return out;
+}
+
+/** 과거 구간 기준의 `selectionState` */
+export function pastSelectionState(
+  sel: GroupSelection,
+  candidates: readonly AgentObject[],
+  rule: GroupRule,
+): 'none' | 'empty-group' | 'ok' {
+  if (isEmptySelection(sel)) return 'none';
+  return resolvePastSelection(sel, candidates, rule).size > 0 ? 'ok' : 'empty-group';
+}
+
+/**
+ * 과거 후보를 하나로 모은다. **같은 해시는 앞의 것이 이긴다** — 지금 목록이 가장 정확하다
+ * (태그가 있다). 그날 목록과 본 기록에는 태그가 없거나 오래됐을 수 있다.
+ */
+export function mergeCandidates(...lists: readonly (readonly AgentObject[])[]): AgentObject[] {
+  const out = new Map<number, AgentObject>();
+  for (const list of lists) {
+    for (const a of list) if (!out.has(a.obj_hash)) out.set(a.obj_hash, a);
+  }
+  return [...out.values()];
+}
+
+/**
  * 고른 상태가 무엇을 뜻하나.
  *
  * **«안 골랐다» 와 «골랐는데 비었다» 는 다른 일이다.** 둘 다 화면은 비어 보이지만

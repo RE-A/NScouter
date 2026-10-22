@@ -902,4 +902,13 @@ export const EN: Record<string, string> = {
   // 프로파일 스텝의 시작 시각 풍선 — «트랜잭션 시작 후 12ms 에 시작»
   '트랜잭션 시작 후': 'Started',
   '에 시작': 'after the transaction began',
+  '고른 서비스의 Task 를 이 날짜 기록에서 찾지 못했습니다.': 'No task of the selected service was found in this date\'s records.',
+  // 알림 묶음 (alertGroups.ts) — 재배포 교체와 서비스 장애
+  'Task 교체': 'Task replaced',
+  '교체': 'Replaced',
+  '내려감': 'down',
+  '올라옴': 'up',
+  '장애': 'Down',
+  '살아 있는 Task 없음': 'No live task',
+  '지금은 살아 있는 Task 가 있습니다': 'a task is live now',
 };

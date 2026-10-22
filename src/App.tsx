@@ -84,6 +84,7 @@ import {
 import { subscribe } from './features/xlog/api/subscribe';
 import { passesFilter } from './features/xlog/engine/rectSelect';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
+import { groupAlerts, quietAlerts, type AlertBurst, type AlertRow } from './features/xlog/utils/alertGroups';
 import { useAlertStream } from './features/xlog/hooks/useAlertStream';
 import { MAX_DETAIL_TABS, useXLogDetailTabs } from './features/xlog/hooks/useXLogDetailTabs';
 import {
@@ -101,12 +102,17 @@ import { mergeObjects } from './features/xlog/hooks/objectRefresh';
 import { allNames, clearNames, rememberNames } from './features/xlog/hooks/agentNames';
 import {
   EMPTY_SELECTION,
+  mergeCandidates,
+  pastSelectionState,
   pickTask,
+  resolvePastSelection,
   resolveSelection,
   selectionState,
   toggleService,
   type GroupSelection,
 } from './features/xlog/hooks/groupSelection';
+import { asAgent, clearObjectHistory, objectHistory, observeObjects } from './features/xlog/hooks/objectTimeline';
+import { usePastCandidates } from './features/xlog/hooks/usePastCandidates';
 import { instanceLabel } from './features/xlog/components/instanceGroup';
 import {
   fromTabs as detailsFromTabs,
@@ -348,6 +354,21 @@ export default function App() {
    * 하지 않아서, 알림을 다 보고 나서도 숫자가 그대로 남았다. 보는 중에 새로 온 것도 읽은 셈이다.
    */
   const markAlertsRead = alertStream.markRead;
+  /**
+   * 알림을 서비스 단위로 묶는다 (alertGroups.ts). **명단이 갱신될 때마다 다시 판정한다** —
+   * 새 Task 가 옛 Task 보다 늦게 뜨는 배포에서는 처음엔 «없음» 이다가 1분 뒤 «교체» 가 된다.
+   * objectHistory 는 명단을 받을 때 같이 갱신되므로 objects 가 그 신호다.
+   */
+  const alertRows = useMemo(
+    () => groupAlerts(alertStream.alerts, objectHistory(), groupRule),
+    // objects 는 본문에서 안 읽는다 — objectHistory 가 갱신됐다는 신호로만 지켜본다
+    [alertStream.alerts, objects, groupRule],
+  );
+  /** 배지 숫자. 교체로 판정된 것은 세지 않는다 — 배포 한 번에 배지가 Task 수만큼 뛰면 배지를 안 본다 */
+  const unreadShown = useMemo(() => {
+    const quiet = quietAlerts(alertRows);
+    return alertStream.alerts.slice(0, alertStream.unread).filter(a => !quiet.has(a)).length;
+  }, [alertRows, alertStream.alerts, alertStream.unread]);
   useEffect(() => {
     if (activeTab === 'alert' && alertStream.unread > 0) markAlertsRead();
   }, [activeTab, alertStream.unread, markAlertsRead]);
@@ -488,7 +509,7 @@ export default function App() {
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
         // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
-        setSelectedXLogs([]); clearNames(); setAgentMap(new Map());
+        setSelectedXLogs([]); clearNames(); clearObjectHistory(); setAgentMap(new Map());
         objectsRef.current = [];
         setObjects([]); setGroupSel(EMPTY_SELECTION);
         setCounterHashes({ javaee: [], host: [], datasource: [] });
@@ -524,6 +545,9 @@ export default function App() {
         // 사라진 Task 를 바로 지우지 않는다 — 재배포 중 몇 초 비는 사이에
         // 서버가 화면에서 통째로 사라지면 «장애» 로 읽힌다.
         const list = mergeObjects(objectsRef.current, fresh, Date.now());
+        // 언제 보였고 언제까지 살았나 — 알림 판정과 과거 고르기가 쓴다 (objectTimeline.ts).
+        // **받은 그대로(fresh)를 적는다.** 잠시 남겨 둔 것(mergeObjects)은 지금 상태가 아니다.
+        observeObjects(fresh, Date.now());
         objectsRef.current = list;
         setObjects(list);
         registerObjectTypeFamilies(families);
@@ -759,9 +783,28 @@ export default function App() {
   // **내용이 같으면 같은 Set 을 돌려준다.** 명단은 10초마다 갱신되는데, 그때마다 새
   // Set 을 만들면 그걸 의존성으로 쓰는 탭·차트·목록이 전부 다시 선다 — Task 가
   // 하나도 안 바뀌었는데도 그렇다. ECS 에서는 그 갱신이 끝없이 돈다.
+  //
+  // **과거 구간을 보는 중이면 죽은 Task 까지 푼다** (`resolvePastSelection`). 그때 돌던 Task 가
+  // 지금은 하나도 없을 수 있다(ECS 재배포). 후보는 지금 목록 · 그날 콜렉터 목록 · 이 앱이 본
+  // 기록 셋이다 — 정리하면 지금 목록에서 빠지고, 오늘자 목록에 계속 남는다고 장담할 수 없다(F-61).
+  const viewingPastRange = xlogMode === 'past' && pastRange !== null ? pastRange : null;
+  const dailyObjects = usePastCandidates(viewingPastRange, isConnected, connectionEpoch);
+  const pastCandidates = useMemo(
+    () =>
+      viewingPastRange === null
+        ? null
+        : mergeCandidates(objects, dailyObjects, [...objectHistory().values()].map(asAgent)),
+    // objectHistory 는 명단을 받을 때 같이 갱신된다 — objects 가 바뀌는 것이 그 신호다
+    [viewingPastRange, objects, dailyObjects],
+  );
   const pickedKey = useMemo(
-    () => [...resolveSelection(groupSel, objects, groupRule)].sort((a, b) => a - b).join(','),
-    [groupSel, objects],
+    () =>
+      [...(pastCandidates
+        ? resolvePastSelection(groupSel, pastCandidates, groupRule)
+        : resolveSelection(groupSel, objects, groupRule))]
+        .sort((a, b) => a - b)
+        .join(','),
+    [groupSel, objects, pastCandidates],
   );
   const pickedHashes = useMemo(
     () => new Set(pickedKey === '' ? [] : pickedKey.split(',').map(Number)),
@@ -770,11 +813,17 @@ export default function App() {
   useEffect(() => {
     setXLogTabs(s => setTabSelection(s, pickedHashes));
   }, [pickedHashes]);
+  /** 목록 정리(handleAgentsLoaded)가 과거 구간에 넣은 죽은 Task 를 도로 빼지 않게 한다 */
+  const pickedHashesRef = useRef(pickedHashes);
+  pickedHashesRef.current = pickedHashes;
 
   /** «안 골랐다» 와 «골랐는데 살아 있는 게 없다» 는 다른 일이다 */
   const pickState = useMemo(
-    () => selectionState(groupSel, objects, groupRule),
-    [groupSel, objects],
+    () =>
+      pastCandidates
+        ? pastSelectionState(groupSel, pastCandidates, groupRule)
+        : selectionState(groupSel, objects, groupRule),
+    [groupSel, objects, pastCandidates],
   );
   // 구간을 바꾸면 이전 구간에서 고른 트랜잭션은 의미가 없다. 같이 비운다.
   const handlePastRangeChange = useCallback((r: PastRange | null) => {
@@ -789,7 +838,8 @@ export default function App() {
     // **목록에서 사라진 서버는 선택에서도 뺀다.** 남겨 두면 «3대 골랐는데 화면은
     // 비어 있다» 로 굳고, 다른 콜렉터로 갈아탄 뒤에는 그 해시가 영영 안 온다.
     // 내려간(alive=false) 서버는 목록에 남으므로 지우지 않는다 — 잠깐 멈춘 것일 수 있다.
-    const listed = agents.map(a => a.obj_hash);
+    // 고르기가 푼 것은 남긴다 — 과거 구간에서는 목록에서 정리된 Task 도 일부러 넣는다.
+    const listed = [...agents.map(a => a.obj_hash), ...pickedHashesRef.current];
     setFilter(prev => {
       const kept = prunePicked(prev.objHashSet, listed);
       return kept === prev.objHashSet ? prev : { ...prev, objHashSet: new Set(kept) };
@@ -1234,7 +1284,10 @@ export default function App() {
    */
   const emptyPickText =
     pickState === 'empty-group'
-      ? t('고른 서비스에 살아 있는 Task 가 없습니다.')
+      ? pastCandidates
+        // 과거 구간은 죽은 Task 까지 찾는다 — 그래도 없으면 «살아 있는 것이 없다» 가 아니다
+        ? t('고른 서비스의 Task 를 이 날짜 기록에서 찾지 못했습니다.')
+        : t('고른 서비스에 살아 있는 Task 가 없습니다.')
       : t('왼쪽에서 볼 서버를 고르세요.');
 
   /**
@@ -1407,7 +1460,7 @@ export default function App() {
           />
           <AlertPanel
             alerts={alertStream.alerts}
-            unread={alertStream.unread}
+            unread={unreadShown}
             onClear={alertStream.clear}
             onMarkRead={alertStream.markRead}
             onBadgeClick={handleAlertBadgeClick}
@@ -1864,6 +1917,7 @@ export default function App() {
         <div style={tabBodyStyle}>
           <AlertFullView
             alerts={alertStream.alerts}
+            rows={alertRows}
             since={alertStream.since}
             connected={isStreaming}
             onClear={alertStream.clear}
@@ -2289,6 +2343,7 @@ function XLogTable({
 
 function AlertFullView({
   alerts,
+  rows,
   since,
   connected,
   onClear,
@@ -2296,6 +2351,8 @@ function AlertFullView({
 }: {
   /** 앱이 쥐고 있는 하나의 버퍼. 여기서 따로 구독하면 배지와 어긋난다 */
   alerts: AlertPack[];
+  /** `alerts` 를 서비스 단위로 묶은 것 (alertGroups.ts) — 그리는 것은 이쪽이다 */
+  rows: AlertRow[];
   since: number | null;
   connected: boolean;
   onClear: () => void;
@@ -2309,6 +2366,15 @@ function AlertFullView({
     const id = setInterval(() => setTick(t => t + 1), 10_000);
     return () => clearInterval(id);
   }, [connected]);
+  /** 펼친 묶음. 열쇠는 서비스 + 첫 알림 시각 — 새 알림이 붙어도 같은 묶음이면 펼친 채다 */
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = useCallback((key: string) => {
+    setOpen(prev => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }, []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -2331,32 +2397,117 @@ function AlertFullView({
             key={tick}
           />
         )}
-        {alerts.map((a, i) => {
-          const color = alertLevelColor(a.level);
-          const label = alertLevelLabel(a.level);
-          const time = formatTime(a.time);
+        {rows.map((r, i) => {
+          if (r.kind === 'single') {
+            return <AlertLine key={`a${i}`} alert={r.alert} agentMap={agentMap} stripe={i % 2 === 1} />;
+          }
+          const key = `${r.service}@${r.from}`;
           return (
-            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', padding: '5px 14px', borderBottom: '1px solid #12122a', fontSize: F.body, gap: 8, background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
-              <span style={{ width: 74, flexShrink: 0, color: T.textDim }}>{time}</span>
-              <span style={{ width: 60, flexShrink: 0 }}>
-                <span style={{ background: color, color: T.text, fontSize: F.micro, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: 0.5 }}>{label}</span>
-              </span>
-              {/* 예전에는 종류(`linux`)를 적었다 — 같은 종류가 여럿이면 어느 서버의 알림인지
-                  알 수 없다. 이름을 적고, 이름을 아직 모르면 종류로 물러선다. */}
-              <span
-                style={{ width: 110, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.textMuted }}
-                title={`${agentMap.get(a.obj_hash) ?? `[${a.obj_hash}]`} · ${a.obj_type}`}
-              >
-                {agentMap.has(a.obj_hash) ? shortName(agentMap.get(a.obj_hash) ?? '') : a.obj_type}
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</div>
-                {a.message && <div style={{ color: T.textDim, fontSize: F.micro, wordBreak: 'break-all', marginTop: 2 }}>{a.message}</div>}
-              </div>
-            </div>
+            <AlertBurstLine
+              key={key}
+              burst={r}
+              agentMap={agentMap}
+              stripe={i % 2 === 1}
+              expanded={open.has(key)}
+              onToggle={() => toggle(key)}
+            />
           );
         })}
       </div>
+    </div>
+  );
+}
+
+const alertRowStyle = (stripe: boolean): React.CSSProperties => ({
+  display: 'flex', alignItems: 'flex-start', padding: '5px 14px', borderBottom: '1px solid #12122a',
+  fontSize: F.body, gap: 8, background: stripe ? 'rgba(255,255,255,0.01)' : 'transparent',
+});
+const alertChipStyle = (color: string): React.CSSProperties => ({
+  background: color, color: T.text, fontSize: F.micro, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: 0.5,
+});
+const alertAgentStyle: React.CSSProperties = {
+  width: 110, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.textMuted,
+};
+
+function AlertLine({ alert: a, agentMap, stripe }: { alert: AlertPack; agentMap: Map<number, string>; stripe: boolean }) {
+  return (
+    <div style={alertRowStyle(stripe)}>
+      <span style={{ width: 74, flexShrink: 0, color: T.textDim }}>{formatTime(a.time)}</span>
+      <span style={{ width: 60, flexShrink: 0 }}>
+        <span style={alertChipStyle(alertLevelColor(a.level))}>{alertLevelLabel(a.level)}</span>
+      </span>
+      {/* 예전에는 종류(`linux`)를 적었다 — 같은 종류가 여럿이면 어느 서버의 알림인지
+          알 수 없다. 이름을 적고, 이름을 아직 모르면 종류로 물러선다. */}
+      <span style={alertAgentStyle} title={`${agentMap.get(a.obj_hash) ?? `[${a.obj_hash}]`} · ${a.obj_type}`}>
+        {agentMap.has(a.obj_hash) ? shortName(agentMap.get(a.obj_hash) ?? '') : a.obj_type}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ color: T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</div>
+        {a.message && <div style={{ color: T.textDim, fontSize: F.micro, wordBreak: 'break-all', marginTop: 2 }}>{a.message}</div>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 한 서비스의 Task 생명주기 알림 묶음 — 한 줄로 말하고, 누르면 펼친다.
+ *
+ * **교체는 흐리게, 장애는 빨갛게.** 재배포는 날마다 있는 일이라 눈에 띄면 안 되고,
+ * 서비스가 통째로 내려간 것은 다른 어떤 알림보다 먼저 보여야 한다.
+ */
+function AlertBurstLine({
+  burst: b,
+  agentMap,
+  stripe,
+  expanded,
+  onToggle,
+}: {
+  burst: AlertBurst;
+  agentMap: Map<number, string>;
+  stripe: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const down = b.status === 'down';
+  const span = b.from === b.to ? formatTime(b.to) : `${formatTime(b.from)}~${formatTime(b.to)}`;
+  const tasks = [...new Set(b.alerts.map(a => shortName(agentMap.get(a.obj_hash) ?? `[${a.obj_hash}]`)))];
+  const counts = [
+    b.down > 0 ? `${t('내려감')} ${b.down}` : '',
+    b.up > 0 ? `${t('올라옴')} ${b.up}` : '',
+  ].filter(Boolean).join(' · ');
+  return (
+    <div style={{ ...alertRowStyle(stripe), flexDirection: 'column', gap: 2, cursor: 'pointer', opacity: down ? 1 : 0.7 }} onClick={onToggle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%' }}>
+        <span style={{ width: 74, flexShrink: 0, color: T.textDim }} title={span}>{formatTime(b.to)}</span>
+        <span style={{ width: 60, flexShrink: 0 }}>
+          <span style={alertChipStyle(down ? T.error : T.textFaint)}>{down ? t('장애') : t('교체')}</span>
+        </span>
+        <span style={alertAgentStyle} title={t('서비스')}>{b.service}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: down ? T.error : T.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {expanded ? '▾ ' : '▸ '}
+            {down ? t('살아 있는 Task 없음') : t('Task 교체')}
+            {b.recovered && <span style={{ color: T.textDim }}> · {t('지금은 살아 있는 Task 가 있습니다')}</span>}
+            <span style={{ color: T.textDim }}> — {counts} · {span}</span>
+          </div>
+          <div style={{ color: T.textDim, fontSize: F.micro, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {tasks.join(', ')}
+          </div>
+        </div>
+      </div>
+      {expanded && (
+        <div style={{ paddingLeft: 82, width: '100%' }}>
+          {b.alerts.map((a, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, fontSize: F.micro, color: T.textDim, padding: '1px 0' }}>
+              <span style={{ width: 64, flexShrink: 0 }}>{formatTime(a.time)}</span>
+              <span style={{ width: 120, flexShrink: 0 }}>{a.title}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {agentMap.get(a.obj_hash) ?? `[${a.obj_hash}]`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

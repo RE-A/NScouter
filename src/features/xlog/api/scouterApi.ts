@@ -165,6 +165,24 @@ export async function getObjectList(): Promise<AgentObject[]> {
   return invoke<AgentObject[]>('get_object_list');
 }
 
+/** 그날 콜렉터에 붙었던 오브젝트 (`OBJECT_LIST_LOAD_DATE`). 살아 있는지·태그는 없다 */
+export interface DailyObject {
+  obj_hash: number;
+  obj_type: string;
+  obj_name: string;
+}
+
+/**
+ * @param date 콜렉터 기준 `yyyyMMdd` (F-18)
+ *
+ * 정리(비활성 정리) 직후에도 오늘자 목록에 **남아 있었다**(실측, F-61). 바이트코드상 정리는
+ * 오늘자 DB 도 건드리므로 언제까지 남는지는 장담하지 않는다 — 부르는 쪽은 이 앱이 본 기록
+ * (`objectTimeline.ts`)도 같이 쓴다.
+ */
+export async function getObjectListByDate(date: string): Promise<DailyObject[]> {
+  return invoke<DailyObject[]>('get_object_list_by_date', { date });
+}
+
 // ─── 오브젝트 단건 명령 ───────────────────────────────────────
 // 콜렉터가 에이전트로 중계한다. 파라미터가 틀리면 에러가 아니라 빈 결과가 온다 (F-15).
 
