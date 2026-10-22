@@ -99,7 +99,8 @@ export const KpiTile = memo(function KpiTile({
   // 억지로 한 줄에 밀어 넣다가 **숫자가 잘린다** — 그러면 게이지가 값을 가린 셈이 된다.
   return (
     <div
-      className="relative min-w-[188px] flex-1 overflow-hidden rounded border border-line bg-surface px-3 py-2"
+      // 안 고른 Family 의 칸은 흐리게 둔다 — «—» 가 진하게 서 있으면 값이 끊긴 것으로 읽힌다.
+      className={`relative min-w-[188px] overflow-hidden rounded border border-line bg-surface px-3 py-2 ${available ? '' : 'opacity-50'}`}
       title={`${t(def.label)} — ${hint}`}
     >
       <div className={`absolute inset-y-0 left-0 w-0.5 ${EDGE[g]}`} aria-hidden />
