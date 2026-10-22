@@ -480,6 +480,15 @@ export class XLogChartRenderer {
     return selectInRect(data, sel, this.lastMapper, this.lastFilter, this.serviceName);
   }
 
+  /**
+   * 사각형 안의 것을 **필터 없이** 준다. 목록은 이것을 들고 있다가 지금 필터로 다시 거른다
+   * (`selectInRect` 주석). 좌표는 마지막으로 그린 것을 쓰므로 눈에 보이는 사각형과 같다.
+   */
+  querySelectionUnfiltered(sel: SelectionRect, data: SXLog[]): SXLog[] {
+    if (!this.lastMapper) return [];
+    return selectInRect(data, sel, this.lastMapper, null);
+  }
+
   dispose(): void {
     this.dotCache.clear();
   }

@@ -103,12 +103,15 @@ export function passesPatterns(
  * 사각형 안의 XLog 를 **전부** 돌려준다.
  *
  * 순서는 원본(시간 순)을 유지한다. 픽셀 훑기와 달리 y(=Elapsed) 순으로 섞이지 않는다.
+ *
+ * `filter` 가 `null` 이면 거르지 않는다. 목록은 고른 뒤에 필터가 바뀌어도 다시 걸러야
+ * 하는데, 고를 때 이미 걸러 버리면 조건을 풀었을 때 빠졌던 것을 되살릴 수 없다.
  */
 export function selectInRect(
   data: readonly SXLog[],
   rect: SelectionRect,
   mapper: CoordinateMapper,
-  filter: XLogFilterState,
+  filter: XLogFilterState | null,
   serviceName?: (hash: number) => string | undefined,
 ): SXLog[] {
   // 드래그는 어느 방향으로든 할 수 있다. 뒤집힌 사각형도 같은 결과여야 한다.
@@ -119,7 +122,7 @@ export function selectInRect(
 
   const out: SXLog[] = [];
   for (const xlog of data) {
-    if (!passesFilter(xlog, filter, serviceName)) continue;
+    if (filter !== null && !passesFilter(xlog, filter, serviceName)) continue;
 
     // **렌더러와 똑같이 천장에 붙인다.** 축보다 큰 값을 원래 자리로 두면
     // 그림 밖으로 판정돼, 천장에 찍혀 **눈에 보이는 점이 드래그에서 빠진다** —

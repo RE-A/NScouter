@@ -78,6 +78,25 @@ describe('selectInRect', () => {
     expect(got.map(x => x.error)).toEqual([7]);
   });
 
+  it('필터를 null 로 주면 거르지 않는다 — 목록이 나중에 지금 필터로 다시 거른다', () => {
+    // 고를 때 걸러 버리면 조건을 풀었을 때 빠졌던 것을 되살릴 수 없다.
+    const rows = [xlog({ error: 0 }), xlog({ error: 7 })];
+    const raw = selectInRect(rows, WHOLE_PLOT, mapper, null);
+    expect(raw).toHaveLength(2);
+
+    const errorOnly = { ...DEFAULT_FILTER, errorOnly: true };
+    expect(raw.filter(x => passesFilter(x, errorOnly)).map(x => x.error)).toEqual([7]);
+    expect(raw.filter(x => passesFilter(x, DEFAULT_FILTER))).toHaveLength(2);
+  });
+
+  it('필터가 없어도 사각형 밖과 시간 구간 밖은 빠진다', () => {
+    const inside = xlog({ endTime: now - 30_000, elapsed: 1000 });
+    const old = xlog({ endTime: now - 120_000 });
+    const p = mapper.dataToPixel(inside.endTime, mapper.extractValue(inside));
+    const rect = { x1: p.x - 3, y1: p.y - 3, x2: p.x + 3, y2: p.y + 3 };
+    expect(selectInRect([inside, old], rect, mapper, null).map(x => x.txid)).toEqual([inside.txid]);
+  });
+
   it('시간 구간을 벗어난 트랜잭션은 빠진다', () => {
     // 롤링 윈도우보다 오래된 건은 플롯 영역 왼쪽 밖으로 나간다
     const old = xlog({ endTime: now - 120_000 });
