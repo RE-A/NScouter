@@ -203,6 +203,31 @@ NScouter 는 두 가지로 받아 둔다.
 ※ 정리는 `ObjectWR`(오늘자 오브젝트 DB)까지 지운다. NScouter 는 **본 이름을 따로
 들고 있어서**(`agentNames.ts`) 정리한 뒤에도 지난 XLog 의 서버 이름이 그대로 보인다.
 
+### 콜렉터에서 자동 정리 — 클라이언트를 안 켜 둬도 된다
+
+위 두 가지는 **누군가의 NScouter 가 켜져 있어야** 돈다. 콜렉터가 스스로 지우게 하려면
+콜렉터 플러그인을 넣는다: `tools/collector-plugin/object.plug`.
+
+1. 파일을 콜렉터의 `plugin/object.plug` 로 복사한다 (`${COLLECTOR_DIR}/plugin/`).
+   **콜렉터를 다시 켤 필요는 없다** — 콜렉터가 몇 초 안에 다시 읽는다(로그에 `PLUG-IN : … IObject loaded`).
+2. 파일 머리의 설정을 사이트에 맞춘다.
+
+| 설정 | 기본 | 뜻 |
+|---|---|---|
+| `INTERVAL_MS` | 60초 | 몇 초마다 훑나 |
+| `DEAD_FOR_MS` | 10분 | 죽은 지 이만큼 지난 것만 지운다 — 재배포 중 잠깐 끊긴 것은 남긴다 |
+| `NAME_MARK` | `-ip-` | 이름에 이 글자가 든 것만 지운다. 고정 서버(이름이 안 갈리는 것)는 건드리지 않게 한다 |
+| `PERMANENT` | `false` | `true` 면 그날 오브젝트 DB 에서도 지운다 — 그날의 과거 조회에서 Task 이름을 잃는다 |
+
+- 지우면 **모든 클라이언트의 목록에서** 사라진다(전역). 「비활성 정리」 와 같은 일이다
+- `PERMANENT=false` 면 지운 Task 도 그날 기록(`OBJECT_LIST_LOAD_DATE`)에 남아, NScouter 의
+  과거 조회가 그때의 Task 를 계속 찾는다
+- `object.plug` 는 콜렉터에 **하나뿐**이다. 이미 쓰는 오브젝트 플러그인이 있으면 본문을 합친다
+- 콜렉터가 이 파일을 javassist 로 컴파일한다 — 고칠 때 제네릭·람다·향상된 for 를 쓰면 안 올라간다.
+  안 올라가면 콜렉터 로그에 컴파일 오류가 남는다
+- 지울 때마다 콜렉터 표준 출력에 `[nscouter-cleanup] removed N inactive object(s)` 가 찍힌다
+- 확인한 버전: scouter-server 2.21.3 (verified-facts F-63)
+
 ### 죽은 Task 가 남긴 것 보기 — 과거 조회 · 알림
 
 - **과거 조회** — 서비스를 고른 채 과거 모드로 가면 **그때 돌던 Task 까지** 찾아 넣는다
