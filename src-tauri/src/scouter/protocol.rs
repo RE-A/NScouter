@@ -59,6 +59,10 @@ pub const CMD_OBJECT_LIST_REAL_TIME: &str = "OBJECT_LIST_REAL_TIME";
 /// 콜렉터는 죽은 오브젝트를 스스로 지우지 않는다(F-60). ECS 처럼 Task 가
 /// 계속 갈리는 곳에서는 재배포마다 명단이 늘어난다.
 pub const CMD_OBJECT_REMOVE_INACTIVE: &str = "OBJECT_REMOVE_INACTIVE";
+/// 그날 붙었던 오브젝트 목록 (`AgentInfo.getAgentOldList`). 파라미터는 `date`(yyyyMMdd).
+///
+/// 정리(OBJECT_REMOVE_INACTIVE) 직후에도 오늘자 목록에 남아 있었다(실측 F-61).
+pub const CMD_OBJECT_LIST_LOAD_DATE: &str = "OBJECT_LIST_LOAD_DATE";
 
 // 오브젝트 단건 명령 — 콜렉터가 에이전트로 중계한다.
 // 응답은 전부 MapPack (실측: probe_object_mappack_keys).

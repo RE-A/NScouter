@@ -22,6 +22,7 @@ use crate::scouter::object::{
     build_thread_detail_param, parse_socket_list,
     parse_thread_detail, parse_thread_list, ActiveService, ThreadDetail,
     ClassListPage, DumpFile, EnvEntry, HeapHistoRow, SocketInfo, ThreadInfo,
+    build_daily_object_param, parse_daily_objects, DailyObject,
 };
 use crate::scouter::distribution::{Accumulator, ElapsedDistribution};
 use crate::scouter::objtype::{
@@ -238,6 +239,22 @@ pub async fn get_object_list(
 
     log::debug!("get_object_list: {}개 오브젝트 수신", objects.len());
     Ok(objects)
+}
+
+/// 그날 콜렉터에 붙었던 오브젝트 (`OBJECT_LIST_LOAD_DATE`).
+///
+/// **과거 조회에서 «그때 있던 Task» 를 풀려고 쓴다.** 서비스로 묶어 고르면 지금 살아 있는
+/// Task 만 대상이 되는데, ECS 에서는 어제 돌던 Task 가 오늘 하나도 안 남아 있다. 그 해시를
+/// 모르면 과거 XLog 를 물을 수 없다.
+#[tauri::command]
+pub async fn get_object_list_by_date(
+    state: State<'_, AppState>,
+    date: String,
+) -> Result<Vec<DailyObject>, String> {
+    let map = request_map(&state, CMD_OBJECT_LIST_LOAD_DATE, build_daily_object_param(&date)).await?;
+    let list = map.as_ref().map(parse_daily_objects).unwrap_or_default();
+    log::debug!("get_object_list_by_date: {date} → {}건", list.len());
+    Ok(list)
 }
 
 // ─── 오브젝트 단건 명령 (OBJECT_*) ───────────────────────────

@@ -81,6 +81,7 @@ pub fn run() {
             resolve_texts,
             get_object_list,
             remove_inactive_objects,
+            get_object_list_by_date,
             get_object_env,
             get_object_thread_list,
             get_object_sockets,

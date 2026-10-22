@@ -395,6 +395,52 @@ pub fn build_dump_file_param(obj_hash: i32, name: &str) -> MapPack {
     param
 }
 
+// ─── OBJECT_LIST_LOAD_DATE ───────────────────────────────────
+
+/// 그날 콜렉터에 붙었던 오브젝트 하나 (`ObjectRD.getDailyAgent`).
+///
+/// 실시간 목록과 달리 **살아 있는지·태그·주소가 없다.** 그날 오브젝트 DB 에 남은
+/// 이름만 있다. ECS 처럼 Task 가 갈리는 곳에서 «그때 어떤 Task 가 있었나» 를 푸는 데 쓴다 —
+/// 지금 목록에는 죽은 Task 가 정리돼 없을 수 있다.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DailyObject {
+    pub obj_hash: i32,
+    pub obj_type: String,
+    pub obj_name: String,
+}
+
+/// 날짜 하나(`yyyyMMdd`, 콜렉터 기준 — F-18)를 묻는다. 키는 **`date`** 하나다.
+pub fn build_daily_object_param(date: &str) -> MapPack {
+    let mut param = MapPack::new();
+    param.put("date", ScouterValue::Text(date.to_string()));
+    param
+}
+
+/// 응답은 MapPack 하나에 `objType` `objHash` `objName` 세 병렬 리스트다
+/// (`AgentInfo.getAgentOldList` → `ObjectRD.getDailyAgent`, 2.21.3 바이트코드).
+///
+/// `objHash` 는 long 으로 담겨 오지만 값은 i32 범위다(ObjectPack 의 objHash 가 int).
+/// 길이가 어긋나면 짧은 쪽에 맞춘다 — 이름 없는 해시를 지어내지 않는다.
+pub fn parse_daily_objects(out: &MapPack) -> Vec<DailyObject> {
+    let list = |key: &str| match out.entries.get(key) {
+        Some(ScouterValue::List(v)) => v.as_slice(),
+        _ => &[][..],
+    };
+    let types = list("objType");
+    let hashes = list("objHash");
+    let names = list("objName");
+
+    let n = hashes.len().min(names.len());
+    (0..n)
+        .filter_map(|i| {
+            let obj_hash = hashes[i].as_decimal()? as i32;
+            let obj_name = names[i].as_text()?.to_string();
+            let obj_type = types.get(i).and_then(|v| v.as_text()).unwrap_or("").to_string();
+            Some(DailyObject { obj_hash, obj_type, obj_name })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,6 +451,49 @@ mod tests {
 
     fn decimals(items: &[i64]) -> ScouterValue {
         ScouterValue::List(items.iter().map(|v| ScouterValue::Decimal(*v)).collect())
+    }
+
+    #[test]
+    fn 날짜별_목록_파라미터는_date_하나다() {
+        let p = build_daily_object_param("20261022");
+        assert_eq!(p.get_text("date"), Some("20261022"));
+        assert_eq!(p.entries.len(), 1);
+    }
+
+    #[test]
+    fn 날짜별_목록을_세_병렬_리스트에서_뽑는다() {
+        let mut m = MapPack::new();
+        m.put("objType", texts(&["tomcat", "tomcat"]));
+        m.put("objHash", decimals(&[16367847, -1585387669]));
+        m.put("objName", texts(&["/vm/safs-ip-10-0-0-1", "/vm/safs-ip-10-0-0-2"]));
+
+        let got = parse_daily_objects(&m);
+        assert_eq!(
+            got,
+            vec![
+                DailyObject { obj_hash: 16367847, obj_type: "tomcat".into(), obj_name: "/vm/safs-ip-10-0-0-1".into() },
+                DailyObject { obj_hash: -1585387669, obj_type: "tomcat".into(), obj_name: "/vm/safs-ip-10-0-0-2".into() },
+            ]
+        );
+    }
+
+    #[test]
+    fn 날짜별_목록은_길이가_어긋나면_짧은_쪽에_맞춘다() {
+        // 이름 없는 해시를 내보내면 화면이 [해시] 줄을 지어낸다.
+        let mut m = MapPack::new();
+        m.put("objType", texts(&["tomcat"]));
+        m.put("objHash", decimals(&[1, 2, 3]));
+        m.put("objName", texts(&["/a", "/b"]));
+        let got = parse_daily_objects(&m);
+        assert_eq!(got.len(), 2);
+        // 종류가 모자라도 이름이 있으면 낸다 — 종류는 묶기에 안 쓴다.
+        assert_eq!(got[1].obj_type, "");
+    }
+
+    #[test]
+    fn 날짜별_목록이_비면_빈_벡터다() {
+        // 그날 기록이 없으면 콜렉터는 빈 MapPack 이나 리스트 없는 MapPack 을 준다.
+        assert!(parse_daily_objects(&MapPack::new()).is_empty());
     }
 
     #[test]
