@@ -210,13 +210,18 @@ export class XLogChartRenderer {
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'top';
 
+    const { canvasWidth } = this.layout;
     for (const line of grid.lines) {
       const px = plotAreaX + line.position;
       this.ctx.beginPath();
       this.ctx.moveTo(px, plotAreaY);
       this.ctx.lineTo(px, plotAreaY + plotAreaHeight);
       this.ctx.stroke();
-      this.ctx.fillText(line.label, px, plotAreaY + plotAreaHeight + 4);
+      // 가운데 맞춤이라 오른쪽 끝 눈금의 시각은 절반이 캔버스 밖으로 나가 잘렸다.
+      // 글자만 안으로 당긴다 — 눈금선은 제자리다.
+      const half = this.ctx.measureText(line.label).width / 2;
+      const lx = Math.min(px, canvasWidth - half - 2);
+      this.ctx.fillText(line.label, lx, plotAreaY + plotAreaHeight + 4);
     }
 
     this.ctx.restore();
