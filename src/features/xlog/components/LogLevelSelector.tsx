@@ -50,7 +50,8 @@ const selectStyle: React.CSSProperties = {
   border: `1px solid ${T.borderControl}`,
   borderRadius: 4,
   color: T.textMuted,
-  padding: '3px 6px',
+  // 오른쪽은 직접 그린 화살표 자리다 (index.css select). 줄이면 글자가 화살표 밑으로 간다
+  padding: '3px 26px 3px 6px',
   fontSize: F.small,
   cursor: 'pointer',
 };

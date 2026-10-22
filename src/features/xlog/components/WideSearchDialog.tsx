@@ -172,7 +172,7 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           <select
             value={objHash}
             onChange={e => setObjHash(Number(e.target.value))}
-            className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg"
+            className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 pr-[26px] text-body text-fg"
           >
             {/* 서버가 **하나만** 받는다. 목록으로 좁힐 수 없다 */}
             <option value={0}>{t('전체')}</option>
