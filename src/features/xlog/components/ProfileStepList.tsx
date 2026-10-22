@@ -214,13 +214,20 @@ function StepRow({
           : `border-l-2 border-transparent ${highlighted ? 'bg-accent/12' : ''}`,
       ].join(' ')}
     >
-      {/* 시작 시각 — 트랜잭션 시작 기준 상대 ms */}
-      <span className="tnum text-right font-mono text-micro text-fg-faint">
-        {step.start_time}
+      {/* 시작 시각 — 트랜잭션 시작 기준 상대 ms.
+          숫자만 두었을 때는 `0 0 0 1 1 2` 가 순번으로 읽혔다. `+` 를 붙여 «시작 후» 로 읽히게 하고
+          단위는 풍선에 적는다 — 34px 칸에 `ms` 까지 넣으면 큰 값이 잘린다. */}
+      <span
+        className="tnum text-right font-mono text-micro text-fg-faint"
+        title={`${t('트랜잭션 시작 후')} ${step.start_time.toLocaleString()}ms ${t('에 시작')}`}
+      >
+        +{step.start_time}
       </span>
 
-      {/* 종류 */}
-      <span className={`font-mono text-micro font-semibold ${kind.cls}`}>{kind.label}</span>
+      {/* 종류. 한두 글자 약자라(M · ·) 풀어 쓴 이름을 풍선에 둔다 */}
+      <span className={`font-mono text-micro font-semibold ${kind.cls}`} title={kind.full}>
+        {kind.label}
+      </span>
 
       {/* 내용 */}
       <div style={{ paddingLeft: depth * 10 }} className="min-w-0">
