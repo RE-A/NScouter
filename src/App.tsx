@@ -1563,8 +1563,8 @@ export default function App() {
                 style={{ height: tableH }}
                 aside={
                   hasSelected ? (
-                    <span className="flex items-center gap-2">
-                      <span className="text-micro normal-case text-fg-dim">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 whitespace-nowrap text-micro normal-case text-fg-dim">
                         <span className="tnum font-mono text-fg-muted">
                           {selectedXLogs.length}
                         </span>
@@ -1580,7 +1580,7 @@ export default function App() {
                           없는 트랜잭션을 없다고 믿게 된다 (F-54). */}
                       {wideTruncated && (
                         <span
-                          className="rounded border border-warn/50 px-1 text-micro normal-case text-warn"
+                          className="shrink-0 whitespace-nowrap rounded border border-warn/50 px-1 text-micro normal-case text-warn"
                           title={
                             wideTruncated.known
                               ? t('서버 상한에 닿았습니다. 조건을 좁히거나 구간을 나눠 다시 찾으십시오.')
@@ -1595,7 +1595,7 @@ export default function App() {
                         onClick={handleClearSelection}
                         title={t('선택 해제')}
                         aria-label={t('선택 해제')}
-                        className="rounded px-1 text-micro text-fg-faint hover:text-fg"
+                        className="shrink-0 rounded px-1 text-micro text-fg-faint hover:text-fg"
                       >
                         ✕
                       </button>
@@ -2001,8 +2001,15 @@ interface XLogTableProps {
  * **행을 나누는 장치를 네 개** 겹쳐 썼다. 구분선 하나만 남긴다.
  * 상태 열(OK/ERR)도 뺐다 — 거의 모든 행이 OK 라 초록 기둥만 생겼다.
  * 에러는 예외적으로만 표시한다(왼쪽 막대 + ERR 칩).
+ *
+ * 시간 열은 `HH:mm:ss.SSS`(12자, 고정폭)가 다 들어가야 한다. 62px 로 박아 두었을 때는
+ * 밀리초 끝자리가 옆 서버 열 밑으로 들어갔다. 글자 크기 배율을 따라야 하므로 px 가 아니라
+ * 그 칸의 글자 크기(`--fs-micro`)로 잡는다.
+ *
+ * URL 열에는 최소폭을 둔다. `minmax(0,1fr)` 이면 창이 좁을 때 고정 열들이 자리를 다 먹고
+ * **URL 이 0 이 되어 사라졌다** — 목록에서 가장 먼저 읽는 칸이다. 서버·IP 가 먼저 준다.
  */
-const XLOG_COLS = 'grid grid-cols-[62px_minmax(0,104px)_minmax(0,1fr)_minmax(0,96px)_74px] gap-x-3';
+const XLOG_COLS = 'grid grid-cols-[calc(var(--fs-micro)*7.6)_minmax(0,104px)_minmax(96px,1fr)_minmax(0,96px)_74px] gap-x-3';
 /**
  * Y축이 Elapsed 가 아닐 때 쓰는 배치. **그 축의 값을 한 칸 더 보여준다.**
  *
@@ -2011,7 +2018,7 @@ const XLOG_COLS = 'grid grid-cols-[62px_minmax(0,104px)_minmax(0,1fr)_minmax(0,9
  * 같은 것으로 읽힌다.
  */
 const XLOG_COLS_Y =
-  'grid grid-cols-[62px_minmax(0,104px)_minmax(0,1fr)_minmax(0,96px)_74px_74px] gap-x-3';
+  'grid grid-cols-[calc(var(--fs-micro)*7.6)_minmax(0,104px)_minmax(96px,1fr)_minmax(0,96px)_74px_74px] gap-x-3';
 
 /** 목록에 실제로 그리는 최대 행 수. 넘으면 **느린 것부터** 자른다 */
 const XLOG_TABLE_LIMIT = 500;

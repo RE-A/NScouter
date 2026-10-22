@@ -22,10 +22,12 @@ export function Pane({ title, children, aside, className = '', style }: PaneProp
       style={style}
     >
       <div className="flex h-[26px] shrink-0 items-center justify-between border-b border-line px-2.5">
-        <span className="truncate text-micro font-semibold tracking-[0.08em] text-fg-dim uppercase">
+        {/* 제목은 줄지 않는다. 보조 요소가 길면 그쪽이 잘린다 — 제목이 «트...» 가 되면
+            무슨 패널인지부터 잃는다. */}
+        <span className="shrink-0 text-micro font-semibold tracking-[0.08em] text-fg-dim uppercase">
           {title}
         </span>
-        {aside}
+        {aside && <div className="ml-2 flex min-w-0 justify-end">{aside}</div>}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
     </section>

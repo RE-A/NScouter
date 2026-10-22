@@ -35,8 +35,10 @@ export const SelectionSummary = memo(function SelectionSummary({ stats }: Select
   const tone = (v: number | null) =>
     timed && v !== null ? durationTone(v * 1000) : 'text-fg-muted';
 
+  // **줄을 바꾸지 않는다.** 놓이는 자리가 높이 26px 의 패널 머리라, 접혀 내려간 줄이
+  // 아래 검색줄 위로 겹쳐 그려졌다. 좁으면 뒤쪽(내역)부터 잘린다 — 앞의 평균·최대가 먼저다.
   return (
-    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 normal-case">
+    <span className="flex min-w-0 items-baseline gap-x-2 overflow-hidden whitespace-nowrap normal-case">
       <Item label={t('평균')} value={stats.avg === null ? '—' : formatYAmount(stats.mode, stats.avg)} cls={tone(stats.avg)} />
       <Item label={t('최대')} value={stats.max === null ? '—' : formatYAmount(stats.mode, stats.max)} cls={tone(stats.max)} />
 
