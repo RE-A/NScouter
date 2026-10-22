@@ -19,7 +19,7 @@ use nscouter_lib::scouter::protocol::{
     CMD_TRIGGER_ACTIVE_SERVICE_LIST, CMD_TRIGGER_HEAPHISTO, CMD_TRIGGER_THREAD_LIST,
     CMD_ALERT_REAL_TIME, CMD_COUNTER_REAL_TIME_ALL, CMD_COUNTER_REAL_TIME_ALL_MULTI,
     CMD_OBJECT_ACTIVE_SERVICE_LIST, CMD_OBJECT_CLASS_LIST, CMD_OBJECT_DUMP_FILE_DETAIL,
-    CMD_OBJECT_DUMP_FILE_LIST, CMD_OBJECT_ENV, CMD_OBJECT_HEAPHISTO, CMD_OBJECT_LIST_REAL_TIME, CMD_OBJECT_REMOVE_INACTIVE,
+    CMD_OBJECT_DUMP_FILE_LIST, CMD_OBJECT_ENV, CMD_OBJECT_HEAPHISTO, CMD_OBJECT_LIST_LOAD_DATE, CMD_OBJECT_LIST_REAL_TIME, CMD_OBJECT_REMOVE_INACTIVE,
     CMD_OBJECT_SOCKET,
     CMD_OBJECT_THREAD_LIST, CMD_TRANX_LOAD_TIME_GROUP_V2, CMD_TRIGGER_THREAD_DUMP,
     CMD_TRANX_PROFILE, CMD_TRANX_PROFILE_FULL, CMD_TRANX_REAL_TIME_GROUP,
@@ -35,7 +35,7 @@ use nscouter_lib::scouter::protocol::{
 use nscouter_lib::scouter::configure::{
     attach_meta, parse_config_desc, parse_config_entries, parse_config_text, parse_config_value_types,
 };
-use nscouter_lib::scouter::object::build_object_param;
+use nscouter_lib::scouter::object::{build_daily_object_param, build_object_param, parse_daily_objects};
 use nscouter_lib::scouter::summary::{build_summary_param, parse_error_summary, parse_summary};
 use nscouter_lib::scouter::value::ScouterValue;
 use nscouter_lib::scouter::streaming::{build_request_param, StreamCursor};
@@ -7978,4 +7978,38 @@ fn live_remove_inactive() {
         before.len(),
         after.len()
     );
+}
+
+/// 날짜별 오브젝트 목록: **지금 붙어 있는 것이 오늘자 목록에 다 들어 있다.**
+///
+/// 과거 조회에서 서비스를 고르면 «그날 있었던 Task» 를 이 목록으로 푼다. 살아 있는 것조차
+/// 빠진다면 키·응답 모양이 틀린 것이다(이 프로토콜은 틀려도 빈 응답으로 답한다 — F-15).
+/// 죽은 것이 들어 있는지는 환경에 따라 달라 단정하지 않는다 — 숫자만 찍는다.
+#[test]
+#[ignore]
+fn live_object_list_load_date() {
+    let mut conn = login();
+    let live = fetch_object_hashes(&mut conn);
+
+    let today = chrono::Local::now().format("%Y%m%d").to_string();
+    let session = conn.session;
+    conn.send_request(CMD_OBJECT_LIST_LOAD_DATE, session, &build_daily_object_param(&today))
+        .expect("날짜별 오브젝트 목록 요청 실패");
+    let mut daily = Vec::new();
+    while let Some(pack) = conn.read_next_pack().expect("날짜별 오브젝트 응답 수신 실패") {
+        if let AnyPack::Map(m) = pack {
+            daily = parse_daily_objects(&m);
+        }
+    }
+    for o in &daily {
+        println!("  {today}: {} (type={}, hash={})", o.obj_name, o.obj_type, o.obj_hash);
+    }
+    println!("실시간 {}건 · 오늘자 {}건", live.len(), daily.len());
+
+    assert!(!daily.is_empty(), "오늘자 목록이 비었다 — 파라미터 키(date)나 응답 모양 확인");
+    let names: std::collections::HashSet<i32> = daily.iter().map(|o| o.obj_hash).collect();
+    for h in &live {
+        assert!(names.contains(h), "지금 붙어 있는 {h} 가 오늘자 목록에 없다");
+    }
+    assert!(daily.iter().all(|o| !o.obj_name.is_empty()), "이름 없는 줄이 있다");
 }
