@@ -262,7 +262,9 @@ export interface ChartLayout {
 }
 
 export function buildLayout(w: number, h: number): ChartLayout {
-  const paddingTop = 10;
+  // 위 여백은 `멈춤` 단추(XLogChart, 왼쪽 위에 떠 있다) 아래로 내린다. 10 이었을 때는
+  // Y축 맨 윗눈금 — 지금 축의 최대값 — 이 단추 밑에 깔려 안 보였다.
+  const paddingTop = 34;
   const paddingRight = 10;
   const paddingBottom = 30;
   const paddingLeft = 60;
