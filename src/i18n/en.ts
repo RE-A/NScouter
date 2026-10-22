@@ -899,4 +899,7 @@ export const EN: Record<string, string> = {
   'config.json 의': 'Saved to',
   '에 저장됩니다.': 'in config.json.',
   '수신 대기 중…': 'Waiting for data…',
+  // 프로파일 스텝의 시작 시각 풍선 — «트랜잭션 시작 후 12ms 에 시작»
+  '트랜잭션 시작 후': 'Started',
+  '에 시작': 'after the transaction began',
 };
