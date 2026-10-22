@@ -4,6 +4,7 @@
 // (`src/test/fakeCanvas.ts`, `XLogChartRenderer.test.ts` 와 같은 방식).
 // 자(눈금·좌표)는 `timelineScale.test.ts` 가 맡는다 — 여기서는 **무엇을 적는가** 만 본다.
 
+import { StrictMode } from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeCanvasContext, textsOf } from '../../test/fakeCanvas';
@@ -93,6 +94,22 @@ describe('StackedTimeline', () => {
     const texts = await draw([{ counter: 'Cpu', series: [], asked: false }]);
     expect(texts).toContain('이 지표를 주는 서버를 안 골랐습니다');
     expect(texts).not.toContain('이 구간에 값이 없습니다');
+  });
+
+  it('StrictMode 에서도 그린다 — effect 를 정리했다 다시 세워도 예약이 막히지 않는다', async () => {
+    // 정리할 때 예약 자리표를 안 비웠더니 두 번째 마운트부터 «이미 예약됨» 으로 보고
+    // 영영 그리지 않았다. 개발 모드에서 «같은 시간축» 이 빈 상자로 남던 원인이다.
+    render(
+      <StrictMode>
+        <StackedTimeline
+          rows={rowsOf([{ counter: 'TPS', series: [series(11, [1, 2])] }])}
+          range={RANGE}
+          agentMap={agentMap}
+        />
+      </StrictMode>,
+    );
+    await frame();
+    expect(textsOf(ctx)).toContain('TPS');
   });
 
   it('시각 눈금을 적는다', async () => {
