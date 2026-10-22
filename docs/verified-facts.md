@@ -1733,6 +1733,7 @@ ASIS 가 목록을 다루는 법도 같이 적어 둔다 (`AgentModelThread`):
 `ObjectMap.remove`(살아 있는 목록)와 `ObjectWR$.remove`(**오늘자 오브젝트 DB**).
 그래서 지우고 나면 **오늘 받은 XLog 의 서버 이름이 콜렉터 쪽에서는 안 풀린다.**
 지난 날짜는 그날 DB 에 남아 있어 괜찮다.
+(단, 날짜별 목록 `OBJECT_LIST_LOAD_DATE` 로 보면 정리 직후에도 오늘자에 남아 있었다 — F-61)
 
 실측(테스트 환경): 살아 있는 5건에서 정리하면 **5건 그대로**,
 한 대를 내리고 25초 뒤 정리하면 **5→3건**(그 WAS 와 그 datasource).
@@ -1743,6 +1744,36 @@ ASIS 가 목록을 다루는 법도 같이 적어 둔다 (`AgentModelThread`):
 - 재현: `cargo test --test live_collector live_remove_inactive -- --ignored --nocapture`
 - 화면 쪽 대응: `objectRefresh.ts`(죽은 것 잠시 유지),
   `agentNames.ts`(이름 영구 보관 — 정리해도 이름이 안 끊기게)
+
+### F-61. 날짜별 오브젝트 목록 `OBJECT_LIST_LOAD_DATE` — 정리 직후에도 **오늘자 목록에 남는다**
+
+파라미터는 MapPack `{date: "yyyyMMdd"}` 하나(콜렉터 기준 날짜, F-18). 응답은 MapPack **하나**에
+병렬 리스트 셋 — `objType`(text) · `objHash`(decimal, 값은 int 범위) · `objName`(text).
+**살아 있는지·태그·주소는 없다.** (`AgentInfo.getAgentOldList` → `ObjectRD.getDailyAgent`)
+
+실측(테스트 환경, safs Task 셋을 띄웠다 내린 뒤): 비활성 정리(`OBJECT_REMOVE_INACTIVE`)로
+실시간 목록이 11 → 5건이 된 **직후에도** 오늘자 목록에는 11건이 그대로 있었다.
+F-60 의 «정리는 `ObjectWR$.remove`(오늘자 DB)도 건드린다» 와 어긋난다 — 바이트코드에
+호출은 있지만 적어도 곧바로 목록에서 빠지지는 않는다. 언제 빠지는지는 재지 않았다.
+
+**그래서 과거 조회의 «그때 있던 Task» 는 이 목록에만 기대지 않는다** — 앱이 본 기록
+(`objectTimeline.ts`)을 같이 쓴다.
+
+- 재현: `cargo test --test live_collector live_object_list_load_date -- --ignored --nocapture`
+  (오늘자 목록이 지금 붙어 있는 것을 전부 담는지 본다. 정리 뒤 남는지는 정리 후 다시 돌려 숫자로 본다)
+
+### F-62. 오브젝트의 `wakeup` 은 **시작 시각이 아니라 마지막 하트비트**다
+
+콜렉터는 오브젝트 팩을 받을 때마다 `ObjectPack.wakeup()` 을 부르고, 그건
+`wakeup = System.currentTimeMillis(); alive = true` 다 (`AgentManager$.active`, 2.21.3 바이트코드).
+그래서 살아 있는 것의 `wakeup` 은 «방금», 죽은 것의 `wakeup` 은 **«마지막으로 살아 있던 때»** 다.
+
+**처음 뜬 때는 콜렉터가 어디에도 남기지 않는다.** Task 교체를 가르려면(새 Task 가 언제
+떴나) 앱이 처음 본 때를 직접 적어야 한다 — `objectTimeline.ts` 의 `firstSeen`.
+
+또 **새로 뜬 오브젝트에는 `ACTIVATED_OBJECT` 알림이 안 온다**(실측: safs Task 3·4 를 새로 띄웠을 때).
+그 알림은 죽었던 오브젝트가 **되살아날 때**(`alertReactiveObject`)만 나간다. 교체 판정은
+알림이 아니라 목록 기록으로 해야 하는 이유다.
 
 ## 도구 / 환경
 
