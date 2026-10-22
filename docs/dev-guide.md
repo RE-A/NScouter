@@ -44,58 +44,65 @@ npm install
 ```
 NScouter/
 ├── src/                          # React 프론트엔드
-│   ├── App.tsx                   # 앱 루트 (레이아웃, 이벤트 연결)
+│   ├── App.tsx                   # 앱 루트 (레이아웃, 상단 탭, 이벤트 연결)
 │   ├── main.tsx                  # ReactDOM 진입점
-│   └── features/xlog/            # XLog 기능 모듈
-│       ├── api/
-│       │   └── scouterApi.ts     # Tauri invoke/listen 래퍼
-│       ├── types/
-│       │   └── xlog.ts           # 모든 타입 정의 (XLogPack, SXLog, Config 등)
-│       ├── engine/               # Canvas 렌더링 엔진 (React 의존성 없음)
-│       │   ├── XLogChartRenderer.ts  # 7단계 렌더링 오케스트레이터
-│       │   ├── CoordinateMapper.ts   # 좌표 변환
-│       │   ├── GridCalculator.ts     # 눈금 계산
-│       │   ├── PointMap.ts           # O(1) 충돌 감지
-│       │   └── DotImageCache.ts      # 점 이미지 캐시
-│       ├── store/
-│       │   └── XLogDataStore.ts  # 데이터 관리 (시간 윈도우, 상한)
-│       ├── hooks/
-│       │   ├── useXLogStream.ts  # Tauri 이벤트 → Store
-│       │   └── useXLogCanvas.ts  # rAF 루프, ResizeObserver, 드래그
-│       ├── components/
-│       │   ├── XLogChart.tsx         # 메인 차트 컴포넌트
-│       │   ├── XLogToolbar.tsx       # 필터/설정 UI
-│       │   └── ConnectionDialog.tsx  # 서버 연결 UI
-│       └── utils/
-│           └── colorPalette.ts   # 점 색상 규칙
+│   ├── components/               # 공용 UI (Pane, Divider, ContextMenu, SectionHeader 등)
+│   ├── i18n/                     # 문구 (index.ts, en.ts) — 한국어 원문이 키, en.ts 가 영어 사전
+│   ├── styles/                   # 디자인 토큰·테마 (tokens.ts/.css, theme.ts)
+│   ├── test/                     # Vitest setup, fakeCanvas
+│   └── features/
+│       ├── xlog/                 # XLog 기능 모듈 (앱의 중심)
+│       │   ├── api/              # scouterApi.ts(invoke/listen 래퍼), subscribe, connectFlow, pastXLog
+│       │   ├── types/            # 타입 정의 (xlog.ts 의 SXLog·XLogColumns·Config 등)
+│       │   ├── engine/           # Canvas 렌더링 엔진 (React 의존성 없음)
+│       │   │                     #   XLogChartRenderer · CoordinateMapper · GridCalculator ·
+│       │   │                     #   PointMap · DotImageCache · yScale · densityGrid · pixelQuery · rectSelect
+│       │   ├── store/            # XLogDataStore (시간 창, 건수 상한)
+│       │   ├── hooks/            # useXLogStream · useXLogCanvas · 탭·선택·이름 캐시 등
+│       │   ├── components/       # 차트·툴바·상세·검색·서버 트리·카운터·토폴로지 등
+│       │   ├── trace/            # 콜트리·흐름 트리 모델
+│       │   └── utils/            # colorPalette(점 색상 규칙), xlogDate, streamStatus, alertWatch
+│       ├── active/               # 액티브 서비스 탭
+│       ├── visualize/            # 시각화 탭 (KPI·분포·타임라인·인스턴스 그리드)
+│       ├── settings/             # 앱 설정 대화상자
+│       ├── config/               # 에이전트·서버 설정 편집 (catalog/official.ts 는 tools/gen_config_catalog.py 로 생성)
+│       └── parity/               # ASIS 이관 인벤토리 (이관율 계산)
 │
 ├── src-tauri/                    # Tauri + Rust 백엔드
-│   ├── Cargo.toml                # 의존성 (tokio, sha2, hex, serde 등)
+│   ├── Cargo.toml                # 의존성 (tokio, serde, sha2, hex, flate2, tauri-plugin-log 등)
 │   ├── tauri.conf.json           # Tauri 앱 설정
 │   ├── capabilities/
 │   │   └── default.json          # 권한 설정
+│   ├── tests/                    # scouter_integration(L3 mock) · live_collector(L4 실서버) · log_level*
 │   └── src/
 │       ├── main.rs               # 진입점
-│       ├── lib.rs                # Tauri Builder + Command 등록
-│       ├── commands.rs           # Tauri Command 함수 6개
-│       ├── state.rs              # AppState (Mutex<Connection>, TextCache, stop_flag)
+│       ├── lib.rs                # Tauri Builder + Command 등록 (Command 목록의 원본)
+│       ├── commands.rs           # Tauri Command 전부 + 카운터·알림 스트림 루프
+│       ├── state.rs              # AppState (연결, 조회용 연결 풀, 스트림 토큰, 설정)
+│       ├── config.rs             # config.json (실행파일 경로 기준)
+│       ├── profile_store.rs      # 프로파일 저장·열기
+│       ├── export_store.rs       # CSV 내보내기
 │       └── scouter/
 │           ├── mod.rs
 │           ├── protocol.rs       # 프로토콜 상수 (TcpFlag, PackEnum, CMD_*)
 │           ├── codec.rs          # ScouterReader / ScouterWriter
 │           ├── value.rs          # ScouterValue enum
-│           ├── pack.rs           # XLogPack (43필드), MapPack 역직렬화
-│           ├── connection.rs     # TCP 연결, 로그인, 스트림 읽기
+│           ├── pack.rs           # XLogPack, MapPack 등 역직렬화
+│           ├── connection.rs     # TCP 연결, 로그인, 요청/응답 읽기
 │           ├── streaming.rs      # TRANX_REAL_TIME_GROUP 폴링 루프
-│           └── dictionary.rs     # GET_TEXT_100 hash→text 캐시
+│           ├── xlog_columns.rs   # 실시간 XLog 열 묶음 직렬화
+│           ├── dictionary.rs     # GET_TEXT_100 hash→text 캐시
+│           ├── counter.rs / alert.rs            # 실시간 카운터·알림 파라미터
+│           ├── object.rs / objtype.rs / family.rs  # 오브젝트 단건·타입 단위 명령, Family 판정
+│           ├── past.rs / search.rs / trace.rs   # 과거 XLog, 조건 검색, gxid 조회
+│           ├── profile.rs / profile_search.rs   # 프로파일 Step 파싱, 본문 검색
+│           ├── summary.rs / distribution.rs     # 요약, 응답시간 분포
+│           ├── configure.rs      # 에이전트·콜렉터 설정 조회
+│           └── mock_server.rs    # 통합 테스트용 가짜 Collector
 │
-├── docs/                         # 문서
-│   ├── README.md                 # 문서 인덱스
-│   ├── architecture.md           # 아키텍처 가이드 (이 파일과 동급)
-│   ├── dev-guide.md              # 개발 가이드 (이 파일)
-│   ├── deploy-guide.md           # 배포 가이드
-│   ├── asis/                     # ASIS Java 코드 분석
-│   └── plans/                    # 상세 설계 문서
+├── Test/                         # 로컬 Scouter 테스트 환경 (podman compose)
+├── tools/                        # gen_config_catalog.py
+├── docs/                         # 문서 (인덱스는 docs/README.md)
 │
 ├── package.json
 ├── tsconfig.json
@@ -279,29 +286,22 @@ export const Y_AXIS_CONFIGS: Record<YAxisMode, YAxisModeConfig> = {
    pub const CMD_MY_REQUEST: &str = "MY_REQUEST";
    ```
 
-2. `commands.rs`에 새 Command 구현:
+2. `commands.rs`에 새 Command 구현. 응답이 MapPack 하나면 기존 헬퍼 `request_map`
+   (오브젝트 단건이면 `request_object_map`)을 쓴다 — `send_request` → `read_next_pack` 루프가 그 안에 있다:
    ```rust
    #[tauri::command]
-   pub async fn my_request(state: State<'_, AppState>) -> Result<..., String> {
-       let mut conn = state.connection.lock().await;
-       let conn = conn.as_mut().ok_or("연결되지 않음")?;
-
-       let param = MapPack::new();
-       let session = conn.session;
-       conn.send_request(CMD_MY_REQUEST, session, &param)
-           .map_err(|e| e.to_string())?;
-
-       // 응답 수신
-       loop {
-           match conn.read_next_pack().map_err(|e| e.to_string())? {
-               Some(AnyPack::Map(map)) => { /* 처리 */ }
-               Some(_) => {}
-               None => break,
-           }
-       }
-       Ok(...)
+   pub async fn my_request(state: State<'_, AppState>) -> Result<(), String> {
+       let map = request_map(&state, CMD_MY_REQUEST, MapPack::new()).await?;
+       // map: Option<MapPack> — 처리
+       Ok(())
    }
    ```
+   응답 팩이 여러 개거나 MapPack 이 아니면 `request_map` 처럼 `state.connection` 을 잠그고
+   `send_request` 후 `read_next_pack()` 이 `None` 이 될 때까지 읽는다.
+   오래 걸리는 objType 단위 조회는 `state.connection` 대신 조회용 연결 풀을 쓰는 기존 Command
+   (`request_objtype_maps`)를 따른다 — 짧은 폴링을 막지 않기 위해서다.
+
+3. `lib.rs` 의 `generate_handler!` 에 등록하고 `scouterApi.ts` 에 래퍼를 단다 (5.1).
 
 ---
 
@@ -315,7 +315,7 @@ cargo test                                       # L2 유닛 + L3 mock 통합
 cargo test --test live_collector -- --ignored    # L4 실서버 (Test 환경이 떠 있어야 한다)
 ```
 
-현재 152건(L2) + 4건(L3) + 85건(L4, 기본 `#[ignore]`).
+2026-10-22 기준 226건(L2) + 5건(L3) + 103건(L4, 기본 `#[ignore]`), 그 밖에 로그 레벨 시험 2건(`tests/log_level*.rs`).
 L2 는 각 모듈 하단의 `#[cfg(test)] mod tests`, L3 는 `tests/scouter_integration.rs`,
 L4 는 `tests/live_collector.rs` 에 있다.
 
@@ -346,7 +346,7 @@ npm test -- src/features/xlog/engine    # 일부만
 ```
 
 Vitest + jsdom. 설정은 `vite.config.ts` 의 `test` 블록이고 Tauri API mock 은
-`src/test/setup.ts` 에서 건다. 현재 570건 / 54개 파일이며, 테스트 파일은 대상 옆에
+`src/test/setup.ts` 에서 건다. 2026-10-22 기준 1,651건 / 132개 파일이며, 테스트 파일은 대상 옆에
 `*.test.ts(x)` 로 둔다.
 
 계층(L1~L4) 구분과 «무엇을 어디서 검증하나» 는 [테스트 전략](testing-strategy.md).
@@ -385,14 +385,15 @@ listen('xlog-data', e => console.log(e.payload));
 
 ### TCP 연결
 
-- `start_xlog_stream` command는 현재 **블로킹** 방식으로 동작. 스트리밍 루프가 실행 중인 동안 command가 반환되지 않음.
-- 실용적 해결: `invoke('start_xlog_stream', ...)` 호출 후 응답을 기다리지 말 것 (fire-and-forget).
-- 세션 만료(`INVALID_SESSION`) 시 자동 재연결 없음 — `xlog-error` 이벤트를 수신하여 UI에서 재연결 버튼 표시.
+- `start_xlog_stream` 은 스트림 전용 연결을 따로 열어 `tokio::spawn` 으로 폴링을 돌리고 **바로 반환**한다.
+  같은 스트림을 다시 시작하면 이전 태스크는 중지 토큰으로 멈춘다 (`StreamTokens::take_token`).
+- 일시 오류는 `xlog-error` 를 보내고 1초 뒤 스스로 다시 폴링한다.
+- 세션 만료(`INVALID_SESSION`) 시 자동 재로그인 없음 — `xlog-error` 를 보내고 스트림 루프를 끝낸다.
 
 ### txid / gxid 정밀도
 
 - Java `long`(i64)은 JavaScript `number`(f64) 범위를 초과함.
-- Rust에서 String으로 직렬화하여 전달. 프론트에서 `BigInt(xlog.txid)` 변환 필요.
+- Rust에서 String으로 직렬화하여 전달. 프론트는 **문자열 그대로** 키·비교에 쓰고 숫자로 바꾸지 않는다 (`SXLog.txid: string`).
 
 ### XLogPack 선택적 필드
 
@@ -401,5 +402,5 @@ listen('xlog-data', e => console.log(e.payload));
 
 ### Canvas 좌표
 
-- `drawImage(dot, px-2, py-2)` — **좌상단 기준**. 중심 기준으로 계산하면 위치가 2픽셀 어긋남.
+- `drawImage(dot, x - half, y - half)` — **좌상단 기준**. 중심 기준으로 계산하면 점 크기의 절반만큼 어긋남.
 - `devicePixelRatio`를 고려한 canvas 크기 설정 (`ResizeObserver` 내부에서 처리).

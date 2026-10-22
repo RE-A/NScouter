@@ -16,7 +16,7 @@ NScouter는 Tauri v2 기반 데스크톱 앱이다. 단일 `npm run tauri build`
        │
        └─ 2. cargo build --release (Rust)
                └─ src-tauri/target/release/
-                       ├─ NScouter.exe           (Windows 실행파일)
+                       ├─ nscouter.exe           (Windows 실행파일)
                        └─ bundle/
                                ├─ msi/            ← Windows 설치 패키지
                                ├─ nsis/           ← Windows 경량 인스톨러
@@ -33,8 +33,7 @@ NScouter는 Tauri v2 기반 데스크톱 앱이다. 단일 `npm run tauri build`
 □ cargo check 통과 (Rust 컴파일 오류 없음)
 □ tsc --noEmit 통과 (TypeScript 타입 오류 없음)
 □ cargo test 통과 (단위 테스트 전체 통과)
-□ tauri.conf.json 버전 번호 업데이트
-□ Cargo.toml 버전 번호 업데이트 (동일 버전으로 맞춤)
+□ 버전 번호 업데이트 — package.json · package-lock.json · tauri.conf.json · Cargo.toml · Cargo.lock (6장)
 □ 테스트 서버 연결 확인 (Collector :6100 접근 가능)
 ```
 
@@ -124,8 +123,10 @@ rustup target add x86_64-pc-windows-msvc
 ```
 
 배포 파일:
-- `bundle/msi/NScouter_0.1.0_x64_en-US.msi` — 표준 MSI 설치 파일
-- `bundle/nsis/NScouter_0.1.0_x64-setup.exe` — 경량 설치 파일 (권장)
+- `bundle/msi/Nscouter_<버전>_x64_en-US.msi` — 표준 MSI 설치 파일
+- `bundle/nsis/Nscouter_<버전>_x64-setup.exe` — 경량 설치 파일 (권장)
+
+(파일 이름의 앞부분은 `tauri.conf.json` 의 `productName` 이다.)
 
 ### macOS
 
@@ -169,9 +170,9 @@ sudo apt-get install -y \
 
 ```json
 {
-  "productName": "NScouter",
-  "version": "0.1.0",             // ← 버전 업데이트
-  "identifier": "com.company.NScouter",  // ← 고유 식별자 (변경 금지)
+  "productName": "Nscouter",
+  "version": "0.5.13",            // ← 버전 업데이트
+  "identifier": "com.jun.nscouter",  // ← 고유 식별자 (변경 금지)
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -181,13 +182,16 @@ sudo apt-get install -y \
   "app": {
     "windows": [
       {
-        "title": "NScouter",
-        "width": 1280,             // ← 기본 창 크기 조정 권장
-        "height": 800,
-        "minWidth": 800,
+        "title": "Nscouter",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
         "minHeight": 600
       }
-    ]
+    ],
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
@@ -203,14 +207,14 @@ sudo apt-get install -y \
 
 ### 버전 업데이트 절차
 
-버전은 두 파일에서 동일하게 관리:
+버전은 아래 파일에서 동일하게 관리한다 (릴리스 커밋 예: `301a4d5` 0.5.13):
 
 ```bash
-# 1. tauri.conf.json
-"version": "0.2.0"
-
-# 2. src-tauri/Cargo.toml
-version = "0.2.0"
+# 1. package.json                 "version": "0.5.13"
+# 2. package-lock.json            루트 "version" 두 곳 (직접 고친다 — 0.5.7 에서 멈춰 있던 적이 있다)
+# 3. src-tauri/tauri.conf.json    "version": "0.5.13"
+# 4. src-tauri/Cargo.toml         version = "0.5.13"
+# 5. src-tauri/Cargo.lock         nscouter 항목 (cargo check 가 갱신)
 ```
 
 ### 버전 번호 규칙
