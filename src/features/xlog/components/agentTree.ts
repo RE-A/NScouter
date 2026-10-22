@@ -57,6 +57,30 @@ export function shortName(objName: string): string {
 }
 
 /**
+ * 목록에 적을 이름. 평소에는 `shortName` 이다.
+ *
+ * **짧은 이름이 겹치면 부모 마디를 앞에 붙인다** — `order-app · HikariPool-1`.
+ * datasource 는 앱마다 `HikariPool-1` 로 똑같이 지어져, 짧은 이름만으로는 어느 앱의 풀인지
+ * 가를 수 없었다(Active 탭의 커넥션 풀 줄과 같은 표기다). 안 겹치는 이름은 그대로 둔다 —
+ * 전부에 붙이면 목록이 길어지기만 한다.
+ */
+export function displayNames(agents: readonly AgentObject[]): Map<number, string> {
+  const count = new Map<string, number>();
+  for (const a of agents) {
+    const s = shortName(a.obj_name);
+    count.set(s, (count.get(s) ?? 0) + 1);
+  }
+  const out = new Map<number, string>();
+  for (const a of agents) {
+    const s = shortName(a.obj_name);
+    const parts = a.obj_name.split('/').filter(Boolean);
+    const parent = parts.length >= 2 ? parts[parts.length - 2] : '';
+    out.set(a.obj_hash, (count.get(s) ?? 0) > 1 && parent !== '' ? `${parent} · ${s}` : s);
+  }
+  return out;
+}
+
+/**
  * 검색어와 맞는가.
  *
  * **이름과 타입 둘 다** 본다. 사용자는 `CJFW`(시스템)로도 찾고 `BO`(이름)로도 찾는다.
