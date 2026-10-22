@@ -4,7 +4,7 @@
 // 10초마다 목록을 다시 받는데 그때마다 순서가 바뀌면 누르려던 항목이 도망간다.
 
 import { describe, it, expect } from 'vitest';
-import { groupAgents, groupNameOf, shortName, NO_GROUP } from './agentTree';
+import { displayNames, groupAgents, groupNameOf, shortName, NO_GROUP } from './agentTree';
 import type { AgentObject } from '../types/xlog';
 
 function agent(name: string, type: string, alive = true): AgentObject {
@@ -29,6 +29,34 @@ describe('shortName', () => {
   it('경로만 있어도 빈 문자열을 내지 않는다', () => {
     // 빈 이름은 화면에서 클릭할 수 없는 행이 된다
     expect(shortName('/')).toBe('/');
+  });
+});
+
+describe('displayNames', () => {
+  const withHash = (name: string, type: string, hash: number): AgentObject => ({
+    ...agent(name, type),
+    obj_hash: hash,
+  });
+
+  it('짧은 이름이 겹치면 부모 마디를 붙인다 — 앱마다 HikariPool-1 이다', () => {
+    const names = displayNames([
+      withHash('/vm/shop-app/HikariPool-1', 'datasource', 1),
+      withHash('/vm/order-app/HikariPool-1', 'datasource', 2),
+      withHash('/vm/shop-app', 'tomcat', 3),
+    ]);
+    expect(names.get(1)).toBe('shop-app · HikariPool-1');
+    expect(names.get(2)).toBe('order-app · HikariPool-1');
+    expect(names.get(3)).toBe('shop-app');
+  });
+
+  it('안 겹치는 이름은 그대로다', () => {
+    const names = displayNames([withHash('/vm/shop-app/HikariPool-1', 'datasource', 1)]);
+    expect(names.get(1)).toBe('HikariPool-1');
+  });
+
+  it('붙일 부모가 없으면 짧은 이름 그대로다', () => {
+    const names = displayNames([withHash('test-host', 'linux', 1), withHash('test-host', 'linux', 2)]);
+    expect(names.get(1)).toBe('test-host');
   });
 });
 

@@ -4,7 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { getObjectList } from '../api/scouterApi';
 import type { AgentObject } from '../types/xlog';
 import { agentRowState, groupCheck, toggleGroupPick } from './agentFilter';
-import { groupAgents, shortName, type GroupBy } from './agentTree';
+import { displayNames, groupAgents, type GroupBy } from './agentTree';
 import { shouldShowTypes, typeCounts, typeLabel, typeTone } from './objectTypes';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
@@ -108,6 +108,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
 
   const filtering = selectedHashes.size > 0;
   const aliveCount = agents.filter(a => a.alive).length;
+  /** 겹치는 짧은 이름은 부모를 붙여 가른다 (displayNames). 묶음과 무관하게 전체에서 본다 */
+  const labels = useMemo(() => displayNames(agents), [agents]);
   const [cleaning, setCleaning] = useState(false);
   /** 정리한 뒤에는 **기다리지 않고** 다시 읽는다 — 10초 뒤에 줄어들면 안 눈 것으로 읽힌다 */
   const handleCleanup = useCallback(async () => {
@@ -395,13 +397,15 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 <div className="divide-y divide-line/40">
                   {group.agents.map(agent => {
                     const state = agentRowState(selectedHashes, agent.obj_hash);
-                    const name = shortName(agent.obj_name);
+                    const name = labels.get(agent.obj_hash) ?? '';
                     return (
             <div
               key={agent.obj_hash}
               onClick={() => handleToggle(agent.obj_hash)}
               onContextMenu={e => handleContextMenu(e, agent)}
-              title={`${agent.obj_name}\n${agent.address}\nv${agent.version}`}
+              // 메뉴가 떠 있는 동안에는 풍선 도움말을 거둔다 — 오른쪽 클릭 자리에 그대로 남아
+              // 메뉴 항목 위를 덮었다.
+              title={menu ? undefined : `${agent.obj_name}\n${agent.address}\nv${agent.version}`}
               className={[
                 'flex cursor-pointer items-center gap-2 border-l-2 px-2.5 py-1.5 text-small select-none',
                 // 전부 보이는 중(plain)에는 칠하지 않는다 — 전부를 강조하면 강조가 아니다.
