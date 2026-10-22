@@ -10,6 +10,7 @@ import { deriveStreamStatus } from '../utils/streamStatus';
 import { sampleX, totalLineVisible } from './counterGeometry';
 import { aggregate, totalMode } from './counterTotal';
 import { CANVAS, SERIES } from '../../../styles/tokens';
+import { getAgentColor } from '../utils/colorPalette';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
 
@@ -50,6 +51,8 @@ interface AgentSamples {
 }
 
 // Canvas 는 var() 를 못 읽으므로 실제 색 문자열이어야 한다.
+// 합계 선 하나에만 쓴다. 오브젝트별 선은 XLog 점과 같은 색(`getAgentColor`)이다 —
+// 순서로 돌려 쓰면 같은 서버가 XLog 에서는 노랑, 여기서는 파랑이 된다.
 const PALETTE = SERIES;
 
 export const CounterChart = memo(function CounterChart({
@@ -194,7 +197,7 @@ export const CounterChart = memo(function CounterChart({
         return;
       }
 
-      drawLines(ctx, agents, w, h, PALETTE);
+      drawLines(ctx, agents, w, h, a => (a.objHash === TOTAL_HASH ? PALETTE[0] : getAgentColor(a.objHash)));
 
       // 범례. 합계 모드에는 선이 하나뿐이라 이름 대신 접는 방식을 적는다 —
       // 여기서 "합계인가 평균인가"를 말해 주지 않으면 두 배로 읽거나 절반으로 읽는다.
@@ -206,8 +209,7 @@ export const CounterChart = memo(function CounterChart({
         ctx.fillText(mode === 'avg' ? t('평균') : t('합계'), 22, h - 8);
       } else {
         agents.forEach((a, i) => {
-          const color = PALETTE[i % PALETTE.length];
-          ctx.fillStyle = color;
+          ctx.fillStyle = getAgentColor(a.objHash);
           ctx.fillRect(8 + i * 90, h - 16, 10, 2);
           ctx.fillStyle = CANVAS.textMuted;
           ctx.font = '9px monospace';
@@ -265,7 +267,7 @@ function drawLines(
   agents: AgentSamples[],
   w: number,
   h: number,
-  palette: readonly string[],
+  colorOf: (a: AgentSamples) => string,
 ) {
   const usable = h - 20;
   const allValues = agents.flatMap(a => a.values);
@@ -290,11 +292,11 @@ function drawLines(
     ctx.restore();
   }
 
-  agents.forEach((agent, i) => {
+  agents.forEach(agent => {
     const data = agent.values;
     if (data.length < 2) return;
 
-    const color = palette[i % palette.length];
+    const color = colorOf(agent);
     ctx.beginPath();
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;

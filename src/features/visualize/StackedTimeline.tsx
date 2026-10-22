@@ -9,7 +9,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { counterMeta } from '../xlog/types/counter';
-import { CANVAS, SERIES } from '../../styles/tokens';
+import { CANVAS } from '../../styles/tokens';
+import { getAgentColor } from '../xlog/utils/colorPalette';
 import { useThemeEpoch } from '../../styles/useThemeEpoch';
 import { t } from '../../i18n';
 import { formatKpi } from './kpi';
@@ -148,10 +149,11 @@ export const StackedTimeline = memo(function StackedTimeline({
           return;
         }
 
-        row.series.forEach((s, si) => {
+        // 선 색은 XLog 점과 같은 오브젝트 고정색이다 (CounterChart 와 같은 이유).
+        row.series.forEach(s => {
           if (s.times.length < 2) return;
           ctx.beginPath();
-          ctx.strokeStyle = SERIES[si % SERIES.length];
+          ctx.strokeStyle = getAgentColor(s.obj_hash);
           ctx.lineWidth = 1.3;
           // **값이 없는 자리에서는 선을 끊는다.** 이어 버리면 «그 사이 서서히 변했다» 가
           // 되는데, 실제로는 아무것도 모르는 구간이다.

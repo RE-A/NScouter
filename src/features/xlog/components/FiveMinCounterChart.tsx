@@ -10,7 +10,8 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { getTodayCounter, type CounterSeries } from '../api/scouterApi';
 import { counterMeta, type CounterName } from '../types/counter';
 import { hasAnyValue, seriesMax, trimAll, type TrimmedSeries } from './fiveMinSeries';
-import { CANVAS, SERIES } from '../../../styles/tokens';
+import { CANVAS } from '../../../styles/tokens';
+import { getAgentColor } from '../utils/colorPalette';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
 
@@ -150,10 +151,11 @@ function draw(
   }
   const span = t1 > t0 ? t1 - t0 : 1;
 
-  list.forEach((s, i) => {
+  // 선 색은 XLog 점과 같은 오브젝트 고정색이다 (CounterChart 와 같은 이유).
+  list.forEach(s => {
     if (s.times.length < 2) return;
     ctx.beginPath();
-    ctx.strokeStyle = SERIES[i % SERIES.length];
+    ctx.strokeStyle = getAgentColor(s.obj_hash);
     ctx.lineWidth = 1.5;
     // **값이 없는 슬롯에서는 선을 끊는다.** 이어 버리면 수집이 없던 구간이
     // «서서히 변했다» 로 그려진다.
@@ -186,7 +188,7 @@ function draw(
   // 좁은 차트에서 시간축 글씨와 겹친다.
   if (list.length > 1) {
     list.forEach((s, i) => {
-      ctx.fillStyle = SERIES[i % SERIES.length];
+      ctx.fillStyle = getAgentColor(s.obj_hash);
       ctx.fillRect(60 + i * 90, h - 8, 10, 2);
       ctx.fillStyle = CANVAS.textMuted;
       ctx.fillText(label(s.obj_hash).substring(0, 10), 74 + i * 90, h - 4);

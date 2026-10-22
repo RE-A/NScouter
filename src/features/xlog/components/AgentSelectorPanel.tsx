@@ -11,6 +11,7 @@ import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { ConfigSettingsDialog } from '../../config/ConfigSettingsDialog';
 import { isDatasourceObjectType, isJavaeeObjectType, learnFamiliesFromObjects } from '../types/counter';
 import { t } from '../../../i18n';
+import { getAgentColor } from '../utils/colorPalette';
 
 interface AgentSelectorPanelProps {
   isConnected: boolean;
@@ -416,6 +417,16 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 className={`size-1.5 shrink-0 rounded-full ${agent.alive ? 'bg-ok' : 'bg-fg-faint'}`}
                 aria-hidden
               />
+              {/* 이 서버의 점·선 색. XLog 와 카운터 차트가 같은 색을 쓰므로 이 칸이 범례다.
+                  앞의 둥근 점은 살아 있음 표시라 겹쳐 쓰지 않는다.
+                  트랜잭션을 내는 javaee 만 단다 — 나머지는 XLog 에 점이 없다. */}
+              {isJavaeeObjectType(agent.obj_type) && (
+                <span
+                  className="h-2.5 w-1 shrink-0 rounded-sm"
+                  style={{ backgroundColor: getAgentColor(agent.obj_hash) }}
+                  aria-hidden
+                />
+              )}
               <span className="min-w-0 flex-1 truncate text-fg">
                 {name || `[${agent.obj_hash}]`}
               </span>
