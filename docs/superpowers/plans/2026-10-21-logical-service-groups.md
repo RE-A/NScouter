@@ -53,7 +53,7 @@
     - `null` 인 것은 **넣지 않는다** (그룹 없음은 호출부가 평평하게 보여준다)
     - **멤버가 하나인 그룹은 빼고** 돌려준다 — Review Focus 1
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다** — `src/features/xlog/components/instanceGroup.test.ts`
+- [x] **Step 1: 실패하는 테스트를 쓴다** — `src/features/xlog/components/instanceGroup.test.ts`
 
 ```ts
 const agent = (obj_name: string, tags: [string, string][] = []): AgentObject =>
@@ -90,21 +90,21 @@ it('같은 서비스의 여러 Task 를 한 묶음으로 센다', () => {
 });
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `npx vitest run src/features/xlog/components/instanceGroup.test.ts`
 Expected: FAIL — `serviceNameOf is not defined`
 
-- [ ] **Step 3: `instanceGroup.ts` 를 구현한다**
+- [x] **Step 3: `instanceGroup.ts` 를 구현한다**
 
 `shortName` 은 `agentTree.ts` 에서 가져다 쓴다. 정규식은 `new RegExp` 을 `try/catch` 로 감싼다.
 
-- [ ] **Step 4: 통과를 확인한다**
+- [x] **Step 4: 통과를 확인한다**
 
 Run: `npx vitest run src/features/xlog/components/instanceGroup.test.ts`
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add src/features/xlog/components/instanceGroup.ts src/features/xlog/components/instanceGroup.test.ts
@@ -129,7 +129,7 @@ git commit -m "ECS Task 이름에서 논리 서비스를 뽑는다"
   - **종료된 Task 를 바로 지우지 않는 이유**: 재배포 중 몇 초 비는 사이에 화면에서 사라지면 «장애» 로 읽힌다
 - `export const TERMINATED_KEEP_MS = 60_000`
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 ```ts
 it('새 Task 는 바로 들어온다', () => { /* next 에만 있는 해시가 결과에 있다 */ });
@@ -138,15 +138,15 @@ it('오래 지난 것은 버린다', () => { /* now - wakeup > TERMINATED_KEEP_M
 it('되돌아온 Task 는 다시 살아난다', () => { /* 같은 해시가 next 에 오면 alive === true */ });
 ```
 
-- [ ] **Step 2: 실패를 확인한다** — `npx vitest run src/features/xlog/hooks/objectRefresh.test.ts`
+- [x] **Step 2: 실패를 확인한다** — `npx vitest run src/features/xlog/hooks/objectRefresh.test.ts`
 
-- [ ] **Step 3: `mergeObjects` 를 구현하고 App 효과를 주기 갱신으로 바꾼다**
+- [x] **Step 3: `mergeObjects` 를 구현하고 App 효과를 주기 갱신으로 바꾼다**
 
 `setInterval(load, 10_000)` 로 바꾸고 `clearInterval` 로 정리한다. 주기는 왼쪽 패널과 **같은 10초** — 둘이 다르면 화면 두 곳이 서로 다른 명단을 보여준다. `setAgentMap` 의 기존 «같으면 그대로» 비교를 유지한다(매 갱신마다 새 Map 을 만들면 그걸 의존성으로 쓰는 곳이 전부 다시 돈다).
 
-- [ ] **Step 4: 통과를 확인한다** — 위 명령 + `npx vitest run` 전체
+- [x] **Step 4: 통과를 확인한다** — 위 명령 + `npx vitest run` 전체
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git commit -am "오브젝트 목록을 앱 전체가 10초마다 다시 읽는다"
@@ -167,7 +167,7 @@ git commit -am "오브젝트 목록을 앱 전체가 10초마다 다시 읽는�
   - `groupAgents(agents, query, 'service', types, rule)` — 묶인 것은 서비스 이름으로, `null` 인 것은 기존 `'(그룹 없음)'` 마디로
   - `AgentGroup` 에 `kind: 'type' | 'host' | 'service'` 를 더한다 — 화면이 서비스 묶음만 다르게(펼침·일괄 선택) 다루려면 구별이 필요하다
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 ```ts
 it('서비스로 묶으면 같은 서비스의 Task 가 한 마디에 모인다', () => { /* ... */ });
@@ -175,15 +175,15 @@ it('규칙에 안 걸린 것은 «그룹 없음» 으로 떨어진다 — 조용
 it('묶음은 이름순 — 살아 있는 수로 정렬하면 10초마다 목록이 춤춘다', () => { /* ... */ });
 ```
 
-- [ ] **Step 2: 실패를 확인한다** — `npx vitest run src/features/xlog/components/agentTree.test.ts`
+- [x] **Step 2: 실패를 확인한다** — `npx vitest run src/features/xlog/components/agentTree.test.ts`
 
-- [ ] **Step 3: `groupAgents` 에 `'service'` 분기를 더하고 패널에 버튼을 단다**
+- [x] **Step 3: `groupAgents` 에 `'service'` 분기를 더하고 패널에 버튼을 단다**
 
 기본 묶기는 **바꾸지 않는다** — 지금 쓰는 사람의 화면이 말없이 달라지면 안 된다.
 
-- [ ] **Step 4: 통과를 확인한다**
+- [x] **Step 4: 통과를 확인한다**
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ---
 
@@ -209,7 +209,7 @@ it('묶음은 이름순 — 살아 있는 수로 정렬하면 10초마다 목록
   - `export function toggleService(sel, name): GroupSelection`
   - `export function toggleHash(sel, hash): GroupSelection`
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 ```ts
 it('그룹을 고르면 그 그룹의 Task 가 전부 대상이 된다', () => { /* ... */ });
@@ -221,15 +221,15 @@ it('그룹과 낱개를 같이 골라도 두 번 세지 않는다', () => { /* .
 it('고른 그룹이 통째로 사라지면 빈 집합이다 — 호출부가 그걸 말해야 한다', () => { /* ... */ });
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
-- [ ] **Step 3: 구현하고 App 에 붙인다**
+- [x] **Step 3: 구현하고 App 에 붙인다**
 
 App 은 `GroupSelection` 을 상태로 들고, `agents` 가 갱신될 때마다 `resolveSelection` 으로 푼 결과를 **모든 XLog 탭에** 적는다 (`setTabSelection`, 0.5.12 에서 만든 것). 기존 `filter.objHashSet` 의 뜻과 쓰임은 그대로다.
 
-- [ ] **Step 4: 통과를 확인한다** — 위 + 전체
+- [x] **Step 4: 통과를 확인한다** — 위 + 전체
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ---
 
@@ -244,7 +244,7 @@ Review Focus 3. 그룹은 골라 뒀는데 그 서비스의 Task 가 하나도 �
 **Interfaces:**
 - Produces: `export function selectionState(sel, agents, rule): 'none' | 'empty-group' | 'ok'`
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 ```ts
 it('아무것도 안 골랐으면 none', () => { /* ... */ });
@@ -252,11 +252,11 @@ it('골랐는데 살아 있는 Task 가 없으면 empty-group', () => { /* ... *
 it('살아 있는 것이 있으면 ok', () => { /* ... */ });
 ```
 
-- [ ] **Step 2~4: 실패 확인 → 구현 → 통과 확인**
+- [x] **Step 2~4: 실패 확인 → 구현 → 통과 확인**
 
 `'empty-group'` 일 때 XLog·Active 의 빈 화면 문구를 「고른 서비스에 살아 있는 Task 가 없습니다」로 바꾼다. `en.ts` 에도 넣는다.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ---
 
@@ -273,14 +273,14 @@ it('살아 있는 것이 있으면 ok', () => { /* ... */ });
 - Consumes: `agentMap` (objHash → objName), Task 1 `serviceNameOf`
 - 서버 열은 **짧은 인스턴스명**을 쓴다. 그룹명은 이미 왼쪽에서 고른 것이라 줄마다 반복할 이유가 없다
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 ```ts
 it('한 줄에 그 트랜잭션이 돈 Task 이름이 보인다', () => { /* ... */ });
 it('이름을 못 풀면 해시를 드러낸다 — 빈 칸은 «못 받았다» 로 읽힌다', () => { /* ... */ });
 ```
 
-- [ ] **Step 2~5: 실패 확인 → 구현 → 통과 확인 → 커밋**
+- [x] **Step 2~5: 실패 확인 → 구현 → 통과 확인 → 커밋**
 
 ---
 
@@ -298,14 +298,14 @@ it('이름을 못 풀면 해시를 드러낸다 — 빈 칸은 «못 받았다»
 - Rust: `pub struct GroupRulePrefs { pub tag_key: String, pub pattern: String }`, `#[serde(default)]`, 기본은 Task 1 의 `DEFAULT_GROUP_RULE` 과 **같은 값**
 - 화면: 태그 키 입력칸 + 패턴 입력칸 + **지금 목록으로 미리보기**(몇 개 그룹으로 묶이는지 수를 보여준다 — 정규식을 눈으로만 보고 맞추는 것은 어렵다)
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 ```ts
 it('규칙을 바꾸면 저장된다', () => { /* saveConfig 에 group_rule 이 담긴다 */ });
 it('정규식이 깨져 있으면 저장 전에 말해 준다', () => { /* ... */ });
 ```
 
-- [ ] **Step 2~5: 실패 확인 → 구현 → 통과 확인 → 커밋**
+- [x] **Step 2~5: 실패 확인 → 구현 → 통과 확인 → 커밋**
 
 ---
 
@@ -317,8 +317,8 @@ it('정규식이 깨져 있으면 저장 전에 말해 준다', () => { /* ... *
 
 이름을 유니크하게 나눈 **다음** 에 오는 문제가 이 기능이다. 가이드가 거기서 끊기면 나눈 사람이 «이제 100줄이 됐다» 에서 멈춘다.
 
-- [ ] **Step 1: 두 문서를 고친다**
-- [ ] **Step 2: 커밋**
+- [x] **Step 1: 두 문서를 고친다**
+- [x] **Step 2: 커밋**
 
 ---
 
@@ -365,7 +365,7 @@ ECS 에서는 Task 가 갈릴 때마다 이름이 달라지므로 재배포 한 
   - Rust: `#[tauri::command] async fn remove_inactive_objects(state) -> Result<(), String>` — `request_objtype_maps` 가 아니라 단건 요청(`OBJECT_REMOVE_INACTIVE`, 파라미터 없음)
   - 설정: `auto_remove_inactive_min` — 0 이면 끔(**기본값**), 그 외는 분 단위 주기
 
-- [ ] **Step 1: 이름 캐시의 실패하는 테스트를 쓴다**
+- [x] **Step 1: 이름 캐시의 실패하는 테스트를 쓴다**
 
 ```ts
 it('한 번 본 이름은 목록에서 사라져도 남는다', () => { /* ... */ });
@@ -373,41 +373,41 @@ it('이름이 바뀌면 새 이름으로 갱신한다 — 같은 해시면 같�
 it('콜렉터를 갈아타면 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다 (F-35)', () => { /* ... */ });
 ```
 
-- [ ] **Step 2: 실패를 확인한다** — `npx vitest run src/features/xlog/hooks/agentNames.test.ts`
+- [x] **Step 2: 실패를 확인한다** — `npx vitest run src/features/xlog/hooks/agentNames.test.ts`
 
-- [ ] **Step 3: `agentNames.ts` 를 구현하고 `App` 의 `agentMap` 을 여기로 바꾼다**
+- [x] **Step 3: `agentNames.ts` 를 구현하고 `App` 의 `agentMap` 을 여기로 바꾼다**
 
 `agentMap` 은 지금 살아 있는 목록에서 매번 다시 만든다 — 그래서 오브젝트가 사라지면
 이름이 끊긴다. 캐시를 거쳐 읽게 한다.
 
-- [ ] **Step 4: 통과를 확인한다**
+- [x] **Step 4: 통과를 확인한다**
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
-- [ ] **Step 6: Rust 커맨드를 더하고 `live_collector` 에 실측 테스트를 쓴다**
+- [x] **Step 6: Rust 커맨드를 더하고 `live_collector` 에 실측 테스트를 쓴다**
 
 ```rust
 #[ignore] #[tokio::test] async fn live_remove_inactive() { /* 응답이 오는지, 목록이 줄었는지 */ }
 ```
 
-- [ ] **Step 7: 실측으로 확인한다**
+- [x] **Step 7: 실측으로 확인한다**
 
 Run: `cargo test --test live_collector live_remove_inactive -- --ignored --nocapture`
 Expected: PASS — 명령이 받아들여지고, 직전/직후 목록 길이가 찍힌다
 
-- [ ] **Step 8: 커밋**
+- [x] **Step 8: 커밋**
 
-- [ ] **Step 9: 화면 — 서버 목록에 「비활성 정리」 버튼**
+- [x] **Step 9: 화면 — 서버 목록에 「비활성 정리」 버튼**
 
 죽은 것이 하나도 없으면 **그리지 않는다.** 누를 이유가 없는 버튼은 자리만 먹는다.
 누르면 몇 개를 지울지 먼저 말하고 확인을 받는다 — **다른 사람 화면에서도 사라진다**는 것을
 그 자리에서 적는다.
 
-- [ ] **Step 10: 설정 — 자동 정리 주기 (기본 끔)**
+- [x] **Step 10: 설정 — 자동 정리 주기 (기본 끔)**
 
 `0`(끔) · `30분` · `1시간` · `6시간`. 자유 입력을 받지 않는 이유는 글자 크기와 같다.
 **끔이 기본인 이유를 설명 줄에 적는다** — 전역이라 남의 화면까지 바뀐다.
 
-- [ ] **Step 11: 통과를 확인한다** — 전체 + `cargo test`
+- [x] **Step 11: 통과를 확인한다** — 전체 + `cargo test`
 
-- [ ] **Step 12: 커밋**
+- [x] **Step 12: 커밋**
