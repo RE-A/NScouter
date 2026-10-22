@@ -1775,6 +1775,26 @@ F-60 의 «정리는 `ObjectWR$.remove`(오늘자 DB)도 건드린다» 와 어�
 그 알림은 죽었던 오브젝트가 **되살아날 때**(`alertReactiveObject`)만 나간다. 교체 판정은
 알림이 아니라 목록 기록으로 해야 하는 이유다.
 
+### F-63. 콜렉터 오브젝트 플러그인으로 **죽은 오브젝트를 자동으로 지울 수 있다**
+
+`plugin/object.plug` 는 오브젝트 팩이 올 때마다 불린다. 로더(`PlugInLoader`)가 파일 내용을
+`public void process(ObjectPack p){ ObjectPack $pack=$1; <파일> }` 로 감싸 javassist 로 컴파일한다.
+콜렉터 내부의 static 메서드를 그대로 부를 수 있다:
+
+- `scouter.server.core.AgentManager.getObjPacks()` — 지금 목록 (`Enumeration<ObjectPack>`)
+- `scouter.server.core.AgentManager.removeAgents(List<Integer objHash>, boolean permanent)` —
+  골라서 지운다. `permanent=true` 면 `ObjectWR.remove`(그날 오브젝트 DB)까지, `false` 면 목록에서만
+  (`AgentManager$$anonfun$removeAgents$1`, 2.21.3 바이트코드). `OBJECT_REMOVE_INACTIVE` 는 이것을 전부에 부른다
+
+실측(테스트 환경, `tools/collector-plugin/object.plug` 의 시간 기준만 60초로 줄여서):
+Task 를 띄웠다 죽이고 약 90~110초 뒤 실시간 목록에서 Task 와 그 커넥션 풀이 빠졌다
+(`[nscouter-cleanup] removed 2`). `permanent=false` 라 그날 목록(`OBJECT_LIST_LOAD_DATE`)에는 남았다.
+파일을 바꾸면 **재기동 없이** 다시 읽는다 — 로그에 `[S1600] … duplicate class definition` 이 한 줄 남지만
+곧바로 다른 경로로 올라간다(`PLUG-IN : … IObject loaded`).
+
+- 재현: 위 파일을 `plugin/object.plug` 로 두고 Task 하나를 띄웠다 죽인 뒤
+  `cargo test --test live_collector live_object_list -- --ignored --nocapture` 로 목록을 본다
+
 ## 도구 / 환경
 
 ### F-13. podman-compose는 Windows에서 `build:` 섹션이 동작하지 않는다

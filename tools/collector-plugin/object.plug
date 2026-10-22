@@ -1,0 +1,38 @@
+// NScouter — ECS·K8s 에서 죽은 Task 를 콜렉터가 스스로 지운다
+//
+// 콜렉터는 죽은 오브젝트를 스스로 지우지 않는다(verified-facts F-60). Task 이름이 갈릴 때마다
+// 목록이 쌓여, 누군가 「비활성 정리」 를 눌러 주거나 클라이언트를 켜 둬야 했다.
+// 이 플러그인은 콜렉터 안에서 돈다 — 클라이언트가 꺼져 있어도 정리된다.
+//
+// 설치·설정·주의: docs/duplicate-objname-guide.md 「콜렉터에서 자동 정리」
+// 확인한 버전: scouter-server 2.21.3 (F-63)
+//
+// 콜렉터가 이 파일을 `process(ObjectPack p)` 의 본문으로 컴파일한다(javassist).
+// **javassist 문법만 된다** — 제네릭·람다·향상된 for·자동 박싱을 쓰지 말 것.
+// 오브젝트 팩이 올 때마다(하트비트마다) 불리므로 간격은 시스템 속성으로 직접 잰다.
+
+// ── 설정 ────────────────────────────────────────────────────
+long INTERVAL_MS = 60000L;      // 몇 ms 마다 훑나
+long DEAD_FOR_MS = 600000L;     // 죽은 지 이만큼 지난 것만 지운다 (재배포 중 잠깐 끊긴 것은 남긴다)
+String NAME_MARK = "-ip-";      // 이름에 이 글자가 든 것만 지운다 (ECS Task 이름 규칙). 빈 문자열이면 전부
+boolean PERMANENT = false;      // true 면 그날 오브젝트 DB 에서도 지운다 — 그날 과거 조회에서 이름을 잃는다
+
+// ── 본문 ────────────────────────────────────────────────────
+long now = System.currentTimeMillis();
+String last = System.getProperty("nscouter.cleanup.last");
+if (last == null || now - Long.parseLong(last) >= INTERVAL_MS) {
+    System.setProperty("nscouter.cleanup.last", String.valueOf(now));
+    java.util.ArrayList dead = new java.util.ArrayList();
+    java.util.Enumeration en = scouter.server.core.AgentManager.getObjPacks();
+    while (en.hasMoreElements()) {
+        scouter.lang.pack.ObjectPack o = (scouter.lang.pack.ObjectPack) en.nextElement();
+        // wakeup 은 마지막 하트비트다(F-62) — 죽은 것이면 «마지막으로 살아 있던 때»
+        if (!o.alive && now - o.wakeup > DEAD_FOR_MS && o.objName != null && o.objName.indexOf(NAME_MARK) >= 0) {
+            dead.add(Integer.valueOf(o.objHash));
+        }
+    }
+    if (dead.size() > 0) {
+        scouter.server.core.AgentManager.removeAgents(dead, PERMANENT);
+        System.out.println("[nscouter-cleanup] removed " + dead.size() + " inactive object(s)");
+    }
+}
