@@ -49,6 +49,11 @@ const Y_AXIS_OPTIONS: YAxisMode[] = [
  */
 const CONTROL =
   'rounded border border-line-control bg-input px-1.5 py-0.5 text-body text-fg';
+/**
+ * 고르기 상자. `px-1.5` 가 기본 스타일의 오른쪽 여백(직접 그린 화살표 자리, index.css)을
+ * 덮어써서 `5분` 같은 짧은 값이 화살표 밑으로 들어갔다. 오른쪽만 되살린다.
+ */
+const SELECT = `${CONTROL} pr-[26px]`;
 
 export function XLogToolbar({
   config,
@@ -187,7 +192,7 @@ export function XLogToolbar({
       )}
       <Field label={t('Y축')}>
         <select
-          className={CONTROL}
+          className={SELECT}
           title={t('점의 높이를 무엇으로 볼지. 응답시간·CPU·SQL 시간·SQL 건수 등')}
           value={config.yAxisMode}
           onChange={e => onConfigChange({ yAxisMode: e.target.value as YAxisMode })}
@@ -201,7 +206,7 @@ export function XLogToolbar({
       </Field>
       <Field label={t('범위')}>
         <select
-          className={CONTROL}
+          className={SELECT}
           title={t('가로축이 담는 시간. 좁힐수록 점이 덜 겹친다')}
           value={config.timeRangeMs}
           onChange={e => onConfigChange({ timeRangeMs: Number(e.target.value) })}
@@ -259,7 +264,7 @@ export function XLogToolbar({
             Ctrl+휠로도 움직인다. */}
         <Field label={t('Y최대')}>
           <select
-            className={CONTROL}
+            className={SELECT}
             title={t('세로축의 최대값. 이보다 큰 것은 맨 위에 붙습니다 (Ctrl+휠로도 조절)')}
             value={String(config.yMax)}
             onChange={e => onConfigChange({ yMax: Number(e.target.value) })}
