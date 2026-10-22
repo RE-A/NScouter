@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Nscouter",
+  "productName": "NScouter",
   "version": "0.5.13",
   "identifier": "com.jun.nscouter",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Nscouter",
+        "title": "NScouter",
         "width": 1400,
         "height": 900,
         "minWidth": 900,

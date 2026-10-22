@@ -1,6 +1,6 @@
-# YAScouter
+# NScouter
 
-> **Yet Another Scouter** — Scouter APM 모던 클라이언트
+> Scouter APM 모던 클라이언트
 
 Java 기반 Eclipse RCP 클라이언트를 **Tauri + Rust + React + TypeScript**로 재구현한 데스크톱 애플리케이션. Scouter Collector에 직접 TCP 연결하여 XLog 트랜잭션을 실시간으로 Canvas 스캐터 차트에 시각화한다.
 
@@ -56,7 +56,7 @@ npm run tauri build
 ## 네트워크 요구사항
 
 ```
-YAScouter (클라이언트 PC)  ──TCP :6100──►  Scouter Collector (서버)
+NScouter (클라이언트 PC)  ──TCP :6100──►  Scouter Collector (서버)
 ```
 
 Scouter Collector가 설치된 서버의 **TCP 6100 포트**가 클라이언트에서 접근 가능해야 한다.
