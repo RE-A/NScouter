@@ -251,7 +251,13 @@ export const StackedTimeline = memo(function StackedTimeline({
     return () => ro.disconnect();
   }, [schedule]);
 
-  useEffect(() => () => { if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current); }, []);
+  // **취소하면 자리표도 비운다.** 비우지 않으면 `schedule` 이 «이미 예약됨» 으로 보고 다시는
+  // 그리지 않는다 — StrictMode 가 effect 를 정리했다 다시 세우는 순간(개발 모드) 그 꼴이 되어
+  // 「같은 시간축」 이 값이 있는데도 빈 상자로 남았다.
+  useEffect(() => () => {
+    if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+  }, []);
 
   return (
     <canvas
