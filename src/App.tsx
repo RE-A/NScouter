@@ -123,7 +123,7 @@ import {
   toTabs as toXLogTabs,
   fromTabs as xlogTabsToPrefs,
 } from './features/xlog/hooks/uiState';
-import type { GroupBy } from './features/xlog/components/agentTree';
+import { shortName, type GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
 import type { AgentObject, SXLog, XLogChartConfig, XLogFilterState, YAxisMode } from './features/xlog/types/xlog';
 import {
@@ -343,6 +343,14 @@ export default function App() {
   // **알림은 앱이 하나만 쥔다.** 배지와 Alert 탭이 각자 모으면, 다른 탭을 보는 동안
   // 온 알림이 탭에는 없어서 배지에 2가 떠도 목록은 비어 있다 (실제로 겪었다).
   const alertStream = useAlertStream(isConnected);
+  /**
+   * **Alert 탭을 보고 있으면 읽은 것이다.** 배지를 누르면 이 탭으로 오기만 하고 읽음 처리는
+   * 하지 않아서, 알림을 다 보고 나서도 숫자가 그대로 남았다. 보는 중에 새로 온 것도 읽은 셈이다.
+   */
+  const markAlertsRead = alertStream.markRead;
+  useEffect(() => {
+    if (activeTab === 'alert' && alertStream.unread > 0) markAlertsRead();
+  }, [activeTab, alertStream.unread, markAlertsRead]);
 
   // 상세는 **여러 개** 열어 둘 수 있다. 느린 트랜잭션은 정상인 것과 나란히 놓고 봐야 안다.
   const detail = useXLogDetailTabs();
@@ -1762,8 +1770,12 @@ export default function App() {
       )}
 
       {/* ── Counter 탭 ── */}
-      {activeTab === 'counter' && (
-        <div style={tabBodyStyle}>
+      {/* **Counter 탭은 떠나도 내리지 않고 숨긴다.** 카운터 스트림은 탭과 무관하게 고른
+          서버 것을 계속 받는데, 차트는 쌓아 둔 표본을 자기 안에 든다. 탭을 오갈 때마다
+          새로 세우면 그동안 받은 것을 버리고 0 부터 다시 쌓아, 들어올 때마다 선이 오른쪽
+          끝에만 붙어 있었다. 폴링하는 패널은 `enabled` 로 탭이 보일 때만 돈다. */}
+      {(activeTab === 'counter' || isConnected) && (
+        <div style={activeTab === 'counter' ? tabBodyStyle : HIDDEN_TAB_STYLE}>
           {!isConnected ? (
             <EmptyState text={t('연결 후 사용 가능합니다.')} />
           ) : nothingPicked ? (
@@ -1855,6 +1867,7 @@ export default function App() {
             since={alertStream.since}
             connected={isStreaming}
             onClear={alertStream.clear}
+            agentMap={agentMap}
           />
         </div>
       )}
@@ -2279,12 +2292,15 @@ function AlertFullView({
   since,
   connected,
   onClear,
+  agentMap,
 }: {
   /** 앱이 쥐고 있는 하나의 버퍼. 여기서 따로 구독하면 배지와 어긋난다 */
   alerts: AlertPack[];
   since: number | null;
   connected: boolean;
   onClear: () => void;
+  /** objHash → objName. 에이전트 열에 **이름**을 적는다 */
+  agentMap: Map<number, string>;
 }) {
   // 경과 시간 문구가 멈춰 있으면 화면이 얼어붙은 것처럼 보인다.
   const [tick, setTick] = useState(0);
@@ -2325,7 +2341,14 @@ function AlertFullView({
               <span style={{ width: 60, flexShrink: 0 }}>
                 <span style={{ background: color, color: T.text, fontSize: F.micro, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: 0.5 }}>{label}</span>
               </span>
-              <span style={{ width: 110, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.textMuted }}>{a.obj_type}</span>
+              {/* 예전에는 종류(`linux`)를 적었다 — 같은 종류가 여럿이면 어느 서버의 알림인지
+                  알 수 없다. 이름을 적고, 이름을 아직 모르면 종류로 물러선다. */}
+              <span
+                style={{ width: 110, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.textMuted }}
+                title={`${agentMap.get(a.obj_hash) ?? `[${a.obj_hash}]`} · ${a.obj_type}`}
+              >
+                {agentMap.has(a.obj_hash) ? shortName(agentMap.get(a.obj_hash) ?? '') : a.obj_type}
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</div>
                 {a.message && <div style={{ color: T.textDim, fontSize: F.micro, wordBreak: 'break-all', marginTop: 2 }}>{a.message}</div>}
@@ -2406,6 +2429,9 @@ const tabBodyStyle: React.CSSProperties = {
   flexDirection: 'column',
   overflow: 'hidden',
 };
+
+/** 내리지 않고 숨겨 두는 탭 (Counter — 쌓아 둔 카운터 표본을 지킨다) */
+const HIDDEN_TAB_STYLE: React.CSSProperties = { display: 'none' };
 
 const tabPageHeaderStyle: React.CSSProperties = {
   display: 'flex',
