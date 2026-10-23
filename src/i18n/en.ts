@@ -440,6 +440,7 @@ export const EN: Record<string, string> = {
   '원문': 'Raw',
   '상세': 'Detail',
   '개별': 'Each',
+  '서비스별': 'By service',
   '과거': 'Past',
   '이 구간을 조회합니다': 'Load this range',
   '조건에 맞는 항목이 없습니다.': 'Nothing matches the filter.',

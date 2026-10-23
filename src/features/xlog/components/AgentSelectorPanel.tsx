@@ -13,6 +13,7 @@ import { isDatasourceObjectType, isJavaeeObjectType, learnFamiliesFromObjects } 
 import { t } from '../../../i18n';
 import { getAgentColor } from '../utils/colorPalette';
 import { useViewOptions } from '../hooks/useViewOptions';
+import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 
 interface AgentSelectorPanelProps {
   isConnected: boolean;
@@ -48,6 +49,9 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   groupBy,
   onGroupByChange,
 }: AgentSelectorPanelProps) {
+  // 색 칸은 getAgentColor 를 그릴 때 읽는다. 서버 색의 기준이 바뀌면(서비스로 묶기 —
+  // App 의 setAgentColorKey) 다시 그려야 칸이 XLog 점과 같은 색이 된다.
+  useThemeEpoch();
   const [agents, setAgents] = useState<AgentObject[]>([]);
   const [loading, setLoading] = useState(false);
   /** 목록 안 검색어 */

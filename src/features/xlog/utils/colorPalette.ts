@@ -95,6 +95,28 @@ const AGENT_COLORS: readonly string[] = [
 
 const agentColorMap = new Map<number, string>();
 
+/**
+ * 색을 오브젝트가 아니라 **무리**로 정할 때 쓰는 열쇠. `null` 이면 오브젝트마다 따로다.
+ *
+ * ECS 에서 서비스로 묶어 볼 때는 Task 가 재배포마다 바뀐다 — Task 마다 색을 주면
+ * 같은 서비스가 배포할 때마다 다른 색이 되고, 4대짜리 서비스가 네 색으로 흩어진다.
+ * 그때는 서비스 이름으로 색을 정한다(App 이 서버 목록의 묶기에 맞춰 건다).
+ */
+let colorKeyOf: ((objHash: number) => string | null) | null = null;
+
+/** 무리 열쇠를 건다. **캐시도 비운다** — 안 비우면 옛 기준의 색이 남는다 */
+export function setAgentColorKey(fn: ((objHash: number) => string | null) | null): void {
+  colorKeyOf = fn;
+  agentColorMap.clear();
+}
+
+/** 문자열 → 색. Java `String.hashCode` 와 같은 식이라 재시작해도 같은 이름은 같은 색이다 */
+export function keyColor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return AGENT_COLORS[Math.abs(h) % AGENT_COLORS.length];
+}
+
 export function getDotColor(objHash: number, xType: number, hasError: boolean): string {
   const isLight = xType === 3 || xType === 4;
   if (hasError) return isLight ? XLOG_COLORS.ERROR_LIGHT : XLOG_COLORS.ERROR;
@@ -111,8 +133,8 @@ export function getDotColor(objHash: number, xType: number, hasError: boolean): 
 export function getAgentColor(objHash: number): string {
   let color = agentColorMap.get(objHash);
   if (!color) {
-    const idx = Math.abs(objHash) % AGENT_COLORS.length;
-    color = AGENT_COLORS[idx];
+    const key = colorKeyOf?.(objHash) ?? null;
+    color = key !== null ? keyColor(key) : AGENT_COLORS[Math.abs(objHash) % AGENT_COLORS.length];
     agentColorMap.set(objHash, color);
   }
   return color;

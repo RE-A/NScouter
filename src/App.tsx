@@ -1,6 +1,6 @@
 // src/App.tsx
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pane } from './components/Pane';
 import { Divider } from './components/Divider';
 import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './components/paneSizing';
@@ -113,7 +113,10 @@ import {
 } from './features/xlog/hooks/groupSelection';
 import { asAgent, clearObjectHistory, objectHistory, observeObjects } from './features/xlog/hooks/objectTimeline';
 import { usePastCandidates } from './features/xlog/hooks/usePastCandidates';
-import { instanceLabel } from './features/xlog/components/instanceGroup';
+import { instanceLabel, serviceNameOf } from './features/xlog/components/instanceGroup';
+import { setAgentColorKey } from './features/xlog/utils/colorPalette';
+import { repaintCharts } from './styles/theme';
+import { useSectionFold } from './features/xlog/hooks/useSectionFold';
 import {
   fromTabs as detailsFromTabs,
   normalize as normalizeOpenDetails,
@@ -408,6 +411,47 @@ export default function App() {
   const [tableH, setTableH] = useState<number>(PANE.tableDefaultH);
   /** 서비스 목록을 무엇으로 묶는가. 껐다 켜도 남는다 */
   const [agentGroupBy, setAgentGroupBy] = useState<GroupBy>('type');
+  /**
+   * 서비스로 묶어 볼 때 오브젝트 → 서비스 이름. 서비스로 안 묶으면 비어 있다.
+   *
+   * 정리로 사라진 Task 도 넣는다(objectHistory) — 카운터 차트에는 그 Task 의 지난 값이 남아 있다.
+   * objectHistory 는 명단을 받을 때 같이 갱신되므로 objects 가 그 신호다.
+   */
+  const serviceIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    if (agentGroupBy === 'service') {
+      for (const seen of objectHistory().values()) {
+        const svc = serviceNameOf(asAgent(seen), groupRule);
+        if (svc !== null) map.set(seen.obj_hash, svc);
+      }
+    }
+    return { map, sig: [...map].map(([h, svc]) => `${h}=${svc}`).join('|') };
+    // objects 는 본문에서 안 읽는다 — objectHistory 가 갱신됐다는 신호로만 지켜본다
+  }, [agentGroupBy, objects, groupRule]);
+  /**
+   * 차트에 넘길 함수. **묶음이 같으면 같은 함수다** — 명단은 폴링마다 새로 오는데
+   * 그때마다 함수가 바뀌면 카운터 차트가 매번 다시 접고 색 캐시를 비운다.
+   */
+  const serviceOf = useMemo(
+    () => {
+      if (serviceIndex.sig === '') return undefined;
+      const map = serviceIndex.map;
+      return (h: number): string | null => map.get(h) ?? null;
+    },
+    // sig 가 같으면 map 의 내용도 같다 — map 이 새 객체여도 함수는 그대로 둔다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [serviceIndex.sig],
+  );
+  /**
+   * 서비스로 묶어 볼 때는 **서비스가 색을 정한다.** Task 마다 색을 주면 4대짜리 서비스가
+   * 네 색으로 흩어지고, 재배포할 때마다 색이 바뀐다.
+   *
+   * 그리기 전에 건다(layout) — 목록의 색 칸이 옛 기준으로 한 번 그려졌다 바뀌지 않게.
+   */
+  useLayoutEffect(() => {
+    setAgentColorKey(serviceOf ?? null);
+    repaintCharts();
+  }, [serviceOf]);
   /**
    * 저장해 둔 배치·차트 설정을 한 번 읽어 온다.
    *
@@ -1868,6 +1912,7 @@ export default function App() {
                 counters={JAVAEE_CHARTS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
+                serviceOf={serviceOf}
                 hashes={shownHashes.javaee}
                 empty={shownHashes.javaee.length === 0 ? t('고른 서버 중 자바 에이전트가 없습니다.') : null}
                 // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
@@ -1879,6 +1924,7 @@ export default function App() {
                 counters={HOST_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
+                serviceOf={serviceOf}
                 hashes={shownHashes.host}
                 empty={
                   shownHashes.host.length === 0
@@ -1899,6 +1945,7 @@ export default function App() {
                 counters={DATASOURCE_CHART_COUNTERS}
                 isStreaming={isStreaming}
                 agentMap={agentMap}
+                serviceOf={serviceOf}
                 hashes={shownHashes.datasource}
                 empty={
                   shownHashes.datasource.length === 0
@@ -1984,6 +2031,7 @@ function CounterSection({
   counters,
   isStreaming,
   agentMap,
+  serviceOf,
   hashes,
   empty,
   footnote,
@@ -1993,6 +2041,8 @@ function CounterSection({
   counters: readonly CounterName[];
   isStreaming: boolean;
   agentMap: Map<number, string>;
+  /** 오브젝트 → 서비스 이름. 서버 목록을 서비스로 묶어 볼 때만 있다 */
+  serviceOf?: (objHash: number) => string | null;
   /**
    * 이 구역이 그릴 오브젝트.
    *
@@ -2006,13 +2056,14 @@ function CounterSection({
   footnote?: string;
 }) {
   /**
-   * 개별 선 / 접은 선 하나 (ASIS RealTimeAllCount vs RealTimeTotalCount).
+   * 개별 선 / 접은 선 하나 (ASIS RealTimeAllCount vs RealTimeTotalCount) / 서비스마다 한 선.
    *
-   * 두 화면이 다른 질문에 답한다 — "어느 서버가 이상한가" 와 "전체가 견디고 있나".
-   * 구역 단위로 바꾼다: 카운터마다 따로 두면 어떤 건 합계고 어떤 건 개별인 채로
-   * 나란히 놓여 서로 비교하는 순간 틀린다.
+   * 셋이 다른 질문에 답한다 — "어느 서버가 이상한가", "전체가 견디고 있나",
+   * "어느 서비스가 견디고 있나". 구역 단위로 바꾼다: 카운터마다 따로 두면 어떤 건 합계고
+   * 어떤 건 개별인 채로 나란히 놓여 서로 비교하는 순간 틀린다.
+   * 서비스로 묶어 볼 때는 서비스별이 기본이다 (useSectionFold).
    */
-  const [total, setTotal] = useState(false);
+  const { fold, setFold, choices: folds } = useSectionFold(serviceOf !== undefined);
 
   /**
    * 차트에 넘길 «그릴 서버».
@@ -2030,16 +2081,16 @@ function CounterSection({
         action={
           !empty && counters.some(isTotalCapable) ? (
             <div className="flex gap-0.5">
-              {([false, true] as const).map(v => (
+              {folds.map(v => (
                 <button
-                  key={String(v)}
-                  onClick={() => setTotal(v)}
-                  aria-pressed={total === v}
+                  key={v}
+                  onClick={() => setFold(v)}
+                  aria-pressed={fold === v}
                   className={`rounded px-2 py-0.5 text-micro ${
-                    total === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
+                    fold === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
                   }`}
                 >
-                  {v ? t('합계') : t('개별')}
+                  {v === 'total' ? t('합계') : v === 'service' ? t('서비스별') : t('개별')}
                 </button>
               ))}
             </div>
@@ -2059,7 +2110,8 @@ function CounterSection({
               counter={c}
               agentMap={agentMap}
               height={110}
-              total={total}
+              fold={fold}
+              serviceOf={serviceOf}
               visible={visible}
             />
           ))}
