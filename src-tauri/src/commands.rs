@@ -2386,6 +2386,48 @@ pub async fn get_profile_dir(state: State<'_, AppState>) -> Result<String, Strin
     Ok(state.profile_dir().await.to_string_lossy().to_string())
 }
 
+// ─── 오브젝트 기록 ────────────────────────────────────────────
+
+/// 지금 붙은 서버의 기록 자리 — 화면이 아는 `server_id` 가 지금 서버와 다르면 `None`.
+///
+/// **서버를 갈아타는 사이에 온 저장을 버린다.** 옛 서버의 기록이 새 서버의 파일에 쓰이면
+/// 다른 서버의 Task 가 «그때 살아 있었다» 로 끼어 교체/장애 판정이 틀린다. 합성 데이터도 안 남긴다.
+async fn object_history_target(server_id: &str, state: &AppState) -> Option<(String, u16)> {
+    let current = state.server_id.lock().await.clone()?;
+    if current != server_id || current == DEMO_SERVER_ID {
+        return None;
+    }
+    Some((state.conn_host.lock().await.clone(), *state.conn_port.lock().await))
+}
+
+/// 지금 서버의 오브젝트 기록 (`objectTimeline.ts`). 없으면 null
+#[tauri::command]
+pub async fn load_object_history(
+    server_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<serde_json::Value>, String> {
+    let Some((host, port)) = object_history_target(&server_id, &state).await else {
+        return Ok(None);
+    };
+    let dir = state.object_history_dir().await;
+    Ok(crate::object_history_store::load(&dir, &host, port, &server_id))
+}
+
+/// 지금 서버의 오브젝트 기록을 남긴다. 서버가 바뀐 뒤에 온 것이면 조용히 버린다
+#[tauri::command]
+pub async fn save_object_history(
+    server_id: String,
+    objects: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let Some((host, port)) = object_history_target(&server_id, &state).await else {
+        return Ok(());
+    };
+    let dir = state.object_history_dir().await;
+    crate::object_history_store::save(&dir, &host, port, &server_id, objects)?;
+    Ok(())
+}
+
 // ─── 표 내보내기 ──────────────────────────────────────────────
 
 /// 화면이 만든 CSV 를 파일로 남긴다. 만들어진 경로를 돌려준다.

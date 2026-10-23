@@ -12,6 +12,9 @@
 //
 // **모듈 저장소다** (`agentNames.ts` 와 같은 이유). 지우지 않고 쌓는다 — 정리된 Task 도
 // 그날의 과거 조회와 알림 판정에는 필요하다.
+//
+// **껐다 켜도 남는다.** 메인 창이 서버마다 파일로 남기고(`object_history_store.rs`) 붙을 때 되살린다.
+// 남기는 것은 최근 며칠치만이다(`persistableHistory`).
 
 import type { AgentObject } from '../types/xlog';
 
@@ -67,6 +70,67 @@ export function objectHistory(): ReadonlyMap<number, SeenObject> {
 export function clearObjectHistory(): void {
   seen.clear();
   primed = false;
+}
+
+/** 파일에 남기는 기간 — 마지막으로 살아 있던 때가 이보다 오래된 것은 버린다 */
+export const HISTORY_KEEP_MS = 7 * 24 * 60 * 60_000;
+
+/** 파일에 남기는 최대 건수 — 최근에 살아 있던 것부터. ECS 에서 배포가 잦아도 며칠이면 이 안이다 */
+export const HISTORY_KEEP_MAX = 5_000;
+
+/** 파일에 남길 것 — 최근 `HISTORY_KEEP_MS` 안에 살아 있던 것을, 최근 것부터 `HISTORY_KEEP_MAX` 건까지 */
+export function persistableHistory(now: number): SeenObject[] {
+  return [...seen.values()]
+    .filter(s => s.alive || s.lastAlive >= now - HISTORY_KEEP_MS)
+    .sort((a, b) => b.lastAlive - a.lastAlive)
+    .slice(0, HISTORY_KEEP_MAX);
+}
+
+function isTag(v: unknown): v is [string, string] {
+  return Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string';
+}
+
+/** 파일에서 온 한 건을 믿을 수 있는 모양으로. 모양이 틀리면 null */
+function toSeen(v: unknown): SeenObject | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (
+    typeof o.obj_hash !== 'number' || !Number.isFinite(o.obj_hash) ||
+    typeof o.obj_name !== 'string' || typeof o.obj_type !== 'string' ||
+    typeof o.firstSeen !== 'number' || typeof o.lastAlive !== 'number' ||
+    !Array.isArray(o.tags)
+  ) return null;
+  return {
+    obj_hash: o.obj_hash,
+    obj_name: o.obj_name,
+    obj_type: o.obj_type,
+    tags: o.tags.filter(isTag),
+    firstSeen: o.firstSeen,
+    lastAlive: o.lastAlive,
+    // **죽은 것으로 되살린다.** 남긴 때 살아 있던 것이 지금도 살아 있는지는 모른다 — 살아 있으면
+    // 다음 목록이 살린다. 살아 있다고 두면 꺼 둔 사이 내려간 Task 가 «대신 받았다» 로 장애를 숨긴다.
+    alive: false,
+  };
+}
+
+/**
+ * 파일에 남긴 기록을 들인다. **이미 본 것은 건드리지 않는다** — 지금 목록이 파일보다 새것이다.
+ *
+ * 처음 받은 목록(`primed`)은 건드리지 않는다 — 파일보다 늦게 와도, 일찍 와도 그 목록의 새것은
+ * «원래 있던 것» 이다.
+ *
+ * @returns 들인 건수
+ */
+export function restoreObjectHistory(data: unknown): number {
+  if (!Array.isArray(data)) return 0;
+  let n = 0;
+  for (const v of data) {
+    const x = toSeen(v);
+    if (!x || seen.has(x.obj_hash)) continue;
+    seen.set(x.obj_hash, x);
+    n++;
+  }
+  return n;
 }
 
 /** 서비스 묶기 규칙에 넘길 수 있는 모양으로. 살아 있는지는 마지막으로 본 상태다 */

@@ -221,6 +221,11 @@ impl AppState {
     pub async fn export_dir(&self) -> PathBuf {
         self.data_sub_dir(crate::export_store::DIR_NAME).await
     }
+
+    /// 오브젝트 기록 폴더. `{data_dir}/object-history/`
+    pub async fn object_history_dir(&self) -> PathBuf {
+        self.data_sub_dir(crate::object_history_store::DIR_NAME).await
+    }
 }
 
 #[cfg(test)]

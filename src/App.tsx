@@ -66,6 +66,8 @@ import {
   onConnected,
   onDisconnected,
   getObjectList,
+  loadObjectHistory,
+  saveObjectHistory,
   removeInactiveObjects,
   getObjectTypeFamilies,
   getXLogDetail,
@@ -147,7 +149,14 @@ import {
   toggleService,
   type GroupSelection,
 } from './features/xlog/hooks/groupSelection';
-import { asAgent, clearObjectHistory, objectHistory, observeObjects } from './features/xlog/hooks/objectTimeline';
+import {
+  asAgent,
+  clearObjectHistory,
+  objectHistory,
+  observeObjects,
+  persistableHistory,
+  restoreObjectHistory,
+} from './features/xlog/hooks/objectTimeline';
 import { usePastCandidates } from './features/xlog/hooks/usePastCandidates';
 import { searchAll, type WideProgress } from './features/xlog/hooks/wideSearchAll';
 import { instanceLabel, serviceNameOf } from './features/xlog/components/instanceGroup';
@@ -725,11 +734,26 @@ export default function App({ windowLabel }: {
   useEffect(() => {
     if (!isConnected) { setCounterHashes({ javaee: [], host: [], datasource: [] }); return; }
     let cancelled = false;
+    // **지난번 기록부터 들인다** (objectTimeline.ts). 첫 목록이 오기 전에 들여야 껐던 사이에
+    // 내려간 Task 가 «그때 살아 있었다» 로 끼지 않는다 — 되살린 것은 죽은 것으로 온다.
+    // 못 읽어도 목록은 연다.
+    // **이름도 들인다** — 목록에서 정리된 Task 의 알림·XLog 가 `#해시` 로 남지 않게. 지금 목록의 이름이
+    // 뒤에 덮는다(같은 then 에서 rememberNames(list) 가 나중이다).
+    const restored: Promise<unknown> = serverId
+      ? loadObjectHistory(serverId)
+          .then(d => {
+            if (cancelled || restoreObjectHistory(d) === 0) return;
+            rememberNames([...objectHistory().values()].map(asAgent));
+          })
+          .catch(() => {})
+      : Promise.resolve();
+    /** 마지막으로 파일에 남긴 때. 목록은 10초마다지만 파일은 1분에 한 번만 쓴다 */
+    let lastSaved = 0;
     const load = () => {
     // **종류를 가르기 전에 콜렉터의 종류→Family 표부터 받는다.** 커스텀 종류
     // (`monitoring_group_type`)는 이름 목록에 없어서, 표 없이 가르면 WAS 가 통째로 빠진다.
     // 표를 못 받아도(옛 콜렉터) 목록은 연다 — 그때는 `detected` 태그로 배운다.
-    Promise.all([getObjectList(), getObjectTypeFamilies().catch(() => [])])
+    Promise.all([getObjectList(), getObjectTypeFamilies().catch(() => []), restored])
       .then(([fresh, families]) => {
         if (cancelled) return;
         // 사라진 Task 를 바로 지우지 않는다 — 재배포 중 몇 초 비는 사이에
@@ -737,7 +761,13 @@ export default function App({ windowLabel }: {
         const list = mergeObjects(objectsRef.current, fresh, Date.now());
         // 언제 보였고 언제까지 살았나 — 알림 판정과 과거 고르기가 쓴다 (objectTimeline.ts).
         // **받은 그대로(fresh)를 적는다.** 잠시 남겨 둔 것(mergeObjects)은 지금 상태가 아니다.
-        observeObjects(fresh, Date.now());
+        const now = Date.now();
+        observeObjects(fresh, now);
+        // (메인 창만) 파일에 남긴다 — 두 창이 같은 파일을 덮으면 서로 지운다. 뗀 창은 읽기만 한다
+        if (isMain && serverId && now - lastSaved >= 60_000) {
+          lastSaved = now;
+          saveObjectHistory(serverId, persistableHistory(now)).catch(() => {});
+        }
         objectsRef.current = list;
         setObjects(list);
         registerObjectTypeFamilies(families);
@@ -770,7 +800,7 @@ export default function App({ windowLabel }: {
     load();
     const timer = setInterval(load, 10_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [isConnected]);
+  }, [isConnected, serverId, isMain]);
 
   // 알림은 메인 창이 받는다 — 뗀 창에는 알림 화면이 없다
   useEffect(() => {

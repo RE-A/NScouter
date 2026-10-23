@@ -76,6 +76,7 @@ NScouter는 Java 기반 Scouter Eclipse 클라이언트를 **Tauri + Rust + Reac
 │   state.rs    — AppState (연결, 조회용 연결 풀, 스트림 토큰, 설정)    │
 │   config.rs   — config.json 읽기/쓰기                                │
 │   profile_store.rs / export_store.rs — 프로파일 저장, CSV 내보내기    │
+│   object_history_store.rs — 서버별 오브젝트 기록 (재시작 후 복원)    │
 ├─────────────────────────────────────────────────────────────────────┤
 │                         Scouter 프로토콜 레이어 (Rust, scouter/)      │
 │                                                                       │
@@ -192,7 +193,7 @@ commands.rs
     │       ├── conn_host·port·user·pass  (스트림 전용 연결을 새로 열 때 쓴다)
     │       └── config: Mutex<AppConfig> + config_path
     │
-    ├── config.rs / profile_store.rs / export_store.rs
+    ├── config.rs / profile_store.rs / export_store.rs / object_history_store.rs
     │
     ├── scouter/connection.rs
     │       ├── scouter/codec.rs   (ScouterReader / ScouterWriter)
@@ -399,7 +400,7 @@ Command 는 60개가 넘는다. **목록의 원본은 `src-tauri/src/lib.rs` 의
 | XLog 조회 | `load_past_xlog` `load_xlog_by_gxid` `search_xlog_list` `get_search_max` `get_xlog_distribution` `get_xlog_detail` |
 | 프로파일 | `get_xlog_profile` `get_xlog_full_profile` `search_profiles` `save_xlog_profile` `list_saved_profiles` `open_saved_profile` `get_profile_dir` |
 | 집계 | `get_summary` `get_error_summary` `get_interaction` `get_service_group` `get_active_speed` `get_active_speed_by_object` `get_past_counter` `get_today_counter` `get_today_visitor` |
-| 오브젝트 | `get_object_list` `remove_inactive_objects` `get_object_type_families` `get_object_env` `get_object_thread_list` `get_object_sockets` `get_object_class_list` `get_object_active_services` `get_type_active_services` `get_object_heap_histogram` `get_thread_detail` `get_stack_index` `get_stack_dump` |
+| 오브젝트 | `get_object_list` `load_object_history` `save_object_history` `remove_inactive_objects` `get_object_type_families` `get_object_env` `get_object_thread_list` `get_object_sockets` `get_object_class_list` `get_object_active_services` `get_type_active_services` `get_object_heap_histogram` `get_thread_detail` `get_stack_index` `get_stack_dump` |
 | 오브젝트 작업 | `trigger_dump` `object_system_gc` `object_reset_cache` `object_stack_sampling` `object_heap_dump` `get_dump_file_list` `get_dump_file_content` |
 | 원격 설정 | `get_agent_config` `save_agent_config` `get_server_config` `save_server_config` |
 | 텍스트 사전 | `resolve_texts` |
