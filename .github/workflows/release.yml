@@ -1,6 +1,11 @@
 # 윈도우 exe 를 빌드해 릴리스에 붙인다.
 #
-# 버전 태그(예: 0.6.1)를 푸시하면 돈다. 지금까지 릴리스와 같은 모양으로 만든다:
+# 두 가지로 돈다.
+#   · 버전 태그(예: 0.6.1)를 푸시하면
+#   · Actions 화면에서 직접 돌리면(workflow_dispatch) — package.json 의 버전으로 태그를 **여기서 만든다.**
+#     태그를 푸시할 수 없는 곳(브랜치 하나에만 쓰게 묶인 세션 등)에서 쓴다
+#
+# 지금까지 릴리스와 같은 모양으로 만든다:
 #   · 태그 이름은 숫자만(0.6.1), 릴리스 이름은 v0.6.1
 #   · 프리릴리스
 #   · 설치본이 아니라 단일 실행 파일 nscouter.exe 하나 (WebView2 는 윈도우 10/11 에 기본으로 있다)
@@ -13,6 +18,7 @@ on:
   push:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,9 +30,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 태그와 앱 버전이 같은지 확인
+        id: ver
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME}"
+          # 직접 돌렸으면 태그가 아직 없다 — 앱 버전이 곧 태그다
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="$(node -p "require('./package.json').version")"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           for v in \
             "$(node -p "require('./package.json').version")" \
             "$(node -p "require('./src-tauri/tauri.conf.json').version")" \
@@ -54,6 +67,9 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          name: v${{ github.ref_name }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          # 직접 돌렸을 때 태그를 이 커밋에 만든다
+          target_commitish: ${{ github.sha }}
+          name: v${{ steps.ver.outputs.tag }}
           prerelease: true
           files: src-tauri/target/release/nscouter.exe
