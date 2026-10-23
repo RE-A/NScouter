@@ -6,7 +6,7 @@
 //   · 원본을 들고 있으므로 접는 방식을 바꿔도 이력이 그대로다
 
 import { describe, expect, it } from 'vitest';
-import { foldSeries, shownObjectCount } from './counterSeries';
+import { foldSeries, legendLabel, shownObjectCount } from './counterSeries';
 import type { CounterUpdate } from '../types/counter';
 import { getAgentColor, keyColor } from '../utils/colorPalette';
 
@@ -94,5 +94,20 @@ describe('shownObjectCount', () => {
   it('고른 것 중 받은 오브젝트 수를 센다 — 같은 오브젝트는 한 번만', () => {
     expect(shownObjectCount(ups, null)).toBe(3);
     expect(shownObjectCount(ups, new Set([1, 99]))).toBe(1);
+  });
+});
+
+describe('legendLabel', () => {
+  it('짧으면 그대로', () => {
+    expect(legendLabel('shop-app')).toBe('shop-app');
+  });
+
+  it('길면 앞뒤를 남긴다 — 앞이 같은 Task 이름이 서로 갈린다', () => {
+    const a = legendLabel('safs-ip-10-0-0-1');
+    const b = legendLabel('safs-ip-10-0-0-2');
+    expect(a).not.toBe(b);
+    expect(a).toHaveLength(10);
+    expect(a.startsWith('safs')).toBe(true);
+    expect(a.endsWith('0-0-1')).toBe(true);
   });
 });
