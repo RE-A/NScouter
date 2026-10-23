@@ -12,14 +12,15 @@
 // 그 구간은 3분에 500건꼴이다 — 그 60% 폭으로 자르면 조각마다 300건 남짓이라 거의 한 번에 끝난다.
 // 짐작이 안 서면(시간 순이 아니거나 한 시각에 몰렸으면) 반으로 자른다.
 //
-// **조각마다 따로 부른다.** 한 번에 다 받아 넘기면 수만 건이 한 덩어리로 IPC 를 탄다(CLAUDE.md 3.3).
+// **조각마다 따로 부른다.** 한 번에 다 받아 넘기면 수십만 건이 한 덩어리로 IPC 를 탄다(CLAUDE.md 3.3).
 // 조각은 많아야 상한(500)건이라 가볍고, 그 사이에 진행을 보여 주고 멈출 수 있다.
+// 조각은 **넷씩 한꺼번에** 묻는다(Rust 가 조회용 연결 풀에서 연결을 빌린다) — 하나씩이면 30만 건이 몇 분이다.
 
 import type { SearchMax, SearchXLogFilter, SearchXLogResult } from '../api/scouterApi';
 import type { XLogPack } from '../types/xlog';
 
-/** 다 모아 이만큼이면 멈춘다. 목록·메모리가 견디는 선 — 그 너머는 구간을 좁혀 볼 일이다 */
-export const WIDE_TOTAL_CAP = 50_000;
+/** 다 모아 이만큼이면 멈춘다 — 기본값. 설정 «트랜잭션 찾기 상한» 으로 100만까지 올린다(`clampWideMax`) */
+export const WIDE_TOTAL_CAP = 300_000;
 
 /** 이보다 좁은 조각은 더 안 나눈다. 1초에 상한을 넘기는 조건이면 나눠도 끝이 없다 */
 export const MIN_PIECE_MS = 1_000;
@@ -68,44 +69,63 @@ export interface WideProgress {
   requests: number;
 }
 
-export interface WideResult {
+export interface WideResult<T = XLogPack> {
   /** 시간 순 */
-  xlogs: XLogPack[];
+  xlogs: T[];
   limit: SearchMax;
   /**
    * 다 못 찾았을 때 그 까닭.
    *   · `dense` — 1초 조각도 상한에 닿았다. 그 1초 안의 것은 상한만큼만 있다
-   *   · `cap`   — 다 모은 것이 `WIDE_TOTAL_CAP` 에 닿아 멈췄다. `stoppedAt` 뒤는 안 훑었다
+   *   · `cap`   — 다 모은 것이 상한(`cap`)에 닿아 멈췄다. `stoppedAt` 뒤는 안 훑었다
    *   · `cancelled` — 멈춤을 눌렀다
    */
   cut: 'none' | 'dense' | 'cap' | 'cancelled';
-  /** `cap`·`cancelled` 일 때 어디까지 훑었나 (epoch ms) */
+  /** `cap`·`cancelled` 일 때 **빈틈없이** 어디까지 훑었나 (epoch ms) */
   stoppedAt: number | null;
   requests: number;
 }
 
-export interface WideOptions {
+export interface WideOptions<T> {
+  /** 모두 모을 최대 건수. 설정 «트랜잭션 찾기 상한» (`clampWideMax`) */
   cap?: number;
+  /** 한꺼번에 보낼 요청 수 */
+  parallel?: number;
+  /**
+   * 받은 것을 담기 전에 바꾼다(화면 모양으로). **조각마다 바로 바꾼다** — 다 모은 뒤 바꾸면
+   * 수십만 건이 날것과 바꾼 것 두 벌로 한때 메모리에 앉는다.
+   */
+  map?: (x: XLogPack) => T;
   onProgress?: (p: WideProgress) => void;
-  /** 참이면 다음 조각을 부르기 전에 멈춘다 */
+  /** 참이면 다음 묶음을 보내기 전에 멈춘다 */
   isCancelled?: () => boolean;
 }
 
 /** 한 조각 찾기 — 테스트에서 갈아 끼운다 */
 export type SearchFn = (filter: SearchXLogFilter, maxHint?: SearchMax) => Promise<SearchXLogResult>;
 
-export async function searchAll(
+/** 기본 동시 요청 수 — Rust 조회용 연결 풀이 쉬는 연결을 넷까지 들고 있다(`MAX_IDLE_QUERY_CONNS`) */
+export const WIDE_PARALLEL = 4;
+
+/**
+ * @remarks 조각을 **몇 개씩 한꺼번에** 묻는다(묶음). 묶음이 다 오면 상한에 닿은 조각을 나눠 앞에 다시 넣고,
+ * 늘 **이른 시각부터** 묻는다 — 그래야 상한·멈춤에서 «여기까지는 빈틈없이 찾았다» 를 말할 수 있다.
+ */
+export async function searchAll<T = XLogPack>(
   filter: SearchXLogFilter,
   search: SearchFn,
-  opts: WideOptions = {},
-): Promise<WideResult> {
+  opts: WideOptions<T> = {},
+): Promise<WideResult<T>> {
   const cap = opts.cap ?? WIDE_TOTAL_CAP;
+  const parallel = Math.max(1, opts.parallel ?? WIDE_PARALLEL);
+  const map = opts.map ?? ((x: XLogPack) => x as unknown as T);
   const total = Math.max(1, filter.etime - filter.stime);
 
-  /** 아직 안 훑은 조각들 — 앞이 먼저다 */
-  const queue: [number, number][] = [[filter.stime, filter.etime]];
+  /** 아직 안 훑은 조각들 — 이른 것부터 */
+  let pending: [number, number][] = [[filter.stime, filter.etime]];
+  /** 다 훑은 조각들 */
+  const done: [number, number][] = [];
   const seen = new Set<string>();
-  const out: XLogPack[] = [];
+  const out: { t: number; v: T }[] = [];
   let limit: SearchMax | undefined;
   let doneMs = 0;
   let requests = 0;
@@ -114,48 +134,75 @@ export async function searchAll(
   const report = () =>
     opts.onProgress?.({ found: out.length, done: Math.min(1, doneMs / total), requests });
 
-  while (queue.length > 0) {
-    const [s, e] = queue[0];
-    if (opts.isCancelled?.()) return finish('cancelled', s);
+  /** 처음부터 빈틈없이 훑은 데까지 */
+  const prefixEnd = (): number => {
+    let cur = filter.stime;
+    for (const [s, e] of [...done].sort((a, b) => a[0] - b[0])) {
+      if (s > cur) break;
+      if (e > cur) cur = e;
+    }
+    return cur;
+  };
 
-    const res = await search({ ...filter, stime: s, etime: e }, limit);
-    requests += 1;
-    limit = { max: res.max, known: res.max_known };
-    queue.shift();
+  while (pending.length > 0) {
+    if (opts.isCancelled?.()) return finish('cancelled', prefixEnd());
 
-    // 상한에 닿았으면 버리고 나눠 다시 — 닿은 결과는 «앞쪽 일부» 라 그대로 쓰면 구멍이 남는다
-    if (res.truncated) {
-      const pieces = splitRange(s, e, res.xlogs);
-      if (pieces.length > 0) {
-        queue.unshift(...pieces);
-        report();
-        continue;
+    const wave = pending.splice(0, parallel);
+    const results = await Promise.all(wave.map(([s, e]) => search({ ...filter, stime: s, etime: e }, limit)));
+    requests += wave.length;
+
+    const splits: [number, number][] = [];
+    results.forEach((res, i) => {
+      const [s, e] = wave[i];
+      limit = { max: res.max, known: res.max_known };
+      // 상한에 닿았으면 버리고 나눠 다시 — 닿은 결과는 «앞쪽 일부» 라 그대로 쓰면 구멍이 남는다
+      if (res.truncated) {
+        const pieces = splitRange(s, e, res.xlogs);
+        if (pieces.length > 0) {
+          splits.push(...pieces);
+          return;
+        }
+        // 더 못 나누는 1초 조각 — 받은 만큼이라도 담고 «빽빽해서 다 못 찾았다» 고 말한다
+        dense = true;
       }
-      // 더 못 나누는 1초 조각 — 받은 만큼이라도 담고 «빽빽해서 다 못 찾았다» 고 말한다
-      dense = true;
-    }
-
-    // 조각 경계의 같은 시각은 양쪽에서 다 온다 — txid 로 한 번만 담는다
-    for (const x of res.xlogs) {
-      if (seen.has(x.txid)) continue;
-      seen.add(x.txid);
-      out.push(x);
-    }
-    doneMs += e - s;
+      // 조각 경계의 같은 시각은 양쪽에서 다 온다 — txid 로 한 번만 담는다
+      for (const x of res.xlogs) {
+        if (seen.has(x.txid)) continue;
+        seen.add(x.txid);
+        out.push({ t: x.end_time, v: map(x) });
+      }
+      done.push([s, e]);
+      doneMs += e - s;
+    });
+    // 나눈 조각은 원래 자리로 — 늘 이른 것부터 묻는다
+    pending = [...splits, ...pending].sort((a, b) => a[0] - b[0]);
     report();
-    if (out.length >= cap) return finish('cap', e);
+    if (out.length >= cap) return finish('cap', prefixEnd());
   }
   return finish(dense ? 'dense' : 'none', null);
 
-  function finish(cut: WideResult['cut'], stoppedAt: number | null): WideResult {
-    out.sort((a, b) => a.end_time - b.end_time);
+  function finish(cut: WideResult<T>['cut'], stoppedAt: number | null): WideResult<T> {
+    // 멈췄으면 **빈틈없이 훑은 데까지만** 담는다 — 그 뒤의 것까지 두면 «어디까지 찾았나» 가 거짓이 된다
+    const kept = stoppedAt === null ? out : out.filter(o => o.t <= stoppedAt);
+    kept.sort((a, b) => a.t - b.t);
     return {
-      // 상한에서 멈춰도 자르지 않는다 — 마지막 조각을 반만 담으면 «어디까지 훑었나» 가 거짓이 된다
-      xlogs: out,
+      xlogs: kept.map(o => o.v),
       limit: limit ?? { max: 0, known: false },
       cut,
       stoppedAt,
       requests,
     };
   }
+}
+
+/** 설정 «트랜잭션 찾기 상한» 의 범위. 100만 건이면 화면 모양으로 ≈ 370MB 다 (XLog 버퍼와 같은 건당 크기) */
+export const WIDE_MAX_CHOICES = [100_000, 300_000, 500_000, 1_000_000] as const;
+export const MIN_WIDE_MAX = 10_000;
+export const LIMIT_WIDE_MAX = 1_000_000;
+
+/** 설정에서 온 값을 쓸 수 있는 수로 다듬는다 */
+export function clampWideMax(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return WIDE_TOTAL_CAP;
+  return Math.min(Math.max(Math.round(n), MIN_WIDE_MAX), LIMIT_WIDE_MAX);
 }

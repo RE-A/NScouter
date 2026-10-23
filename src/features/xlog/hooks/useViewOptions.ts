@@ -6,6 +6,7 @@
 // 컨텍스트를 쓰지 않는 이유: 이 값은 앱 전체에 하나뿐이고 거의 안 바뀐다.
 // 트리 위에 Provider 를 하나 더 얹는 것보다 이쪽이 읽기 쉽다.
 
+import { clampWideMax, WIDE_TOTAL_CAP } from './wideSearchAll';
 import { useEffect, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../api/scouterApi';
 import { setLang, toLang, type Lang } from '../../../i18n';
@@ -22,6 +23,8 @@ export interface ViewOptions {
   lang: Lang;
   /** XLog 버퍼에 담아 둘 최대 건수 */
   bufferMax: number;
+  /** 트랜잭션 찾기로 모두 모을 최대 건수 */
+  wideSearchMax: number;
   /** 색 벌 */
   theme: ThemeId;
   /** 어느 Task 가 어느 논리 서비스인가 */
@@ -69,6 +72,7 @@ const DEFAULTS: ViewOptions = {
   fontScale: 1,
   lang: 'ko',
   bufferMax: DEFAULT_MAX_ITEMS,
+  wideSearchMax: WIDE_TOTAL_CAP,
   theme: DEFAULT_THEME,
   groupRule: DEFAULT_GROUP_RULE,
   autoRemoveInactiveMin: 0,
@@ -93,6 +97,7 @@ function fromConfig(cfg: AppConfig): ViewOptions {
     fontScale: clampFontScale(cfg.ui_font_scale ?? DEFAULTS.fontScale),
     lang: toLang(cfg.ui_language),
     bufferMax: clampMaxItems(cfg.xlog_buffer_max ?? DEFAULTS.bufferMax),
+    wideSearchMax: clampWideMax(cfg.wide_search_max ?? DEFAULTS.wideSearchMax),
     theme: toTheme(cfg.ui_theme),
     groupRule: {
       tagKey: cfg.group_rule?.tag_key ?? DEFAULT_GROUP_RULE.tagKey,
@@ -140,6 +145,7 @@ export async function setViewOption<K extends keyof ViewOptions>(
       ui_font_scale: current.fontScale,
       ui_language: current.lang,
       xlog_buffer_max: current.bufferMax,
+      wide_search_max: current.wideSearchMax,
       ui_theme: current.theme,
       group_rule: { tag_key: current.groupRule.tagKey, pattern: current.groupRule.pattern },
       auto_remove_inactive_min: current.autoRemoveInactiveMin,

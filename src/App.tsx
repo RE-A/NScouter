@@ -149,7 +149,7 @@ import {
 } from './features/xlog/hooks/groupSelection';
 import { asAgent, clearObjectHistory, objectHistory, observeObjects } from './features/xlog/hooks/objectTimeline';
 import { usePastCandidates } from './features/xlog/hooks/usePastCandidates';
-import { searchAll, WIDE_TOTAL_CAP, type WideProgress } from './features/xlog/hooks/wideSearchAll';
+import { searchAll, type WideProgress } from './features/xlog/hooks/wideSearchAll';
 import { instanceLabel, serviceNameOf } from './features/xlog/components/instanceGroup';
 import { setAgentColorKey } from './features/xlog/utils/colorPalette';
 import { repaintCharts } from './styles/theme';
@@ -273,7 +273,7 @@ export default function App({ windowLabel }: {
   // **여기서 한 번은 불러야 한다.** 표시 설정(언어·글자 크기)은 이걸 처음 쓰는
   // 컴포넌트가 마운트될 때 config.json 을 읽는데, 그게 상세 패널이라
   // 앱을 켜고 아무것도 안 열면 저장해 둔 설정이 적용되지 않았다.
-  const { groupRule, autoRemoveInactiveMin } = useViewOptions();
+  const { groupRule, autoRemoveInactiveMin, wideSearchMax } = useViewOptions();
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -1325,12 +1325,15 @@ export default function App({ windowLabel }: {
       wideCancelRef.current = false;
       setWideProgress({ found: 0, done: 0, requests: 0 });
       searchAll(v, searchXLogList, {
+        cap: wideSearchMax,
+        // 조각마다 바로 화면 모양으로 — 수십만 건을 날것과 바꾼 것 두 벌로 들지 않는다
+        map: xlogPackToSXLog,
         onProgress: setWideProgress,
         isCancelled: () => wideCancelRef.current,
       })
         .then(res => {
           setShowWideSearch(false);
-          setSelectedXLogs(res.xlogs.map(xlogPackToSXLog));
+          setSelectedXLogs(res.xlogs);
           // 검색 결과는 차트에서 고른 구간이 아니다. 사각형을 남겨 두면
           // 목록이 그 구간의 것인 줄 알게 된다.
           setClearSignal(n => n + 1);
@@ -1345,7 +1348,7 @@ export default function App({ windowLabel }: {
           setWideProgress(null);
         });
     },
-    [resetSearch],
+    [resetSearch, wideSearchMax],
   );
 
   const [showSettings, setShowSettings] = useState(false);
@@ -1991,6 +1994,7 @@ export default function App({ windowLabel }: {
           agents={[...agentMap].map(([obj_hash, obj_name]) => ({ obj_hash, obj_name }) as AgentObject)}
           running={wideRunning}
           progress={wideProgress}
+          cap={wideSearchMax}
           onCancel={() => { wideCancelRef.current = true; }}
           onSearch={runWideSearch}
           onClose={() => setShowWideSearch(false)}
@@ -2139,7 +2143,7 @@ export default function App({ windowLabel }: {
                           {wideTruncated.kind === 'dense'
                             ? `${t('빽빽한 구간은 1초에')} ${wideTruncated.max.toLocaleString()}${t('건까지만')}`
                             : `${wideTruncated.kind === 'cap'
-                                ? `${WIDE_TOTAL_CAP.toLocaleString()}${t('건에서 멈춤')}`
+                                ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')}`
                                 : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
                         </span>
                       )}

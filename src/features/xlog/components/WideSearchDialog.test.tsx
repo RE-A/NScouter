@@ -40,6 +40,7 @@ function open(onSearch = vi.fn()) {
       running={false}
       progress={null}
       onCancel={vi.fn()}
+      cap={300_000}
       onSearch={onSearch}
       onClose={vi.fn()}
     />,
@@ -132,6 +133,7 @@ describe('WideSearchDialog — 넘기는 값', () => {
         running
         progress={{ found: 0, done: 0, requests: 1 }}
         onCancel={vi.fn()}
+        cap={300_000}
         onSearch={onSearch}
         onClose={vi.fn()}
       />,
@@ -149,6 +151,7 @@ describe('WideSearchDialog — 넘기는 값', () => {
         running
         progress={{ found: 1234, done: 0.42, requests: 7 }}
         onCancel={onCancel}
+        cap={300_000}
         onSearch={vi.fn()}
         onClose={vi.fn()}
       />,

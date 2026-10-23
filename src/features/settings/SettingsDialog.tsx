@@ -1,5 +1,6 @@
 // src/features/settings/SettingsDialog.tsx
 
+import { clampWideMax, WIDE_MAX_CHOICES, WIDE_TOTAL_CAP } from '../xlog/hooks/wideSearchAll';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
 import {
@@ -107,6 +108,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   }, [sample, groupRule]);
   /** XLog 버퍼에 담아 둘 최대 건수 */
   const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);
+  /** 트랜잭션 찾기로 모두 모을 최대 건수 */
+  const [wideMax, setWideMax] = useState<number>(WIDE_TOTAL_CAP);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -127,6 +130,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       });
       savedTheme.current = th;
       setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
+      setWideMax(clampWideMax(cfg.wide_search_max ?? WIDE_TOTAL_CAP));
     }).catch(() => {});
     // 미리보기는 지금 붙어 있을 때만 된다. 안 붙어 있으면 조용히 비워 둔다.
     getObjectList().then(setSample).catch(() => {});
@@ -152,6 +156,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         group_rule: { tag_key: groupRule.tagKey, pattern: groupRule.pattern },
         auto_remove_inactive_min: cleanupMin,
         xlog_buffer_max: bufferMax,
+        wide_search_max: wideMax,
       };
       await saveConfig(next);
       setConfig(next);
@@ -168,7 +173,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     }
     // **여기 빠뜨리면 조용히 옛 값이 저장된다.** `theme` 이 빠져 있어서, 테마를 고르고
     // 저장하면 처음 값(dark)이 그대로 쓰였다 — 화면에서는 「바꿔도 안 먹는다」로 보인다.
-  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, theme, groupRule, cleanupMin]);
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, wideMax, theme, groupRule, cleanupMin]);
 
   // ESC 닫기
   useEffect(() => {
@@ -396,6 +401,38 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
             <div style={{ ...sectionDescStyle, marginTop: 6 }}>
               {t('선택한 값의 대략적인 메모리:')} {estimatedMb(bufferMax)}MB
               {bufferMax > DEFAULT_MAX_ITEMS ? ` · ${t('기본값보다 큽니다')}` : ''}
+            </div>
+          </div>
+
+          {/* 트랜잭션 찾기 상한 */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>{t('트랜잭션 찾기 상한')}</div>
+            <div style={sectionDescStyle}>
+              {t('트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수입니다. 넘으면 그 시각까지 찾은 것만 목록에 올리고 어디까지 찾았는지 알려 줍니다. 올릴수록 메모리를 쓰고 오래 걸립니다.')}
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              {WIDE_MAX_CHOICES.map(v => {
+                const on = v === wideMax;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setWideMax(v)}
+                    aria-pressed={on}
+                    title={`${estimatedMb(v)}MB`}
+                    style={{
+                      ...scaleBtnStyle,
+                      borderColor: on ? T.accent : T.border,
+                      color: on ? T.text : T.textDim,
+                      background: on ? T.bgHover : 'transparent',
+                    }}
+                  >
+                    {v.toLocaleString()}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ ...sectionDescStyle, marginTop: 6 }}>
+              {t('다 모았을 때의 대략적인 메모리:')} {estimatedMb(wideMax)}MB
             </div>
           </div>
 
