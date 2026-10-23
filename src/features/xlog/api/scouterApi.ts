@@ -697,6 +697,8 @@ export interface AppConfig {
   auto_remove_inactive_min?: number;
   /** XLog 버퍼 최대 건수. 없으면 300,000 */
   xlog_buffer_max?: number;
+  /** 트랜잭션 찾기로 모두 모을 최대 건수. 없으면 300,000 */
+  wide_search_max?: number;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
   ui_layout?: UiLayout;
   /** XLog 스캐터 차트 설정 */

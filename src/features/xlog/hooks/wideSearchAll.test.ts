@@ -4,7 +4,7 @@
 // (실제 콜렉터는 «잘렸다» 를 안 알려 준다 — Rust 가 건수로 짐작해 붙인다, F-54)
 
 import { describe, expect, it } from 'vitest';
-import { MIN_PIECE_MS, searchAll, splitRange, type SearchFn } from './wideSearchAll';
+import { clampWideMax, LIMIT_WIDE_MAX, MIN_PIECE_MS, searchAll, splitRange, WIDE_TOTAL_CAP, type SearchFn } from './wideSearchAll';
 import type { SearchXLogFilter, SearchXLogResult } from '../api/scouterApi';
 import type { XLogPack } from '../types/xlog';
 
@@ -141,5 +141,52 @@ describe('searchAll', () => {
     await searchAll({ ...BASE, stime: 0, etime: 600_000 }, fn, { onProgress: p => done.push(p.done) });
     expect(done[done.length - 1]).toBeCloseTo(1);
     for (let i = 1; i < done.length; i++) expect(done[i]).toBeGreaterThanOrEqual(done[i - 1]);
+  });
+});
+
+describe('searchAll — 한꺼번에 묻기', () => {
+  it('정한 수까지만 한꺼번에 묻는다 — 그보다 많이 열면 콜렉터가 버겁다', async () => {
+    const { fn: inner } = server(spread(20_000, 0, 3_600_000));
+    let inflight = 0;
+    let peak = 0;
+    const fn: SearchFn = async (f, h) => {
+      inflight += 1;
+      peak = Math.max(peak, inflight);
+      await new Promise(r => setTimeout(r, 1));
+      try { return await inner(f, h); } finally { inflight -= 1; }
+    };
+    const r = await searchAll({ ...BASE, stime: 0, etime: 3_600_000 }, fn, { parallel: 3 });
+    expect(r.xlogs).toHaveLength(20_000);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(3);
+  });
+
+  it('받은 것은 조각마다 바로 화면 모양으로 바꾼다', async () => {
+    const { fn } = server(spread(1_200, 0, 600_000));
+    const r = await searchAll({ ...BASE, stime: 0, etime: 600_000 }, fn, { map: x => ({ id: x.txid, at: x.end_time }) });
+    expect(r.xlogs).toHaveLength(1_200);
+    expect(r.xlogs[0]).toHaveProperty('id');
+    for (let i = 1; i < r.xlogs.length; i++) expect(r.xlogs[i].at).toBeGreaterThanOrEqual(r.xlogs[i - 1].at);
+  });
+
+  it('멈추면 빈틈없이 훑은 데까지만 담는다', async () => {
+    const times = spread(5_000, 0, 600_000);
+    const { fn } = server(times);
+    let stop = false;
+    const r = await searchAll({ ...BASE, stime: 0, etime: 600_000 }, fn, {
+      onProgress: p => { if (p.found > 1_000) stop = true; },
+      isCancelled: () => stop,
+    });
+    expect(r.cut).toBe('cancelled');
+    expect(r.xlogs.length).toBe(times.filter(t => t <= r.stoppedAt!).length);
+  });
+});
+
+describe('clampWideMax', () => {
+  it('설정 값을 범위 안으로 자른다', () => {
+    expect(clampWideMax(undefined)).toBe(WIDE_TOTAL_CAP);
+    expect(clampWideMax(5)).toBe(10_000);
+    expect(clampWideMax(9_999_999)).toBe(LIMIT_WIDE_MAX);
+    expect(clampWideMax(500_000)).toBe(500_000);
   });
 });

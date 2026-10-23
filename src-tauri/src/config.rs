@@ -44,6 +44,10 @@ pub struct AppConfig {
     /// 화면 쪽에서 1만~100만으로 자른다.
     #[serde(default = "default_buffer_max")]
     pub xlog_buffer_max: u32,
+    /// 트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수. 기본 300,000.
+    /// 화면 쪽에서 1만~100만으로 자른다.
+    #[serde(default = "default_wide_search_max")]
+    pub wide_search_max: u32,
     /// 화면 언어. `"ko"` 또는 `"en"`.
     ///
     /// Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같다.
@@ -385,6 +389,10 @@ fn default_font_scale() -> f32 {
 }
 
 /// 파생 기본값(0)이면 버퍼가 한 건도 못 담는다.
+fn default_wide_search_max() -> u32 {
+    300_000
+}
+
 fn default_buffer_max() -> u32 {
     // 화면 쪽 DEFAULT_MAX_ITEMS 와 같은 수여야 한다. 갈리면 설정 창이 «기본값» 이라고
     // 보여주는 값과 실제로 도는 값이 달라진다.
@@ -415,6 +423,7 @@ impl Default for AppConfig {
             sql_bind_inline: true,
             ui_font_scale: 1.0,
             xlog_buffer_max: default_buffer_max(),
+            wide_search_max: default_wide_search_max(),
             ui_language: "ko".to_string(),
             ui_theme: default_theme(),
             ui_layout: UiLayout::default(),

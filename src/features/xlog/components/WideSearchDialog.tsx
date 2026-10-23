@@ -11,7 +11,7 @@
 import { memo, useEffect, useState } from 'react';
 import type { AgentObject } from '../types/xlog';
 import { getSearchMax } from '../api/scouterApi';
-import { WIDE_TOTAL_CAP, type WideProgress } from '../hooks/wideSearchAll';
+import type { WideProgress } from '../hooks/wideSearchAll';
 import { t } from '../../../i18n';
 
 export interface WideSearchValues {
@@ -37,6 +37,8 @@ interface WideSearchDialogProps {
   progress: WideProgress | null;
   /** 찾는 것을 멈춘다 — 그때까지 모은 것은 목록으로 간다 */
   onCancel: () => void;
+  /** 모두 모을 최대 건수 (설정 «트랜잭션 찾기 상한») */
+  cap: number;
   onSearch: (v: WideSearchValues) => void;
   onClose: () => void;
 }
@@ -58,6 +60,7 @@ export const WideSearchDialog = memo(function WideSearchDialog({
   running,
   progress,
   onCancel,
+  cap,
   onSearch,
   onClose,
 }: WideSearchDialogProps) {
@@ -146,8 +149,8 @@ export const WideSearchDialog = memo(function WideSearchDialog({
               {t('서버가 걸러서 보내 줍니다. 한 번에')}{' '}
               <span className="tnum font-mono text-fg-muted">{limit.max.toLocaleString()}</span>
               {t('건까지 오므로, 넘으면 구간을 잘게 나눠 이어 찾습니다. 모두')}{' '}
-              <span className="tnum font-mono text-fg-muted">{WIDE_TOTAL_CAP.toLocaleString()}</span>
-              {t('건까지 모읍니다.')}
+              <span className="tnum font-mono text-fg-muted">{cap.toLocaleString()}</span>
+              {t('건까지 모읍니다.')} <span className="text-fg-faint">{t('(설정에서 바꿈)')}</span>
               {!limit.known && (
                 <span className="text-fg-faint">
                   {' '}

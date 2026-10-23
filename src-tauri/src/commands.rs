@@ -909,22 +909,36 @@ pub async fn search_xlog_list(
             .and_then(parse_search_max),
     };
 
-    let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
-
+    // **조회용 연결을 빌려 쓴다.** 화면이 상한에 닿은 구간을 나눠 여러 조각을 **한꺼번에** 묻는다
+    // (`wideSearchAll.ts`) — 공용 연결 하나를 잠그면 조각이 줄을 서서 넓은 구간이 몇 분씩 걸리고,
+    // 그동안 상세·사전 조회까지 멈춘다.
+    if state.connection.lock().await.is_none() {
+        return Err("연결되지 않음".to_string());
+    }
+    let mut conn = state.acquire_query_conn().await?;
     let param = build_search_xlog_param(&filter);
     let session = conn.session;
-    conn.send_request(CMD_SEARCH_XLOG_LIST, session, &param)
-        .map_err(|e| format!("XLog 검색 요청 실패: {e}"))?;
-
-    let mut xlogs = Vec::new();
-    loop {
-        match conn.read_next_pack().map_err(|e| format!("XLog 검색 수신 실패: {e}"))? {
-            Some(AnyPack::XLog(x)) => xlogs.push(x),
-            Some(_) => {}
-            None => break,
+    let result = (|| -> Result<Vec<XLogPack>, String> {
+        conn.send_request(CMD_SEARCH_XLOG_LIST, session, &param)
+            .map_err(|e| format!("XLog 검색 요청 실패: {e}"))?;
+        let mut xlogs = Vec::new();
+        loop {
+            match conn.read_next_pack().map_err(|e| format!("XLog 검색 수신 실패: {e}"))? {
+                Some(AnyPack::XLog(x)) => xlogs.push(x),
+                Some(_) => {}
+                None => break,
+            }
         }
-    }
+        Ok(xlogs)
+    })();
+    // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
+    let xlogs = match result {
+        Ok(x) => {
+            state.release_query_conn(conn).await;
+            x
+        }
+        Err(e) => return Err(e),
+    };
 
     let max = max_from_server.unwrap_or(DEFAULT_SEARCH_MAX);
     let truncated = xlogs.len() as i32 >= max;
