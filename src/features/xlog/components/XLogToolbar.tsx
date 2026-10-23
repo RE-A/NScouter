@@ -29,11 +29,12 @@ interface XLogToolbarProps {
    * 드래그와 **다른 일**이라 따로 둔다 — 드래그는 «이 구간에 뭐가 있나» 이고
    * 이건 «어디 있는지 모르는 걸 찾는다» 다.
    */
-  onWideSearch: () => void;
+  onWideSearch?: () => void;
   /** 저장해 둔 프로파일 목록을 연다 */
-  onOpenSaved: () => void;
+  onOpenSaved?: () => void;
   /** 필터 창을 연다 */
-  onOpenFilters: () => void;
+  onOpenFilters?: () => void;
+  // 셋 다 **없으면 버튼을 안 그린다** — 떼어 낸 창은 그 창들이 메인 창 탭을 고치므로 두지 않는다
 }
 
 const Y_AXIS_OPTIONS: YAxisMode[] = [
@@ -212,21 +213,21 @@ export function XLogToolbar({
       </button>
 
       {/* 조건이 두 줄을 넘어가면 인라인으로는 못 다룬다 — 거기서부터는 창이 맡는다 */}
-      <button
+      {onOpenFilters && <button
         onClick={onOpenFilters}
         title={t('포함·제외를 여러 줄로 겁니다')}
         className="btn px-2 py-0.5 text-micro"
       >
         {t('필터')}
         {extraRules > 0 ? ` +${extraRules}` : ''}
-      </button>
+      </button>}
 
       {/* **찾기는 오른쪽 끝, 채운 버튼이다.** 모드와 거름 사이에 회색으로 끼어 있을 때는
           거름의 하나처럼 읽혀 아무도 누르지 않았다. 이건 거름이 아니라 «서버에 묻는» 다른 일이고,
           검색은 오른쪽 위에서 찾는 손버릇이 있다.
           드래그로는 «이 구간에 뭐가 있나» 만 볼 수 있다. 어디 있는지 모르는 걸 넓은 구간에서
           찾는 입구다 */}
-      <button
+      {onWideSearch && <button
         onClick={onWideSearch}
         title={t('구간과 조건(서비스·IP·로그인 등)을 정해 서버에서 찾습니다. 드래그 없이 넓은 구간도 됩니다')}
         className="ml-auto flex items-center gap-1.5 rounded border border-accent bg-accent px-2.5 py-0.5 text-small font-medium text-white hover:brightness-110"
@@ -236,7 +237,7 @@ export function XLogToolbar({
           <path d="M11 11l4 4" strokeLinecap="round" />
         </svg>
         {t('트랜잭션 찾기')}
-      </button>
+      </button>}
       </div>
 
       {/* 두 줄째 — 자주 안 건드리는 것들. 접어 두면 찾는 줄이 한 눈에 들어온다. */}
@@ -273,13 +274,13 @@ export function XLogToolbar({
         <span className="h-4 w-px bg-line" aria-hidden />
         {/* 저장본은 **접속과 무관하다.** 콜렉터에서 이미 밀려난 트랜잭션도 열리므로
             연결 상태와 상관없이 늘 눌린다 */}
-        <button
+        {onOpenSaved && <button
           onClick={onOpenSaved}
           title={t('파일로 남겨 둔 프로파일을 엽니다')}
           className="btn px-2 py-0.5 text-micro"
         >
           {t('저장본')}
-        </button>
+        </button>}
         <span className="h-4 w-px bg-line" aria-hidden />
         {/* 축보다 큰 점은 **천장에 붙어** 그려진다(예전에는 통째로 사라졌다).
             축은 사람이 정한다 — 자동으로 늘리면 튀는 것 하나에 나머지가 바닥에 깔린다.

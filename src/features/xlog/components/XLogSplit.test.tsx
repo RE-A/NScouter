@@ -52,6 +52,7 @@ function view(s: XLogTabsState) {
       onFocus={onFocus}
       onDrop={onDrop}
       onClosePane={onClosePane}
+      onDetach={vi.fn()}
       onRatioDelta={vi.fn()}
     />,
   );

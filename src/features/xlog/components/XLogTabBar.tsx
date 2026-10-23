@@ -12,8 +12,12 @@
 //
 // 탭을 **차트 위로 끌어 놓으면** 화면이 나뉜다(`XLogSplit`). 판에 떠 있는 탭은 밑줄로 드러낸다 —
 // 지금 판은 진하게, 옆 판은 흐리게.
+//
+// 탭을 **창 밖으로 끌어 놓으면 새 창으로 떨어진다**(브라우저 탭과 같다). 오른쪽 클릭 메뉴에도 있다.
+// 뗀 탭은 `↗` 를 달고, 누르면 그 창을 앞으로 부른다.
 
 import { memo, useRef, useState } from 'react';
+import { ContextMenu } from '../../../components/ContextMenu';
 import { MAX_XLOG_TABS, tabLabels, type XLogTab } from '../hooks/xlogTabs';
 import { TAB_DRAG_TYPE } from './XLogSplit';
 import { t } from '../../../i18n';
@@ -23,6 +27,12 @@ interface XLogTabBarProps {
   activeKey: string;
   /** 화면에 띄운 탭들 */
   panes: readonly string[];
+  /** 새 창으로 뗀 탭들 */
+  detached: readonly string[];
+  /** 새 창으로 뗀다. `at` 은 창 밖에 끌어 놓은 화면 좌표 */
+  onDetach: (key: string, at?: { x: number; y: number }) => void;
+  /** 뗀 탭을 도로 붙인다 */
+  onAttach: (key: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
   onAdd: () => void;
@@ -34,6 +44,9 @@ export const XLogTabBar = memo(function XLogTabBar({
   tabs,
   activeKey,
   panes,
+  detached,
+  onDetach,
+  onAttach,
   onActivate,
   onClose,
   onAdd,
@@ -58,6 +71,36 @@ export const XLogTabBar = memo(function XLogTabBar({
     setEditing(null);
   };
   const labels = tabLabels(tabs);
+  /** 오른쪽 클릭 메뉴 */
+  const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  /**
+   * 끌던 탭이 **창 밖으로 나갔나.** `dragend` 의 좌표만 믿을 수 없다 — WebKit 은 창 밖에 놓으면
+   * 0,0 을 주기도 한다. 그래서 끄는 동안 문서를 떠나고(dragleave, 갈 곳 없음) 들어오는(dragenter)
+   * 것을 따로 지켜본다.
+   */
+  const outsideRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const watchDrag = () => {
+    outsideRef.current = false;
+    lastPointRef.current = null;
+    const leave = (e: DragEvent) => {
+      if (e.relatedTarget === null) {
+        outsideRef.current = true;
+        if (e.screenX !== 0 || e.screenY !== 0) lastPointRef.current = { x: e.screenX, y: e.screenY };
+      }
+    };
+    const enter = () => { outsideRef.current = false; };
+    const stop = () => {
+      document.removeEventListener('dragleave', leave);
+      document.removeEventListener('dragenter', enter);
+    };
+    document.addEventListener('dragleave', leave);
+    document.addEventListener('dragenter', enter);
+    // 탭의 onDragEnd 가 결과를 읽은 **뒤에** 뗀다 — 다음 틱
+    document.addEventListener('dragend', () => setTimeout(stop, 0), { once: true });
+  };
+  /** 안 뗀 탭이 하나뿐이면 그건 못 뗀다 — 메인 창 차트 자리가 빈다 */
+  const dockedCount = tabs.filter(tab => !detached.includes(tab.key)).length;
 
   // 탭이 하나면 「+」만 둔다 — 줄을 통째로 그리면 쓰지도 않는 구조가 늘 보인다.
   if (tabs.length <= 1) {
@@ -88,10 +131,28 @@ export const XLogTabBar = memo(function XLogTabBar({
             onDragStart={e => {
               e.dataTransfer.setData(TAB_DRAG_TYPE, tab.key);
               e.dataTransfer.effectAllowed = 'move';
+              watchDrag();
+            }}
+            // **창 밖에 놓았으면 새 창으로 뗀다.** 판이 받은 것(dropEffect move)이 아니고
+            // 놓은 자리가 창 밖일 때만 — 창 안 빈 곳에 놓은 것은 «그만둔 것» 이다
+            onDragEnd={e => {
+              if (e.dataTransfer.dropEffect === 'move') return;
+              // WebKitGTK 는 창 밖에 놓으면 client 좌표에 끌기 **시작점**을 준다(실측 44,20).
+              // 그래서 client 좌표로는 안 가리고, 문서를 떠났는지와 화면 좌표로 가린다
+              const hasScreen = e.screenX !== 0 || e.screenY !== 0;
+              const outside = outsideRef.current || (hasScreen && isOutsideScreenRect(e.screenX, e.screenY));
+              if (!outside) return;
+              if (detached.includes(tab.key) || dockedCount <= 1) return;
+              const at = e.screenX !== 0 || e.screenY !== 0 ? { x: e.screenX, y: e.screenY } : lastPointRef.current;
+              onDetach(tab.key, at ?? undefined);
+            }}
+            onContextMenu={e => {
+              e.preventDefault();
+              setMenu({ key: tab.key, x: e.clientX, y: e.clientY });
             }}
             className={`flex items-center rounded-t border-b-2 ${
               on ? 'border-accent bg-hover' : panes.includes(tab.key) ? 'border-accent/40' : 'border-transparent'
-            }`}
+            } ${detached.includes(tab.key) ? 'italic' : ''}`}
           >
             {isEditing ? (
               <input
@@ -118,11 +179,13 @@ export const XLogTabBar = memo(function XLogTabBar({
                 aria-selected={on}
                 onClick={() => onActivate(tab.key)}
                 onDoubleClick={() => startEdit(tab)}
-                title={`${label} — ${t('두 번 눌러 이름 바꾸기 · 차트 가장자리로 끌어 나란히 보기')}`}
+                // 메뉴가 떠 있는 동안에는 풍선 도움말을 거둔다 — 오른쪽 클릭 자리에 남아 메뉴를 덮었다
+                title={menu ? undefined : `${label} — ${t('두 번 눌러 이름 바꾸기 · 차트 가장자리로 끌어 나란히 보기')}`}
                 className={`max-w-[12rem] truncate px-2 py-0.5 text-micro ${
                   on ? 'text-fg' : 'text-fg-dim hover:text-fg-muted'
                 }`}
               >
+                {detached.includes(tab.key) && <span aria-hidden>↗ </span>}
                 {label}
               </button>
             )}
@@ -139,9 +202,47 @@ export const XLogTabBar = memo(function XLogTabBar({
         );
       })}
       <AddButton onAdd={onAdd} full={full} />
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={
+            detached.includes(menu.key)
+              ? [
+                  { label: t('창 보기'), onSelect: () => onActivate(menu.key) },
+                  { label: t('메인 창에 붙이기'), onSelect: () => onAttach(menu.key) },
+                  { label: t('탭 닫기'), onSelect: () => onClose(menu.key) },
+                ]
+              : [
+                  {
+                    label: t('새 창으로 떼기'),
+                    onSelect: () => onDetach(menu.key),
+                    disabled: dockedCount <= 1 ? t('메인 창에 탭이 하나는 남아야 합니다') : undefined,
+                  },
+                  {
+                    label: t('이름 바꾸기'),
+                    onSelect: () => {
+                      const tab = tabs.find(x => x.key === menu.key);
+                      if (tab) startEdit(tab);
+                    },
+                  },
+                  { label: t('탭 닫기'), onSelect: () => onClose(menu.key), disabled: tabs.length <= 1 ? t('마지막 탭은 닫지 않습니다') : undefined },
+                ]
+          }
+        />
+      )}
     </div>
   );
 });
+
+/** 화면 좌표가 이 창 밖인가 — 창 가장자리에서 조금 벗어난 정도는 안 친다 */
+function isOutsideScreenRect(x: number, y: number): boolean {
+  const M = 8;
+  const left = window.screenX;
+  const top = window.screenY;
+  return x < left - M || y < top - M || x > left + window.outerWidth + M || y > top + window.outerHeight + M;
+}
 
 function AddButton({ onAdd, full }: { onAdd: () => void; full: boolean }) {
   return (

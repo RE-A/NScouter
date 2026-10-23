@@ -15,6 +15,8 @@ import {
   activate,
   activeTab,
   addTab,
+  attachTab,
+  detachTab,
   clearSelections,
   closePane,
   closeTab,
@@ -363,5 +365,82 @@ describe('탭 줄 이름', () => {
     let s = addTab(addTab(initialTabs()));
     for (const t of s.tabs) s = renameTab(s, t.key, 'A');
     expect(tabLabels(s.tabs)).toEqual(['A', 'A 2', 'A 3']);
+  });
+});
+
+describe('새 창으로 떼기', () => {
+  const tabs = (n: number) => {
+    let s = initialTabs();
+    for (let i = 1; i < n; i++) s = addTab(s);
+    return activate(s, s.tabs[0].key);
+  };
+
+  it('뗀 탭은 판에서 빠지고 탭 목록에는 남는다 — 조건·저장은 이 창이 쥔다', () => {
+    let s = tabs(2);
+    const [a, b] = s.tabs.map(t => t.key);
+    s = dropTab(s, b, a, 'right');
+    s = detachTab(s, b);
+    expect(s.detached).toEqual([b]);
+    expect(s.panes).toEqual([a]);
+    expect(s.tabs).toHaveLength(2);
+  });
+
+  it('하나뿐인 판을 떼면 안 뗀 이웃을 그 자리에 띄운다', () => {
+    let s = tabs(3);
+    const [a, b] = s.tabs.map(t => t.key);
+    s = detachTab(s, a);
+    expect(s.panes).toEqual([b]);
+    expect(s.activeKey).toBe(b);
+  });
+
+  it('안 뗀 탭이 하나도 안 남으면 떼지 않는다', () => {
+    let s = tabs(2);
+    const [a, b] = s.tabs.map(t => t.key);
+    s = detachTab(s, b);
+    expect(detachTab(s, a)).toBe(s);
+  });
+
+  it('뗀 탭을 누르면 판에 올리지 않는다 — 그 창을 부를 일이다', () => {
+    let s = tabs(2);
+    const b = s.tabs[1].key;
+    s = detachTab(s, b);
+    expect(activate(s, b)).toBe(s);
+  });
+
+  it('도로 붙이면 지금 판 자리에 뜬다', () => {
+    let s = tabs(2);
+    const [, b] = s.tabs.map(t => t.key);
+    s = detachTab(s, b);
+    s = attachTab(s, b);
+    expect(s.detached).toEqual([]);
+    expect(s.panes).toEqual([b]);
+    expect(s.activeKey).toBe(b);
+  });
+
+  it('뗀 탭을 판 가장자리에 끌어 놓으면 붙으며 그 옆에 선다', () => {
+    let s = tabs(2);
+    const [a, b] = s.tabs.map(t => t.key);
+    s = detachTab(s, b);
+    s = dropTab(s, b, a, 'right');
+    expect(s.detached).toEqual([]);
+    expect(s.panes).toEqual([a, b]);
+  });
+
+  it('뗀 탭을 닫으면 뗀 목록에서도 빠진다', () => {
+    let s = tabs(2);
+    const [, b] = s.tabs.map(t => t.key);
+    s = detachTab(s, b);
+    s = closeTab(s, b);
+    expect(s.detached).toEqual([]);
+    expect(s.tabs).toHaveLength(1);
+  });
+
+  it('지금 판을 닫았을 때 이웃으로 뗀 탭을 고르지 않는다', () => {
+    let s = tabs(3);
+    const [a, b, c] = s.tabs.map(t => t.key);
+    s = detachTab(s, b); // 판 [a], 뗀 [b]
+    s = closeTab(s, a);
+    expect(s.panes).toEqual([c]);
+    expect(s.panes).not.toContain(b);
   });
 });

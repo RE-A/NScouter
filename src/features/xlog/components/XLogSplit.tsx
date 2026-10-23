@@ -63,6 +63,8 @@ interface XLogSplitProps {
   onFocus: (key: string) => void;
   onDrop: (key: string, target: string, side: DropSide) => void;
   onClosePane: (key: string) => void;
+  /** 판을 새 창으로 뗀다 */
+  onDetach: (key: string) => void;
   /**
    * 경계를 끌었다 — **첫 판 몫의 변화량**을 넘긴다. 몫을 넘기지 않는 것은 끌기 이벤트가 그리기보다
    * 잦아서다: 옛 몫에 더하면 그 사이에 끈 만큼이 사라진다.
@@ -96,6 +98,7 @@ export const XLogSplit = memo(function XLogSplit({
   onFocus,
   onDrop,
   onClosePane,
+  onDetach,
   onRatioDelta,
 }: XLogSplitProps) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -184,6 +187,15 @@ export const XLogSplit = memo(function XLogSplit({
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate">{labels[i]}</span>
+                <button
+                  type="button"
+                  onClick={() => onDetach(tab.key)}
+                  title={t('이 판을 새 창으로 뗍니다 — 다른 모니터에 띄울 때')}
+                  aria-label={`${labels[i]} ${t('새 창으로 떼기')}`}
+                  className="flex h-4 w-4 items-center justify-center rounded text-fg-faint hover:bg-hover hover:text-fg"
+                >
+                  ↗
+                </button>
                 <button
                   type="button"
                   onClick={() => onClosePane(tab.key)}

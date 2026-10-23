@@ -276,7 +276,8 @@ export function toTabs(
       selection: { services: new Set(services), hashes: new Set(legacy) },
     };
   });
-  return withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key] }, split);
+  // 뗀 창은 되살리지 않는다 — 켤 때는 모든 탭이 메인 창에 붙어 있다
+  return withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key], detached: [] }, split);
 }
 
 /**
