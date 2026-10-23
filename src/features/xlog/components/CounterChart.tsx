@@ -9,7 +9,7 @@ import { subscribe } from '../api/subscribe';
 import { deriveStreamStatus } from '../utils/streamStatus';
 import { sampleX, totalLineVisible } from './counterGeometry';
 import { totalMode } from './counterTotal';
-import { foldSeries, shownObjectCount, type DrawSeries, type FoldMode } from './counterSeries';
+import { foldSeries, legendLabel, shownObjectCount, type DrawSeries, type FoldMode } from './counterSeries';
 import { CANVAS, SERIES } from '../../../styles/tokens';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
@@ -198,7 +198,7 @@ export const CounterChart = memo(function CounterChart({
         ctx.fillStyle = CANVAS.textMuted;
         ctx.font = '9px monospace';
         const label = s.color === null ? (mode === 'avg' ? t('평균') : t('합계')) : s.label;
-        ctx.fillText(label.substring(0, 10), 22 + i * 90, h - 8);
+        ctx.fillText(legendLabel(label), 22 + i * 90, h - 8);
       });
 
       rafId = requestAnimationFrame(render);

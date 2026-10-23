@@ -108,3 +108,17 @@ export function shownObjectCount(updates: readonly CounterUpdate[], visible: Rea
   for (const u of updates) for (const v of u.values) if (visible === null || visible.has(v.obj_hash)) seen.add(v.obj_hash);
   return seen.size;
 }
+
+/**
+ * 범례 칸에 들어가게 줄인 이름.
+ *
+ * **앞만 자르지 않는다.** ECS Task 이름은 `safs-ip-10-0-0-1` 처럼 앞이 같고 끝이 다르다 —
+ * 앞 10자만 남기면 세 Task 가 전부 `safs-ip-10` 이 된다. 서비스로 묶어 볼 때는 색까지 같아
+ * 범례로는 하나도 못 가린다. 앞뒤를 남기고 가운데를 접는다.
+ */
+export function legendLabel(label: string, max = 10): string {
+  if (label.length <= max) return label;
+  const tail = Math.ceil((max - 1) / 2);
+  const head = max - 1 - tail;
+  return `${label.slice(0, head)}…${label.slice(-tail)}`;
+}
