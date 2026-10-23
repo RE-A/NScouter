@@ -7,6 +7,7 @@
 //   · 닫으면 **이웃**으로 옮긴다 (매번 첫 탭으로 튀지 않는다)
 //   · 고친 것은 **그 탭만** 바뀐다. 그게 탭을 나눈 이유다
 //   · 서버 고르기는 탭 바깥이라 **모든 탭에** 적힌다
+//   · 이름은 붙일 수 있고, 안 붙인 이름이 겹치면 순번으로 가른다
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -17,7 +18,9 @@ import {
   initialTabs,
   MAX_XLOG_TABS,
   patchActive,
+  renameTab,
   setSelection,
+  tabLabels,
   tabTitle,
 } from './xlogTabs';
 
@@ -162,5 +165,53 @@ describe('조건은 탭마다다', () => {
     s = setSelection(s, new Set([7]));
 
     for (const t of s.tabs) expect([...t.filter.objHashSet]).toEqual([7]);
+  });
+});
+
+describe('탭 이름 붙이기', () => {
+  it('붙인 이름이 조건에서 만든 이름보다 앞선다', () => {
+    const s = initialTabs();
+    const named = renameTab(s, s.activeKey, '  결제 서버  ');
+    expect(tabTitle(activeTab(named))).toBe('결제 서버');
+  });
+
+  it('비우면 조건에서 만든 이름으로 돌아간다', () => {
+    const s = initialTabs();
+    const back = renameTab(renameTab(s, s.activeKey, '결제'), s.activeKey, '   ');
+    expect(activeTab(back).title).toBeUndefined();
+    expect(tabTitle(activeTab(back))).toBe('실시간');
+  });
+
+  it('그 탭만 바뀐다', () => {
+    const two = addTab(initialTabs());
+    const [first] = two.tabs;
+    const named = renameTab(two, first.key, '결제');
+    expect(named.tabs[0].title).toBe('결제');
+    expect(named.tabs[1].title).toBeUndefined();
+  });
+
+  it('복제본은 붙인 이름을 안 물려받는다 — 둘 다 «결제» 면 못 가른다', () => {
+    const s = initialTabs();
+    const two = addTab(renameTab(s, s.activeKey, '결제'));
+    expect(activeTab(two).title).toBeUndefined();
+  });
+});
+
+describe('탭 줄 이름', () => {
+  it('안 붙인 실시간 탭 둘은 순번으로 가른다', () => {
+    const two = addTab(initialTabs());
+    expect(tabLabels(two.tabs)).toEqual(['실시간', '실시간 2']);
+  });
+
+  it('겹치지 않으면 순번을 안 붙인다', () => {
+    const two = addTab(initialTabs());
+    const named = renameTab(two, two.tabs[1].key, '주문');
+    expect(tabLabels(named.tabs)).toEqual(['실시간', '주문']);
+  });
+
+  it('붙인 이름끼리 겹쳐도 가른다', () => {
+    let s = addTab(addTab(initialTabs()));
+    for (const t of s.tabs) s = renameTab(s, t.key, 'A');
+    expect(tabLabels(s.tabs)).toEqual(['A', 'A 2', 'A 3']);
   });
 });

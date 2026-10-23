@@ -30,7 +30,7 @@ function open(filter: Partial<XLogFilterState> = {}) {
   return { onFilterChange, view };
 }
 
-/** 조건 줄은 **접힌 것이 기본**이다. 펼쳐야 서비스·IP 칸이 나온다 */
+/** 두 줄째는 **접힌 것이 기본**이다. 펼쳐야 Y축·범위·저장본·응답 칸이 나온다 */
 function expand() {
   fireEvent.click(screen.getByRole('button', { name: /조건 더보기/ }));
 }
@@ -45,7 +45,6 @@ function serviceDirection() {
 describe('툴바 서비스 조건', () => {
   it('빈 칸에서 눌러도 제외로 뒤집힌다', () => {
     open();
-    expand();
     const btn = serviceDirection();
     expect(btn.textContent).toBe('포함');
 
@@ -56,7 +55,6 @@ describe('툴바 서비스 조건', () => {
 
   it('뒤집어 둔 방향으로 조건 줄이 생긴다', () => {
     const { onFilterChange } = open();
-    expand();
     fireEvent.click(serviceDirection());
 
     fireEvent.change(screen.getByPlaceholderText('URL 일부'), {
@@ -69,21 +67,37 @@ describe('툴바 서비스 조건', () => {
   });
 
   it('줄이 있을 때의 방향은 상위 상태를 따른다', () => {
-    // 걸려 있는 조건이 있으면 **펼쳐진 채로 시작한다** — 따로 누를 필요가 없다
     open({ patterns: [{ field: 'service', text: '/health', exclude: true }] });
     expect(serviceDirection().textContent).toBe('제외');
   });
 });
 
 describe('조건 접기', () => {
-  it('기본은 접혀 있다 — 찾는 줄이 한 눈에 들어와야 한다', () => {
+  it('서비스·IP 는 첫 줄에 있다 — 가장 자주 거는 조건이다', () => {
     open();
-    expect(screen.queryByPlaceholderText('URL 일부')).toBeNull();
+    expect(screen.getByPlaceholderText('URL 일부')).toBeDefined();
+    expect(screen.getByPlaceholderText('IP 일부')).toBeDefined();
   });
 
-  it('걸려 있는 조건이 있으면 펼쳐진 채로 시작한다', () => {
+  it('Y축·범위·저장본은 두 줄째다 — 한 번 정하면 잘 안 바꾼다', () => {
+    open();
+    expect(screen.queryByText('Y축')).toBeNull();
+    expect(screen.queryByText('범위')).toBeNull();
+    expect(screen.queryByRole('button', { name: '저장본' })).toBeNull();
+    expand();
+    expect(screen.getByText('Y축')).toBeDefined();
+    expect(screen.getByText('범위')).toBeDefined();
+    expect(screen.getByRole('button', { name: '저장본' })).toBeDefined();
+  });
+
+  it('접힌 줄에 걸려 있는 조건이 있으면 펼쳐진 채로 시작한다', () => {
+    open({ elapsedMs: 3_000 });
+    expect(screen.getByText('Y축')).toBeDefined();
+  });
+
+  it('첫 줄의 서비스·IP 조건은 접힌 수에 안 센다 — 보이는 것을 숨었다고 하면 안 된다', () => {
     open({ patterns: [{ field: 'ip', text: '10.89.', exclude: false }] });
-    expect(screen.getByPlaceholderText('IP 일부')).toBeDefined();
+    expect(screen.getByRole('button', { name: /^조건 더보기$/ })).toBeDefined();
   });
 
   it('접힌 조건 수를 버튼에 적는다 — 숨은 거름을 모르면 «왜 이만큼만» 이 된다', () => {

@@ -82,8 +82,7 @@ export function XLogToolbar({
    */
   const hiddenActive =
     (filter.elapsedMs > 0 ? 1 : 0) +
-    (config.showDensity ? 1 : 0) +
-    filter.patterns.filter(r => r.text.trim() !== '').length;
+    (config.showDensity ? 1 : 0);
 
   /**
    * 두 줄째를 펼친가.
@@ -136,16 +135,6 @@ export function XLogToolbar({
         {t('찾기')}
       </button>
 
-      {/* 저장본은 **접속과 무관하다.** 콜렉터에서 이미 밀려난 트랜잭션도 열리므로
-          연결 상태와 상관없이 늘 눌린다 */}
-      <button
-        onClick={onOpenSaved}
-        title={t('파일로 남겨 둔 프로파일을 엽니다')}
-        className="btn px-2 py-0.5 text-micro"
-      >
-        {t('저장본')}
-      </button>
-
       {mode === 'past' && (
         <>
           <input
@@ -190,35 +179,6 @@ export function XLogToolbar({
           <span className="h-4 w-px bg-line" aria-hidden />
         </>
       )}
-      <Field label={t('Y축')}>
-        <select
-          className={SELECT}
-          title={t('점의 높이를 무엇으로 볼지. 응답시간·CPU·SQL 시간·SQL 건수 등')}
-          value={config.yAxisMode}
-          onChange={e => onConfigChange({ yAxisMode: e.target.value as YAxisMode })}
-        >
-          {Y_AXIS_OPTIONS.map(mode => (
-            <option key={mode} value={mode}>
-              {Y_AXIS_CONFIGS[mode].label}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label={t('범위')}>
-        <select
-          className={SELECT}
-          title={t('가로축이 담는 시간. 좁힐수록 점이 덜 겹친다')}
-          value={config.timeRangeMs}
-          onChange={e => onConfigChange({ timeRangeMs: Number(e.target.value) })}
-        >
-          <option value={60_000}>{t('1분')}</option>
-          <option value={300_000}>{t('5분')}</option>
-          <option value={600_000}>{t('10분')}</option>
-          <option value={1_800_000}>{t('30분')}</option>
-        </select>
-      </Field>
-      <span className="h-4 w-px bg-line" aria-hidden />
-
       <label
         className="flex cursor-pointer items-center gap-1.5 text-body text-fg-muted hover:text-fg"
         title={t('실패한 트랜잭션만 남긴다')}
@@ -230,7 +190,22 @@ export function XLogToolbar({
         />
         {t('에러만')}
       </label>
-
+      {/* 서비스·IP 는 **가장 자주 거는 조건**이라 첫 줄에 둔다 — Y축·범위는 한 번 정하면 잘 안 바꾼다.
+          인라인 칸은 첫 줄짜리 뷰다. 팝업에서 여러 줄을 걸어 둔 사람이 여기서
+          글자를 고쳤다고 나머지 줄이 사라지면 안 된다(setFirstRule). */}
+      <TextCond
+        label={t('서비스')}
+        value={firstRule(filter, 'service')}
+        placeholder={t('URL 일부')}
+        onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'service', v) })}
+      />
+      <TextCond
+        label="IP"
+        value={firstRule(filter, 'ip')}
+        // 예시 IP 를 깔아 두면 이미 들어 있는 값으로 읽힌다 — 무엇을 넣는 칸인지만 적는다
+        placeholder={t('IP 일부')}
+        onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'ip', v) })}
+      />
 
       {/* **접어 둔 조건이 몇 개인지를 적어 둔다.** 안 적으면 «왜 이만큼만 보이지» 의
           답이 접힌 줄 안에 숨는다 — 거르고 있는 것은 항상 드러나야 한다. */}
@@ -238,7 +213,7 @@ export function XLogToolbar({
         type="button"
         onClick={() => setShowMore(v => !v)}
         aria-expanded={showMore}
-        title={t('Y최대·밀집·응답·서비스·IP 조건을 여닫습니다')}
+        title={t('Y축·범위·저장본·Y최대·밀집·응답을 여닫습니다')}
         className="btn px-2 py-0.5 text-micro"
       >
         {showMore ? t('조건 접기') : t('조건 더보기')}
@@ -259,6 +234,45 @@ export function XLogToolbar({
       {/* 두 줄째 — 자주 안 건드리는 것들. 접어 두면 찾는 줄이 한 눈에 들어온다. */}
       {showMore && (
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-1">
+        {/* 한 번 정하면 잘 안 바꾸는 것들 — 무엇을 어떤 폭으로 그리나, 파일로 남긴 것 열기 */}
+        <Field label={t('Y축')}>
+          <select
+            className={SELECT}
+            title={t('점의 높이를 무엇으로 볼지. 응답시간·CPU·SQL 시간·SQL 건수 등')}
+            value={config.yAxisMode}
+            onChange={e => onConfigChange({ yAxisMode: e.target.value as YAxisMode })}
+          >
+            {Y_AXIS_OPTIONS.map(mode => (
+              <option key={mode} value={mode}>
+                {Y_AXIS_CONFIGS[mode].label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t('범위')}>
+          <select
+            className={SELECT}
+            title={t('가로축이 담는 시간. 좁힐수록 점이 덜 겹친다')}
+            value={config.timeRangeMs}
+            onChange={e => onConfigChange({ timeRangeMs: Number(e.target.value) })}
+          >
+            <option value={60_000}>{t('1분')}</option>
+            <option value={300_000}>{t('5분')}</option>
+            <option value={600_000}>{t('10분')}</option>
+            <option value={1_800_000}>{t('30분')}</option>
+          </select>
+        </Field>
+        <span className="h-4 w-px bg-line" aria-hidden />
+        {/* 저장본은 **접속과 무관하다.** 콜렉터에서 이미 밀려난 트랜잭션도 열리므로
+            연결 상태와 상관없이 늘 눌린다 */}
+        <button
+          onClick={onOpenSaved}
+          title={t('파일로 남겨 둔 프로파일을 엽니다')}
+          className="btn px-2 py-0.5 text-micro"
+        >
+          {t('저장본')}
+        </button>
+        <span className="h-4 w-px bg-line" aria-hidden />
         {/* 축보다 큰 점은 **천장에 붙어** 그려진다(예전에는 통째로 사라졌다).
             축은 사람이 정한다 — 자동으로 늘리면 튀는 것 하나에 나머지가 바닥에 깔린다.
             Ctrl+휠로도 움직인다. */}
@@ -321,21 +335,6 @@ export function XLogToolbar({
           />
           <span className="text-micro text-fg-faint">{t('초')}</span>
         </Field>
-        {/* 인라인 칸은 **첫 줄짜리 뷰**다. 팝업에서 여러 줄을 걸어 둔 사람이 여기서
-            글자를 고쳤다고 나머지 줄이 사라지면 안 된다(setFirstRule). */}
-        <TextCond
-          label={t('서비스')}
-          value={firstRule(filter, 'service')}
-          placeholder={t('URL 일부')}
-          onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'service', v) })}
-        />
-        <TextCond
-          label="IP"
-          value={firstRule(filter, 'ip')}
-          // 예시 IP 를 깔아 두면 이미 들어 있는 값으로 읽힌다 — 무엇을 넣는 칸인지만 적는다
-          placeholder={t('IP 일부')}
-          onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'ip', v) })}
-        />
 
         </div>
       )}

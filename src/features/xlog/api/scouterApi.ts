@@ -718,6 +718,8 @@ export interface UiLayout {
  */
 /** 탭 하나의 조건. Rust `XLogTabPrefs` 와 짝이다 */
 export interface XLogTabPrefs {
+  /** 사람이 붙인 탭 이름. 비어 있으면 조건에서 만든다 */
+  title?: string;
   chart?: XLogChartPrefs;
   filter?: XLogFilterPrefs;
   /** 과거 구간(epoch ms). 둘 다 0 이면 구간을 정하지 않은 것이다 */

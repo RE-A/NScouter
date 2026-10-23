@@ -288,6 +288,14 @@ describe('XLog 탭', () => {
     expect(s.tabs[0].mode).toBe('past');
   });
 
+  it('붙인 이름이 남는다 — 비어 있으면 자동 이름이다', () => {
+    const s = toTabs([{ title: '결제', stime: 0, etime: 0 }, { title: '  ', stime: 0, etime: 0 }], undefined, undefined);
+    expect(s.tabs[0].title).toBe('결제');
+    expect(s.tabs[1].title).toBeUndefined();
+    const back = fromTabs(s);
+    expect(back.map(t => t.title)).toEqual(['결제', '']);
+  });
+
   it('구간이 0 이면 «안 정했다» 로 되돌린다', () => {
     const s = toTabs([{ stime: 0, etime: 0 }], undefined, undefined);
     expect(s.tabs[0].pastRange).toBeNull();

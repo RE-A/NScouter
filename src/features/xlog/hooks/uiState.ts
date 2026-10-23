@@ -216,6 +216,8 @@ export function fromFilterState(filter: XLogFilterState, mode: XLogMode): XLogFi
 
 export function fromTabs(s: XLogTabsState): XLogTabPrefs[] {
   return s.tabs.map(t => ({
+    // 붙인 이름이 없으면 빈 글자 — 읽는 쪽이 «자동 이름» 으로 되돌린다
+    title: t.title ?? '',
     chart: fromChartConfig(t.config),
     filter: fromFilterState(t.filter, t.mode),
     // 구간이 없으면 0 으로 적는다. 읽는 쪽이 «안 정했다» 로 되돌린다.
@@ -246,6 +248,7 @@ export function toTabs(
     return {
       // 첫 탭은 처음 만든 키를 그대로 쓴다 — 키가 흔들리면 차트가 통째로 다시 선다
       key: i === 0 ? base.tabs[0].key : `${base.tabs[0].key}-r${i}`,
+      ...(typeof row.title === 'string' && row.title.trim() !== '' ? { title: row.title.trim() } : {}),
       mode: f.mode,
       pastRange: hasRange ? { stime: row.stime as number, etime: row.etime as number } : null,
       config: toChartConfig(row.chart),

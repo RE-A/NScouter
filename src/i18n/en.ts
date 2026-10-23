@@ -381,6 +381,9 @@ export const EN: Record<string, string> = {
     'Groups ECS tasks of the same service into one node',
   // XLog 탭 줄
   'XLog 탭 목록': 'XLog tabs',
+  '탭 이름': 'Tab name',
+  '비우면 자동 이름': 'empty = automatic name',
+  '두 번 눌러 이름 바꾸기': 'double-click to rename',
   '탭 닫기': 'Close tab',
   '탭': 'tab',
   '지금 조건을 복제해 탭을 하나 더 엽니다 — 날짜만 바꿔 견주는 데 씁니다':
@@ -390,8 +393,8 @@ export const EN: Record<string, string> = {
   // XLog 툴바 — 자주 안 쓰는 조건은 접어 둔다
   '조건 더보기': 'More filters',
   '조건 접기': 'Fewer filters',
-  'Y최대·밀집·응답·서비스·IP 조건을 여닫습니다':
-    'Show or hide Y-max, density, response time, service and IP filters',
+  'Y축·범위·저장본·Y최대·밀집·응답을 여닫습니다':
+    'Show or hide Y axis, range, saved profiles, Y-max, density and response time',
   // 프로파일 전문 창
   '프로파일 전문': 'Full profile text',
   '개 스텝': ' steps',
