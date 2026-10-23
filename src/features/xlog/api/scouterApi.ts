@@ -865,8 +865,12 @@ export interface SearchXLogResult {
  * **`truncated` 를 반드시 화면에 보여야 한다.** 서버는 상한에서 그냥 끊고
  * «잘렸다» 는 신호를 아무것도 주지 않는다 (F-54).
  */
-export async function searchXLogList(filter: SearchXLogFilter): Promise<SearchXLogResult> {
-  return invoke<SearchXLogResult>('search_xlog_list', { filter });
+export async function searchXLogList(
+  filter: SearchXLogFilter,
+  /** 이미 아는 상한. 주면 서버 설정을 다시 읽지 않는다 (조각을 이어 찾을 때) */
+  maxHint?: SearchMax,
+): Promise<SearchXLogResult> {
+  return invoke<SearchXLogResult>('search_xlog_list', { filter, maxHint: maxHint ?? null });
 }
 
 export async function getConfig(): Promise<AppConfig> {

@@ -5,12 +5,13 @@
 // 드래그로는 여러 번 나눠 받아야 하는 것을 한 번에 찾기 위한 입구다 (F-54).
 //
 // **상한을 숨기지 않는다.** 서버는 `req_search_xlog_max_count`(기본 500)에서 그냥 끊고
-// «잘렸다» 는 신호를 아무것도 주지 않는다. 그걸 화면이 말하지 않으면 없는 트랜잭션을
-// 없다고 믿게 된다 — 그래서 창을 열 때부터 상한을 적어 두고, 닿으면 결과에 경고를 단다.
+// «잘렸다» 는 신호를 아무것도 주지 않는다. 그래서 상한에 닿으면 구간을 잘게 나눠 이어 찾는다
+// (`wideSearchAll.ts`) — 창에는 한 번에 오는 양과 모두 모으는 양을 적어 두고, 찾는 동안 진행을 보인다.
 
 import { memo, useEffect, useState } from 'react';
 import type { AgentObject } from '../types/xlog';
 import { getSearchMax } from '../api/scouterApi';
+import { WIDE_TOTAL_CAP, type WideProgress } from '../hooks/wideSearchAll';
 import { t } from '../../../i18n';
 
 export interface WideSearchValues {
@@ -32,6 +33,10 @@ interface WideSearchDialogProps {
   /** 고를 수 있는 오브젝트. 서버가 **하나만** 받는다 */
   agents: AgentObject[];
   running: boolean;
+  /** 찾는 중의 진행. 안 찾고 있으면 null */
+  progress: WideProgress | null;
+  /** 찾는 것을 멈춘다 — 그때까지 모은 것은 목록으로 간다 */
+  onCancel: () => void;
   onSearch: (v: WideSearchValues) => void;
   onClose: () => void;
 }
@@ -51,6 +56,8 @@ function fromLocalInput(s: string): number {
 export const WideSearchDialog = memo(function WideSearchDialog({
   agents,
   running,
+  progress,
+  onCancel,
   onSearch,
   onClose,
 }: WideSearchDialogProps) {
@@ -136,9 +143,11 @@ export const WideSearchDialog = memo(function WideSearchDialog({
             t('서버가 걸러서 보내 줍니다. 상한을 확인하는 중입니다…')
           ) : (
             <>
-              {t('서버가 걸러서 보내 줍니다. 최대')}{' '}
-              <span className="tnum font-mono text-warn">{limit.max.toLocaleString()}</span>
-              {t('건까지만 오고, 그보다 많으면 잘립니다.')}
+              {t('서버가 걸러서 보내 줍니다. 한 번에')}{' '}
+              <span className="tnum font-mono text-fg-muted">{limit.max.toLocaleString()}</span>
+              {t('건까지 오므로, 넘으면 구간을 잘게 나눠 이어 찾습니다. 모두')}{' '}
+              <span className="tnum font-mono text-fg-muted">{WIDE_TOTAL_CAP.toLocaleString()}</span>
+              {t('건까지 모읍니다.')}
               {!limit.known && (
                 <span className="text-fg-faint">
                   {' '}
@@ -229,13 +238,30 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           </>
         )}
 
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="rounded border border-line-strong px-3 py-1 text-small text-fg-muted hover:bg-hover"
-          >
-            {t('취소')}
-          </button>
+        <div className="mt-3 flex items-center justify-end gap-2">
+          {/* 넓은 구간은 수십 번 나눠 묻는다 — 몇 건 모았고 어디까지 왔는지 보여 줘야 기다릴지 정한다 */}
+          {progress && (
+            <span className="mr-auto text-micro text-fg-dim" role="status">
+              <span className="tnum font-mono text-fg-muted">{progress.found.toLocaleString()}</span>
+              {t('건')} · {Math.round(progress.done * 100)}% · {t('요청')} {progress.requests}
+            </span>
+          )}
+          {running ? (
+            <button
+              onClick={onCancel}
+              title={t('그때까지 모은 것을 목록으로 보냅니다')}
+              className="rounded border border-line-strong px-3 py-1 text-small text-fg-muted hover:bg-hover"
+            >
+              {t('멈추기')}
+            </button>
+          ) : (
+            <button
+              onClick={onClose}
+              className="rounded border border-line-strong px-3 py-1 text-small text-fg-muted hover:bg-hover"
+            >
+              {t('취소')}
+            </button>
+          )}
           <button
             onClick={submit}
             disabled={badRange || running}

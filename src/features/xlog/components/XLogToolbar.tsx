@@ -125,15 +125,6 @@ export function XLogToolbar({
         ))}
       </div>
 
-      {/* 드래그로는 «이 구간에 뭐가 있나» 만 볼 수 있다. 어디 있는지 모르는 걸
-          찾으려면 구간을 잘게 나눠 여러 번 받아야 했다 — 그걸 한 번에 하는 입구다 */}
-      <button
-        onClick={onWideSearch}
-        title={t('구간과 조건을 정해 서버에서 찾습니다')}
-        className="btn px-2 py-0.5 text-micro"
-      >
-        {t('찾기')}
-      </button>
 
       {mode === 'past' && (
         <>
@@ -228,6 +219,23 @@ export function XLogToolbar({
       >
         {t('필터')}
         {extraRules > 0 ? ` +${extraRules}` : ''}
+      </button>
+
+      {/* **찾기는 오른쪽 끝, 채운 버튼이다.** 모드와 거름 사이에 회색으로 끼어 있을 때는
+          거름의 하나처럼 읽혀 아무도 누르지 않았다. 이건 거름이 아니라 «서버에 묻는» 다른 일이고,
+          검색은 오른쪽 위에서 찾는 손버릇이 있다.
+          드래그로는 «이 구간에 뭐가 있나» 만 볼 수 있다. 어디 있는지 모르는 걸 넓은 구간에서
+          찾는 입구다 */}
+      <button
+        onClick={onWideSearch}
+        title={t('구간과 조건(서비스·IP·로그인 등)을 정해 서버에서 찾습니다. 드래그 없이 넓은 구간도 됩니다')}
+        className="ml-auto flex items-center gap-1.5 rounded border border-accent bg-accent px-2.5 py-0.5 text-small font-medium text-white hover:brightness-110"
+      >
+        <svg aria-hidden width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="7" cy="7" r="5" />
+          <path d="M11 11l4 4" strokeLinecap="round" />
+        </svg>
+        {t('트랜잭션 찾기')}
       </button>
       </div>
 

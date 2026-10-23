@@ -35,7 +35,14 @@ afterEach(() => vi.clearAllMocks());
 
 function open(onSearch = vi.fn()) {
   render(
-    <WideSearchDialog agents={AGENTS} running={false} onSearch={onSearch} onClose={vi.fn()} />,
+    <WideSearchDialog
+      agents={AGENTS}
+      running={false}
+      progress={null}
+      onCancel={vi.fn()}
+      onSearch={onSearch}
+      onClose={vi.fn()}
+    />,
   );
   return onSearch;
 }
@@ -120,10 +127,41 @@ describe('WideSearchDialog — 넘기는 값', () => {
   it('찾는 중에는 다시 못 누른다', async () => {
     const onSearch = vi.fn();
     render(
-      <WideSearchDialog agents={AGENTS} running onSearch={onSearch} onClose={vi.fn()} />,
+      <WideSearchDialog
+        agents={AGENTS}
+        running
+        progress={{ found: 0, done: 0, requests: 1 }}
+        onCancel={vi.fn()}
+        onSearch={onSearch}
+        onClose={vi.fn()}
+      />,
     );
     await waitFor(() => expect(screen.getByText('500')).toBeTruthy());
     fireEvent.click(screen.getByText(/찾는 중/));
     expect(onSearch).not.toHaveBeenCalled();
+  });
+
+  it('찾는 동안 모은 수와 진행을 보이고, 멈추기를 누를 수 있다', async () => {
+    const onCancel = vi.fn();
+    render(
+      <WideSearchDialog
+        agents={AGENTS}
+        running
+        progress={{ found: 1234, done: 0.42, requests: 7 }}
+        onCancel={onCancel}
+        onSearch={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const status = screen.getByRole('status');
+    expect(status.textContent).toContain('1,234');
+    expect(status.textContent).toContain('42%');
+    fireEvent.click(screen.getByRole('button', { name: '멈추기' }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('상한을 넘으면 나눠 이어 찾는다고 적어 둔다', async () => {
+    open();
+    await waitFor(() => expect(screen.getByText(/구간을 잘게 나눠 이어 찾습니다/)).toBeTruthy());
   });
 });

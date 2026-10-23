@@ -122,6 +122,7 @@ import {
 } from './features/xlog/hooks/groupSelection';
 import { asAgent, clearObjectHistory, objectHistory, observeObjects } from './features/xlog/hooks/objectTimeline';
 import { usePastCandidates } from './features/xlog/hooks/usePastCandidates';
+import { searchAll, WIDE_TOTAL_CAP, type WideProgress } from './features/xlog/hooks/wideSearchAll';
 import { instanceLabel, serviceNameOf } from './features/xlog/components/instanceGroup';
 import { setAgentColorKey } from './features/xlog/utils/colorPalette';
 import { repaintCharts } from './styles/theme';
@@ -1079,13 +1080,29 @@ export default function App() {
    */
   const [showWideSearch, setShowWideSearch] = useState(false);
   const [wideRunning, setWideRunning] = useState(false);
-  /** 상한에 닿았다 — 더 있었을 수 있다. null 이면 검색 결과가 아니다 */
-  const [wideTruncated, setWideTruncated] = useState<{ max: number; known: boolean } | null>(null);
+  /**
+   * 다 못 찾았다 — 그 까닭과 어디까지 찾았나. null 이면 다 찾았거나 검색 결과가 아니다.
+   *
+   * 상한(기본 500)에 닿으면 구간을 나눠 이어 찾으므로(`wideSearchAll.ts`) 이제 «500 에서 잘림» 은
+   * 없다. 남는 것은 1초에 상한을 넘는 빽빽한 구간, 모은 것이 너무 많아 멈춘 것, 멈춤을 누른 것이다.
+   */
+  const [wideTruncated, setWideTruncated] = useState<{
+    kind: 'dense' | 'cap' | 'cancelled';
+    max: number;
+    stoppedAt: number | null;
+  } | null>(null);
+  const [wideProgress, setWideProgress] = useState<WideProgress | null>(null);
+  const wideCancelRef = useRef(false);
 
   const runWideSearch = useCallback(
     (v: WideSearchValues) => {
       setWideRunning(true);
-      searchXLogList(v)
+      wideCancelRef.current = false;
+      setWideProgress({ found: 0, done: 0, requests: 0 });
+      searchAll(v, searchXLogList, {
+        onProgress: setWideProgress,
+        isCancelled: () => wideCancelRef.current,
+      })
         .then(res => {
           setShowWideSearch(false);
           setSelectedXLogs(res.xlogs.map(xlogPackToSXLog));
@@ -1093,10 +1110,15 @@ export default function App() {
           // 목록이 그 구간의 것인 줄 알게 된다.
           setClearSignal(n => n + 1);
           resetSearch();
-          setWideTruncated(res.truncated ? { max: res.max, known: res.max_known } : null);
+          setWideTruncated(
+            res.cut === 'none' ? null : { kind: res.cut, max: res.limit.max, stoppedAt: res.stoppedAt },
+          );
         })
         .catch(() => {})
-        .finally(() => setWideRunning(false));
+        .finally(() => {
+          setWideRunning(false);
+          setWideProgress(null);
+        });
     },
     [resetSearch],
   );
@@ -1729,14 +1751,17 @@ export default function App() {
         <WideSearchDialog
           agents={[...agentMap].map(([obj_hash, obj_name]) => ({ obj_hash, obj_name }) as AgentObject)}
           running={wideRunning}
+          progress={wideProgress}
+          onCancel={() => { wideCancelRef.current = true; }}
           onSearch={runWideSearch}
           onClose={() => setShowWideSearch(false)}
         />
       )}
 
-      {/* ── 서버 고르기는 탭 바깥이다 ──
-          세 화면이 **같은 선택**을 쓴다. 탭마다 따로 고르게 두면 서버가 100대인 곳에서
+      {/* ── 서버 고르기는 화면(XLog·Active·Counter) 바깥이다 ──
+          세 화면이 **지금 XLog 탭의 선택**을 쓴다. 화면마다 따로 고르게 두면 서버가 100대인 곳에서
           같은 일을 세 번 해야 하고, 화면을 옮길 때마다 무엇을 보고 있는지가 달라진다.
+          XLog 탭끼리는 따로다 (`xlogTabs.ts`).
           알림은 여기 걸리지 않는다 — 안 보기로 한 서버가 죽는 것이야말로 알아야 한다. */}
       <div ref={xlogWsRef} className="flex min-h-0 flex-1 overflow-hidden bg-base p-1">
         <Pane title="Services" className="shrink-0" style={{ width: servicesW }}>
@@ -1864,13 +1889,16 @@ export default function App() {
                         <span
                           className="shrink-0 whitespace-nowrap rounded border border-warn/50 px-1 text-micro normal-case text-warn"
                           title={
-                            wideTruncated.known
-                              ? t('서버 상한에 닿았습니다. 조건을 좁히거나 구간을 나눠 다시 찾으십시오.')
-                              : t('서버 상한에 닿은 것으로 보입니다. 상한이 설정에 안 적혀 있어 기본값으로 판단했습니다.')
+                            wideTruncated.kind === 'dense'
+                              ? t('1초 안에 서버 상한보다 많이 걸리는 구간이 있어, 그 1초는 상한만큼만 담았습니다. 조건을 좁히면 다 나옵니다.')
+                              : t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')
                           }
                         >
-                          {t('상한')} {wideTruncated.max.toLocaleString()}
-                          {t('건에서 잘렸을 수 있습니다')}
+                          {wideTruncated.kind === 'dense'
+                            ? `${t('빽빽한 구간은 1초에')} ${wideTruncated.max.toLocaleString()}${t('건까지만')}`
+                            : `${wideTruncated.kind === 'cap'
+                                ? `${WIDE_TOTAL_CAP.toLocaleString()}${t('건에서 멈춤')}`
+                                : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
                         </span>
                       )}
                       <button

@@ -807,7 +807,7 @@ pub struct SearchXLogResult {
 /// **찾기 전에 물어본다.** 창을 열자마자 «최대 500건» 이라고 적어 두려면 그 500 이
 /// 어디서 온 값인지 알아야 한다 — 안 물어보고 기본값을 단정하면, 서버가 상한을
 /// 올려 뒀을 때 화면이 거짓말을 한다.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
 pub struct SearchMax {
     pub max: i32,
     /// 서버 설정에서 실제로 읽었는가. 아니면 기본값을 쓴 것이다
@@ -833,19 +833,28 @@ pub async fn get_search_max(state: State<'_, AppState>) -> Result<SearchMax, Str
 ///
 /// 상한은 서버 설정에서 읽어 온다. `req_search_xlog_max_count` 를 못 찾으면
 /// 기본값(500)을 쓰되 `max_known=false` 로 «추측» 임을 알린다.
+///
+/// `max_hint` 가 있으면 **설정을 다시 읽지 않는다.** 화면이 상한에 닿은 구간을 잘게 나눠
+/// 이어 찾을 때(`wideSearchAll.ts`) 조각마다 설정을 읽으면 왕복이 두 배가 된다 —
+/// 첫 조각에서 받은 상한을 그대로 넘겨 온다.
 #[tauri::command]
 pub async fn search_xlog_list(
     state: State<'_, AppState>,
     filter: SearchXLogFilter,
+    max_hint: Option<SearchMax>,
 ) -> Result<SearchXLogResult, String> {
     // 상한을 먼저 읽는다. 실패해도 검색은 한다 — 상한을 모른다고 못 찾을 이유는 없다.
-    let max_from_server = request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
-        .await
-        .ok()
-        .flatten()
-        .map(|m| parse_config_text(&m))
-        .as_deref()
-        .and_then(parse_search_max);
+    let max_from_server = match max_hint {
+        Some(h) if h.known => Some(h.max),
+        Some(_) => None,
+        None => request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
+            .await
+            .ok()
+            .flatten()
+            .map(|m| parse_config_text(&m))
+            .as_deref()
+            .and_then(parse_search_max),
+    };
 
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;

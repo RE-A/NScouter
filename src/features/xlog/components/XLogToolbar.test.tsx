@@ -105,3 +105,26 @@ describe('조건 접기', () => {
     expect(screen.getByRole('button', { name: /조건 접기 1/ })).toBeDefined();
   });
 });
+
+describe('트랜잭션 찾기', () => {
+  it('첫 줄에 늘 있고 누르면 찾기 창을 연다 — 더보기 안에 숨지 않는다', () => {
+    const onWideSearch = vi.fn();
+    render(
+      <XLogToolbar
+        config={DEFAULT_CHART_CONFIG}
+        filter={DEFAULT_FILTER}
+        onConfigChange={vi.fn()}
+        onFilterChange={vi.fn()}
+        mode="live"
+        onModeChange={vi.fn()}
+        pastRange={null}
+        onPastRangeChange={vi.fn()}
+        onWideSearch={onWideSearch}
+        onOpenSaved={vi.fn()}
+        onOpenFilters={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /트랜잭션 찾기/ }));
+    expect(onWideSearch).toHaveBeenCalled();
+  });
+});
