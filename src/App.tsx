@@ -95,14 +95,22 @@ import {
   initialTabs,
   patchActive as patchActiveTab,
   renameTab as renameXLogTab,
-  setSelection as setTabSelection,
+  setResolved as setTabResolved,
+  clearSelections as clearTabSelections,
+  dropTab as dropXLogTab,
+  closePane as closeXLogPane,
+  setRatio as setXLogRatio,
+  patchTab as patchXLogTab,
+  tabLabels as xlogTabLabelsOf,
+  type DropSide,
+  type XLogTab,
   type XLogTabsState,
 } from './features/xlog/hooks/xlogTabs';
 import { XLogTabBar } from './features/xlog/components/XLogTabBar';
+import { XLogSplit } from './features/xlog/components/XLogSplit';
 import { mergeObjects } from './features/xlog/hooks/objectRefresh';
 import { allNames, clearNames, rememberNames } from './features/xlog/hooks/agentNames';
 import {
-  EMPTY_SELECTION,
   mergeCandidates,
   pastSelectionState,
   pickTask,
@@ -132,6 +140,7 @@ import {
   fromFilterState,
   toTabs as toXLogTabs,
   fromTabs as xlogTabsToPrefs,
+  fromSplit as xlogSplitToPrefs,
 } from './features/xlog/hooks/uiState';
 import { shortName, type GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
@@ -324,12 +333,22 @@ export default function App() {
   /** 화면이 구독하는 명단. 그룹을 다시 푸는 일이 이 값에 달려 있다 */
   const [objects, setObjects] = useState<AgentObject[]>([]);
   /**
-   * 무엇을 보기로 골랐나 — **그룹 이름과 낱개 해시**로 들고 있는다.
+   * 무엇을 보기로 골랐나 — **그룹 이름과 낱개 해시**로 들고 있는다. **탭마다다** (`xlogTabs.ts`).
+   * 왼쪽 목록은 지금 탭의 것을 보여 주고 고친다.
    *
    * 고를 때의 해시를 집어넣으면 ECS 에서 바로 틀어진다(`groupSelection.ts`).
    * 아래로 내려보내는 것은 여전히 **해시 집합 하나**라 네 화면의 계약은 그대로다.
    */
-  const [groupSel, setGroupSel] = useState<GroupSelection>(EMPTY_SELECTION);
+  const groupSel = curTab.selection;
+  const setGroupSel = useCallback(
+    (v: GroupSelection | ((p: GroupSelection) => GroupSelection)) =>
+      setXLogTabs(s =>
+        patchActiveTab(s, {
+          selection: typeof v === 'function' ? v(activeXLogTab(s).selection) : v,
+        }),
+      ),
+    [],
+  );
   /** 카운터 요청 대상. Family 별로 나눠 둔다 — 화면도 Family 로 나눈다 */
   const [counterHashes, setCounterHashes] = useState<{
     javaee: number[];
@@ -473,7 +492,7 @@ export default function App() {
         setAgentGroupBy(l.agentGroupBy);
         // 조회 조건도 되살린다. **껐다 켜면 다 날아간다** 가 현장에서 가장 많이 나온 말이다.
         // 탭은 **조건만** 되살린다 — 받아 둔 것은 열면 이미 지나간 것이라 다시 조회한다.
-        setXLogTabs(toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter));
+        setXLogTabs(toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter, cfg.xlog_split));
         // 프로필 목록이 없으면 **예전 설정에서 하나 만든다** — 앱을 올리자마자
         // «어제까지 붙던 서버» 를 다시 쳐야 하는 것은 퇴보다.
         const list = normalize(cfg.servers);
@@ -511,6 +530,7 @@ export default function App() {
             ...cfg,
             open_details: detailsFromTabs(detail.tabs, toDateString),
             xlog_tabs: xlogTabsToPrefs(xlogTabs),
+            xlog_split: xlogSplitToPrefs(xlogTabs),
           });
         } catch {
           // 탭 저장 실패가 화면을 되돌릴 이유는 없다
@@ -556,7 +576,7 @@ export default function App() {
         // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
         setSelectedXLogs([]); clearNames(); clearObjectHistory(); setAgentMap(new Map());
         objectsRef.current = [];
-        setObjects([]); setGroupSel(EMPTY_SELECTION);
+        setObjects([]); setXLogTabs(clearTabSelections);
         setCounterHashes({ javaee: [], host: [], datasource: [] });
         setObjTypeOf(new Map()); clearDetail();
         // 콜렉터마다 사이트 정의가 다르다. 다른 콜렉터의 종류 표를 들고 가면 안 된다.
@@ -750,10 +770,32 @@ export default function App() {
     [persistServers],
   );
 
-  /** 탭을 옮기면 고른 점을 버린다 — 다른 탭의 점이 남아 있으면 어느 탭 것인지 모른다 */
+  /**
+   * 탭(판)을 옮기면 고른 점을 버린다 — 다른 탭의 점이 남아 있으면 어느 탭 것인지 모른다.
+   * **차트의 선택 사각형도 지운다** — 판을 나눠 띄우면 옛 판의 사각형이 보인 채로 남아,
+   * 아래 목록이 어느 판에서 뽑은 것인지 헷갈린다.
+   */
+  const activeXLogKeyRef = useRef(xlogTabs.activeKey);
+  activeXLogKeyRef.current = xlogTabs.activeKey;
   const handleXLogTabActivate = useCallback((key: string) => {
+    if (key === activeXLogKeyRef.current) return;
     setXLogTabs(s => activateXLogTab(s, key));
     setSelectedXLogs([]);
+    setClearSignal(n => n + 1);
+  }, []);
+  const handleXLogTabDrop = useCallback((key: string, target: string, side: DropSide) => {
+    setXLogTabs(s => dropXLogTab(s, key, target, side));
+    if (key !== activeXLogKeyRef.current) {
+      setSelectedXLogs([]);
+      setClearSignal(n => n + 1);
+    }
+  }, []);
+  const handleXLogPaneClose = useCallback((key: string) => {
+    if (key === activeXLogKeyRef.current) setSelectedXLogs([]);
+    setXLogTabs(s => closeXLogPane(s, key));
+  }, []);
+  const handleXLogRatioDelta = useCallback((d: number) => {
+    setXLogTabs(s => setXLogRatio(s, s.ratio + d));
   }, []);
   const handleXLogTabAdd = useCallback(() => {
     setXLogTabs(addXLogTab);
@@ -777,8 +819,7 @@ export default function App() {
     },
     [persistServers, currentServer],
   );
-  // **모든 탭에 적는다.** 고르기는 탭 바깥인데 거름(`filter`)은 탭마다라
-  // 그 안에 같이 산다. 지금 탭에만 적으면 다른 탭에서 예전 선택이 되살아난다.
+  // 지금 탭의 고르기만 바꾼다 — 다른 탭은 저마다 고른 것을 본다
   const handleAgentSelectionChange = useCallback((hashes: Set<number>) => {
     // 왼쪽 목록이 해시만 넘기는 경로(«전부 풀기» 등). 그룹은 건드리지 않는다.
     setGroupSel(prev => ({ services: hashes.size === 0 ? new Set() : prev.services, hashes }));
@@ -859,8 +900,28 @@ export default function App() {
     [pickedKey],
   );
   useEffect(() => {
-    setXLogTabs(s => setTabSelection(s, pickedHashes));
-  }, [pickedHashes]);
+    setXLogTabs(s => setTabResolved(s, s.activeKey, pickedHashes));
+  }, [pickedHashes, xlogTabs.activeKey]);
+  /**
+   * **지금 탭이 아닌 실시간 탭도 명단을 따라간다.** 화면을 나눠 띄운 판은 지금 판이 아니어도
+   * 보이고 있다 — 새 Task 가 떴는데 옆 판만 옛 해시로 묻고 있으면 안 된다.
+   * 과거 탭은 그 탭을 볼 때 그날 목록까지 넣어 푼다(위). 과거 구간의 Task 는 이미 정해져 있다.
+   */
+  const otherSelSig = xlogTabs.tabs
+    .filter(t => t.key !== xlogTabs.activeKey && t.mode === 'live')
+    .map(t => `${t.key}:${[...t.selection.services].join(',')}/${[...t.selection.hashes].join(',')}`)
+    .join('|');
+  useEffect(() => {
+    if (otherSelSig === '') return;
+    setXLogTabs(s => {
+      let next = s;
+      for (const tab of s.tabs) {
+        if (tab.key === s.activeKey || tab.mode !== 'live') continue;
+        next = setTabResolved(next, tab.key, resolveSelection(tab.selection, objects, groupRule));
+      }
+      return next;
+    });
+  }, [otherSelSig, objects, groupRule]);
   /** 목록 정리(handleAgentsLoaded)가 과거 구간에 넣은 죽은 Task 를 도로 빼지 않게 한다 */
   const pickedHashesRef = useRef(pickedHashes);
   pickedHashesRef.current = pickedHashes;
@@ -1338,6 +1399,78 @@ export default function App() {
         : t('고른 서비스에 살아 있는 Task 가 없습니다.')
       : t('왼쪽에서 볼 서버를 고르세요.');
 
+  const xlogTabLabels = useMemo(() => xlogTabLabelsOf(xlogTabs.tabs), [xlogTabs.tabs]);
+  /**
+   * 고른 점은 **지금 판의 것만** 목록으로 받는다. 판을 누르는 순간 지금 판이 바뀌므로
+   * (XLogSplit) 끌어서 고른 판이 곧 지금 판이지만, 옆 판이 늦게 알려 오는 것은 버린다.
+   */
+  const handleXLogSelectRef = useRef(handleXLogSelect);
+  handleXLogSelectRef.current = handleXLogSelect;
+  /**
+   * 판마다 **같은 함수**를 넘긴다. 차트는 memo 라, 그릴 때마다 새 화살표 함수를 주면
+   * App 이 다시 그릴 때마다(명단 갱신 10초 등) 판 넷이 통째로 다시 그려진다.
+   */
+  const paneHandlersRef = useRef(new Map<string, {
+    select: (xlogs: SXLog[]) => void;
+    config: (c: Partial<XLogChartConfig>) => void;
+    range: (r: PastRange | null) => void;
+  }>());
+  const paneHandlers = (key: string) => {
+    let h = paneHandlersRef.current.get(key);
+    if (!h) {
+      h = {
+        select: xlogs => {
+          if (key === activeXLogKeyRef.current) handleXLogSelectRef.current(xlogs);
+        },
+        // 휠·Ctrl+휠은 **그 판을** 고친다 — 휠은 판을 누르지 않으므로 지금 판이 아닐 수 있다
+        config: c => setXLogTabs(s => patchXLogTab(s, key, t0 => ({ config: { ...t0.config, ...c } }))),
+        range: r => setXLogTabs(s => patchXLogTab(s, key, () => ({ pastRange: r }))),
+      };
+      paneHandlersRef.current.set(key, h);
+    }
+    return h;
+  };
+  /** 해시 배열도 같은 Set 이면 같은 배열을 준다 (위와 같은 이유) */
+  const hashArraysRef = useRef(new WeakMap<ReadonlySet<number>, number[]>());
+  const hashArray = (set: ReadonlySet<number>) => {
+    let a = hashArraysRef.current.get(set);
+    if (!a) { a = [...set]; hashArraysRef.current.set(set, a); }
+    return a;
+  };
+  const renderXLogTab = useCallback(
+    (tab: XLogTab, visible: boolean) => {
+      // **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
+      // 트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다.
+      // 지금 판이 아니면 그 판의 고르기 사정을 따로 풀지 않는다 — 고르라는 말만 한다.
+      if (visible && isConnected && tab.filter.objHashSet.size === 0) {
+        return (
+          <EmptyState
+            text={tab.key === xlogTabs.activeKey ? emptyPickText : t('이 판을 누르고 왼쪽에서 볼 서버를 고르세요.')}
+          />
+        );
+      }
+      return (
+        <XLogChart
+          config={tab.config}
+          filter={tab.filter}
+          onSelect={paneHandlers(tab.key).select}
+          connected={isConnected}
+          connectionEpoch={connectionEpoch}
+          clearSignal={clearSignal}
+          pastRange={tab.pastRange}
+          refreshSignal={refreshSignal}
+          objHashes={hashArray(tab.filter.objHashSet)}
+          onConfigChange={paneHandlers(tab.key).config}
+          onPastRangeChange={paneHandlers(tab.key).range}
+          active={visible}
+        />
+      );
+    },
+    // paneHandlers·hashArray 는 ref 위의 캐시라 deps 가 아니다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal],
+  );
+
   /**
    * 고른 서버들이 속한 Family.
    *
@@ -1371,7 +1504,8 @@ export default function App() {
    * 서버를 바꿔도 유지되는 편이 맞다.
    */
   const drillToXLog = useCallback((objHash: number) => {
-    setXLogTabs(s => setTabSelection(s, new Set([objHash])));
+    // 고르기를 그 한 대로 바꾼다 — 해시만 적으면 다음 명단 갱신 때 고르기에서 다시 풀려 사라진다
+    setXLogTabs(s => patchActiveTab(s, { selection: { services: new Set(), hashes: new Set([objHash]) } }));
     setActiveTab('xlog');
   }, []);
 
@@ -1629,6 +1763,7 @@ export default function App() {
           <XLogTabBar
             tabs={xlogTabs.tabs}
             activeKey={xlogTabs.activeKey}
+            panes={xlogTabs.panes}
             onActivate={handleXLogTabActivate}
             onClose={handleXLogTabClose}
             onAdd={handleXLogTabAdd}
@@ -1658,39 +1793,22 @@ export default function App() {
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <Pane title="XLog" className="min-h-0 flex-1">
-                {/* **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
-                    트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다. */}
-                {nothingPicked && isConnected ? (
-                  <EmptyState text={emptyPickText} />
-                ) : (
-                /* **탭을 전부 띄워 둔다.** 보는 것만 달면 돌아올 때마다 다시 조회해야 해,
-                   여러 날짜를 오가며 견주는 일이 매번 몇 초씩 기다리는 일이 된다.
-                   다만 받고 그리는 것은 보는 판만 한다(`active`) — 안 그러면 탭 수만큼
-                   같은 스트림이 쌓이고 숨겨둔 판에 매 프레임 헛돈을 쓴다. */
-                <>
-                  {xlogTabs.tabs.map(tab => {
-                    const on = tab.key === xlogTabs.activeKey;
-                    return (
-                      <div key={tab.key} className={on ? 'h-full p-2' : 'hidden'}>
-                        <XLogChart
-                          config={tab.config}
-                          filter={tab.filter}
-                          onSelect={handleXLogSelect}
-                          connected={isConnected}
-                          connectionEpoch={connectionEpoch}
-                          clearSignal={clearSignal}
-                          pastRange={tab.pastRange}
-                          refreshSignal={refreshSignal}
-                          objHashes={[...tab.filter.objHashSet]}
-                          onConfigChange={handleConfigChange}
-                          onPastRangeChange={setPastRange}
-                          active={on}
-                        />
-                      </div>
-                    );
-                  })}
-                </>
-                )}
+                {/* 탭을 전부 띄워 두고 판에 놓인 것만 보인다 (XLogSplit).
+                    받고 그리는 것은 **보이는 판만** 한다(`active`) — 안 그러면 탭 수만큼
+                    같은 스트림이 쌓이고 숨겨둔 판에 매 프레임 헛돈을 쓴다. */}
+                <XLogSplit
+                  tabs={xlogTabs.tabs}
+                  labels={xlogTabLabels}
+                  panes={xlogTabs.panes}
+                  activeKey={xlogTabs.activeKey}
+                  dir={xlogTabs.dir}
+                  ratio={xlogTabs.ratio}
+                  renderTab={renderXLogTab}
+                  onFocus={handleXLogTabActivate}
+                  onDrop={handleXLogTabDrop}
+                  onClosePane={handleXLogPaneClose}
+                  onRatioDelta={handleXLogRatioDelta}
+                />
               </Pane>
 
               {/* 목록은 **항상 자리를 지킨다.**

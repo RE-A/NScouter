@@ -14,6 +14,7 @@ import {
   DEFAULT_LAYOUT,
   toTabs,
   fromTabs,
+  fromSplit,
 } from './uiState';
 import { MAX_XLOG_TABS } from './xlogTabs';
 import { DEFAULT_CHART_CONFIG, DEFAULT_FILTER } from '../types/xlog';
@@ -294,6 +295,39 @@ describe('XLog 탭', () => {
     expect(s.tabs[1].title).toBeUndefined();
     const back = fromTabs(s);
     expect(back.map(t => t.title)).toEqual(['결제', '']);
+  });
+
+  it('탭마다 고른 서버가 남는다', () => {
+    const s = toTabs([{ sel_services: ['pay'], sel_hashes: [5], stime: 0, etime: 0 }], undefined, undefined);
+    expect([...s.tabs[0].selection.services]).toEqual(['pay']);
+    expect([...s.tabs[0].selection.hashes]).toEqual([5]);
+    const back = fromTabs(s);
+    expect(back[0].sel_services).toEqual(['pay']);
+    expect(back[0].sel_hashes).toEqual([5]);
+  });
+
+  it('고르기를 담기 전 파일은 풀린 해시를 낱개로 고른 것으로 되살린다', () => {
+    const s = toTabs([{ filter: filt({ obj_hashes: [9, 8] }), stime: 0, etime: 0 }], undefined, undefined);
+    expect([...s.tabs[0].selection.hashes].sort()).toEqual([8, 9]);
+  });
+
+  it('분할을 넣었다 빼면 같다', () => {
+    const rows = [{ stime: 0, etime: 0 }, { stime: 0, etime: 0 }, { stime: 0, etime: 0 }];
+    const s = toTabs(rows, undefined, undefined, { panes: [2, 0], active: 0, dir: 'column', ratio: 0.3 });
+    expect(s.panes).toEqual([s.tabs[2].key, s.tabs[0].key]);
+    expect(s.activeKey).toBe(s.tabs[0].key);
+    expect(s.dir).toBe('column');
+    expect(s.ratio).toBeCloseTo(0.3);
+    expect(fromSplit(s)).toEqual({ panes: [2, 0], active: 0, dir: 'column', ratio: 0.3 });
+  });
+
+  it('못 쓸 분할은 버린다 — 없는 순번 · 같은 탭 두 번 · 안 띄운 지금 판', () => {
+    const rows = [{ stime: 0, etime: 0 }, { stime: 0, etime: 0 }];
+    const s = toTabs(rows, undefined, undefined, { panes: [1, 1, 7, -1], active: 0, dir: 'diag', ratio: 5 });
+    expect(s.panes).toEqual([s.tabs[1].key]);
+    expect(s.activeKey).toBe(s.tabs[1].key);
+    expect(s.dir).toBe('row');
+    expect(s.ratio).toBe(0.8);
   });
 
   it('구간이 0 이면 «안 정했다» 로 되돌린다', () => {

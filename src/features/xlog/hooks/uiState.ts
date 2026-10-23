@@ -9,12 +9,13 @@ import type {
   UiLayout,
   XLogChartPrefs,
   XLogFilterPrefs,
+  XLogSplitPrefs,
   XLogTabPrefs,
 } from '../api/scouterApi';
 import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
 import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
-import { initialTabs, MAX_XLOG_TABS, type XLogTabsState } from './xlogTabs';
+import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTabsState } from './xlogTabs';
 import type { XLogMode } from '../types/timeRange';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
@@ -218,6 +219,8 @@ export function fromTabs(s: XLogTabsState): XLogTabPrefs[] {
   return s.tabs.map(t => ({
     // 붙인 이름이 없으면 빈 글자 — 읽는 쪽이 «자동 이름» 으로 되돌린다
     title: t.title ?? '',
+    sel_services: [...t.selection.services],
+    sel_hashes: [...t.selection.hashes],
     chart: fromChartConfig(t.config),
     filter: fromFilterState(t.filter, t.mode),
     // 구간이 없으면 0 으로 적는다. 읽는 쪽이 «안 정했다» 로 되돌린다.
@@ -232,10 +235,22 @@ export function fromTabs(s: XLogTabsState): XLogTabPrefs[] {
  * **빈 목록이면 옛 한 벌로 탭 하나를 만든다.** 판이 올라가기 전 파일에는 `xlog_tabs`
  * 가 없는데, 그때 빈 화면으로 시작하면 «설정이 날아갔다» 로 읽힌다.
  */
+/** 분할 → 저장할 값. 탭은 순번으로 적는다 — 키는 켤 때마다 새로 만든다 */
+export function fromSplit(s: XLogTabsState): XLogSplitPrefs {
+  const index = (key: string) => s.tabs.findIndex(t => t.key === key);
+  return {
+    panes: s.panes.map(index).filter(i => i >= 0),
+    active: Math.max(0, index(s.activeKey)),
+    dir: s.dir,
+    ratio: s.ratio,
+  };
+}
+
 export function toTabs(
   saved: XLogTabPrefs[] | undefined,
   legacyChart: XLogChartPrefs | undefined,
   legacyFilter: XLogFilterPrefs | undefined,
+  split?: XLogSplitPrefs,
 ): XLogTabsState {
   const rows = saved && saved.length > 0
     ? saved
@@ -245,6 +260,11 @@ export function toTabs(
   const tabs = rows.slice(0, MAX_XLOG_TABS).map((row, i) => {
     const f = toFilterState(row.filter);
     const hasRange = (row.stime ?? 0) > 0 && (row.etime ?? 0) > 0;
+    const tab = row as XLogTabPrefs;
+    const services = Array.isArray(tab.sel_services) ? tab.sel_services.filter(v => typeof v === 'string') : [];
+    const picked = Array.isArray(tab.sel_hashes) ? tab.sel_hashes.filter(h => Number.isInteger(h)) : [];
+    // 고르기를 담기 전 파일에는 풀린 해시(obj_hashes)만 있다 — 그걸 낱개로 고른 것으로 되살린다
+    const legacy = services.length === 0 && picked.length === 0 ? [...f.filter.objHashSet] : picked;
     return {
       // 첫 탭은 처음 만든 키를 그대로 쓴다 — 키가 흔들리면 차트가 통째로 다시 선다
       key: i === 0 ? base.tabs[0].key : `${base.tabs[0].key}-r${i}`,
@@ -253,7 +273,32 @@ export function toTabs(
       pastRange: hasRange ? { stime: row.stime as number, etime: row.etime as number } : null,
       config: toChartConfig(row.chart),
       filter: f.filter,
+      selection: { services: new Set(services), hashes: new Set(legacy) },
     };
   });
-  return { tabs, activeKey: tabs[0].key };
+  return withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key] }, split);
+}
+
+/**
+ * 저장한 분할을 되살린다. **못 쓸 값은 버린다** — 없는 순번, 같은 탭 두 번, 상한 넘는 판 수.
+ * 남는 판이 없으면 첫 탭 하나다.
+ */
+function withSplit(s: XLogTabsState, split: XLogSplitPrefs | undefined): XLogTabsState {
+  if (!split) return s;
+  const keyAt = (i: unknown) =>
+    typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < s.tabs.length ? s.tabs[i].key : null;
+  const panes: string[] = [];
+  for (const i of Array.isArray(split.panes) ? split.panes : []) {
+    const k = keyAt(i);
+    if (k !== null && !panes.includes(k) && panes.length < MAX_PANES) panes.push(k);
+  }
+  if (panes.length === 0) panes.push(s.tabs[0].key);
+  const active = keyAt(split.active);
+  const out: XLogTabsState = {
+    ...s,
+    panes,
+    activeKey: active !== null && panes.includes(active) ? active : panes[0],
+    dir: split.dir === 'column' ? 'column' : 'row',
+  };
+  return typeof split.ratio === 'number' ? setRatio(out, split.ratio) : out;
 }

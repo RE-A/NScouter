@@ -80,6 +80,9 @@ pub struct AppConfig {
     /// (판이 올라가기 전 파일을 읽기 위해 남겨 둔다).
     #[serde(default)]
     pub xlog_tabs: Vec<XLogTabPrefs>,
+    /// XLog 화면 분할 — 어느 탭들을 나란히 띄웠나. 탭은 `xlog_tabs` 의 순번으로 적는다
+    #[serde(default)]
+    pub xlog_split: XLogSplitPrefs,
     /// 어느 Task 가 어느 논리 서비스인가를 정하는 규칙.
     ///
     /// 사이트마다 이름 짃는 법이 다르다 — ECS 가 아닐 수도 있고
@@ -244,12 +247,36 @@ impl Default for GroupRulePrefs {
     }
 }
 
+/// XLog 화면 분할. 화면의 `XLogTabsState.panes/dir/ratio` 와 짝이다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XLogSplitPrefs {
+    /// 띄운 탭들의 순번(`xlog_tabs` 기준), 놓인 순서대로. 비어 있으면 첫 탭 하나
+    pub panes: Vec<u32>,
+    /// 지금 판의 순번
+    pub active: u32,
+    /// 두 판의 방향. `"row"`(좌우) 또는 `"column"`(위아래)
+    pub dir: String,
+    /// 두 판일 때 첫 판의 몫
+    pub ratio: f32,
+}
+
+impl Default for XLogSplitPrefs {
+    fn default() -> Self {
+        Self { panes: Vec::new(), active: 0, dir: "row".to_string(), ratio: 0.5 }
+    }
+}
+
 /// 탭 하나의 조건. 화면의 `XLogTab` 과 1:1 이다.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct XLogTabPrefs {
     /// 사람이 붙인 탭 이름. **비어 있으면 화면이 조건에서 만든다**
     pub title: String,
+    /// 왼쪽 목록에서 고른 서비스 이름들. 해시가 아니라 이름이라 Task 가 갈려도 따라간다
+    pub sel_services: Vec<String>,
+    /// 낱개로 고른 오브젝트 해시
+    pub sel_hashes: Vec<i32>,
     pub chart: XLogChartPrefs,
     pub filter: XLogFilterPrefs,
     /// 과거 구간(epoch ms). **둘 다 0 이면 구간을 정하지 않은 것**이다 —
@@ -378,6 +405,7 @@ impl Default for AppConfig {
             last_server: String::new(),
             xlog_filter: XLogFilterPrefs::default(),
             xlog_tabs: Vec::new(),
+            xlog_split: XLogSplitPrefs::default(),
             group_rule: GroupRulePrefs::default(),
             auto_remove_inactive_min: 0,
             // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)
