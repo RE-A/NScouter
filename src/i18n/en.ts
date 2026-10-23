@@ -383,7 +383,11 @@ export const EN: Record<string, string> = {
   'XLog 탭 목록': 'XLog tabs',
   '탭 이름': 'Tab name',
   '비우면 자동 이름': 'empty = automatic name',
-  '두 번 눌러 이름 바꾸기': 'double-click to rename',
+  '두 번 눌러 이름 바꾸기 · 차트 가장자리로 끌어 나란히 보기': 'double-click to rename · drag onto a chart edge to view side by side',
+  '이 판을 내립니다 — 탭은 남습니다': 'Close this pane — the tab stays',
+  '판 내리기': 'close pane',
+  '판 경계': 'Pane border',
+  '이 판을 누르고 왼쪽에서 볼 서버를 고르세요.': 'Click this pane and pick servers on the left.',
   '탭 닫기': 'Close tab',
   '탭': 'tab',
   '지금 조건을 복제해 탭을 하나 더 엽니다 — 날짜만 바꿔 견주는 데 씁니다':

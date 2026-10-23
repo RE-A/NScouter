@@ -677,6 +677,8 @@ export interface AppConfig {
   ui_theme?: string;
   /** 열어 둔 XLog 탭들의 **조건만**. 받아 둔 데이터는 안 담는다 */
   xlog_tabs?: XLogTabPrefs[];
+  /** XLog 화면 분할. Rust `XLogSplitPrefs` 와 짝이다 */
+  xlog_split?: XLogSplitPrefs;
   /** 논리 서비스 묶기 규칙. Rust `GroupRulePrefs` 와 짝이다 */
   group_rule?: { tag_key?: string; pattern?: string };
   /** 비활성 자동 정리 주기(분). **0 이면 끕** — 전역이라 기본값이다 */
@@ -716,10 +718,21 @@ export interface UiLayout {
  * 색은 넣지 않는다 — 팔레트는 `colorPalette.ts` 한 곳에만 있어야 한다.
  * 설정 파일에 두 벌이 되면 테마를 바꿔도 저장해 둔 색이 이긴다.
  */
+/** XLog 화면 분할. 탭은 `xlog_tabs` 의 순번으로 적는다 */
+export interface XLogSplitPrefs {
+  panes?: number[];
+  active?: number;
+  dir?: string;
+  ratio?: number;
+}
+
 /** 탭 하나의 조건. Rust `XLogTabPrefs` 와 짝이다 */
 export interface XLogTabPrefs {
   /** 사람이 붙인 탭 이름. 비어 있으면 조건에서 만든다 */
   title?: string;
+  /** 왼쪽 목록에서 고른 서비스 이름 / 낱개 해시 */
+  sel_services?: string[];
+  sel_hashes?: number[];
   chart?: XLogChartPrefs;
   filter?: XLogFilterPrefs;
   /** 과거 구간(epoch ms). 둘 다 0 이면 구간을 정하지 않은 것이다 */

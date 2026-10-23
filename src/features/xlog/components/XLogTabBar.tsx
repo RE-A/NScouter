@@ -9,14 +9,20 @@
 //
 // 이름은 **두 번 눌러 고친다** (브라우저·편집기 탭과 같은 손버릇). Enter 로 정하고
 // Esc 로 물린다. 비우고 정하면 조건에서 만든 이름으로 돌아간다.
+//
+// 탭을 **차트 위로 끌어 놓으면** 화면이 나뉜다(`XLogSplit`). 판에 떠 있는 탭은 밑줄로 드러낸다 —
+// 지금 판은 진하게, 옆 판은 흐리게.
 
 import { memo, useRef, useState } from 'react';
 import { MAX_XLOG_TABS, tabLabels, type XLogTab } from '../hooks/xlogTabs';
+import { TAB_DRAG_TYPE } from './XLogSplit';
 import { t } from '../../../i18n';
 
 interface XLogTabBarProps {
   tabs: readonly XLogTab[];
   activeKey: string;
+  /** 화면에 띄운 탭들 */
+  panes: readonly string[];
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
   onAdd: () => void;
@@ -27,6 +33,7 @@ interface XLogTabBarProps {
 export const XLogTabBar = memo(function XLogTabBar({
   tabs,
   activeKey,
+  panes,
   onActivate,
   onClose,
   onAdd,
@@ -76,8 +83,14 @@ export const XLogTabBar = memo(function XLogTabBar({
           // 바깥은 div 로 두고 제목 쪽만 버튼으로 만든다.
           <div
             key={tab.key}
+            // 고치는 중에는 끌지 않는다 — 글자를 드래그로 고르려다 탭이 끌려 나간다
+            draggable={!isEditing}
+            onDragStart={e => {
+              e.dataTransfer.setData(TAB_DRAG_TYPE, tab.key);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
             className={`flex items-center rounded-t border-b-2 ${
-              on ? 'border-accent bg-hover' : 'border-transparent'
+              on ? 'border-accent bg-hover' : panes.includes(tab.key) ? 'border-accent/40' : 'border-transparent'
             }`}
           >
             {isEditing ? (
@@ -105,7 +118,7 @@ export const XLogTabBar = memo(function XLogTabBar({
                 aria-selected={on}
                 onClick={() => onActivate(tab.key)}
                 onDoubleClick={() => startEdit(tab)}
-                title={`${label} — ${t('두 번 눌러 이름 바꾸기')}`}
+                title={`${label} — ${t('두 번 눌러 이름 바꾸기 · 차트 가장자리로 끌어 나란히 보기')}`}
                 className={`max-w-[12rem] truncate px-2 py-0.5 text-micro ${
                   on ? 'text-fg' : 'text-fg-dim hover:text-fg-muted'
                 }`}

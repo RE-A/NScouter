@@ -4,9 +4,15 @@
 // 다시 되돌려야 했다. 되돌리는 동안 비교 대상이 머릿속에만 남는다.
 // 탭을 나누면 둘을 오가며 볼 수 있다.
 //
-// **서버 고르기는 여기 없다.** 그건 Active·Counter 와 같은 선택이라 탭 바깥에 있다
-// (App.tsx «서버 고르기는 탭 바깥이다» 참고). 여기서 나뉘는 것은
-// 모드·구간·차트 설정·거름 넷이다.
+// **서버 고르기도 탭마다다.** 실시간 탭 둘에 서버만 달리 고르는 것이 흔한 쓰임새라
+// («결제» 탭과 «주문» 탭), 한 벌로 두면 한쪽을 고치는 순간 다른 쪽도 바뀐다.
+// 왼쪽 목록은 **지금 탭의** 선택을 보여 주고 고친다. Active·Counter 는 지금 XLog 탭의
+// 선택을 따른다. 고른 것은 이름으로 들고(`selection`), 조회할 해시(`filter.objHashSet`)는
+// 명단이 갱신될 때마다 App 이 다시 푼다(`groupSelection.ts`).
+//
+// **여러 탭을 한 화면에 나란히 띄울 수 있다**(`panes`). 브라우저·편집기의 화면 분할처럼
+// 탭을 차트 가장자리로 끌어 놓으면 그 옆에 선다. 툴바·왼쪽 목록·아래 표는 **지금 판**
+// (`activeKey`) 의 것이다.
 //
 // 이 파일은 **순수 함수다.** 탭을 더하고 닫고 옮기는 규칙은 화면 없이 확인한다.
 
@@ -17,6 +23,7 @@ import {
   type XLogFilterState,
 } from '../types/xlog';
 import type { PastRange, XLogMode } from '../types/timeRange';
+import { EMPTY_SELECTION, type GroupSelection } from './groupSelection';
 
 /** 탭 하나가 쥐는 것 */
 export interface XLogTab {
@@ -28,12 +35,28 @@ export interface XLogTab {
   pastRange: PastRange | null;
   config: XLogChartConfig;
   filter: XLogFilterState;
+  /** 왼쪽 목록에서 고른 것 — 서비스 이름과 낱개 Task. 해시는 `filter.objHashSet` 에 풀려 있다 */
+  selection: GroupSelection;
 }
+
+/** 두 판을 놓는 방향. `row` 는 좌우, `column` 은 위아래. 셋 이상은 2×2 격자다 */
+export type SplitDir = 'row' | 'column';
 
 export interface XLogTabsState {
   tabs: XLogTab[];
+  /** 지금 판. 툴바·왼쪽 목록·아래 표가 이 탭의 것이다. 늘 `panes` 안에 있다 */
   activeKey: string;
+  /** 화면에 띄운 탭들, 놓인 순서대로. 하나면 분할이 아니다 */
+  panes: string[];
+  dir: SplitDir;
+  /** 두 판일 때 첫 판이 차지하는 몫 */
+  ratio: number;
 }
+
+/** 한 화면에 나란히 둘 수 있는 판 수. 넷을 넘기면 판 하나가 엽서만 해져 점을 못 읽는다 */
+export const MAX_PANES = 4;
+export const MIN_RATIO = 0.2;
+export const MAX_RATIO = 0.8;
 
 /**
  * 한 번에 둘 수 있는 탭 수.
@@ -58,8 +81,9 @@ export function initialTabs(): XLogTabsState {
     pastRange: null,
     config: DEFAULT_CHART_CONFIG,
     filter: DEFAULT_FILTER,
+    selection: EMPTY_SELECTION,
   };
-  return { tabs: [tab], activeKey: tab.key };
+  return { tabs: [tab], activeKey: tab.key, panes: [tab.key], dir: 'row', ratio: 0.5 };
 }
 
 /** 지금 보고 있는 탭. 목록이 비는 일은 없다(마지막 하나는 안 닫힌다) */
@@ -143,12 +167,16 @@ export function addTab(s: XLogTabsState): XLogTabsState {
     config: { ...src.config },
     // Set 은 얕게 복사하면 두 탭이 같은 것을 공유한다 — 한쪽을 고치면 다른 쪽도 바뀐다
     filter: { ...src.filter, objHashSet: new Set(src.filter.objHashSet) },
+    // 고른 서버도 복제한다 — 비교하려고 여는 것이니 서버를 처음부터 다시 고르게 하지 않는다
+    selection: src.selection,
   };
   const at = s.tabs.findIndex(t => t.key === s.activeKey);
   const tabs = [...s.tabs];
   // 복제본은 **원본 바로 옆**에 둔다. 맨 뒤로 보내면 비교할 둘이 떨어진다.
   tabs.splice(at < 0 ? tabs.length : at + 1, 0, tab);
-  return { tabs, activeKey: tab.key };
+  // 새 탭은 **지금 판 자리에** 연다 — 브라우저에서 분할된 쪽에 새 탭을 열면 그 쪽이 바뀌듯
+  const panes = s.panes.map(k => (k === s.activeKey ? tab.key : k));
+  return { ...s, tabs, activeKey: tab.key, panes };
 }
 
 /**
@@ -164,13 +192,90 @@ export function closeTab(s: XLogTabsState, key: string): XLogTabsState {
   if (at < 0) return s;
 
   const tabs = s.tabs.filter(t => t.key !== key);
-  if (key !== s.activeKey) return { tabs, activeKey: s.activeKey };
+  const panes = s.panes.filter(k => k !== key);
+  if (key !== s.activeKey) {
+    return { ...s, tabs, panes: panes.length > 0 ? panes : [s.activeKey] };
+  }
+  // 띄워 둔 다른 판이 있으면 그쪽으로, 없으면 탭 줄의 이웃을 그 자리에 띄운다
+  if (panes.length > 0) {
+    const i = Math.min(s.panes.indexOf(key), panes.length - 1);
+    return { ...s, tabs, panes, activeKey: panes[Math.max(0, i)] };
+  }
   const neighbor = tabs[Math.min(at, tabs.length - 1)];
-  return { tabs, activeKey: neighbor.key };
+  return { ...s, tabs, activeKey: neighbor.key, panes: [neighbor.key] };
 }
 
+/**
+ * 탭을 누른다.
+ *
+ * 띄워 둔 판이면 **그 판으로 옮긴다.** 안 띄운 탭이면 **지금 판 자리에** 띄운다 —
+ * 분할해 둔 다른 판은 그대로 둔다(브라우저 분할 보기와 같다).
+ */
 export function activate(s: XLogTabsState, key: string): XLogTabsState {
-  return s.tabs.some(t => t.key === key) ? { ...s, activeKey: key } : s;
+  if (!s.tabs.some(t => t.key === key)) return s;
+  if (s.panes.includes(key)) return { ...s, activeKey: key };
+  return { ...s, activeKey: key, panes: s.panes.map(k => (k === s.activeKey ? key : k)) };
+}
+
+export type DropSide = 'left' | 'right' | 'top' | 'bottom' | 'center';
+
+/**
+ * 탭을 판 위에 끌어 놓는다.
+ *
+ *   · 가장자리(left/right/top/bottom) — 그 판 옆에 새 판으로 세운다
+ *   · 가운데 — 그 판을 이 탭으로 바꾼다
+ *
+ * 판이 이미 `MAX_PANES` 면 가장자리에 놓아도 **그 판을 바꾼다** — 더 쪼개지 않는다.
+ * 이미 떠 있는 탭을 끌면 자리만 옮긴다(둘로 보이지 않는다).
+ */
+export function dropTab(s: XLogTabsState, key: string, target: string, side: DropSide): XLogTabsState {
+  if (!s.tabs.some(t => t.key === key) || !s.panes.includes(target)) return s;
+  if (key === target) return { ...s, activeKey: key };
+
+  if (side === 'center' || (s.panes.length >= MAX_PANES && !s.panes.includes(key))) {
+    // 떠 있던 탭을 다른 판에 놓으면 두 판이 자리를 바꾼다
+    const from = s.panes.indexOf(key);
+    const panes = s.panes.map((k, i) => (k === target ? key : i === from ? target : k));
+    return { ...s, panes, activeKey: key };
+  }
+
+  const rest = s.panes.filter(k => k !== key);
+  const at = rest.indexOf(target);
+  const before = side === 'left' || side === 'top';
+  rest.splice(before ? at : at + 1, 0, key);
+  return {
+    ...s,
+    panes: rest,
+    activeKey: key,
+    // 두 판의 방향은 놓은 쪽이 정한다. 셋 이상은 격자라 방향이 없다
+    dir: side === 'left' || side === 'right' ? 'row' : 'column',
+  };
+}
+
+/** 판 하나를 내린다 — **탭은 남는다.** 마지막 판은 못 내린다 */
+export function closePane(s: XLogTabsState, key: string): XLogTabsState {
+  if (s.panes.length <= 1 || !s.panes.includes(key)) return s;
+  const panes = s.panes.filter(k => k !== key);
+  if (key !== s.activeKey) return { ...s, panes };
+  const i = Math.min(s.panes.indexOf(key), panes.length - 1);
+  return { ...s, panes, activeKey: panes[i] };
+}
+
+export function setRatio(s: XLogTabsState, ratio: number): XLogTabsState {
+  if (!Number.isFinite(ratio)) return s;
+  return { ...s, ratio: Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio)) };
+}
+
+/**
+ * 그 탭만 고친다. 판을 나눠 띄우면 **지금 판이 아닌 판도** 휠로 확대·축소된다 —
+ * 지금 판을 고치면 엉뚱한 판이 바뀐다.
+ */
+export function patchTab(
+  s: XLogTabsState,
+  key: string,
+  patch: (tab: XLogTab) => Partial<Omit<XLogTab, 'key'>>,
+): XLogTabsState {
+  return { ...s, tabs: s.tabs.map(t => (t.key === key ? { ...t, ...patch(t) } : t)) };
 }
 
 /** 지금 탭만 고친다. 나머지는 그대로 둔다 — 그게 탭을 나눈 이유다 */
@@ -182,17 +287,34 @@ export function patchActive(s: XLogTabsState, patch: Partial<Omit<XLogTab, 'key'
 }
 
 /**
- * 고른 서버를 **모든 탭에** 적는다.
+ * 한 탭의 조회할 해시를 적는다 (App 이 그 탭의 `selection` 을 풀어 넘긴다).
  *
- * 서버 고르기는 탭 바깥이라 한 벌뿐인데, 거름(`filter`)은 탭마다라서 그 안에 같이 산다.
- * 지금 탭에만 적으면 다른 탭으로 옮겼을 때 옛 선택이 되살아난다.
+ * **내용이 같으면 그대로 돌려준다.** 명단은 10초마다 갱신되는데 그때마다 새 Set 을 넣으면
+ * 그걸 의존성으로 쓰는 차트·목록이 Task 가 하나도 안 바뀌었는데도 다시 선다.
  */
-export function setSelection(s: XLogTabsState, objHashSet: ReadonlySet<number>): XLogTabsState {
+export function setResolved(s: XLogTabsState, key: string, hashes: ReadonlySet<number>): XLogTabsState {
+  const tab = s.tabs.find(t => t.key === key);
+  if (!tab || sameSet(tab.filter.objHashSet, hashes)) return s;
+  return {
+    ...s,
+    tabs: s.tabs.map(t => (t.key === key ? { ...t, filter: { ...t.filter, objHashSet: new Set(hashes) } } : t)),
+  };
+}
+
+/** 모든 탭의 고르기를 비운다 — 콜렉터를 갈아탈 때. 해시는 이름의 해시라 서버가 달라도 겹친다(F-35) */
+export function clearSelections(s: XLogTabsState): XLogTabsState {
   return {
     ...s,
     tabs: s.tabs.map(t => ({
       ...t,
-      filter: { ...t.filter, objHashSet: new Set(objHashSet) },
+      selection: EMPTY_SELECTION,
+      filter: { ...t.filter, objHashSet: new Set<number>() },
     })),
   };
+}
+
+function sameSet(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
 }

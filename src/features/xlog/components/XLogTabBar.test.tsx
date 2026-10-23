@@ -17,6 +17,7 @@ function bar() {
     <XLogTabBar
       tabs={s.tabs}
       activeKey={s.activeKey}
+      panes={s.panes}
       onActivate={vi.fn()}
       onClose={vi.fn()}
       onAdd={vi.fn()}
