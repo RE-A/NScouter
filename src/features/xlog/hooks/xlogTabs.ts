@@ -14,6 +14,9 @@
 // 탭을 차트 가장자리로 끌어 놓으면 그 옆에 선다. 툴바·왼쪽 목록·아래 표는 **지금 판**
 // (`activeKey`) 의 것이다.
 //
+// **탭을 새 창으로 떼어 낼 수도 있다**(`detached`). 모니터 여러 대에 나눠 띄우는 용도다.
+// 뗀 탭도 이 목록에 그대로 있다 — 조건·고르기·저장은 여기서 하고, 창은 그것을 그려 보일 뿐이다.
+//
 // 이 파일은 **순수 함수다.** 탭을 더하고 닫고 옮기는 규칙은 화면 없이 확인한다.
 
 import {
@@ -51,6 +54,8 @@ export interface XLogTabsState {
   dir: SplitDir;
   /** 두 판일 때 첫 판이 차지하는 몫 */
   ratio: number;
+  /** 새 창으로 떼어 낸 탭들. 판에는 없다 */
+  detached: string[];
 }
 
 /** 한 화면에 나란히 둘 수 있는 판 수. 넷을 넘기면 판 하나가 엽서만 해져 점을 못 읽는다 */
@@ -83,7 +88,7 @@ export function initialTabs(): XLogTabsState {
     filter: DEFAULT_FILTER,
     selection: EMPTY_SELECTION,
   };
-  return { tabs: [tab], activeKey: tab.key, panes: [tab.key], dir: 'row', ratio: 0.5 };
+  return { tabs: [tab], activeKey: tab.key, panes: [tab.key], dir: 'row', ratio: 0.5, detached: [] };
 }
 
 /** 지금 보고 있는 탭. 목록이 비는 일은 없다(마지막 하나는 안 닫힌다) */
@@ -193,16 +198,20 @@ export function closeTab(s: XLogTabsState, key: string): XLogTabsState {
 
   const tabs = s.tabs.filter(t => t.key !== key);
   const panes = s.panes.filter(k => k !== key);
+  const detached = s.detached.filter(k => k !== key);
   if (key !== s.activeKey) {
-    return { ...s, tabs, panes: panes.length > 0 ? panes : [s.activeKey] };
+    return { ...s, tabs, detached, panes: panes.length > 0 ? panes : [s.activeKey] };
   }
   // 띄워 둔 다른 판이 있으면 그쪽으로, 없으면 탭 줄의 이웃을 그 자리에 띄운다
   if (panes.length > 0) {
     const i = Math.min(s.panes.indexOf(key), panes.length - 1);
-    return { ...s, tabs, panes, activeKey: panes[Math.max(0, i)] };
+    return { ...s, tabs, detached, panes, activeKey: panes[Math.max(0, i)] };
   }
-  const neighbor = tabs[Math.min(at, tabs.length - 1)];
-  return { ...s, tabs, activeKey: neighbor.key, panes: [neighbor.key] };
+  // 이웃은 **창에 안 뗀 것**에서 고른다 — 뗀 탭을 판에 올리면 같은 탭이 두 곳에 보인다
+  const docked = tabs.filter(t => !detached.includes(t.key));
+  if (docked.length === 0) return s;
+  const neighbor = docked[Math.min(at, docked.length - 1)];
+  return { ...s, tabs, detached, activeKey: neighbor.key, panes: [neighbor.key] };
 }
 
 /**
@@ -213,6 +222,8 @@ export function closeTab(s: XLogTabsState, key: string): XLogTabsState {
  */
 export function activate(s: XLogTabsState, key: string): XLogTabsState {
   if (!s.tabs.some(t => t.key === key)) return s;
+  // 뗀 탭은 제 창에 있다 — 판에 올리려면 `attachTab`
+  if (s.detached.includes(key)) return s;
   if (s.panes.includes(key)) return { ...s, activeKey: key };
   return { ...s, activeKey: key, panes: s.panes.map(k => (k === s.activeKey ? key : k)) };
 }
@@ -231,6 +242,8 @@ export type DropSide = 'left' | 'right' | 'top' | 'bottom' | 'center';
 export function dropTab(s: XLogTabsState, key: string, target: string, side: DropSide): XLogTabsState {
   if (!s.tabs.some(t => t.key === key) || !s.panes.includes(target)) return s;
   if (key === target) return { ...s, activeKey: key };
+  // 뗀 탭을 판에 끌어 놓으면 **도로 붙인다** — 창은 부르는 쪽이 닫는다
+  if (s.detached.includes(key)) s = { ...s, detached: s.detached.filter(k => k !== key) };
 
   if (side === 'center' || (s.panes.length >= MAX_PANES && !s.panes.includes(key))) {
     // 떠 있던 탭을 다른 판에 놓으면 두 판이 자리를 바꾼다
@@ -250,6 +263,34 @@ export function dropTab(s: XLogTabsState, key: string, target: string, side: Dro
     // 두 판의 방향은 놓은 쪽이 정한다. 셋 이상은 격자라 방향이 없다
     dir: side === 'left' || side === 'right' ? 'row' : 'column',
   };
+}
+
+/**
+ * 탭을 새 창으로 뗀다. 판에서 빠지고 `detached` 에 든다.
+ *
+ * **창에 안 뗀 탭이 하나는 남아야 한다** — 다 떼면 메인 창의 차트 자리가 빈다.
+ * 판이 비면 안 뗀 탭 중 이웃을 그 자리에 띄운다.
+ */
+export function detachTab(s: XLogTabsState, key: string): XLogTabsState {
+  if (!s.tabs.some(t => t.key === key) || s.detached.includes(key)) return s;
+  const docked = s.tabs.filter(t => t.key !== key && !s.detached.includes(t.key));
+  if (docked.length === 0) return s;
+
+  const detached = [...s.detached, key];
+  let panes = s.panes.filter(k => k !== key);
+  if (panes.length === 0) {
+    const at = s.tabs.findIndex(t => t.key === key);
+    const after = docked.find(t => s.tabs.indexOf(t) > at) ?? docked[docked.length - 1];
+    panes = [after.key];
+  }
+  const activeKey = panes.includes(s.activeKey) ? s.activeKey : panes[0];
+  return { ...s, detached, panes, activeKey };
+}
+
+/** 뗀 탭을 도로 붙인다 — **지금 판 자리에** 띄운다(탭 줄에서 누른 것과 같다) */
+export function attachTab(s: XLogTabsState, key: string): XLogTabsState {
+  if (!s.detached.includes(key)) return s;
+  return activate({ ...s, detached: s.detached.filter(k => k !== key) }, key);
 }
 
 /** 판 하나를 내린다 — **탭은 남는다.** 마지막 판은 못 내린다 */
