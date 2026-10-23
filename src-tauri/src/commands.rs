@@ -95,6 +95,7 @@ pub async fn connect_scouter(
     }
 
     log::info!("Collector 연결 완료: server_id={server_id}");
+    *state.server_id.lock().await = Some(server_id.clone());
     let _ = app.emit("scouter-connected", server_id);
     Ok(())
 }
@@ -107,6 +108,9 @@ pub async fn disconnect_scouter(app: AppHandle, state: State<'_, AppState>) -> R
     log::info!("disconnect_scouter: 연결 종료");
     state.streams.stop_all().await;
     *state.connection.lock().await = None;
+    *state.server_id.lock().await = None;
+    // 창마다 받던 것도 비운다 — 다른 서버에 붙으면 창들이 새로 알려 온다
+    state.xlog_subs.lock().await.clear();
     // **조회용 연결도 버린다.** 안 버리면 이전 서버로 붙은 연결이 풀에 남아,
     // 다른 서버로 갈아탄 뒤에도 옛 서버의 답이 온다.
     state.clear_query_pool().await;
@@ -116,20 +120,45 @@ pub async fn disconnect_scouter(app: AppHandle, state: State<'_, AppState>) -> R
 
 // ─── start_xlog_stream ───────────────────────────────────────
 
-/// 실시간 XLog 스트리밍 시작 (별도 connection으로 spawn)
+/// 실시간 XLog 스트리밍 시작 — **이 창이** 받고 싶은 오브젝트를 알린다.
+///
+/// 스트림은 하나다(콜렉터 연결 하나). 창이 여럿이면(떼어 낸 XLog 창) 창마다 알린 오브젝트를
+/// **합쳐서** 연다 — 한 창이 고르기를 바꿀 때마다 자기 것만으로 다시 열면 다른 창의 점이 끊긴다.
+/// 점은 모든 창에 똑같이 뿌려지고, 창마다 제 오브젝트만 그린다.
 #[tauri::command]
 pub async fn start_xlog_stream(
     obj_hashes: Vec<i32>,
+    window: tauri::Window,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    log::debug!("start_xlog_stream: obj_hashes={obj_hashes:?}");
+    log::debug!("start_xlog_stream[{}]: obj_hashes={obj_hashes:?}", window.label());
+    state.xlog_subs.lock().await.insert(window.label().to_string(), obj_hashes);
+    restart_xlog_stream(&app, &state).await
+}
+
+/// 창들이 알린 오브젝트를 합쳐 스트림을 다시 연다. 합친 것이 비면 멈춘다.
+///
+/// **데모 모드에서는 건드리지 않는다** — 합성 스트림이 같은 자리(XLog)를 쓰고 있다.
+pub async fn restart_xlog_stream(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    if state.server_id.lock().await.as_deref() == Some(DEMO_SERVER_ID) {
+        return Ok(());
+    }
+    let mut union: Vec<i32> = state.xlog_subs.lock().await.values().flatten().copied().collect();
+    union.sort_unstable();
+    union.dedup();
+    if union.is_empty() {
+        state.streams.stop(StreamKind::XLog).await;
+        return Ok(());
+    }
+
     let stop_flag = state.streams.take_token(StreamKind::XLog).await;
 
     let host = state.conn_host.lock().await.clone();
     let port = *state.conn_port.lock().await;
     let user = state.conn_user.lock().await.clone();
     let pass = state.conn_pass.lock().await.clone();
+    let app = app.clone();
 
     tokio::spawn(async move {
         let mut stream_conn = match ScouterConnection::connect(&host, port) {
@@ -144,7 +173,7 @@ pub async fn start_xlog_stream(
             log::error!("XLog 스트림 로그인 실패: {e}");
             return;
         }
-        run_xlog_stream(&mut stream_conn, obj_hashes, app, stop_flag).await;
+        run_xlog_stream(&mut stream_conn, union, app, stop_flag).await;
     });
 
     Ok(())
@@ -152,12 +181,36 @@ pub async fn start_xlog_stream(
 
 // ─── stop_xlog_stream ────────────────────────────────────────
 
-/// 실시간 XLog 스트리밍 중지
+/// **이 창은** 더 안 받는다. 다른 창이 받고 있으면 그것만으로 다시 연다.
 #[tauri::command]
-pub async fn stop_xlog_stream(state: State<'_, AppState>) -> Result<(), String> {
-    log::info!("stop_xlog_stream: 스트리밍 중지");
-    state.streams.stop(StreamKind::XLog).await;
-    Ok(())
+pub async fn stop_xlog_stream(
+    window: tauri::Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    log::info!("stop_xlog_stream[{}]", window.label());
+    state.xlog_subs.lock().await.remove(window.label());
+    restart_xlog_stream(&app, &state).await
+}
+
+/// 창이 닫혔다 — 그 창이 받던 것을 빼고 다시 연다 (lib.rs 의 창 이벤트가 부른다)
+pub async fn forget_xlog_window(app: &AppHandle, state: &AppState, label: &str) {
+    if state.xlog_subs.lock().await.remove(label).is_some() {
+        let _ = restart_xlog_stream(app, state).await;
+    }
+}
+
+/// 지금 접속 상태. **나중에 뜬 창**(떼어 낸 XLog 창)은 «붙었다» 이벤트를 못 받았으므로 물어본다.
+#[derive(serde::Serialize)]
+pub struct ConnectionInfo {
+    pub connected: bool,
+    pub server_id: String,
+}
+
+#[tauri::command]
+pub async fn get_connection_info(state: State<'_, AppState>) -> Result<ConnectionInfo, String> {
+    let sid = state.server_id.lock().await.clone();
+    Ok(ConnectionInfo { connected: sid.is_some(), server_id: sid.unwrap_or_default() })
 }
 
 // ─── stop_counter_stream ─────────────────────────────────────
@@ -2142,6 +2195,7 @@ pub async fn start_mock_stream(
     // 접속 폼이 그대로 떠 있고 차트는 유휴 상태로 그려져, 콜렉터 없이 화면을 보려고
     // 만든 버튼이 정작 아무것도 보여주지 못한다. 화면의 연결 상태는 Rust 가 쥐고 있으므로
     // 여기서 알려야 한다.
+    *state.server_id.lock().await = Some(DEMO_SERVER_ID.to_string());
     let _ = app.emit("scouter-connected", DEMO_SERVER_ID);
 
     tokio::spawn(async move {

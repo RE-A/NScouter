@@ -45,6 +45,16 @@ export async function disconnectScouter(): Promise<void> {
 
 // ─── XLog 스트리밍 ────────────────────────────────────────────
 
+/** 지금 접속 상태 — 나중에 뜬 창이 묻는다 */
+export interface ConnectionInfo {
+  connected: boolean;
+  server_id: string;
+}
+
+export async function getConnectionInfo(): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>('get_connection_info');
+}
+
 export async function startXLogStream(objHashes: number[]): Promise<void> {
   await invoke<void>('start_xlog_stream', { objHashes });
 }
@@ -679,6 +689,8 @@ export interface AppConfig {
   xlog_tabs?: XLogTabPrefs[];
   /** XLog 화면 분할. Rust `XLogSplitPrefs` 와 짝이다 */
   xlog_split?: XLogSplitPrefs;
+  /** 떼어 낸 XLog 창들. Rust `XLogWindowPrefs` 와 짝이다 */
+  xlog_windows?: XLogWindowPrefs[];
   /** 논리 서비스 묶기 규칙. Rust `GroupRulePrefs` 와 짝이다 */
   group_rule?: { tag_key?: string; pattern?: string };
   /** 비활성 자동 정리 주기(분). **0 이면 끕** — 전역이라 기본값이다 */
@@ -718,6 +730,17 @@ export interface UiLayout {
  * 색은 넣지 않는다 — 팔레트는 `colorPalette.ts` 한 곳에만 있어야 한다.
  * 설정 파일에 두 벌이 되면 테마를 바꿔도 저장해 둔 색이 이긴다.
  */
+/** 떼어 낸 XLog 창 하나 — 그 창의 탭·분할과 자리(논리 좌표, 0 이면 모름) */
+export interface XLogWindowPrefs {
+  label: string;
+  tabs: XLogTabPrefs[];
+  split: XLogSplitPrefs;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** XLog 화면 분할. 탭은 `xlog_tabs` 의 순번으로 적는다 */
 export interface XLogSplitPrefs {
   panes?: number[];

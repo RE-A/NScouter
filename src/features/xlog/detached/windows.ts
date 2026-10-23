@@ -1,10 +1,10 @@
 // 떼어 낸 XLog 창 열기·찾기·닫기 (메인 창 쪽).
 //
-// 창 이름은 탭 키에서 만든다(`windowLabelOf`). 같은 탭을 두 번 떼면 새로 열지 않고 그 창을 앞으로 부른다.
+// 같은 이름의 창이 이미 있으면 새로 열지 않고 그 창을 앞으로 부른다.
 
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { availableMonitors } from '@tauri-apps/api/window';
-import { DETACHED_QUERY, windowLabelOf } from './wire';
+import { availableMonitors, getCurrentWindow } from '@tauri-apps/api/window';
+import { WINDOW_QUERY, type WindowBounds } from './protocol';
 
 export interface ScreenPoint {
   x: number;
@@ -60,24 +60,34 @@ async function workAreas(): Promise<Area[]> {
 }
 
 /**
- * 탭을 새 창으로 연다.
+ * 떼어 낸 창을 연다.
  *
- * @param at 탭을 끌어 놓은 화면 좌표. 주면 **그 자리에** 연다 — 다른 모니터로 끌어 놓았으면 그 모니터에 뜬다
+ * @param at     탭을 창 밖에 끌어 놓은 화면 좌표 — **그 자리에** 연다(그 모니터 안으로 민다)
+ * @param bounds 켤 때 되살리는 창 자리 — 지난번 그 자리·크기
  */
-export async function openDetachedWindow(key: string, title: string, at?: ScreenPoint): Promise<void> {
-  const label = windowLabelOf(key);
+export async function openXLogWindow(
+  label: string,
+  title: string,
+  opts: { at?: ScreenPoint; bounds?: WindowBounds | null } = {},
+): Promise<void> {
   const existing = await WebviewWindow.getByLabel(label);
   if (existing) {
     await existing.setFocus();
     return;
   }
-  const pos = at ? placeWindow(at, await workAreas()) : null;
+  const place = opts.bounds
+    ? {
+        x: Math.round(opts.bounds.x),
+        y: Math.round(opts.bounds.y),
+        width: Math.round(opts.bounds.width),
+        height: Math.round(opts.bounds.height),
+      }
+    : { ...SIZE, ...(opts.at ? placeWindow(opts.at, await workAreas()) : {}) };
   // 생성자가 실패를 이벤트로 알린다 — 조용히 삼키면 «눌렀는데 아무 일도 없다» 가 된다
   const win = new WebviewWindow(label, {
-    url: `index.html?${DETACHED_QUERY}=${encodeURIComponent(key)}`,
+    url: `index.html?${WINDOW_QUERY}=${encodeURIComponent(label)}`,
     title: `NScouter — ${title}`,
-    ...SIZE,
-    ...(pos ?? {}),
+    ...place,
     focus: true,
   });
   await new Promise<void>((resolve, reject) => {
@@ -86,13 +96,18 @@ export async function openDetachedWindow(key: string, title: string, at?: Screen
   });
 }
 
-export async function focusDetachedWindow(key: string): Promise<void> {
-  const w = await WebviewWindow.getByLabel(windowLabelOf(key));
+export async function focusXLogWindow(label: string): Promise<void> {
+  const w = await WebviewWindow.getByLabel(label);
   await w?.setFocus();
 }
 
-/** 창을 닫는다. **닫힘 인사(bye)를 보내지 않는다** — 부르는 쪽이 이미 탭을 붙였다 */
-export async function closeDetachedWindow(key: string): Promise<void> {
-  const w = await WebviewWindow.getByLabel(windowLabelOf(key));
-  await w?.destroy();
+/** 이 창의 자리·크기 (논리 좌표). 못 물어보면 null */
+export async function currentWindowBounds(): Promise<WindowBounds | null> {
+  try {
+    const w = getCurrentWindow();
+    const [pos, size, scale] = await Promise.all([w.outerPosition(), w.innerSize(), w.scaleFactor()]);
+    return { x: pos.x / scale, y: pos.y / scale, width: size.width / scale, height: size.height / scale };
+  } catch {
+    return null;
+  }
 }

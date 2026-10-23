@@ -108,6 +108,11 @@ pub struct AppState {
     pub config_path: PathBuf,
     /// 종류별 «사라졌다 돌아온» 추적 (ActiveTrace 주석 참고)
     pub active_trace: Mutex<HashMap<String, ActiveTrace>>,
+    /// 창마다 XLog 스트림으로 받고 싶은 오브젝트. **스트림은 하나**라 이것들을 합쳐 연다
+    /// (`restart_xlog_stream`). 창 이름 → 해시들
+    pub xlog_subs: Mutex<HashMap<String, Vec<i32>>>,
+    /// 붙어 있는 서버 이름. 미연결이면 None. 나중에 뜬 창이 접속 상태를 물을 때 쓴다
+    pub server_id: Mutex<Option<String>>,
 }
 
 /// 액티브 목록에서 **사라졌다 돌아온** 트랜잭션을 찾기 위한 자취.
@@ -146,6 +151,8 @@ impl AppState {
             config: Mutex::new(config),
             config_path,
             active_trace: Mutex::new(HashMap::new()),
+            xlog_subs: Mutex::new(HashMap::new()),
+            server_id: Mutex::new(None),
         }
     }
 

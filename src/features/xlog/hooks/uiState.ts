@@ -15,7 +15,7 @@ import type {
 import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
 import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
-import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTabsState } from './xlogTabs';
+import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTab, type XLogTabsState } from './xlogTabs';
 import type { XLogMode } from '../types/timeRange';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
@@ -216,7 +216,12 @@ export function fromFilterState(filter: XLogFilterState, mode: XLogMode): XLogFi
 // 열어 보면 이미 지나간 것이다. 열면 그 조건으로 다시 조회한다.
 
 export function fromTabs(s: XLogTabsState): XLogTabPrefs[] {
-  return s.tabs.map(t => ({
+  return s.tabs.map(tabToPrefs);
+}
+
+/** 탭 하나 → 저장할 조건. 다른 창으로 보낼 때도 이 모양으로 보낸다 */
+export function tabToPrefs(t: XLogTab): XLogTabPrefs {
+  return {
     // 붙인 이름이 없으면 빈 글자 — 읽는 쪽이 «자동 이름» 으로 되돌린다
     title: t.title ?? '',
     sel_services: [...t.selection.services],
@@ -226,7 +231,7 @@ export function fromTabs(s: XLogTabsState): XLogTabPrefs[] {
     // 구간이 없으면 0 으로 적는다. 읽는 쪽이 «안 정했다» 로 되돌린다.
     stime: t.pastRange?.stime ?? 0,
     etime: t.pastRange?.etime ?? 0,
-  }));
+  };
 }
 
 /**
@@ -276,8 +281,7 @@ export function toTabs(
       selection: { services: new Set(services), hashes: new Set(legacy) },
     };
   });
-  // 뗀 창은 되살리지 않는다 — 켤 때는 모든 탭이 메인 창에 붙어 있다
-  return withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key], detached: [] }, split);
+  return withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key] }, split);
 }
 
 /**

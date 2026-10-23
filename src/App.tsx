@@ -73,6 +73,7 @@ import {
   stopCounterStream,
   startAlertStream,
   getConfig,
+  getConnectionInfo,
   saveUiState,
   searchXLogList,
   saveXLogProfile,
@@ -101,8 +102,8 @@ import {
   closePane as closeXLogPane,
   setRatio as setXLogRatio,
   patchTab as patchXLogTab,
-  detachTab as detachXLogTab,
-  attachTab as attachXLogTab,
+  importTabs as importXLogTabs,
+  tabTitle,
   tabLabels as xlogTabLabelsOf,
   type DropSide,
   type XLogTab,
@@ -111,24 +112,30 @@ import {
 import { XLogTabBar } from './features/xlog/components/XLogTabBar';
 import { XLogSplit } from './features/xlog/components/XLogSplit';
 import {
-  applyPatch as applyDetachedPatch,
-  EV_BYE,
+  EV_CLOSED,
+  EV_DETACH,
   EV_HELLO,
-  EV_PATCH,
-  EV_SELECT,
-  EV_STATE,
-  toWire,
-  type DetachedState,
-  type SelectMessage,
-  type WirePatch,
-} from './features/xlog/detached/wire';
+  EV_INIT,
+  EV_MERGE,
+  EV_SNAPSHOT,
+  type DetachMessage,
+  type InitMessage,
+  type MergeMessage,
+  type SnapshotMessage,
+} from './features/xlog/detached/protocol';
 import {
-  closeDetachedWindow,
-  focusDetachedWindow,
-  openDetachedWindow,
-  type ScreenPoint,
-} from './features/xlog/detached/windows';
+  boundsOf as windowBoundsOf,
+  EMPTY_REGISTRY,
+  fromConfig as windowsFromConfig,
+  nextLabel as nextWindowLabel,
+  remove as removeWindow,
+  toConfig as windowsToConfig,
+  upsert as upsertWindow,
+  type Registry,
+} from './features/xlog/detached/registry';
+import { currentWindowBounds, openXLogWindow, type ScreenPoint } from './features/xlog/detached/windows';
 import { emit, listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { mergeObjects } from './features/xlog/hooks/objectRefresh';
 import { allNames, clearNames, rememberNames } from './features/xlog/hooks/agentNames';
 import {
@@ -163,6 +170,7 @@ import {
   toTabs as toXLogTabs,
   fromTabs as xlogTabsToPrefs,
   fromSplit as xlogSplitToPrefs,
+  tabToPrefs,
 } from './features/xlog/hooks/uiState';
 import { shortName, type GroupBy } from './features/xlog/components/agentTree';
 import { useTextResolver } from './features/xlog/hooks/useTextResolver';
@@ -250,7 +258,16 @@ const ALL_CHART_COUNTERS: CounterName[] = [
   ...DATASOURCE_CHART_COUNTERS,
 ];
 
-export default function App() {
+export default function App({ windowLabel }: {
+  /**
+   * 떼어 낸 XLog 창이면 그 창 이름(`xlogwin-N`), 메인 창이면 없다.
+   *
+   * 뗀 창은 **같은 앱이 XLog 화면만** 띄운 것이다 — 서버 고르기·툴바·차트·목록·상세를 저마다 한다.
+   * 접속·서버 전환·Counter/Active/Visualize/Alert·설정 저장은 메인 창만 한다 (`detached/protocol.ts`).
+   */
+  windowLabel?: string;
+} = {}) {
+  const isMain = windowLabel === undefined;
   // 언어가 바뀌면 화면 전체를 다시 그린다. t() 는 모듈 함수라 **구독하지 않으면**
   // 설정에서 언어를 바꿔도 이미 그려진 글자가 그대로 남는다.
   const { lang } = useT();
@@ -285,6 +302,15 @@ export default function App() {
    * 몰랐던 쪽(툴바·차트·상세)이 그대로 산다.
    */
   const [xlogTabs, setXLogTabs] = useState<XLogTabsState>(initialTabs);
+  /**
+   * 떼어 낸 창들 — **메인 창만** 들고 있다(`detached/registry.ts`). 창마다 띄운 탭·분할·자리를
+   * 설정 파일에 남겼다가 켤 때 같은 자리에 다시 연다.
+   */
+  const [xlogWindows, setXLogWindows] = useState<Registry>(EMPTY_REGISTRY);
+  const xlogWindowsRef = useRef(xlogWindows);
+  xlogWindowsRef.current = xlogWindows;
+  /** 이번에 쓴 창 이름 — 닫힌 창의 번호를 다시 안 쓴다 */
+  const usedWindowLabelsRef = useRef(new Set<string>());
   const curTab = activeXLogTab(xlogTabs);
   const config = curTab.config;
   const filter = curTab.filter;
@@ -512,6 +538,10 @@ export default function App() {
         setTableH(l.tableH);
         setActiveTab(l.activeTab);
         setAgentGroupBy(l.agentGroupBy);
+        setSavedFilters(normalizeSavedFilters(cfg.saved_filters));
+        // 뗀 창은 여기까지 — 탭은 메인 창에서 받고(init), 보던 화면·서버·상세는 메인 창의 것이다
+        if (!isMain) return;
+        setXLogWindows(windowsFromConfig(cfg.xlog_windows));
         // 조회 조건도 되살린다. **껐다 켜면 다 날아간다** 가 현장에서 가장 많이 나온 말이다.
         // 탭은 **조건만** 되살린다 — 받아 둔 것은 열면 이미 지나간 것이라 다시 조회한다.
         setXLogTabs(toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter, cfg.xlog_split));
@@ -520,15 +550,63 @@ export default function App() {
         const list = normalize(cfg.servers);
         setServers(list.length > 0 ? list : fromLegacy(cfg));
         if (cfg.last_server) setCurrentServer(cfg.last_server);
-        setSavedFilters(normalizeSavedFilters(cfg.saved_filters));
         setPendingDetails(normalizeOpenDetails(cfg.open_details, MAX_DETAIL_TABS));
       })
       // 못 읽어도 기본값으로 뜬다. 다만 그 기본값으로 파일을 덮지는 않는다 —
       // 읽기가 실패한 이유가 «잠깐 못 읽었다» 일 수도 있다.
       .catch(() => {})
-      .finally(() => { if (!cancelled) setHydrated(true); });
+      .finally(() => { if (!cancelled && isMain) setHydrated(true); });
     return () => { cancelled = true; };
-  }, []);
+  }, [isMain]);
+
+  /**
+   * (뗀 창) 띄울 탭을 메인 창에서 받는다. 메인 창이 아직 안 듣고 있을 수 있어 받을 때까지 되묻는다.
+   * 받은 뒤에야 «다 읽었다» 로 친다 — 그 전에 snapshot 을 보내면 빈 탭으로 메인 창의 기록을 덮는다.
+   */
+  useEffect(() => {
+    if (isMain || !windowLabel) return;
+    let got = false;
+    const un = listen<InitMessage>(EV_INIT, e => {
+      if (e.payload.label !== windowLabel || got) return;
+      got = true;
+      setXLogTabs(toXLogTabs(e.payload.tabs, undefined, undefined, e.payload.split));
+      setHydrated(true);
+    });
+    const hello = () => { if (!got) void emit(EV_HELLO, { label: windowLabel }); };
+    hello();
+    const timer = setInterval(hello, 1_500);
+    return () => {
+      clearInterval(timer);
+      void un.then(f => f());
+    };
+  }, [isMain, windowLabel]);
+
+  /** (뗀 창) 접속 상태를 묻는다 — «붙었다» 이벤트는 이 창이 뜨기 전에 지나갔다 */
+  useEffect(() => {
+    if (isMain) return;
+    getConnectionInfo()
+      .then(info => {
+        if (!info.connected) return;
+        setIsConnected(true);
+        setServerId(info.server_id);
+        setConnectionEpoch(n => n + 1);
+      })
+      .catch(() => {});
+  }, [isMain]);
+
+  /** (뗀 창) 창을 옮기거나 크기를 바꾸면 자리를 다시 알린다 — 켤 때 같은 자리에 뜨게 */
+  const [boundsTick, setBoundsTick] = useState(0);
+  useEffect(() => {
+    if (isMain) return;
+    const w = getCurrentWindow();
+    const bump = () => setBoundsTick(n => n + 1);
+    const subs = [w.onMoved(bump), w.onResized(bump)];
+    // 사용자가 닫았다 — 메인 창이 적어 둔 것을 지운다 (브라우저 창을 닫으면 그 탭들이 닫히듯)
+    const closing = w.onCloseRequested(() => { void emit(EV_CLOSED, { label: windowLabel }); });
+    return () => {
+      for (const u of [...subs, closing]) void u.then(f => f());
+    };
+  }, [isMain, windowLabel]);
 
   /**
    * 바뀐 것을 파일에 남긴다.
@@ -538,6 +616,21 @@ export default function App() {
    */
   useEffect(() => {
     if (!hydrated) return;
+    // (뗀 창) 파일에 쓰지 않는다 — 메인 창에 알려 메인 창이 쓴다. 두 창이 같은 파일을 덮으면 서로 지운다
+    if (!isMain) {
+      const id = setTimeout(() => {
+        void (async () => {
+          const msg: SnapshotMessage = {
+            label: windowLabel ?? '',
+            tabs: xlogTabsToPrefs(xlogTabs),
+            split: xlogSplitToPrefs(xlogTabs),
+            bounds: await currentWindowBounds(),
+          };
+          void emit(EV_SNAPSHOT, msg);
+        })();
+      }, 600);
+      return () => clearTimeout(id);
+    }
     const id = setTimeout(() => {
       saveUiState(
         fromLayout({ servicesW, detailW, tableH, activeTab, agentGroupBy }),
@@ -553,6 +646,7 @@ export default function App() {
             open_details: detailsFromTabs(detail.tabs, toDateString),
             xlog_tabs: xlogTabsToPrefs(xlogTabs),
             xlog_split: xlogSplitToPrefs(xlogTabs),
+            xlog_windows: windowsToConfig(xlogWindowsRef.current),
           });
         } catch {
           // 탭 저장 실패가 화면을 되돌릴 이유는 없다
@@ -574,6 +668,8 @@ export default function App() {
     // **탭 전부를 지켜본다.** 지금 탭의 조건만 보면 이름 바꾸기·화면 분할·옆 판의 조건이
     // 다른 무엇이 바뀔 때까지 저장되지 않아, 껐다 켜면 사라졌다
     xlogTabs,
+    xlogWindows,
+    boundsTick,
   ]);
 
   useEffect(() => {
@@ -672,10 +768,11 @@ export default function App() {
     return () => { cancelled = true; clearInterval(timer); };
   }, [isConnected]);
 
+  // 알림은 메인 창이 받는다 — 뗀 창에는 알림 화면이 없다
   useEffect(() => {
-    if (!isConnected) return;
+    if (!isConnected || !isMain) return;
     startAlertStream().catch(() => {});
-  }, [isConnected]);
+  }, [isConnected, isMain]);
 
   const handleConfigChange = useCallback((p: Partial<XLogChartConfig>) => setConfig(prev => ({ ...prev, ...p })), []);
   const handleFilterChange = useCallback((p: Partial<XLogFilterState>) => setFilter(prev => ({ ...prev, ...p })), []);
@@ -804,39 +901,114 @@ export default function App() {
   activeXLogKeyRef.current = xlogTabs.activeKey;
   const handleXLogTabActivate = useCallback((key: string) => {
     if (key === activeXLogKeyRef.current) return;
-    // 뗀 탭은 제 창에 있다 — 그 창을 앞으로 부른다
-    if (xlogTabsRef.current.detached.includes(key)) {
-      void focusDetachedWindow(key).catch(() => {});
-      return;
-    }
     setXLogTabs(s => activateXLogTab(s, key));
     setSelectedXLogs([]);
     setClearSignal(n => n + 1);
   }, []);
   const xlogTabsRef = useRef(xlogTabs);
   xlogTabsRef.current = xlogTabs;
+
   /**
-   * 탭을 새 창으로 뗀다. 탭은 이 창의 목록에 남고(조건·고르기·저장은 여기서), 창은 그려 보이기만 한다.
-   * 안 뗀 탭이 하나도 안 남게 되면 떼지 않는다(`detachTab`).
+   * 새 창을 연다 (메인 창). 탭은 이미 보낸 쪽에서 빠졌다 — 못 열면 이 창으로 들인다.
+   */
+  const openDetached = useCallback((msg: DetachMessage) => {
+    if (msg.tabs.length === 0) return;
+    const label = nextWindowLabel(xlogWindowsRef.current, usedWindowLabelsRef.current);
+    usedWindowLabelsRef.current.add(label);
+    const content = { tabs: msg.tabs, split: { panes: [0], active: 0, dir: 'row', ratio: 0.5 } };
+    setXLogWindows(r => upsertWindow(r, label, content));
+    const title = tabTitle(toXLogTabs(msg.tabs, undefined, undefined).tabs[0]);
+    openXLogWindow(label, title, { at: msg.at }).catch(() => {
+      setXLogWindows(r => removeWindow(r, label));
+      setXLogTabs(s => importXLogTabs(s, toXLogTabs(msg.tabs, undefined, undefined).tabs));
+    });
+  }, []);
+  /**
+   * 탭을 새 창으로 뗀다. **이 창에서 빠져 그 창의 것이 된다** — 그 창에서 서버 고르기·목록·상세까지 한다.
+   * 이 창의 마지막 탭은 떼지 않는다(이 창이 빈다).
    */
   const handleXLogTabDetach = useCallback((key: string, at?: ScreenPoint) => {
     const cur = xlogTabsRef.current;
-    const next = detachXLogTab(cur, key);
-    if (next === cur) return;
+    const tab = cur.tabs.find(t => t.key === key);
+    if (!tab || cur.tabs.length <= 1) return;
     if (key === cur.activeKey) {
       setSelectedXLogs([]);
       setClearSignal(n => n + 1);
     }
-    setXLogTabs(next);
-    const label = xlogTabLabelsOf(cur.tabs)[cur.tabs.findIndex(t => t.key === key)] ?? key;
-    openDetachedWindow(key, label, at).catch(() => {
-      // 창을 못 열었으면 도로 붙인다 — 탭이 어디에도 안 보이는 채로 남으면 안 된다
-      setXLogTabs(s => attachXLogTab(s, key));
+    setXLogTabs(closeXLogTab(cur, key));
+    const msg: DetachMessage = { tabs: [tabToPrefs(tab)], at };
+    // 창은 메인 창이 연다 — 창 목록을 적어 두고 저장하는 쪽이 메인 창이다
+    if (isMain) openDetached(msg);
+    else void emit(EV_DETACH, msg);
+  }, [isMain, openDetached]);
+  /** (뗀 창) 탭 하나를 메인 창으로 보낸다. 마지막 탭이면 창째로 합친다 */
+  const handleSendTabToMain = useCallback((key: string) => {
+    if (!windowLabel) return;
+    const cur = xlogTabsRef.current;
+    const tab = cur.tabs.find(t => t.key === key);
+    if (!tab) return;
+    const last = cur.tabs.length <= 1;
+    const msg: MergeMessage = { label: windowLabel, tabs: [tabToPrefs(tab)], close: last };
+    void emit(EV_MERGE, msg).then(() => {
+      if (last) void getCurrentWindow().destroy();
     });
-  }, []);
+    if (!last) {
+      if (key === cur.activeKey) setSelectedXLogs([]);
+      setXLogTabs(s => closeXLogTab(s, key));
+    }
+  }, [windowLabel]);
+  /**
+   * (메인 창) 뗀 창들의 말을 듣는다 — 열어 달라 · 띄울 것을 달라 · 바뀌었다 · 합친다 · 닫았다.
+   */
+  useEffect(() => {
+    if (!isMain) return;
+    const subs = [
+      listen<{ label: string }>(EV_HELLO, e => {
+        const w = xlogWindowsRef.current.get(e.payload.label);
+        if (!w) return;
+        const msg: InitMessage = { label: w.label, tabs: w.tabs, split: w.split };
+        void emit(EV_INIT, msg);
+      }),
+      listen<SnapshotMessage>(EV_SNAPSHOT, e => {
+        const { label, tabs, split, bounds } = e.payload;
+        // 닫힌 뒤 늦게 온 것은 버린다 — 지운 창이 되살아난다
+        if (!xlogWindowsRef.current.has(label)) return;
+        setXLogWindows(r => upsertWindow(r, label, { tabs, split }, bounds));
+      }),
+      listen<MergeMessage>(EV_MERGE, e => {
+        const { label, tabs, close } = e.payload;
+        setXLogTabs(s => importXLogTabs(s, toXLogTabs(tabs, undefined, undefined).tabs));
+        if (close) setXLogWindows(r => removeWindow(r, label));
+      }),
+      listen<{ label: string }>(EV_CLOSED, e => setXLogWindows(r => removeWindow(r, e.payload.label))),
+      listen<DetachMessage>(EV_DETACH, e => openDetached(e.payload)),
+    ];
+    return () => { for (const u of subs) void u.then(f => f()); };
+  }, [isMain, openDetached]);
+
+  /** (메인 창) 켤 때 지난번 뗀 창들을 같은 자리에 다시 연다 — 설정을 다 읽은 뒤 한 번 */
+  const windowsRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!isMain || !hydrated || windowsRestoredRef.current) return;
+    windowsRestoredRef.current = true;
+    for (const w of xlogWindowsRef.current.values()) {
+      usedWindowLabelsRef.current.add(w.label);
+      const title = tabTitle(toXLogTabs(w.tabs, undefined, undefined).tabs[0]);
+      openXLogWindow(w.label, title, { bounds: windowBoundsOf(w) }).catch(() => {
+        // 못 열면 그 탭들을 이 창으로 들인다 — 어디에도 안 보이는 채로 남으면 안 된다
+        setXLogWindows(r => removeWindow(r, w.label));
+        setXLogTabs(s => importXLogTabs(s, toXLogTabs(w.tabs, undefined, undefined).tabs));
+      });
+    }
+  }, [isMain, hydrated]);
+
+  /** (뗀 창) 이 창의 탭을 전부 메인 창으로 보내고 닫는다 */
+  const handleMergeWindow = useCallback(() => {
+    if (!windowLabel) return;
+    const msg: MergeMessage = { label: windowLabel, tabs: xlogTabsToPrefs(xlogTabsRef.current), close: true };
+    void emit(EV_MERGE, msg).then(() => getCurrentWindow().destroy());
+  }, [windowLabel]);
   const handleXLogTabDrop = useCallback((key: string, target: string, side: DropSide) => {
-    // 뗀 탭을 판에 끌어 놓으면 도로 붙인다 — 그 창은 닫는다
-    if (xlogTabsRef.current.detached.includes(key)) void closeDetachedWindow(key).catch(() => {});
     setXLogTabs(s => dropXLogTab(s, key, target, side));
     if (key !== activeXLogKeyRef.current) {
       setSelectedXLogs([]);
@@ -855,7 +1027,6 @@ export default function App() {
     setSelectedXLogs([]);
   }, []);
   const handleXLogTabClose = useCallback((key: string) => {
-    if (xlogTabsRef.current.detached.includes(key)) void closeDetachedWindow(key).catch(() => {});
     setXLogTabs(s => closeXLogTab(s, key));
     setSelectedXLogs([]);
   }, []);
@@ -898,13 +1069,14 @@ export default function App() {
    * 갈리는 곳에서는 명단이 끝없이 는다. 그런 곣에서만 켜면 된다.
    */
   useEffect(() => {
-    if (!isConnected || autoRemoveInactiveMin <= 0) return;
+    // 정리는 메인 창 하나만 돌린다 — 창마다 돌리면 같은 정리를 여러 번 보낸다
+    if (!isConnected || !isMain || autoRemoveInactiveMin <= 0) return;
     const timer = setInterval(
       () => { void handleCleanupInactive().catch(() => {}); },
       autoRemoveInactiveMin * 60_000,
     );
     return () => clearInterval(timer);
-  }, [isConnected, autoRemoveInactiveMin, handleCleanupInactive]);
+  }, [isConnected, isMain, autoRemoveInactiveMin, handleCleanupInactive]);
 
   const handleToggleService = useCallback(
     (name: string) => setGroupSel(prev => toggleService(prev, name)),
@@ -1322,10 +1494,7 @@ export default function App() {
    * 스트림은 하나라 지금 탭 것만 받으면, 나눠 띄운 옆 판은 지금 탭과 겹치는 서버의 점만 받았다.
    * 판마다 제 서버만 그리므로(`filter.objHashSet`) 합쳐 받아도 섞이지 않는다.
    */
-  const liveVisible = xlogTabs.tabs.filter(
-    // 떼어 낸 창도 보이고 있다 — 그 창의 점도 이 스트림에서 온다
-    t => (xlogTabs.panes.includes(t.key) || xlogTabs.detached.includes(t.key)) && t.mode === 'live',
-  );
+  const liveVisible = xlogTabs.tabs.filter(t => xlogTabs.panes.includes(t.key) && t.mode === 'live');
   const streamKey = (() => {
     const set = new Set<number>(filter.objHashSet);
     for (const tab of liveVisible) for (const h of tab.filter.objHashSet) set.add(h);
@@ -1451,7 +1620,8 @@ export default function App() {
   /** XLog 쪽과 같은 이유 — 이름이 같으면 해시도 같아서 «같은 목록» 으로 보인다 */
   const counterEpochRef = useRef(connectionEpoch);
   useEffect(() => {
-    if (!isConnected) { counterStreamRef.current = ''; return; }
+    // 카운터 스트림도 하나다 — 뗀 창이 제 고르기로 다시 열면 메인 창 Counter 화면이 바뀐다
+    if (!isConnected || !isMain) { counterStreamRef.current = ''; return; }
     if (counterEpochRef.current !== connectionEpoch) {
       counterEpochRef.current = connectionEpoch;
       counterStreamRef.current = '';
@@ -1470,7 +1640,7 @@ export default function App() {
     if (key === counterStreamRef.current) return;
     counterStreamRef.current = key;
     startCounterStream(hashes, ALL_CHART_COUNTERS).catch(() => {});
-  }, [isConnected, filter.objHashSet, poolHashes, connectionEpoch]);
+  }, [isConnected, isMain, filter.objHashSet, poolHashes, connectionEpoch]);
 
   /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
   const nothingPicked = filter.objHashSet.size === 0;
@@ -1528,66 +1698,6 @@ export default function App() {
     if (!a) { a = [...set]; hashArraysRef.current.set(set, a); }
     return a;
   };
-  /**
-   * 떼어 낸 창과 주고받기 (`detached/wire.ts`). 탭의 주인은 이 창이다 —
-   * 창이 고친 것을 받아 탭을 고치고, 고친 탭을 다시 보내 준다.
-   */
-  const connRef = useRef({ connected: isConnected, epoch: connectionEpoch });
-  connRef.current = { connected: isConnected, epoch: connectionEpoch };
-  const sendDetachedState = useCallback((key: string) => {
-    const s = xlogTabsRef.current;
-    const i = s.tabs.findIndex(t => t.key === key);
-    if (i < 0 || !s.detached.includes(key)) return;
-    const payload: DetachedState = {
-      tab: toWire(s.tabs[i], xlogTabLabelsOf(s.tabs)[i]),
-      connected: connRef.current.connected,
-      connectionEpoch: connRef.current.epoch,
-    };
-    void emit(EV_STATE, payload);
-  }, []);
-  const handleXLogTabAttach = useCallback((key: string) => {
-    void closeDetachedWindow(key).catch(() => {});
-    setXLogTabs(s => attachXLogTab(s, key));
-    setSelectedXLogs([]);
-    setClearSignal(n => n + 1);
-  }, []);
-  useEffect(() => {
-    const subs = [
-      listen<{ key: string }>(EV_HELLO, e => sendDetachedState(e.payload.key)),
-      listen<{ key: string; patch: WirePatch }>(EV_PATCH, e => {
-        const { key, patch } = e.payload;
-        setXLogTabs(s => patchXLogTab(s, key, t0 => applyDetachedPatch(t0, patch)));
-      }),
-      // 뗀 창에서 끌어 고른 것은 **이 창의 목록**으로 — 상세·프로파일은 여기서 본다.
-      // 그 탭의 거름으로 이미 걸러 그려진 점이라 여기 탭 거름으로 다시 거르지 않는다
-      listen<SelectMessage>(EV_SELECT, e => {
-        setPicked({ xlogs: e.payload.xlogs, refilter: false });
-        setWideTruncated(null);
-        resetSearch();
-      }),
-      // 창을 닫았다 — 탭을 도로 붙인다. 창은 스스로 닫히는 중이다
-      listen<{ key: string }>(EV_BYE, e => {
-        setXLogTabs(s => attachXLogTab(s, e.payload.key));
-      }),
-    ];
-    return () => { for (const u of subs) void u.then(f => f()); };
-  }, [sendDetachedState, resetSearch]);
-  // 뗀 탭이 바뀌면(이 창에서 고르기를 고쳤거나 저 창이 보낸 patch 를 얹었거나) 다시 보낸다
-  const lastSentRef = useRef(new Map<string, unknown>());
-  useEffect(() => {
-    const sent = lastSentRef.current;
-    for (const key of xlogTabs.detached) {
-      const i = xlogTabs.tabs.findIndex(t => t.key === key);
-      if (i < 0) continue;
-      const sig = [xlogTabs.tabs[i], xlogTabLabels[i], isConnected, connectionEpoch];
-      const prev = sent.get(key) as unknown[] | undefined;
-      if (prev && prev.every((v, j) => v === sig[j])) continue;
-      sent.set(key, sig);
-      sendDetachedState(key);
-    }
-    for (const key of [...sent.keys()]) if (!xlogTabs.detached.includes(key)) sent.delete(key);
-  }, [xlogTabs, xlogTabLabels, isConnected, connectionEpoch, sendDetachedState]);
-
   const renderXLogTab = useCallback(
     (tab: XLogTab, visible: boolean) => {
       // **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
@@ -1696,10 +1806,11 @@ export default function App() {
       });
     },
     'tab-xlog': () => setActiveTab('xlog'),
-    'tab-active': () => setActiveTab('active'),
-    'tab-visualize': () => setActiveTab('visualize'),
-    'tab-counter': () => setActiveTab('counter'),
-    'tab-alert': () => setActiveTab('alert'),
+    // 뗀 창은 XLog 만 띄운다 — 다른 화면으로 가는 단축키는 안 듣는다
+    'tab-active': () => { if (isMain) setActiveTab('active'); },
+    'tab-visualize': () => { if (isMain) setActiveTab('visualize'); },
+    'tab-counter': () => { if (isMain) setActiveTab('counter'); },
+    'tab-alert': () => { if (isMain) setActiveTab('alert'); },
     'open-settings': () => setShowSettings(true),
     'toggle-mode': () => setXLogMode(m => (m === 'live' ? 'past' : 'live')),
     /**
@@ -1752,8 +1863,9 @@ export default function App() {
           )}
         </div>
 
-        {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다 */}
-        <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
+        {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다. 뗀 창은 XLog 만 띄운다 */}
+        {!isMain && <span className="text-micro text-fg-dim">XLog · {t('떼어 낸 창')}</span>}
+        {isMain && <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
           {(['xlog', 'active', 'visualize', 'counter', 'alert'] as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
@@ -1770,12 +1882,23 @@ export default function App() {
               </button>
             );
           })}
-        </nav>
+        </nav>}
 
         <div className="flex-1" />
 
+        {/* 뗀 창 — 접속·서버 전환·설정은 메인 창이 한다. 할 일은 합치기뿐이다 */}
+        {!isMain && (
+          <button
+            type="button"
+            onClick={handleMergeWindow}
+            title={t('이 창의 탭을 전부 메인 창으로 보내고 창을 닫습니다')}
+            className="btn px-2 py-0.5 text-micro"
+          >
+            {t('메인 창으로 합치기')}
+          </button>
+        )}
         {/* 상태·설정 — 평소엔 조용히 물러나 있어야 한다 */}
-        <div className="flex items-center gap-2">
+        {isMain && <div className="flex items-center gap-2">
           <ServerSwitcher
             profiles={servers}
             current={isConnected ? currentServer : null}
@@ -1819,7 +1942,7 @@ export default function App() {
           >
             ⚙
           </button>
-        </div>
+        </div>}
       </header>
 
 
@@ -1918,9 +2041,8 @@ export default function App() {
             tabs={xlogTabs.tabs}
             activeKey={xlogTabs.activeKey}
             panes={xlogTabs.panes}
-            detached={xlogTabs.detached}
             onDetach={handleXLogTabDetach}
-            onAttach={handleXLogTabAttach}
+            onSendToMain={isMain ? undefined : handleSendTabToMain}
             onActivate={handleXLogTabActivate}
             onClose={handleXLogTabClose}
             onAdd={handleXLogTabAdd}
@@ -2158,7 +2280,7 @@ export default function App() {
           서버 것을 계속 받는데, 차트는 쌓아 둔 표본을 자기 안에 든다. 탭을 오갈 때마다
           새로 세우면 그동안 받은 것을 버리고 0 부터 다시 쌓아, 들어올 때마다 선이 오른쪽
           끝에만 붙어 있었다. 폴링하는 패널은 `enabled` 로 탭이 보일 때만 돈다. */}
-      {(activeTab === 'counter' || isConnected) && (
+      {isMain && (activeTab === 'counter' || isConnected) && (
         <div style={activeTab === 'counter' ? tabBodyStyle : HIDDEN_TAB_STYLE}>
           {!isConnected ? (
             <EmptyState text={t('연결 후 사용 가능합니다.')} />
