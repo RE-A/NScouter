@@ -10,6 +10,7 @@ import { XLogDataStore } from '../store/XLogDataStore';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import { deriveStreamStatus } from '../utils/streamStatus';
 import { useTextResolver } from './useTextResolver';
+import { subscribeTheme } from '../../../styles/theme';
 
 /** 이 시간 넘게 XLog 가 없으면 "수신 없음"으로 본다. 폴링이 500ms 라 넉넉히 잡는다. */
 const STALE_AFTER_MS = 15_000;
@@ -50,6 +51,9 @@ export function useXLogCanvas(
    * 첫 그림은 0x0 캔버스에 그려지고, 뒤늦게 크기가 잡히면서 지워진다.
    */
   const needsRedrawRef = useRef(true);
+  // 테마나 서버 색 기준이 바뀌면 다시 그린다. 데이터가 흐르지 않는 화면(과거 조회·멈춤)은
+  // 이게 없으면 옛 색으로 남는다.
+  useEffect(() => subscribeTheme(() => { needsRedrawRef.current = true; }), []);
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [selectedXLogs, setSelectedXLogs] = useState<SXLog[]>([]);
 

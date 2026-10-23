@@ -8,17 +8,14 @@ import { onCounterData } from '../api/scouterApi';
 import { subscribe } from '../api/subscribe';
 import { deriveStreamStatus } from '../utils/streamStatus';
 import { sampleX, totalLineVisible } from './counterGeometry';
-import { aggregate, totalMode } from './counterTotal';
+import { totalMode } from './counterTotal';
+import { foldSeries, shownObjectCount, type DrawSeries, type FoldMode } from './counterSeries';
 import { CANVAS, SERIES } from '../../../styles/tokens';
-import { getAgentColor } from '../utils/colorPalette';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
 
 /** 카운터 폴링이 2초라 넉넉히 잡는다 */
 const STALE_AFTER_MS = 8_000;
-
-/** 합계 선의 자리표. 실제 objHash 와 겹치지 않게 둔다 */
-const TOTAL_HASH = 0;
 
 interface CounterChartProps {
   isStreaming: boolean;
@@ -29,10 +26,15 @@ interface CounterChartProps {
   /** 차트 높이 (px, 기본 80) */
   height?: number;
   /**
-   * true 면 오브젝트별 선 대신 **접은 값 한 선**을 그린다 (ASIS RealTimeTotalCount).
-   * 접는 방식(합/평균)은 카운터가 정한다 — counterTotal.totalMode
+   * 선을 어떻게 접나 (`counterSeries.ts`).
+   *   · each    — 오브젝트마다 한 선
+   *   · total   — 접은 값 한 선 (ASIS RealTimeTotalCount)
+   *   · service — 서비스마다 한 선
+   * 접는 셈(합/평균)은 카운터가 정한다 — counterTotal.totalMode
    */
-  total?: boolean;
+  fold?: FoldMode;
+  /** 오브젝트 → 서비스 이름. `fold === 'service'` 일 때만 쓴다 */
+  serviceOf?: (objHash: number) => string | null;
   /**
    * 그릴 오브젝트. `null` 이면 전부.
    *
@@ -42,16 +44,8 @@ interface CounterChartProps {
   visible?: ReadonlySet<number> | null;
 }
 
-interface AgentSamples {
-  objHash: number;
-  values: number[];
-  times: number[];
-  /** 쌍 카운터의 상한. 스칼라 카운터면 null (F-33) */
-  total: number | null;
-}
-
 // Canvas 는 var() 를 못 읽으므로 실제 색 문자열이어야 한다.
-// 합계 선 하나에만 쓴다. 오브젝트별 선은 XLog 점과 같은 색(`getAgentColor`)이다 —
+// 합계 선 하나에만 쓴다. 오브젝트·서비스 선은 XLog 점과 같은 색(`getAgentColor`)이다 —
 // 순서로 돌려 쓰면 같은 서버가 XLog 에서는 노랑, 여기서는 파랑이 된다.
 const PALETTE = SERIES;
 
@@ -60,24 +54,32 @@ export const CounterChart = memo(function CounterChart({
   counter,
   agentMap,
   height = 80,
-  total = false,
+  fold = 'each',
+  serviceOf,
   visible = null,
 }: CounterChartProps) {
-  // prop 이름이 `total` 인데 쌍 카운터의 상한도 `total` 이라 같은 함수 안에서 겹친다.
-  // 지역에서는 이름을 갈라 둔다.
-  //
   // **counters.xml 이 안 된다고 한 카운터는 접지 않는다.** CPU 를 더하거나
   // Heap Total 을 더한 값은 아무 질문에도 답하지 않는다 — 요청받아도 개별로 그린다.
   const capable = isTotalCapable(counter);
-  const totalOne = total && capable;
+  const drawn: FoldMode = capable ? fold : 'each';
   const mode = totalMode(counter);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // 테마가 바뀜 때 한 번 더 그린다 — 캔버스에 칠해 둔 픽셀은 CSS 변수를 따라오지 않는다
   const themeEpoch = useThemeEpoch();
 
-  const seriesRef = useRef<Map<number, AgentSamples>>(new Map());
-  const [agentCount, setAgentCount] = useState(0);
+  /**
+   * 받은 원본. 한 원소가 한 번의 폴링이다.
+   *
+   * **받을 때 접지 않는다.** 접는 방식은 그릴 때 정한다 — 그래야 개별/합계/서비스별을
+   * 바꿔도 쌓아 둔 이력이 그대로 남는다.
+   */
+  const updatesRef = useRef<CounterUpdate[]>([]);
+  /** 원본이 바뀐 횟수. 그리는 쪽이 다시 접을지 판단한다 */
+  const versionRef = useRef(0);
+  /** 머리글을 다시 그리게 하는 신호 — 처음 보는 오브젝트가 오면 바뀐다 */
+  const [seenCount, setSeenCount] = useState(0);
+  const seenRef = useRef<Set<number>>(new Set());
   // rAF 클로저에서 읽으므로 state 가 아니라 ref 여야 한다 (state 면 값이 고정된다).
   const lastReceivedRef = useRef<number | null>(null);
   const streamingRef = useRef(isStreaming);
@@ -85,6 +87,10 @@ export const CounterChart = memo(function CounterChart({
   // rAF 클로저에서 읽는다 — deps 에 넣어 루프를 다시 세우면 프레임이 한 번 끊긴다.
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const foldRef = useRef(drawn);
+  foldRef.current = drawn;
+  const serviceOfRef = useRef(serviceOf);
+  serviceOfRef.current = serviceOf;
 
   // 카운터 데이터 수신 — 이벤트는 카운터 단위로 오므로 내 카운터만 골라낸다
   useEffect(() => {
@@ -95,66 +101,53 @@ export const CounterChart = memo(function CounterChart({
         if (update.counter !== counter) return;
 
         lastReceivedRef.current = Date.now();
+        const buf = updatesRef.current;
+        buf.push(update);
+        if (buf.length > MAX_COUNTER_SAMPLES) buf.shift();
+        versionRef.current += 1;
 
-        if (totalOne) {
-          // 한 시점의 오브젝트 값을 하나로 접어 **선 하나**로 쌓는다.
-          const folded = aggregate(update.values.map(v => v.value), mode);
-          if (folded === null) return;
-          let series = seriesRef.current.get(TOTAL_HASH);
-          if (!series) {
-            series = { objHash: TOTAL_HASH, values: [], times: [], total: null };
-            seriesRef.current.set(TOTAL_HASH, series);
-            setAgentCount(update.values.length);
-          }
-          series.times.push(update.time);
-          series.values.push(folded);
-          // 쌍 카운터의 상한도 같은 방식으로 접는다 — 안 그러면 기준선이 한 대 몫만 남는다.
-          const totals = update.values
-            .map(v => v.total)
-            .filter((t): t is number => typeof t === 'number');
-          series.total = aggregate(totals, mode);
-          if (series.values.length > MAX_COUNTER_SAMPLES) {
-            series.values.shift();
-            series.times.shift();
-          }
-          return;
-        }
-
-        for (const { obj_hash, value, total } of update.values) {
-          let series = seriesRef.current.get(obj_hash);
-          if (!series) {
-            series = { objHash: obj_hash, values: [], times: [], total: null };
-            seriesRef.current.set(obj_hash, series);
-            setAgentCount(seriesRef.current.size);
-          }
-          series.times.push(update.time);
-          series.values.push(value);
-          // 상한은 시간에 따라 거의 변하지 않는다. 최신 값 하나만 든다.
-          series.total = total ?? null;
-
-          if (series.values.length > MAX_COUNTER_SAMPLES) {
-            series.values.shift();
-            series.times.shift();
-          }
-        }
+        for (const v of update.values) seenRef.current.add(v.obj_hash);
+        setSeenCount(seenRef.current.size);
       }),
     );
   }, [isStreaming, counter]);
 
   // 연결이 끊기면 수신 이력을 초기화한다. (rAF 는 매 프레임 도니 별도 틱은 불필요)
-  //
-  // **모드가 바뀔 때도 비운다.** 안 비우면 개별 값과 접은 값이 한 선에 이어져
-  // 전환하는 순간 없던 계단이 생긴다.
   useEffect(() => {
     lastReceivedRef.current = null;
-    seriesRef.current.clear();
-    setAgentCount(0);
-  }, [isStreaming, totalOne]);
+    updatesRef.current = [];
+    versionRef.current += 1;
+    seenRef.current = new Set();
+    setSeenCount(0);
+  }, [isStreaming]);
 
   // rAF 렌더 루프
   useEffect(() => {
     let rafId: number;
     const chartH = height;
+
+    // 매 프레임 접으면 37개 차트 × 155 폴링 × 오브젝트 수를 60번씩 돈다.
+    // 원본이나 접는 조건이 바뀔 때만 다시 접는다. 색 기준이 바뀌면(themeEpoch) 이 루프가
+    // 새로 서므로 캐시도 새로 시작한다.
+    let cacheKey: readonly unknown[] = [];
+    let cached: DrawSeries[] = [];
+    const folded = (): DrawSeries[] => {
+      const key = [versionRef.current, foldRef.current, visibleRef.current, serviceOfRef.current];
+      if (key.length !== cacheKey.length || key.some((k, i) => k !== cacheKey[i])) {
+        cached = foldSeries(updatesRef.current, {
+          fold: foldRef.current,
+          agg: mode,
+          visible: visibleRef.current,
+          serviceOf: serviceOfRef.current,
+          nameOf: h => {
+            const objName = agentMap.get(h) ?? String(h);
+            return objName.split('/').pop() ?? objName;
+          },
+        });
+        cacheKey = key;
+      }
+      return cached;
+    };
 
     const render = () => {
       const canvas = canvasRef.current;
@@ -166,7 +159,7 @@ export const CounterChart = memo(function CounterChart({
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.offsetWidth;
       const h = chartH;
-      // 숨겨진 탭(App 의 Counter 탭)에서는 폭이 0 이다. 표본은 계속 쌓고 그리기만 쉰다.
+      // 숨겨진 탭(App 의 Counter 탭)에서는 폭이 0 이다. 원본은 계속 쌓고 그리기만 쉰다.
       if (w === 0) { rafId = requestAnimationFrame(render); return; }
 
       if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
@@ -179,12 +172,8 @@ export const CounterChart = memo(function CounterChart({
       ctx.fillStyle = CANVAS.bgSurface;
       ctx.fillRect(0, 0, w, h);
 
-      // 고른 서버만 그린다. 합계 선(TOTAL_HASH)은 고르기와 무관하다.
-      const picked = visibleRef.current;
-      const all = Array.from(seriesRef.current.values());
-      const agents =
-        picked === null || totalOne ? all : all.filter(a => picked.has(a.objHash));
-      if (agents.length === 0) {
+      const lines = folded();
+      if (lines.length === 0) {
         // "데이터 없음"만 띄우면 고장인지 트래픽이 없는 건지 알 수 없다.
         const st = deriveStreamStatus({
           connected: streamingRef.current,
@@ -199,34 +188,25 @@ export const CounterChart = memo(function CounterChart({
         return;
       }
 
-      drawLines(ctx, agents, w, h, a => (a.objHash === TOTAL_HASH ? PALETTE[0] : getAgentColor(a.objHash)));
+      drawLines(ctx, lines, w, h);
 
-      // 범례. 합계 모드에는 선이 하나뿐이라 이름 대신 접는 방식을 적는다 —
+      // 범례. 합계 선에는 이름 대신 접는 방식을 적는다 —
       // 여기서 "합계인가 평균인가"를 말해 주지 않으면 두 배로 읽거나 절반으로 읽는다.
-      if (totalOne) {
-        ctx.fillStyle = PALETTE[0];
-        ctx.fillRect(8, h - 16, 10, 2);
+      lines.forEach((s, i) => {
+        ctx.fillStyle = s.color ?? PALETTE[0];
+        ctx.fillRect(8 + i * 90, h - 16, 10, 2);
         ctx.fillStyle = CANVAS.textMuted;
         ctx.font = '9px monospace';
-        ctx.fillText(mode === 'avg' ? t('평균') : t('합계'), 22, h - 8);
-      } else {
-        agents.forEach((a, i) => {
-          ctx.fillStyle = getAgentColor(a.objHash);
-          ctx.fillRect(8 + i * 90, h - 16, 10, 2);
-          ctx.fillStyle = CANVAS.textMuted;
-          ctx.font = '9px monospace';
-          const objName = agentMap.get(a.objHash) ?? String(a.objHash);
-          const agentLabel = objName.split('/').pop() ?? objName;
-          ctx.fillText(agentLabel.substring(0, 10), 22 + i * 90, h - 8);
-        });
-      }
+        const label = s.color === null ? (mode === 'avg' ? t('평균') : t('합계')) : s.label;
+        ctx.fillText(label.substring(0, 10), 22 + i * 90, h - 8);
+      });
 
       rafId = requestAnimationFrame(render);
     };
 
     rafId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(rafId);
-  }, [height, agentMap, totalOne, mode, themeEpoch]);
+  }, [height, agentMap, mode, themeEpoch]);
 
   // javaee / host 어느 Family 든 여기서 찾는다.
   const meta = counterMeta(counter);
@@ -234,12 +214,11 @@ export const CounterChart = memo(function CounterChart({
    * 머리글에 적는 수.
    *
    * **고른 수를 적는다.** 받은 수를 적으면 «3개 에이전트» 라고 써 놓고 선은 하나만
-   * 그려져 고장으로 읽힌다. 합계 모드는 접은 선 하나라 받은 수가 그대로 뜻이 있다.
+   * 그려져 고장으로 읽힌다. 접은 선이어도 몇 대를 접었는지는 남긴다 —
+   * "TPS 23" 만 있으면 한 대가 23인지 두 대가 각각 11.5인지 알 수 없다.
    */
-  const shownCount =
-    totalOne || visible === null
-      ? agentCount
-      : Array.from(seriesRef.current.keys()).filter(h => visible.has(h)).length;
+  const shownCount = seenCount > 0 ? shownObjectCount(updatesRef.current, visible) : 0;
+  const how = mode === 'avg' ? t('평균') : t('합계');
 
   return (
     <div className="overflow-hidden rounded border border-line bg-surface">
@@ -249,11 +228,13 @@ export const CounterChart = memo(function CounterChart({
       <div className="truncate px-2 pt-1 text-micro text-fg-muted" title={meta.disp}>
         {meta.disp} ({meta.unit}){' '}
         {shownCount > 0
-          ? totalOne
-            ? `· ${mode === 'avg' ? t('평균') : t('합계')} · ${agentCount}${t('개 에이전트')}`
-            : // 구역이 합계인데 이 카운터만 개별이면 **말해 줘야 한다.**
-              // 조용히 두면 옆 차트와 같은 자로 읽는다.
-              `· ${shownCount}${t('개 에이전트')}${total && !capable ? ` · ${t('합계 없음')}` : ''}`
+          ? drawn === 'total'
+            ? `· ${how} · ${shownCount}${t('개 에이전트')}`
+            : drawn === 'service'
+              ? `· ${t('서비스별')} ${how} · ${shownCount}${t('개 에이전트')}`
+              : // 구역이 접기인데 이 카운터만 개별이면 **말해 줘야 한다.**
+                // 조용히 두면 옆 차트와 같은 자로 읽는다.
+                `· ${shownCount}${t('개 에이전트')}${fold !== 'each' && !capable ? ` · ${t('합계 없음')}` : ''}`
           : ''}
       </div>
       <canvas
@@ -266,10 +247,9 @@ export const CounterChart = memo(function CounterChart({
 
 function drawLines(
   ctx: CanvasRenderingContext2D,
-  agents: AgentSamples[],
+  agents: DrawSeries[],
   w: number,
   h: number,
-  colorOf: (a: AgentSamples) => string,
 ) {
   const usable = h - 20;
   const allValues = agents.flatMap(a => a.values);
@@ -298,7 +278,7 @@ function drawLines(
     const data = agent.values;
     if (data.length < 2) return;
 
-    const color = colorOf(agent);
+    const color = agent.color ?? PALETTE[0];
     ctx.beginPath();
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;

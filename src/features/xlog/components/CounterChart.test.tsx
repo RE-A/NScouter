@@ -82,7 +82,7 @@ describe('CounterChart', () => {
 // 말해 주지 않으면 CPU 두 대의 50%를 100%로 읽는 사고가 난다.
 describe('CounterChart 합계 모드', () => {
   it('양을 세는 카운터는 합계라고 밝힌다', async () => {
-    render(<CounterChart isStreaming counter="TPS" agentMap={AGENTS} total />);
+    render(<CounterChart isStreaming counter="TPS" agentMap={AGENTS} fold="total" />);
     await emitCounter(update('TPS', [[1, 15.4], [2, 7.8]]));
     expect(screen.getByText(/합계/)).toBeDefined();
   });
@@ -90,14 +90,14 @@ describe('CounterChart 합계 모드', () => {
   it('% 카운터는 평균이라고 밝힌다', async () => {
     // ErrorRate 는 counters.xml 이 합계를 허용하면서 단위가 % 다 —
     // getTotalMode 의 avg 갈래가 바로 이 경우를 위해 있다.
-    render(<CounterChart isStreaming counter="ErrorRate" agentMap={AGENTS} total />);
+    render(<CounterChart isStreaming counter="ErrorRate" agentMap={AGENTS} fold="total" />);
     await emitCounter(update('ErrorRate', [[1, 4], [2, 6]]));
     expect(screen.getByText(/평균/)).toBeDefined();
   });
 
   it('counters.xml 이 막은 카운터는 합계를 요청받아도 개별로 그리고 그렇다고 말한다', async () => {
     // Cpu 는 total="false" 다. 조용히 개별로 그리면 옆 차트와 같은 자로 읽힌다.
-    render(<CounterChart isStreaming counter="Cpu" agentMap={AGENTS} total />);
+    render(<CounterChart isStreaming counter="Cpu" agentMap={AGENTS} fold="total" />);
     await emitCounter(update('Cpu', [[1, 40], [2, 60]]));
     expect(screen.getByText(/합계 없음/)).toBeDefined();
     expect(screen.queryByText(/평균 ·/)).toBeNull();
@@ -105,7 +105,7 @@ describe('CounterChart 합계 모드', () => {
 
   it('접어도 몇 대를 접었는지는 남긴다', async () => {
     // "TPS 23" 만 있으면 한 대가 23인지 두 대가 각각 11.5인지 알 수 없다.
-    render(<CounterChart isStreaming counter="TPS" agentMap={AGENTS} total />);
+    render(<CounterChart isStreaming counter="TPS" agentMap={AGENTS} fold="total" />);
     await emitCounter(update('TPS', [[1, 15.4], [2, 7.8]]));
     expect(screen.getByText(/2개 에이전트/)).toBeDefined();
   });
@@ -115,5 +115,43 @@ describe('CounterChart 합계 모드', () => {
     await emitCounter(update('ErrorRate', [[1, 4], [2, 6]]));
     expect(screen.queryByText(/평균/)).toBeNull();
     expect(screen.queryByText(/합계 없음/)).toBeNull();
+  });
+});
+
+// 접는 방식은 그릴 때 정한다 — 받은 원본을 들고 있으므로 바꿔도 이력이 남는다.
+describe('CounterChart 접기 전환', () => {
+  it('개별 → 합계로 바꿔도 쌓아 둔 것을 버리지 않는다', async () => {
+    const { rerender } = render(<CounterChart isStreaming counter="TPS" agentMap={AGENTS} />);
+    await emitCounter(update('TPS', [[1, 15.4], [2, 7.8]]));
+    rerender(<CounterChart isStreaming counter="TPS" agentMap={AGENTS} fold="total" />);
+    // 예전에는 바꾸는 순간 비우고 다음 폴링을 기다렸다 — 그동안 머리글이 비었다
+    expect(screen.getByText(/합계 · 2개 에이전트/)).toBeDefined();
+  });
+
+  it('서비스별은 서비스별이라고 밝히고 접은 대수를 남긴다', async () => {
+    render(
+      <CounterChart
+        isStreaming
+        counter="TPS"
+        agentMap={AGENTS}
+        fold="service"
+        serviceOf={h => (h === 1 ? 'shop' : null)}
+      />,
+    );
+    await emitCounter(update('TPS', [[1, 15.4], [2, 7.8]]));
+    expect(screen.getByText(/서비스별 합계 · 2개 에이전트/)).toBeDefined();
+  });
+
+  it('counters.xml 이 막은 카운터는 서비스별도 개별로 그리고 그렇다고 말한다', async () => {
+    render(<CounterChart isStreaming counter="Cpu" agentMap={AGENTS} fold="service" serviceOf={() => 'shop'} />);
+    await emitCounter(update('Cpu', [[1, 40], [2, 60]]));
+    expect(screen.getByText(/합계 없음/)).toBeDefined();
+    expect(screen.queryByText(/서비스별/)).toBeNull();
+  });
+
+  it('고른 것만 센다 — 접어도 안 고른 오브젝트는 대수에 안 들어간다', async () => {
+    render(<CounterChart isStreaming counter="TPS" agentMap={AGENTS} fold="total" visible={new Set([2])} />);
+    await emitCounter(update('TPS', [[1, 15.4], [2, 7.8]]));
+    expect(screen.getByText(/합계 · 1개 에이전트/)).toBeDefined();
   });
 });

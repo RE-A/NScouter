@@ -62,6 +62,17 @@ export function subscribeTheme(fn: (n: number) => void): () => void {
 }
 
 /**
+ * 테마는 그대로인데 **차트 색이 바뀌었다** — 다시 그리라고만 알린다.
+ *
+ * 서버 색의 기준을 바꿀 때 쓴다(`setAgentColorKey`). 테마와 같은 구독자에게 가므로
+ * 이 번호를 지켜보는 차트는 따로 손대지 않아도 다시 그린다.
+ */
+export function repaintCharts(): void {
+  epoch += 1;
+  for (const fn of listeners) fn(epoch);
+}
+
+/**
  * 테마를 건다.
  *
  * 기본 테마도 **속성을 적어 둔다** — 비워 두면 `:root[data-theme='dark']` 같은
