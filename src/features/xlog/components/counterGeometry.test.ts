@@ -9,7 +9,7 @@
 // 게다가 선이 왼쪽에서 오른쪽으로 자란다 — 모니터링 차트는 최신이 오른쪽이다.
 
 import { describe, it, expect } from 'vitest';
-import { sampleX, totalLineVisible } from './counterGeometry';
+import { axisLabel, minuteTicks, sampleX, totalLineVisible } from './counterGeometry';
 
 const W = 1000;
 const CAP = 155;
@@ -70,5 +70,36 @@ describe('totalLineVisible', () => {
 
   it('사용량이 0이어도 터지지 않는다', () => {
     expect(totalLineVisible(0, 100)).toBe(false);
+  });
+});
+
+describe('minuteTicks', () => {
+  const M = 60_000;
+  it('분이 바뀌는 표본 자리에 눈금을 둔다', () => {
+    // 0:58, 1:00, 1:02 … 2:00 — 1분·2분 두 경계
+    const times = [58, 60, 62, 118, 120].map(s => s * 1000);
+    const ticks = minuteTicks(times, 100, 5);
+    expect(ticks.map(t => t.at)).toEqual([1 * M, 2 * M]);
+    expect(ticks[0].x).toBe(sampleX(1, 5, 100, 5));
+    expect(ticks[1].x).toBe(100); // 최신이 오른쪽 끝
+  });
+
+  it('한 분 안이면 눈금이 없다', () => {
+    expect(minuteTicks([1000, 3000, 5000], 100, 155)).toEqual([]);
+  });
+
+  it('표본이 하나 이하면 눈금이 없다', () => {
+    expect(minuteTicks([], 100, 155)).toEqual([]);
+    expect(minuteTicks([M], 100, 155)).toEqual([]);
+  });
+});
+
+describe('axisLabel', () => {
+  it('10 이상은 정수로', () => {
+    expect(axisLabel(57.4)).toBe('57');
+  });
+  it('작은 값은 소수 한 자리까지 — 0.5 를 1 로 올리지 않는다', () => {
+    expect(axisLabel(0.5)).toBe('0.5');
+    expect(axisLabel(2)).toBe('2');
   });
 });

@@ -449,8 +449,22 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                   넷을 합쳐 보여 주므로, 문제 난 한 대를 짚으려면 여기에 이름이 있어야 한다.
                   전체 경로로 적는다 — 보고서에 붙일 때 짧은 이름은 어느 환경인지를 안 말해 준다. */}
               <Attr label={t('서버')} value={agentMap.get(xlog.objHash) ?? `[0x${xlog.objHash.toString(16)}]`} />
-              <Attr label="CPU" value={`${xlog.cpu}ms`} />
-              <Attr label="Heap" value={`${xlog.allocKBytes}KB`} />
+              {/* 0 의 뜻이 둘이 다르다 (verified-facts F-64).
+                  CPU 는 늘 재는데 ms 로 버림이라 0 은 «1ms 미만» 이다.
+                  Heap 은 에이전트가 기본으로 안 재서 0 이면 «안 쟀다» 다 — 0KB 로 적으면 없던 사실이 생긴다. */}
+              <Attr
+                label="CPU"
+                value={xlog.cpu > 0 ? `${xlog.cpu}ms` : t('1ms 미만')}
+              />
+              <Attr
+                label="Heap"
+                value={xlog.allocKBytes > 0 ? `${xlog.allocKBytes}KB` : t('수집 안 함')}
+                title={
+                  xlog.allocKBytes > 0
+                    ? undefined
+                    : t('에이전트의 profile_thread_memory_usage_enabled 가 꺼져 있으면(기본) 늘 0 이 옵니다')
+                }
+              />
               <Attr label="IP" value={xlog.ipAddr || '—'} mono />
               <Attr label="TxID" value={xlog.txid} mono />
               {xlog.gxid && xlog.gxid !== '0' && (
@@ -547,9 +561,9 @@ function Toggle({
   );
 }
 
-function Attr({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Attr({ label, value, mono, title }: { label: string; value: string; mono?: boolean; title?: string }) {
   return (
-    <div className="flex gap-3 py-0.5">
+    <div className="flex gap-3 py-0.5" title={title}>
       <dt className="w-14 shrink-0 text-small text-fg-faint">{label}</dt>
       <dd
         className={`min-w-0 flex-1 break-all text-small text-fg-muted ${mono ? 'tnum font-mono text-micro' : ''}`}

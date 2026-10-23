@@ -7,10 +7,11 @@ import { counterMeta, isTotalCapable, MAX_COUNTER_SAMPLES } from '../types/count
 import { onCounterData } from '../api/scouterApi';
 import { subscribe } from '../api/subscribe';
 import { deriveStreamStatus } from '../utils/streamStatus';
-import { sampleX, totalLineVisible } from './counterGeometry';
+import { axisLabel, minuteTicks, sampleX, totalLineVisible } from './counterGeometry';
 import { totalMode } from './counterTotal';
 import { foldSeries, legendLabel, shownObjectCount, type DrawSeries, type FoldMode } from './counterSeries';
 import { CANVAS, SERIES } from '../../../styles/tokens';
+import { formatTime } from '../utils/colorPalette';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
 
@@ -261,6 +262,27 @@ function drawLines(
   const withTotal = totalLineVisible(maxUsed, total);
   const maxVal = withTotal && total !== null ? total : maxUsed;
 
+  // 눈금 — 최대와 0 만 있으면 선이 «어디쯤» 인지와 «언제» 인지를 못 읽는다.
+  // 선보다 먼저 흐리게 깔아 선을 가리지 않는다.
+  ctx.save();
+  ctx.setLineDash([2, 4]);
+  ctx.strokeStyle = CANVAS.textDim;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 1;
+  const midY = usable / 2 + 4;
+  ctx.beginPath();
+  ctx.moveTo(0, midY);
+  ctx.lineTo(w, midY);
+  // 분 경계 — 가장 긴 선의 시각을 쓴다 (선과 같은 자)
+  const longest = agents.reduce((a, b) => (b.times.length > a.times.length ? b : a));
+  const ticks = minuteTicks(longest.times, w, MAX_COUNTER_SAMPLES);
+  for (const tk of ticks) {
+    ctx.moveTo(tk.x, 4);
+    ctx.lineTo(tk.x, usable + 4);
+  }
+  ctx.stroke();
+  ctx.restore();
+
   if (withTotal && total !== null) {
     const y = usable - (total / maxVal) * usable + 4;
     ctx.save();
@@ -296,7 +318,21 @@ function drawLines(
   ctx.fillStyle = CANVAS.textDim;
   ctx.font = '9px monospace';
   ctx.fillText(String(Math.round(maxVal)), 2, 12);
+  ctx.fillText(axisLabel(maxVal / 2), 2, midY - 2);
   ctx.fillText('0', 2, usable + 4);
+
+  // 분 눈금의 시각. 왼쪽 위 최댓값·오른쪽 위 상한 글자와 겹치는 자리는 건너뛴다
+  for (const tk of ticks) {
+    const label = formatTime(tk.at).slice(0, 5);
+    const lw = ctx.measureText(label).width;
+    const lx = tk.x - lw / 2;
+    if (lx < 28 || lx + lw > w - (total !== null && !withTotal ? 90 : 2)) continue;
+    // 위쪽에 붙은 선(Heap Total 처럼 상한 근처)과 겹치면 글자가 안 읽힌다 — 바탕을 깐다
+    ctx.fillStyle = CANVAS.bgSurface;
+    ctx.fillRect(lx - 2, 3, lw + 4, 11);
+    ctx.fillStyle = CANVAS.textDim;
+    ctx.fillText(label, lx, 12);
+  }
 
   // 기준선을 못 그린 쌍 카운터는 상한을 숫자로라도 알려준다 —
   // "열린 것 36" 만으로는 여유가 있는지 없는지 알 수 없다.

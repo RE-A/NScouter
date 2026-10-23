@@ -182,3 +182,24 @@ describe('XLogDetailPanel — 찾으면 그 자리로 데려간다', () => {
     expect(screen.getByText('1/2')).toBeTruthy();
   });
 });
+
+// 0 의 뜻이 CPU 와 Heap 에서 다르다 (verified-facts F-64)
+describe('XLogDetailPanel — CPU · Heap 의 0', () => {
+  it('CPU 0 은 1ms 미만이다 — 늘 재지만 ms 로 버린다', () => {
+    panel();
+    expect(screen.getByText('1ms 미만')).toBeTruthy();
+    expect(screen.queryByText('0ms')).toBeNull();
+  });
+
+  it('Heap 0 은 수집 안 함이다 — 0KB 로 적으면 없던 사실이 생긴다', () => {
+    panel();
+    expect(screen.getByText('수집 안 함')).toBeTruthy();
+    expect(screen.queryByText('0KB')).toBeNull();
+  });
+
+  it('값이 있으면 그대로 적는다', () => {
+    panel({ xlog: { ...XLOG, cpu: 12, allocKBytes: 340 } });
+    expect(screen.getByText('12ms')).toBeTruthy();
+    expect(screen.getByText('340KB')).toBeTruthy();
+  });
+});

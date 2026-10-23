@@ -276,11 +276,13 @@ export function ConnectionDialog({
   );
 }
 
+// 위아래 여백은 두지 않는다 — 헤더가 이미 py-1.5 를 둔다. 여기에 또 주면 접속 전 헤더만
+// 54px 가 되고, 붙는 순간 46px 로 줄어 화면 전체가 위로 튄다.
 const panelStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-  padding: '6px 12px',
+  padding: '0 12px',
   background: T.bgOverlay,
   flexWrap: 'wrap',
 };

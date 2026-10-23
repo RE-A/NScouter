@@ -1851,3 +1851,15 @@ objHash 유무:
 | O-2 | `mock_server.rs`가 오브젝트 목록을 ObjectPack이 아닌 MapPack으로 응답. F-4 회귀를 잡지 못함 | **수정됨.** PackType 80 실제 필드 순서로 응답 |
 | O-3 | Collector `net_http_server_enabled=false`가 실제로는 Jetty를 막지 못함 | 영향 없음 (호스트 미퍼블리시) |
 | O-4 | 알람 규칙(`ErrorRate.alert`) 컴파일 실패 (F-16) | 미해결. 임계치 알람은 못 만든다. 생명주기 알람은 정상이라 프로토콜 검증은 가능했다 |
+### F-64. XLog 의 `cpu` 는 늘 재고, `kbytes` 는 **기본으로 안 잰다**
+
+에이전트 2.21.3 바이트코드(`TraceMain` 의 XLogPack 채우기, `SysJMX`)로 확인했다.
+
+| 필드 | 재는 법 | 0 의 뜻 |
+|---|---|---|
+| `cpu` | `SysJMX.getCurrentThreadCPU()` — 설정과 무관하게 늘 부른다. ns 를 `/1_000_000` 으로 **버림** | 1ms 미만 |
+| `kbytes` | `SysJMX.getCurrentThreadAllocBytes(profile_thread_memory_usage_enabled)` — 인자가 false 면 **곧장 0 을 돌려준다** | 안 쟀다 (기본값 false) |
+
+- `profile_thread_memory_usage_enabled`, `profile_thread_cputime_enabled` 둘 다 기본 false 다(`Configure` 생성자·`apply` 의 `getBoolean(…, false)`).
+  뒤의 것은 **프로파일 스텝의** cputime 용이라 XLog 의 `cpu` 와는 무관하다.
+- 그래서 화면은 CPU 0 을 «1ms 미만», Heap 0 을 «수집 안 함» 으로 적는다 (`XLogDetailPanel`).
