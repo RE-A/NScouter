@@ -549,6 +549,9 @@ export default function App() {
     filter,
     xlogMode,
     detail.tabs,
+    // **탭 전부를 지켜본다.** 지금 탭의 조건만 보면 이름 바꾸기·화면 분할·옆 판의 조건이
+    // 다른 무엇이 바뀔 때까지 저장되지 않아, 껐다 켜면 사라졌다
+    xlogTabs,
   ]);
 
   useEffect(() => {
@@ -1241,6 +1244,19 @@ export default function App() {
    * 스트림이 죽은 채로 있으면 화면은 조용히 비어 가는데, 그때 누를 것이 없었다.
    */
   const streamReloadRef = useRef(refreshSignal);
+  /**
+   * 스트림으로 받을 서버 — 지금 탭과 **화면에 띄운 실시간 판 전부**의 것을 합친다.
+   *
+   * 스트림은 하나라 지금 탭 것만 받으면, 나눠 띄운 옆 판은 지금 탭과 겹치는 서버의 점만 받았다.
+   * 판마다 제 서버만 그리므로(`filter.objHashSet`) 합쳐 받아도 섞이지 않는다.
+   */
+  const liveVisible = xlogTabs.tabs.filter(t => xlogTabs.panes.includes(t.key) && t.mode === 'live');
+  const streamKey = (() => {
+    const set = new Set<number>(filter.objHashSet);
+    for (const tab of liveVisible) for (const h of tab.filter.objHashSet) set.add(h);
+    return [...set].sort((a, b) => a - b).join(',');
+  })();
+  const anyLivePane = liveVisible.length > 0;
   useEffect(() => {
     // **과거를 보는 동안에는 받지 않는다.** 과거 구간을 조회하는 중에도 실시간 폴링이
     // 500ms 마다 돌고 있었다 — 보지도 않을 것을 받느라 콜렉터·네트워크를 같이 쓰고,
@@ -1248,7 +1264,8 @@ export default function App() {
     //
     // **Active 탭은 예외다.** 거기 트래픽 차트가 이 스트림을 쓰므로, XLog 탭을
     // 보면서 과거 모드일 때만 멈춘다.
-    const viewingPast = activeTab === 'xlog' && xlogMode === 'past';
+    // 판을 나눠 두었으면 **띄운 판이 전부 과거일 때만** 멈춘다
+    const viewingPast = activeTab === 'xlog' && !anyLivePane;
     if (!isConnected || viewingPast) {
       if (streamHashesRef.current !== '') {
         streamHashesRef.current = '';
@@ -1267,7 +1284,7 @@ export default function App() {
     }
     // **고른 것이 곧 받는 것이다.** 예전에는 빈 선택을 «전부» 로 읽어 접속하자마자
     // 100대의 XLog 를 받았다 (agentFilter.ts 머리말).
-    const hashes = [...filter.objHashSet];
+    const hashes = streamKey === '' ? [] : streamKey.split(',').map(Number);
 
     if (hashes.length === 0) {
       // 고르기를 다 풀었으면 받던 것도 멈춘다. 화면은 비어 있는데 트래픽만 도는 상태가
@@ -1279,11 +1296,10 @@ export default function App() {
       return;
     }
 
-    const key = hashes.slice().sort((a, b) => a - b).join(',');
-    if (key === streamHashesRef.current) return;
-    streamHashesRef.current = key;
+    if (streamKey === streamHashesRef.current) return;
+    streamHashesRef.current = streamKey;
     startXLogStream(hashes).catch(() => {});
-  }, [isConnected, filter.objHashSet, connectionEpoch, activeTab, xlogMode, refreshSignal]);
+  }, [isConnected, streamKey, anyLivePane, connectionEpoch, activeTab, refreshSignal]);
 
   /**
    * 과거 조회 대상.
