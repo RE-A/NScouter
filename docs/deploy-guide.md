@@ -239,6 +239,9 @@ git tag 0.6.1 origin/main
 git push origin 0.6.1
 ```
 
+태그를 푸시할 수 없으면(브랜치 하나에만 쓰게 묶인 세션 등) Actions 화면에서 `Release` 를 **직접 돌린다**
+(`workflow_dispatch`, main 에서). 그때는 `package.json` 의 버전으로 태그를 그 커밋에 만든다.
+
 - 태그는 숫자만(`0.6.1`), 릴리스 이름은 `v0.6.1`, **프리릴리스**로 만든다 — 지금까지의 릴리스와 같은 모양
 - 붙는 것은 설치본이 아니라 단일 실행 파일 `nscouter.exe` 하나다 (`tauri build --no-bundle`).
   WebView2 는 윈도우 10/11 에 기본으로 있다
