@@ -229,56 +229,22 @@ sudo apt-get install -y \
 
 ---
 
-## 7. CI/CD (GitHub Actions 예시)
+## 7. 릴리스 (GitHub Actions)
 
-```yaml
-# .github/workflows/release.yml
-name: Release
+`.github/workflows/release.yml` 이 **버전 태그를 푸시하면** 윈도우 exe 를 빌드해 릴리스에 붙인다.
 
-on:
-  push:
-    tags:
-      - 'v*'
-
-jobs:
-  build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build
-        run: npm run tauri build
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.os }}-bundle
-          path: src-tauri/target/release/bundle/
+```bash
+# 6장대로 네 파일의 버전을 올려 main 에 넣은 뒤
+git tag 0.6.1 origin/main
+git push origin 0.6.1
 ```
+
+- 태그는 숫자만(`0.6.1`), 릴리스 이름은 `v0.6.1`, **프리릴리스**로 만든다 — 지금까지의 릴리스와 같은 모양
+- 붙는 것은 설치본이 아니라 단일 실행 파일 `nscouter.exe` 하나다 (`tauri build --no-bundle`).
+  WebView2 는 윈도우 10/11 에 기본으로 있다
+- 태그와 `package.json` · `tauri.conf.json` · `Cargo.toml` 의 버전이 다르면 **빌드 전에 멈춘다**
+- 리눅스에서 윈도우용으로 교차 빌드(`cargo-xwin`)도 되지만 MSVC 런타임을 마이크로소프트 서버에서 받아야 한다.
+  그 서버가 막힌 곳(클라우드 세션 등)에서는 이 워크플로를 쓴다
 
 ---
 
