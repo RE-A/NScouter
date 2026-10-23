@@ -73,9 +73,20 @@ pub fn run() {
         // 메인 창을 닫으면 앱을 끝낸다 — 떼어 낸 XLog 창(`detached-*`)만 남으면
         // 접속·저장·스트림을 맡은 쪽이 없는 창이 떠 있게 된다.
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
-                tauri::Manager::app_handle(window).exit(0);
+            if !matches!(event, tauri::WindowEvent::Destroyed) {
+                return;
             }
+            let app = tauri::Manager::app_handle(window).clone();
+            if window.label() == "main" {
+                app.exit(0);
+                return;
+            }
+            // 떼어 낸 XLog 창이 닫혔다 — 그 창이 받던 오브젝트를 스트림에서 뺀다
+            let label = window.label().to_string();
+            tauri::async_runtime::spawn(async move {
+                let state = tauri::Manager::state::<AppState>(&app);
+                commands::forget_xlog_window(&app, &state, &label).await;
+            });
         })
         .manage(AppState::new_with_config(config, config_path))
         .invoke_handler(tauri::generate_handler![
@@ -142,6 +153,7 @@ pub fn run() {
             get_export_dir,
             search_xlog_list,
             get_search_max,
+            get_connection_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

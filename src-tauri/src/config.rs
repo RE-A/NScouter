@@ -83,6 +83,9 @@ pub struct AppConfig {
     /// XLog 화면 분할 — 어느 탭들을 나란히 띄웠나. 탭은 `xlog_tabs` 의 순번으로 적는다
     #[serde(default)]
     pub xlog_split: XLogSplitPrefs,
+    /// 떼어 낸 XLog 창들. 켤 때 같은 자리에 다시 연다
+    #[serde(default)]
+    pub xlog_windows: Vec<XLogWindowPrefs>,
     /// 어느 Task 가 어느 논리 서비스인가를 정하는 규칙.
     ///
     /// 사이트마다 이름 짃는 법이 다르다 — ECS 가 아닐 수도 있고
@@ -247,6 +250,21 @@ impl Default for GroupRulePrefs {
     }
 }
 
+/// 떼어 낸 XLog 창 하나 — 그 창의 탭·분할과 자리. 화면의 `detached/registry.ts` 와 짝이다.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XLogWindowPrefs {
+    /// 창 이름 (`xlogwin-N`)
+    pub label: String,
+    pub tabs: Vec<XLogTabPrefs>,
+    pub split: XLogSplitPrefs,
+    /// 창 자리·크기 (논리 좌표). 0 이면 모른다 — 기본 자리에 연다
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// XLog 화면 분할. 화면의 `XLogTabsState.panes/dir/ratio` 와 짝이다.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -406,6 +424,7 @@ impl Default for AppConfig {
             xlog_filter: XLogFilterPrefs::default(),
             xlog_tabs: Vec::new(),
             xlog_split: XLogSplitPrefs::default(),
+            xlog_windows: Vec::new(),
             group_rule: GroupRulePrefs::default(),
             auto_remove_inactive_min: 0,
             // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)

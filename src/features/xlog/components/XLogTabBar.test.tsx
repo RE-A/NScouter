@@ -18,9 +18,7 @@ function bar() {
       tabs={s.tabs}
       activeKey={s.activeKey}
       panes={s.panes}
-      detached={s.detached}
       onDetach={vi.fn()}
-      onAttach={vi.fn()}
       onActivate={vi.fn()}
       onClose={vi.fn()}
       onAdd={vi.fn()}

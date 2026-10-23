@@ -1,16 +1,15 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { DetachedXLog } from "./features/xlog/detached/DetachedXLog";
-import { detachedKeyFrom } from "./features/xlog/detached/wire";
+import { windowLabelFrom } from "./features/xlog/detached/protocol";
 // 디자인 토큰 + Tailwind. 이걸 빼면 var(--x) 와 유틸 클래스가 전부 무효가 된다.
 import "./styles/index.css";
 
-// 떼어 낸 XLog 창이면 그 탭 하나만 그린다. 메인 창의 앱을 또 띄우면 접속·저장을 두 벌로 하게 된다.
-const detachedKey = detachedKeyFrom(window.location.search);
+// 떼어 낸 XLog 창이면 같은 앱을 **XLog 화면만** 띄운다 (`detached/protocol.ts`).
+const windowLabel = windowLabelFrom(window.location.search);
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {detachedKey !== null ? <DetachedXLog tabKey={detachedKey} /> : <App />}
+    <App windowLabel={windowLabel ?? undefined} />
   </React.StrictMode>,
 );
