@@ -94,6 +94,7 @@ import {
   activate as activateXLogTab,
   initialTabs,
   patchActive as patchActiveTab,
+  renameTab as renameXLogTab,
   setSelection as setTabSelection,
   type XLogTabsState,
 } from './features/xlog/hooks/xlogTabs';
@@ -761,6 +762,9 @@ export default function App() {
   const handleXLogTabClose = useCallback((key: string) => {
     setXLogTabs(s => closeXLogTab(s, key));
     setSelectedXLogs([]);
+  }, []);
+  const handleXLogTabRename = useCallback((key: string, title: string) => {
+    setXLogTabs(s => renameXLogTab(s, key, title));
   }, []);
 
   const removeServer = useCallback(
@@ -1628,8 +1632,12 @@ export default function App() {
             onActivate={handleXLogTabActivate}
             onClose={handleXLogTabClose}
             onAdd={handleXLogTabAdd}
+            onRename={handleXLogTabRename}
           />
+          {/* 탭마다 따로 세운다 — 툴바가 쥔 입력 중인 과거 구간이 탭을 옮겨도 남아,
+              다른 탭의 날짜가 칸에 떠 있었다 */}
           <XLogToolbar
+            key={xlogTabs.activeKey}
             config={config}
             filter={filter}
             onConfigChange={handleConfigChange}

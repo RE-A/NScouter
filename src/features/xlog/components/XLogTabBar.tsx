@@ -6,9 +6,12 @@
 //
 // 탭이 하나뿐이면 **줄 자체를 그리지 않는다.** 고를 것이 없는 줄은
 // 자리만 먹고, 처음 쓰는 사람에게는 못 보던 구조가 하나 더 생긴 셈이 된다.
+//
+// 이름은 **두 번 눌러 고친다** (브라우저·편집기 탭과 같은 손버릇). Enter 로 정하고
+// Esc 로 물린다. 비우고 정하면 조건에서 만든 이름으로 돌아간다.
 
-import { memo } from 'react';
-import { MAX_XLOG_TABS, tabTitle, type XLogTab } from '../hooks/xlogTabs';
+import { memo, useRef, useState } from 'react';
+import { MAX_XLOG_TABS, tabLabels, type XLogTab } from '../hooks/xlogTabs';
 import { t } from '../../../i18n';
 
 interface XLogTabBarProps {
@@ -17,6 +20,8 @@ interface XLogTabBarProps {
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
   onAdd: () => void;
+  /** 이름을 바꾼다. 빈 글자면 붙인 이름을 지운다 */
+  onRename: (key: string, title: string) => void;
 }
 
 export const XLogTabBar = memo(function XLogTabBar({
@@ -25,8 +30,27 @@ export const XLogTabBar = memo(function XLogTabBar({
   onActivate,
   onClose,
   onAdd,
+  onRename,
 }: XLogTabBarProps) {
   const full = tabs.length >= MAX_XLOG_TABS;
+  /** 이름을 고치고 있는 탭과 입력 중인 글자 */
+  const [editing, setEditing] = useState<{ key: string; text: string } | null>(null);
+  /**
+   * 이번 고치기를 이미 끝냈나. Enter·Esc 뒤에 칸이 사라지면서 blur 가 한 번 더 올 수 있다 —
+   * 그걸 «정한다» 로 받으면 Esc 로 물린 이름이 들어간다.
+   */
+  const doneRef = useRef(false);
+  const startEdit = (tab: XLogTab) => {
+    doneRef.current = false;
+    setEditing({ key: tab.key, text: tab.title ?? '' });
+  };
+  const finishEdit = (save: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    if (save && editing) onRename(editing.key, editing.text);
+    setEditing(null);
+  };
+  const labels = tabLabels(tabs);
 
   // 탭이 하나면 「+」만 둔다 — 줄을 통째로 그리면 쓰지도 않는 구조가 늘 보인다.
   if (tabs.length <= 1) {
@@ -43,8 +67,10 @@ export const XLogTabBar = memo(function XLogTabBar({
       aria-label={t('XLog 탭 목록')}
       className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line bg-raised px-3 py-0.5"
     >
-      {tabs.map(tab => {
+      {tabs.map((tab, i) => {
         const on = tab.key === activeKey;
+        const label = labels[i];
+        const isEditing = editing?.key === tab.key;
         return (
           // **탭 안에 닫기 버튼이 있다.** 버튼 안에 버튼은 둘 수 없어서
           // 바깥은 div 로 두고 제목 쪽만 버튼으로 만든다.
@@ -54,22 +80,43 @@ export const XLogTabBar = memo(function XLogTabBar({
               on ? 'border-accent bg-hover' : 'border-transparent'
             }`}
           >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => onActivate(tab.key)}
-              title={tabTitle(tab)}
-              className={`max-w-[12rem] truncate px-2 py-0.5 text-micro ${
-                on ? 'text-fg' : 'text-fg-dim hover:text-fg-muted'
-              }`}
-            >
-              {tabTitle(tab)}
-            </button>
+            {isEditing ? (
+              <input
+                autoFocus
+                value={editing.text}
+                aria-label={t('탭 이름')}
+                // 비우면 조건에서 만든 이름으로 돌아간다 — 무엇으로 돌아가는지 보여 준다
+                placeholder={t('비우면 자동 이름')}
+                onChange={e => setEditing({ key: tab.key, text: e.target.value })}
+                onKeyDown={e => {
+                  // 한글 조합 중의 Enter 는 글자를 확정하는 키다 — 이름을 정하는 키로 치지 않는다
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === 'Enter') finishEdit(true);
+                  if (e.key === 'Escape') finishEdit(false);
+                }}
+                onBlur={() => finishEdit(true)}
+                onFocus={e => e.currentTarget.select()}
+                className="w-32 rounded border border-line-control bg-input px-1.5 py-0.5 text-micro text-fg"
+              />
+            ) : (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => onActivate(tab.key)}
+                onDoubleClick={() => startEdit(tab)}
+                title={`${label} — ${t('두 번 눌러 이름 바꾸기')}`}
+                className={`max-w-[12rem] truncate px-2 py-0.5 text-micro ${
+                  on ? 'text-fg' : 'text-fg-dim hover:text-fg-muted'
+                }`}
+              >
+                {label}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onClose(tab.key)}
-              aria-label={`${tabTitle(tab)} ${t('탭 닫기')}`}
+              aria-label={`${label} ${t('탭 닫기')}`}
               title={t('탭 닫기')}
               className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-micro text-fg-faint hover:bg-hover hover:text-fg"
             >

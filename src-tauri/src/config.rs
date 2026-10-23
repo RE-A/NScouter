@@ -248,6 +248,8 @@ impl Default for GroupRulePrefs {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct XLogTabPrefs {
+    /// 사람이 붙인 탭 이름. **비어 있으면 화면이 조건에서 만든다**
+    pub title: String,
     pub chart: XLogChartPrefs,
     pub filter: XLogFilterPrefs,
     /// 과거 구간(epoch ms). **둘 다 0 이면 구간을 정하지 않은 것**이다 —

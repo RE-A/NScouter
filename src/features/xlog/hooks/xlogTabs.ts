@@ -22,6 +22,8 @@ import type { PastRange, XLogMode } from '../types/timeRange';
 export interface XLogTab {
   /** 탭 식별자. 제목은 바뀌어도 이건 안 바뀐다 */
   key: string;
+  /** 사람이 붙인 이름. 비어 있으면 조건에서 만든다(`tabTitle`) */
+  title?: string;
   mode: XLogMode;
   pastRange: PastRange | null;
   config: XLogChartConfig;
@@ -66,12 +68,19 @@ export function activeTab(s: XLogTabsState): XLogTab {
 }
 
 /**
- * 탭 이름. **따로 붙이지 않고 조건에서 만든다.**
+ * 탭 이름.
  *
- * 이름을 사람이 짓게 하면 열 때마다 한 번 더 묻게 되고, 날짜를 바꾼 뒤에도
- * 옛 이름이 남아 거짓이 된다. 구간이 곧 이름이라 바꾸면 따라 바뀐다.
+ * **붙인 이름이 있으면 그것, 없으면 조건에서 만든다.** 열 때마다 이름을 묻지는 않는다 —
+ * 날짜만 바꿔 견줄 때는 구간이 곧 이름이라 따라 바뀌는 편이 맞다. 다만 실시간 탭 둘에
+ * 서버만 달리 고르면 둘 다 «실시간» 이라 가를 수 없어, 사람이 붙일 수 있게 둔다.
  */
 export function tabTitle(tab: XLogTab): string {
+  const named = tab.title?.trim() ?? '';
+  if (named !== '') return named;
+  return autoTitle(tab);
+}
+
+function autoTitle(tab: XLogTab): string {
   if (tab.mode === 'live') return '실시간';
   if (!tab.pastRange) return '과거';
 
@@ -88,6 +97,36 @@ export function tabTitle(tab: XLogTab): string {
 }
 
 /**
+ * 탭 줄에 적을 이름들 — `tabs` 와 같은 순서.
+ *
+ * **이름이 겹치면 순번을 붙인다.** 붙인 이름이 없는 실시간 탭 둘이 둘 다 «실시간» 이면
+ * 어느 쪽이 어느 쪽인지 눌러 보기 전에는 모른다. 첫 것은 그대로, 다음부터 «실시간 2» 다.
+ */
+export function tabLabels(tabs: readonly XLogTab[]): string[] {
+  const total = new Map<string, number>();
+  for (const tab of tabs) total.set(tabTitle(tab), (total.get(tabTitle(tab)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return tabs.map(tab => {
+    const name = tabTitle(tab);
+    if ((total.get(name) ?? 0) <= 1) return name;
+    const n = (seen.get(name) ?? 0) + 1;
+    seen.set(name, n);
+    return n === 1 ? name : `${name} ${n}`;
+  });
+}
+
+/**
+ * 탭 이름을 바꾼다. **빈 이름이면 붙인 이름을 지운다** — 조건에서 만든 이름으로 돌아간다.
+ */
+export function renameTab(s: XLogTabsState, key: string, title: string): XLogTabsState {
+  const name = title.trim();
+  return {
+    ...s,
+    tabs: s.tabs.map(t => (t.key === key ? { ...t, title: name === '' ? undefined : name } : t)),
+  };
+}
+
+/**
  * 탭을 하나 더 연다 — **지금 탭을 복제한다.**
  *
  * 빈 판으로 열면 서버와 조건을 처음부터 다시 골라야 한다. 비교하려고 여는 것이니
@@ -96,6 +135,7 @@ export function tabTitle(tab: XLogTab): string {
 export function addTab(s: XLogTabsState): XLogTabsState {
   if (s.tabs.length >= MAX_XLOG_TABS) return s;
   const src = activeTab(s);
+  // 붙인 이름은 **안 옮긴다** — 복제본까지 «결제» 면 둘을 못 가른다. 순번 붙은 자동 이름으로 연다
   const tab: XLogTab = {
     key: nextKey(),
     mode: src.mode,
