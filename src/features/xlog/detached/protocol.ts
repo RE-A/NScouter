@@ -9,8 +9,7 @@
 //   뗀 창 → 메인  hello    (떴다 — 띄울 탭을 달라)
 //   메인  → 뗀 창 init     (탭들 · 분할)
 //   뗀 창 → 메인  snapshot (탭·분할·창 자리가 바뀌었다 — 저장해 달라)
-//   뗀 창 → 메인  merge    (이 탭들을 메인 창으로 — `close` 면 창째로 합친다)
-//   뗀 창 → 메인  closed   (사용자가 창을 닫았다 — 적어 둔 것을 지운다)
+//   뗀 창 → 메인  merge    (이 탭들을 메인 창으로 — `close` 면 창째로 합친다. 창을 닫을 때도 이것이다)
 //   아무 창 → 메인 detach  (이 탭들로 새 창을 열어 달라)
 //
 // 스트림은 Rust 가 창마다 받고 싶은 오브젝트를 합쳐 연다(`restart_xlog_stream`).
@@ -21,7 +20,6 @@ export const EV_HELLO = 'xlogwin-hello';
 export const EV_INIT = 'xlogwin-init';
 export const EV_SNAPSHOT = 'xlogwin-snapshot';
 export const EV_MERGE = 'xlogwin-merge';
-export const EV_CLOSED = 'xlogwin-closed';
 export const EV_DETACH = 'xlogwin-detach';
 
 /** 뗀 창 주소의 질의 이름. 값은 창 이름이다 */

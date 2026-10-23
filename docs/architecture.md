@@ -373,7 +373,7 @@ XLogChartRenderer
  · 접속 · 서버 전환 · Counter/Active/…          · XLog 화면만: 서버 고르기 · 툴바 · 탭·분할 · 목록 · 상세
  · 창 목록(registry) → config.xlog_windows      · 파일에 안 쓴다 — snapshot 으로 메인 창에 알린다
  · 켤 때 같은 자리에 다시 연다
-        ◄── hello / snapshot / merge / closed / detach ──
+        ◄── hello / snapshot / merge(닫을 때도) / detach ──
         ─── init (탭·분할) ──►                    (detached/protocol.ts)
 
 Rust: start_xlog_stream(창별 오브젝트) → xlog_subs 합집합으로 스트림 하나 → "xlog-data" 를 모든 창에

@@ -112,7 +112,6 @@ import {
 import { XLogTabBar } from './features/xlog/components/XLogTabBar';
 import { XLogSplit } from './features/xlog/components/XLogSplit';
 import {
-  EV_CLOSED,
   EV_DETACH,
   EV_HELLO,
   EV_INIT,
@@ -601,8 +600,13 @@ export default function App({ windowLabel }: {
     const w = getCurrentWindow();
     const bump = () => setBoundsTick(n => n + 1);
     const subs = [w.onMoved(bump), w.onResized(bump)];
-    // 사용자가 닫았다 — 메인 창이 적어 둔 것을 지운다 (브라우저 창을 닫으면 그 탭들이 닫히듯)
-    const closing = w.onCloseRequested(() => { void emit(EV_CLOSED, { label: windowLabel }); });
+    // 사용자가 닫았다 — **탭을 메인 창으로 돌려보낸다.** 닫는다고 탭까지 지우면 공들여 맞춘 조건을
+    // 실수 한 번에 잃는다. 탭을 정말 없애려면 탭의 ✕ 로 닫는다.
+    // (합치기 버튼은 destroy 로 닫으므로 여기를 안 지난다 — 두 번 들이지 않는다)
+    const closing = w.onCloseRequested(() => {
+      const msg: MergeMessage = { label: windowLabel ?? '', tabs: xlogTabsToPrefs(xlogTabsRef.current), close: true };
+      return emit(EV_MERGE, msg);
+    });
     return () => {
       for (const u of [...subs, closing]) void u.then(f => f());
     };
@@ -980,7 +984,6 @@ export default function App({ windowLabel }: {
         setXLogTabs(s => importXLogTabs(s, toXLogTabs(tabs, undefined, undefined).tabs));
         if (close) setXLogWindows(r => removeWindow(r, label));
       }),
-      listen<{ label: string }>(EV_CLOSED, e => setXLogWindows(r => removeWindow(r, e.payload.label))),
       listen<DetachMessage>(EV_DETACH, e => openDetached(e.payload)),
     ];
     return () => { for (const u of subs) void u.then(f => f()); };
