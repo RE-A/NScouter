@@ -293,9 +293,10 @@ function StepRow({
         <span className={`tnum font-mono text-micro ${durationTone(elapsed)}`}>
           {timed ? `${elapsed.toLocaleString()}ms` : ''}
         </span>
-        <div className="relative h-[3px] w-full rounded-full bg-line">
+        {/* 3px 은 바탕과 거의 구별이 안 됐다. 0ms 스텝도 «언제» 는 있으므로 2px 자리표는 남긴다 */}
+        <div className="relative h-[5px] w-full rounded-full bg-line">
           <div
-            className={`absolute h-full rounded-full ${durationBar(elapsed)}`}
+            className={`absolute h-full min-w-[2px] rounded-full ${durationBar(elapsed)}`}
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
           />
         </div>

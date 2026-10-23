@@ -41,3 +41,34 @@ export function totalLineVisible(maxUsed: number, total: number | null): boolean
   if (total === null || !(total > 0) || !(maxUsed > 0)) return false;
   return total <= maxUsed * TOTAL_LINE_MAX_RATIO;
 }
+
+export interface TimeTick {
+  x: number;
+  /** 분 경계의 시각 (epoch ms) */
+  at: number;
+}
+
+/**
+ * 분이 바뀌는 자리의 눈금.
+ *
+ * x 는 표본 순번으로 정한다(`sampleX`) — 선이 그렇게 그려지므로 눈금도 같은 자를 써야
+ * 선 위의 자리와 맞는다. 폴링이 빠지면 칸이 시간보다 덜 가지만, 그때도 눈금은
+ * **그 표본이 실제로 받은 시각**을 가리킨다.
+ *
+ * @param times 오래된 것부터. 가장 긴 선의 것을 넘긴다
+ */
+export function minuteTicks(times: readonly number[], width: number, capacity: number): TimeTick[] {
+  const out: TimeTick[] = [];
+  for (let j = 1; j < times.length; j++) {
+    const prev = Math.floor(times[j - 1] / 60_000);
+    const cur = Math.floor(times[j] / 60_000);
+    if (cur !== prev) out.push({ x: sampleX(j, times.length, width, capacity), at: cur * 60_000 });
+  }
+  return out;
+}
+
+/** 축 숫자. 작은 값은 소수 한 자리까지 — 최대 1 인 차트의 가운데가 «1» 로 반올림되면 자가 틀린다 */
+export function axisLabel(v: number): string {
+  if (Math.abs(v) >= 10) return String(Math.round(v));
+  return String(Math.round(v * 10) / 10);
+}

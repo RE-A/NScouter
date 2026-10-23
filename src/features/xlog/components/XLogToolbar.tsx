@@ -332,7 +332,8 @@ export function XLogToolbar({
         <TextCond
           label="IP"
           value={firstRule(filter, 'ip')}
-          placeholder="10.89."
+          // 예시 IP 를 깔아 두면 이미 들어 있는 값으로 읽힌다 — 무엇을 넣는 칸인지만 적는다
+          placeholder={t('IP 일부')}
           onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'ip', v) })}
         />
 

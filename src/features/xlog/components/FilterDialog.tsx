@@ -30,7 +30,7 @@ interface FilterDialogProps {
 
 const FIELDS: { field: FilterField; label: string; placeholder: string }[] = [
   { field: 'service', label: '서비스', placeholder: 'URL 일부' },
-  { field: 'ip', label: 'IP', placeholder: '10.89.' },
+  { field: 'ip', label: 'IP', placeholder: 'IP 일부' },
 ];
 
 export const FilterDialog = memo(function FilterDialog({
@@ -136,7 +136,7 @@ export const FilterDialog = memo(function FilterDialog({
                         autoFocus={focusIdx === idx}
                         value={r.text}
                         spellCheck={false}
-                        placeholder={placeholder}
+                        placeholder={t(placeholder)}
                         onChange={e => update(idx, { text: e.target.value })}
                         className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint"
                       />

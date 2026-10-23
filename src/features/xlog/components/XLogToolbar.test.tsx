@@ -83,7 +83,7 @@ describe('조건 접기', () => {
 
   it('걸려 있는 조건이 있으면 펼쳐진 채로 시작한다', () => {
     open({ patterns: [{ field: 'ip', text: '10.89.', exclude: false }] });
-    expect(screen.getByPlaceholderText('10.89.')).toBeDefined();
+    expect(screen.getByPlaceholderText('IP 일부')).toBeDefined();
   });
 
   it('접힌 조건 수를 버튼에 적는다 — 숨은 거름을 모르면 «왜 이만큼만» 이 된다', () => {
