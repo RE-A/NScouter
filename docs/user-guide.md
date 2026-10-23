@@ -693,7 +693,7 @@ ECS 처럼 Task 가 갈리는 곳에서는 재배포 한 번에 내려간 Task �
 |---|---|
 | `Esc` | 보고 있는 상세 닫기 |
 | `Ctrl+F` | 프로파일 검색으로 이동 (XLog 탭으로 데려간다) |
-| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | XLog / Counter / Alert 탭 |
+| `Ctrl+1` ~ `Ctrl+5` | 탭이 놓인 순서대로 XLog / Active / Visualize / Counter / Alert |
 | `Ctrl+W` | 상세 탭 닫기 |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 다음 / 이전 상세 탭 |
 | `Ctrl+,` | 설정 열기 |

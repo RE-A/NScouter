@@ -800,7 +800,10 @@ export default function App({ windowLabel }: {
     load();
     const timer = setInterval(load, 10_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [isConnected, serverId, isMain]);
+    // **접속마다 다시 세운다**(connectionEpoch). 같은 server_id 의 두 콜렉터를 갈아타면 끊김·붙음이 한 번에
+    // 그려져 isConnected·serverId 가 그대로일 수 있다 — 그러면 새 서버의 기록을 안 읽고, 비워진 기록으로
+    // 새 서버의 파일을 덮는다.
+  }, [isConnected, serverId, connectionEpoch, isMain]);
 
   // 알림은 메인 창이 받는다 — 뗀 창에는 알림 화면이 없다
   useEffect(() => {
