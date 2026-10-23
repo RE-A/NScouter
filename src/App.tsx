@@ -2005,9 +2005,16 @@ export default function App({ windowLabel }: {
           세 화면이 **지금 XLog 탭의 선택**을 쓴다. 화면마다 따로 고르게 두면 서버가 100대인 곳에서
           같은 일을 세 번 해야 하고, 화면을 옮길 때마다 무엇을 보고 있는지가 달라진다.
           XLog 탭끼리는 따로다 (`xlogTabs.ts`).
-          알림은 여기 걸리지 않는다 — 안 보기로 한 서버가 죽는 것이야말로 알아야 한다. */}
+          알림은 여기 걸리지 않는다 — 안 보기로 한 서버가 죽는 것이야말로 알아야 한다.
+          **그래서 Alert 탭에서는 목록을 접는다** — 고를 것이 없는데 자리만 차지하면 알림 줄이 좁아진다.
+          지우지 않고 숨긴다 — 펼쳐 둔 묶음·스크롤이 돌아왔을 때 그대로여야 한다. */}
       <div ref={xlogWsRef} className="flex min-h-0 flex-1 overflow-hidden bg-base p-1">
-        <Pane title="Services" className="shrink-0" style={{ width: servicesW }}>
+        <Pane
+          title="Services"
+          className="shrink-0"
+          // 클래스(hidden)로 숨기면 Pane 의 flex 와 부딪쳐 어느 쪽이 이길지 순서에 달린다
+          style={activeTab === 'alert' ? { width: servicesW, display: 'none' } : { width: servicesW }}
+        >
           <AgentSelectorPanel
             isConnected={isConnected}
             selectedHashes={filter.objHashSet}
@@ -2022,7 +2029,7 @@ export default function App({ windowLabel }: {
           />
         </Pane>
 
-        <Divider
+        {activeTab !== 'alert' && <Divider
           orientation="vertical"
           label={t('서비스 목록 너비')}
           onDrag={d =>
@@ -2036,7 +2043,7 @@ export default function App({ windowLabel }: {
                 : w,
             )
           }
-        />
+        />}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 
@@ -2939,8 +2946,12 @@ function AlertBurstLine({
   const down = b.status === 'down';
   const span = b.from === b.to ? formatTime(b.to) : `${formatTime(b.from)}~${formatTime(b.to)}`;
   const tasks = [...new Set(b.alerts.map(a => shortName(agentMap.get(a.obj_hash) ?? `[${a.obj_hash}]`)))];
+  // 교체된 것과 홀로 내려간 것이 섞이면 갈라 적는다 — «내려감 3» 이면 정상 교체된 것까지 장애로 읽힌다
+  const mixed = b.replaced > 0 && b.lost > 0;
   const counts = [
-    b.down > 0 ? `${t('내려감')} ${b.down}` : '',
+    mixed ? `${t('교체')} ${b.replaced}` : '',
+    mixed ? `${t('대신 받을 Task 없이 내려감')} ${b.lost}` : '',
+    !mixed && b.down > 0 ? `${t('내려감')} ${b.down}` : '',
     b.up > 0 ? `${t('올라옴')} ${b.up}` : '',
   ].filter(Boolean).join(' · ');
   return (

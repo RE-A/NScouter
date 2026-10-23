@@ -52,6 +52,14 @@ export interface AlertBurst {
   /** 내려간 / 올라온 Task 수 (알림 수가 아니라 Task 수다) */
   down: number;
   up: number;
+  /**
+   * 내려간 Task 중 대신 받은 것 / 대신 받을 Task 없이 내려간 것. 둘을 더하면 `down` 이다.
+   *
+   * 교체 직후 장애가 나면 한 묶음에 둘이 섞인다 — «내려감 3» 으로만 적으면 정상 교체된 것까지
+   * 장애로 읽힌다. 한 Task 가 여러 번 내려갔으면 한 번이라도 대신 받을 Task 가 없었으면 `lost` 다.
+   */
+  replaced: number;
+  lost: number;
   /** 장애였는데 **지금은** 살아 있는 Task 가 있다 */
   recovered: boolean;
 }
@@ -123,8 +131,9 @@ export function groupAlerts(
     const flush = () => {
       if (cur.length === 0) return;
       const downHashes = new Set(cur.filter(a => a.title === ALERT_OBJECT_DOWN).map(a => a.obj_hash));
+      const lostHashes = new Set(cur.filter(a => a.title === ALERT_OBJECT_DOWN && !covered(a, svc)).map(a => a.obj_hash));
       const upHashes = new Set(cur.filter(a => a.title === ALERT_OBJECT_UP).map(a => a.obj_hash));
-      const isDown = cur.some(a => a.title === ALERT_OBJECT_DOWN && !covered(a, svc));
+      const isDown = lostHashes.size > 0;
       const aliveNow = [...history.values()].some(y => y.alive && serviceOf(y.obj_hash) === svc);
       bursts.push({
         kind: 'burst',
@@ -135,6 +144,8 @@ export function groupAlerts(
         to: cur[cur.length - 1].time,
         down: downHashes.size,
         up: upHashes.size,
+        replaced: downHashes.size - lostHashes.size,
+        lost: lostHashes.size,
         recovered: isDown && aliveNow,
       });
       cur = [];
