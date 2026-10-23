@@ -366,6 +366,23 @@ XLogChartRenderer
                                                   <canvas>
 ```
 
+### 5.4 창 여럿 — 떼어 낸 XLog 창
+
+```
+메인 창 (App)                                 뗀 창 xlogwin-N (같은 App, windowLabel 있음)
+ · 접속 · 서버 전환 · Counter/Active/…          · XLog 화면만: 서버 고르기 · 툴바 · 탭·분할 · 목록 · 상세
+ · 창 목록(registry) → config.xlog_windows      · 파일에 안 쓴다 — snapshot 으로 메인 창에 알린다
+ · 켤 때 같은 자리에 다시 연다
+        ◄── hello / snapshot / merge / closed / detach ──
+        ─── init (탭·분할) ──►                    (detached/protocol.ts)
+
+Rust: start_xlog_stream(창별 오브젝트) → xlog_subs 합집합으로 스트림 하나 → "xlog-data" 를 모든 창에
+```
+
+- 창마다 App 상태를 한 벌씩 든다. 탭은 떼는 순간 보낸 창에서 빠져 받은 창의 것이 된다
+- XLog 스트림만 창별 합집합이다. 카운터·알림 스트림은 메인 창만 연다 (하나뿐이라 뗀 창이 열면 메인 창 화면이 바뀐다)
+- 창 이름 꼴(`xlogwin-*`)은 `capabilities/default.json` 의 창 목록과 맞아야 한다 — 안 맞으면 뗀 창이 이벤트를 못 쓴다
+
 ---
 
 ## 6. Tauri IPC 인터페이스
