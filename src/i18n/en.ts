@@ -951,6 +951,7 @@ export const EN: Record<string, string> = {
   'Task 교체': 'Task replaced',
   '교체': 'Replaced',
   '내려감': 'down',
+  '대신 받을 Task 없이 내려감': 'down with no task to take over',
   '올라옴': 'up',
   '장애': 'Down',
   '살아 있는 Task 없음': 'No live task',

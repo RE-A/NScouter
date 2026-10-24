@@ -67,7 +67,7 @@ describe('교체', () => {
       alert(ALERT_OBJECT_DOWN, 2, T0 + 3 * MIN + 8_000),
     ]);
     expect(b).toHaveLength(1);
-    expect(b[0]).toMatchObject({ service: 'safs', status: 'replaced', down: 2, up: 2 });
+    expect(b[0]).toMatchObject({ service: 'safs', status: 'replaced', down: 2, up: 2, replaced: 2, lost: 0 });
   });
 
   it('최소 정상 0% — 옛 Task 가 먼저 내려가고 새 Task 가 1분 뒤에 뜬다', () => {
@@ -101,7 +101,7 @@ describe('살아 있는 Task 없음', () => {
       alert(ALERT_OBJECT_DOWN, 2, T0 + 11_000),
     ]);
     expect(b).toHaveLength(1);
-    expect(b[0]).toMatchObject({ status: 'down', down: 2, recovered: false });
+    expect(b[0]).toMatchObject({ status: 'down', down: 2, replaced: 0, lost: 2, recovered: false });
   });
 
   it('옆 Task 가 몇 초 뒤 죽었고 그 알림은 아직 안 왔어도 장애다', () => {
@@ -122,6 +122,24 @@ describe('살아 있는 Task 없음', () => {
     ]);
     expect(b).toHaveLength(1);
     expect(b[0].status).toBe('down');
+    // «내려감 2» 가 아니라 «교체 1 · 대신 받을 Task 없이 내려감 1» — 1 은 정상 교체였다
+    expect(b[0]).toMatchObject({ down: 2, replaced: 1, lost: 1 });
+  });
+
+  it('교체 직후 장애 — 교체된 것과 홀로 내려간 것을 따로 센다', () => {
+    // 1·2 를 3·4 가 대신 받았다(롤링 배포). 그 뒤 3·4 가 한꺼번에 내려갔다.
+    task(1, { alive: false, lastAlive: T0 });
+    task(2, { alive: false, lastAlive: T0 + 10_000 });
+    task(3, { firstSeen: T0 - MIN, alive: false, lastAlive: T0 + 3 * MIN });
+    task(4, { firstSeen: T0 - MIN, alive: false, lastAlive: T0 + 3 * MIN + 2_000 });
+    const b = bursts([
+      alert(ALERT_OBJECT_DOWN, 1, T0 + 8_000),
+      alert(ALERT_OBJECT_DOWN, 2, T0 + 18_000),
+      alert(ALERT_OBJECT_DOWN, 3, T0 + 3 * MIN + 8_000),
+      alert(ALERT_OBJECT_DOWN, 4, T0 + 3 * MIN + 10_000),
+    ]);
+    expect(b).toHaveLength(1);
+    expect(b[0]).toMatchObject({ status: 'down', down: 4, replaced: 2, lost: 2 });
   });
 
   it('장애 뒤 한참 있다 뜬 Task 는 대신 받은 것이 아니다 — 장애이되 복구됨', () => {

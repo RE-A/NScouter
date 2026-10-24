@@ -66,6 +66,8 @@ import {
   onConnected,
   onDisconnected,
   getObjectList,
+  loadObjectHistory,
+  saveObjectHistory,
   removeInactiveObjects,
   getObjectTypeFamilies,
   getXLogDetail,
@@ -147,7 +149,14 @@ import {
   toggleService,
   type GroupSelection,
 } from './features/xlog/hooks/groupSelection';
-import { asAgent, clearObjectHistory, objectHistory, observeObjects } from './features/xlog/hooks/objectTimeline';
+import {
+  asAgent,
+  clearObjectHistory,
+  objectHistory,
+  observeObjects,
+  persistableHistory,
+  restoreObjectHistory,
+} from './features/xlog/hooks/objectTimeline';
 import { usePastCandidates } from './features/xlog/hooks/usePastCandidates';
 import { searchAll, type WideProgress } from './features/xlog/hooks/wideSearchAll';
 import { instanceLabel, serviceNameOf } from './features/xlog/components/instanceGroup';
@@ -725,11 +734,26 @@ export default function App({ windowLabel }: {
   useEffect(() => {
     if (!isConnected) { setCounterHashes({ javaee: [], host: [], datasource: [] }); return; }
     let cancelled = false;
+    // **지난번 기록부터 들인다** (objectTimeline.ts). 첫 목록이 오기 전에 들여야 껐던 사이에
+    // 내려간 Task 가 «그때 살아 있었다» 로 끼지 않는다 — 되살린 것은 죽은 것으로 온다.
+    // 못 읽어도 목록은 연다.
+    // **이름도 들인다** — 목록에서 정리된 Task 의 알림·XLog 가 `#해시` 로 남지 않게. 지금 목록의 이름이
+    // 뒤에 덮는다(같은 then 에서 rememberNames(list) 가 나중이다).
+    const restored: Promise<unknown> = serverId
+      ? loadObjectHistory(serverId)
+          .then(d => {
+            if (cancelled || restoreObjectHistory(d) === 0) return;
+            rememberNames([...objectHistory().values()].map(asAgent));
+          })
+          .catch(() => {})
+      : Promise.resolve();
+    /** 마지막으로 파일에 남긴 때. 목록은 10초마다지만 파일은 1분에 한 번만 쓴다 */
+    let lastSaved = 0;
     const load = () => {
     // **종류를 가르기 전에 콜렉터의 종류→Family 표부터 받는다.** 커스텀 종류
     // (`monitoring_group_type`)는 이름 목록에 없어서, 표 없이 가르면 WAS 가 통째로 빠진다.
     // 표를 못 받아도(옛 콜렉터) 목록은 연다 — 그때는 `detected` 태그로 배운다.
-    Promise.all([getObjectList(), getObjectTypeFamilies().catch(() => [])])
+    Promise.all([getObjectList(), getObjectTypeFamilies().catch(() => []), restored])
       .then(([fresh, families]) => {
         if (cancelled) return;
         // 사라진 Task 를 바로 지우지 않는다 — 재배포 중 몇 초 비는 사이에
@@ -737,7 +761,13 @@ export default function App({ windowLabel }: {
         const list = mergeObjects(objectsRef.current, fresh, Date.now());
         // 언제 보였고 언제까지 살았나 — 알림 판정과 과거 고르기가 쓴다 (objectTimeline.ts).
         // **받은 그대로(fresh)를 적는다.** 잠시 남겨 둔 것(mergeObjects)은 지금 상태가 아니다.
-        observeObjects(fresh, Date.now());
+        const now = Date.now();
+        observeObjects(fresh, now);
+        // (메인 창만) 파일에 남긴다 — 두 창이 같은 파일을 덮으면 서로 지운다. 뗀 창은 읽기만 한다
+        if (isMain && serverId && now - lastSaved >= 60_000) {
+          lastSaved = now;
+          saveObjectHistory(serverId, persistableHistory(now)).catch(() => {});
+        }
         objectsRef.current = list;
         setObjects(list);
         registerObjectTypeFamilies(families);
@@ -770,7 +800,10 @@ export default function App({ windowLabel }: {
     load();
     const timer = setInterval(load, 10_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [isConnected]);
+    // **접속마다 다시 세운다**(connectionEpoch). 같은 server_id 의 두 콜렉터를 갈아타면 끊김·붙음이 한 번에
+    // 그려져 isConnected·serverId 가 그대로일 수 있다 — 그러면 새 서버의 기록을 안 읽고, 비워진 기록으로
+    // 새 서버의 파일을 덮는다.
+  }, [isConnected, serverId, connectionEpoch, isMain]);
 
   // 알림은 메인 창이 받는다 — 뗀 창에는 알림 화면이 없다
   useEffect(() => {
@@ -2005,9 +2038,16 @@ export default function App({ windowLabel }: {
           세 화면이 **지금 XLog 탭의 선택**을 쓴다. 화면마다 따로 고르게 두면 서버가 100대인 곳에서
           같은 일을 세 번 해야 하고, 화면을 옮길 때마다 무엇을 보고 있는지가 달라진다.
           XLog 탭끼리는 따로다 (`xlogTabs.ts`).
-          알림은 여기 걸리지 않는다 — 안 보기로 한 서버가 죽는 것이야말로 알아야 한다. */}
+          알림은 여기 걸리지 않는다 — 안 보기로 한 서버가 죽는 것이야말로 알아야 한다.
+          **그래서 Alert 탭에서는 목록을 접는다** — 고를 것이 없는데 자리만 차지하면 알림 줄이 좁아진다.
+          지우지 않고 숨긴다 — 펼쳐 둔 묶음·스크롤이 돌아왔을 때 그대로여야 한다. */}
       <div ref={xlogWsRef} className="flex min-h-0 flex-1 overflow-hidden bg-base p-1">
-        <Pane title="Services" className="shrink-0" style={{ width: servicesW }}>
+        <Pane
+          title="Services"
+          className="shrink-0"
+          // 클래스(hidden)로 숨기면 Pane 의 flex 와 부딪쳐 어느 쪽이 이길지 순서에 달린다
+          style={activeTab === 'alert' ? { width: servicesW, display: 'none' } : { width: servicesW }}
+        >
           <AgentSelectorPanel
             isConnected={isConnected}
             selectedHashes={filter.objHashSet}
@@ -2022,7 +2062,7 @@ export default function App({ windowLabel }: {
           />
         </Pane>
 
-        <Divider
+        {activeTab !== 'alert' && <Divider
           orientation="vertical"
           label={t('서비스 목록 너비')}
           onDrag={d =>
@@ -2036,7 +2076,7 @@ export default function App({ windowLabel }: {
                 : w,
             )
           }
-        />
+        />}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 
@@ -2939,8 +2979,12 @@ function AlertBurstLine({
   const down = b.status === 'down';
   const span = b.from === b.to ? formatTime(b.to) : `${formatTime(b.from)}~${formatTime(b.to)}`;
   const tasks = [...new Set(b.alerts.map(a => shortName(agentMap.get(a.obj_hash) ?? `[${a.obj_hash}]`)))];
+  // 교체된 것과 홀로 내려간 것이 섞이면 갈라 적는다 — «내려감 3» 이면 정상 교체된 것까지 장애로 읽힌다
+  const mixed = b.replaced > 0 && b.lost > 0;
   const counts = [
-    b.down > 0 ? `${t('내려감')} ${b.down}` : '',
+    mixed ? `${t('교체')} ${b.replaced}` : '',
+    mixed ? `${t('대신 받을 Task 없이 내려감')} ${b.lost}` : '',
+    !mixed && b.down > 0 ? `${t('내려감')} ${b.down}` : '',
     b.up > 0 ? `${t('올라옴')} ${b.up}` : '',
   ].filter(Boolean).join(' · ');
   return (

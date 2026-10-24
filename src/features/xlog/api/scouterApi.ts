@@ -7,6 +7,7 @@ import type { XLogPack, AgentObject, XLogColumns, SXLog } from '../types/xlog';
 import type { XLogProfilePack } from '../types/profile';
 import type { CounterName, CounterUpdate } from '../types/counter';
 import type { AlertPack } from '../types/alert';
+import type { SeenObject } from '../hooks/objectTimeline';
 import type { ConfigView } from '../types/config';
 import type { ErrorSummaryRow, SummaryKind, SummaryRow } from '../types/summary';
 import type { InteractionRow } from '../types/interaction';
@@ -191,6 +192,21 @@ export interface DailyObject {
  */
 export async function getObjectListByDate(date: string): Promise<DailyObject[]> {
   return invoke<DailyObject[]>('get_object_list_by_date', { date });
+}
+
+/**
+ * 이 서버에 남겨 둔 오브젝트 기록 (`objectTimeline.ts`). 없으면 null.
+ *
+ * `serverId` 가 지금 붙은 서버와 다르면(갈아타는 중) Rust 가 null 을 준다 — 옛 서버의 기록을 안 들인다.
+ * 알맹이는 파일에서 온 것이라 모양을 믿지 않는다(`restoreObjectHistory` 가 거른다).
+ */
+export async function loadObjectHistory(serverId: string): Promise<unknown> {
+  return invoke<unknown>('load_object_history', { serverId });
+}
+
+/** 이 서버의 오브젝트 기록을 남긴다. 서버를 갈아탄 뒤에 온 것이면 Rust 가 버린다 */
+export async function saveObjectHistory(serverId: string, objects: readonly SeenObject[]): Promise<void> {
+  return invoke<void>('save_object_history', { serverId, objects });
 }
 
 // ─── 오브젝트 단건 명령 ───────────────────────────────────────
