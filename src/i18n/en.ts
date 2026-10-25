@@ -952,6 +952,9 @@ export const EN: Record<string, string> = {
   '교체': 'Replaced',
   '내려감': 'down',
   '대신 받을 Task 없이 내려감': 'down with no task to take over',
+  // 트랜잭션 표 열 너비 (xlogColumns.ts)
+  '열 너비': 'Column width',
+  '끌어서 열 너비를 바꿉니다 · 두 번 누르면 기본 너비': 'Drag to resize the column · double-click for the default width',
   '올라옴': 'up',
   '장애': 'Down',
   '살아 있는 Task 없음': 'No live task',

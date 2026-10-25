@@ -57,6 +57,14 @@ import {
   type SortNames,
   type SortState,
 } from './features/xlog/components/xlogSort';
+import {
+  gridTemplate,
+  resetAt,
+  resizeAt,
+  visibleCols,
+  type XLogColKey,
+  type XLogColWidths,
+} from './features/xlog/components/xlogColumns';
 import { selectionStats } from './features/xlog/components/selectionStats';
 // ko-KR 로케일은 "4시 36분 18초" 를 낸다 — 폭을 먹고 줄바꿈되며 차트 X축(04:36:18)과도 어긋난다.
 import { formatTime, formatTimeMs } from './features/xlog/utils/colorPalette';
@@ -487,6 +495,8 @@ export default function App({ windowLabel }: {
   const [tableH, setTableH] = useState<number>(PANE.tableDefaultH);
   /** 서비스 목록을 무엇으로 묶는가. 껐다 켜도 남는다 */
   const [agentGroupBy, setAgentGroupBy] = useState<GroupBy>('type');
+  /** 트랜잭션 표의 열 너비. 끌어서 정한 것만 있다 (`xlogColumns.ts`) */
+  const [xlogCols, setXLogCols] = useState<XLogColWidths>({});
   /**
    * 서비스로 묶어 볼 때 오브젝트 → 서비스 이름. 서비스로 안 묶으면 비어 있다.
    *
@@ -546,6 +556,7 @@ export default function App({ windowLabel }: {
         setTableH(l.tableH);
         setActiveTab(l.activeTab);
         setAgentGroupBy(l.agentGroupBy);
+        setXLogCols(l.xlogCols);
         setSavedFilters(normalizeSavedFilters(cfg.saved_filters));
         // 뗀 창은 여기까지 — 탭은 메인 창에서 받고(init), 보던 화면·서버·상세는 메인 창의 것이다
         if (!isMain) return;
@@ -646,7 +657,7 @@ export default function App({ windowLabel }: {
     }
     const id = setTimeout(() => {
       saveUiState(
-        fromLayout({ servicesW, detailW, tableH, activeTab, agentGroupBy }),
+        fromLayout({ servicesW, detailW, tableH, activeTab, agentGroupBy, xlogCols }),
         fromChartConfig(config),
         fromFilterState(filter, xlogMode),
       ).catch(() => {});
@@ -674,6 +685,7 @@ export default function App({ windowLabel }: {
     tableH,
     activeTab,
     agentGroupBy,
+    xlogCols,
     config,
     filter,
     xlogMode,
@@ -2220,6 +2232,8 @@ export default function App({ windowLabel }: {
                       yAxisMode={config.yAxisMode}
                       sort={tableSort}
                       onSort={handleSort}
+                      colWidths={xlogCols}
+                      onColWidthsChange={setXLogCols}
                     />
                   </div>
                 </div>
@@ -2602,33 +2616,28 @@ interface XLogTableProps {
   /** 어느 열로 서 있는가. 실시간·과거가 같은 상태를 쓴다 */
   sort: SortState;
   onSort: (key: SortKey) => void;
+  /** 끌어서 정한 열 너비 (`xlogColumns.ts`). 껐다 켜도 남는다 */
+  colWidths: XLogColWidths;
+  onColWidthsChange: (w: XLogColWidths) => void;
 }
 
 /**
- * 열 정의를 한 곳에만 둔다 — 헤더와 행이 따로 폭을 가지면 반드시 어긋난다.
+ * 열 배치는 한 곳에서만 만든다(`gridTemplate`) — 헤더와 행이 따로 폭을 가지면 반드시 어긋난다.
  *
  * 이전 버전은 행마다 zebra 배경 + 아래 테두리 + 왼쪽 색막대 + 에러 배경틴트로
  * **행을 나누는 장치를 네 개** 겹쳐 썼다. 구분선 하나만 남긴다.
  * 상태 열(OK/ERR)도 뺐다 — 거의 모든 행이 OK 라 초록 기둥만 생겼다.
  * 에러는 예외적으로만 표시한다(왼쪽 막대 + ERR 칩).
  *
- * 시간 열은 `HH:mm:ss.SSS`(12자, 고정폭)가 다 들어가야 한다. 62px 로 박아 두었을 때는
- * 밀리초 끝자리가 옆 서버 열 밑으로 들어갔다. 글자 크기 배율을 따라야 하므로 px 가 아니라
- * 그 칸의 글자 크기(`--fs-micro`)로 잡는다.
+ * **열 경계는 선으로 긋는다**(`--border-table`). 간격만으로 가르던 때는 IP 와 Elapsed 처럼
+ * 숫자끼리 붙은 칸이 한 덩어리로 읽혔고, 행 구분선은 어느 테마에서도 거의 안 보였다.
  *
- * URL 열에는 최소폭을 둔다. `minmax(0,1fr)` 이면 창이 좁을 때 고정 열들이 자리를 다 먹고
- * **URL 이 0 이 되어 사라졌다** — 목록에서 가장 먼저 읽는 칸이다. 서버·IP 가 먼저 준다.
+ * Y축이 Elapsed 가 아니면 **그 축의 값을 한 칸 더 보여준다.** 점 높이와 목록의 숫자가 다른
+ * 값을 보고 있으면 «왜 3초짜리가 맨 밑에 있나» 가 된다.
  */
-const XLOG_COLS = 'grid grid-cols-[calc(var(--fs-micro)*7.6)_minmax(0,104px)_minmax(96px,1fr)_minmax(0,96px)_74px] gap-x-3';
-/**
- * Y축이 Elapsed 가 아닐 때 쓰는 배치. **그 축의 값을 한 칸 더 보여준다.**
- *
- * 점 높이와 목록의 숫자가 다른 값을 보고 있으면 «왜 3초짜리가 맨 밑에 있나» 가 된다.
- * 실제로 그렇게 헷갈렸다 — 축 이름이 두 군데 적혀 있어도 두 수가 나란히 있으면
- * 같은 것으로 읽힌다.
- */
-const XLOG_COLS_Y =
-  'grid grid-cols-[calc(var(--fs-micro)*7.6)_minmax(0,104px)_minmax(96px,1fr)_minmax(0,96px)_74px_74px] gap-x-3';
+const XLOG_GRID = 'grid items-stretch';
+/** 칸마다 — 오른쪽 경계선을 긋고 마지막 칸만 뺀다 */
+const XLOG_CELLS = '[&>*]:min-w-0 [&>*]:border-r [&>*]:border-line-table [&>*]:px-2 [&>*:last-child]:border-r-0';
 
 /** 목록에 실제로 그리는 최대 행 수. 넘으면 **느린 것부터** 자른다 */
 const XLOG_TABLE_LIMIT = 500;
@@ -2672,6 +2681,67 @@ function SortHead({
   );
 }
 
+/** 끌기를 시작한 순간의 열 너비 — 끄는 동안 여기서부터 잰다(움직일 때마다 쌓으면 어긋난다) */
+interface ColDragStart {
+  widths: XLogColWidths;
+  measured: Partial<Record<XLogColKey, number>>;
+}
+
+/**
+ * 열 머리 오른쪽 끝의 손잡이 — 끌면 경계가 커서를 따라오고, 두 번 누르면 그 열을 기본 너비로.
+ *
+ * 포인터 캡처를 쓴다(`Divider` 와 같은 이유 — 끄는 중에 다른 칸 위를 지나도 안 끊긴다).
+ * 선 자체는 칸의 오른쪽 테두리다. 손잡이는 잡기 쉽게 그보다 넓고, 올리면 선이 밝아진다.
+ */
+function ColResizer({
+  onDrag,
+  onReset,
+  snapshot,
+}: {
+  onDrag: (delta: number, at: ColDragStart) => void;
+  onReset: () => void;
+  snapshot: () => ColDragStart;
+}) {
+  const startRef = useRef<{ x: number; at: ColDragStart } | null>(null);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('열 너비')}
+      title={t('끌어서 열 너비를 바꿉니다 · 두 번 누르면 기본 너비')}
+      tabIndex={0}
+      className="group absolute inset-y-0 -right-[5px] z-10 w-[9px] cursor-col-resize touch-none focus-visible:outline-none"
+      onPointerDown={e => {
+        e.preventDefault();
+        e.stopPropagation();
+        startRef.current = { x: e.clientX, at: snapshot() };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={e => {
+        const st = startRef.current;
+        if (!st || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
+        onDrag(e.clientX - st.x, st.at);
+      }}
+      onPointerUp={e => {
+        startRef.current = null;
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      }}
+      onDoubleClick={e => { e.stopPropagation(); onReset(); }}
+      // 키보드로도 — 포인터만 되면 접근이 막힌다
+      onKeyDown={e => {
+        const step = e.shiftKey ? 40 : 10;
+        if (e.key === 'ArrowLeft') { e.preventDefault(); onDrag(-step, snapshot()); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); onDrag(step, snapshot()); }
+      }}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-y-0.5 left-1/2 w-[2px] -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-accent/60 group-focus-visible:bg-accent"
+      />
+    </div>
+  );
+}
+
 function XLogTable({
   xlogs,
   searchHits,
@@ -2683,13 +2753,31 @@ function XLogTable({
   yAxisMode,
   sort,
   onSort,
+  colWidths,
+  onColWidthsChange,
 }: XLogTableProps) {
   // 서버 열에 적을 이름을 정하는 데 쓴다. 프롭으로 내리지 않는 이유는
   // 설정이 모듈 저장소에 한 벌만 있고, 거쳐 가는 곧마다 빠뜨릴 자리가 생기기 때문이다.
   const { groupRule } = useViewOptions();
   // Elapsed 축이면 목록의 Elapsed 가 곧 점 높이라 더 보여줄 것이 없다.
   const showY = yAxisMode !== 'elapsed';
-  const cols = showY ? XLOG_COLS_Y : XLOG_COLS;
+  const colKeys = useMemo(() => visibleCols(showY), [showY]);
+  const gridStyle = useMemo<React.CSSProperties>(
+    () => ({ gridTemplateColumns: gridTemplate(colWidths, showY) }),
+    [colWidths, showY],
+  );
+  const headRef = useRef<HTMLDivElement>(null);
+  /** 열마다 지금 **그려진** 너비 — 끌기는 여기서 시작한다 (안 정한 열이 튀지 않게) */
+  const measureCols = useCallback((): Partial<Record<XLogColKey, number>> => {
+    const out: Partial<Record<XLogColKey, number>> = {};
+    const cells = headRef.current?.children;
+    if (!cells) return out;
+    colKeys.forEach((k, i) => {
+      const el = cells.item(i);
+      if (el) out[k] = el.getBoundingClientRect().width;
+    });
+    return out;
+  }, [colKeys]);
   // 촘촘한 구간을 고르면 수천 건이 잡힌다. 시간 순으로 앞에서 500건을 자르면
   // **가장 오래된 500건**만 남는다 — 1ms 짜리 잡음이다.
   // 구간을 드래그하는 이유는 "무엇이 느렸나" 이므로 느린 순으로 자른다.
@@ -2731,29 +2819,43 @@ function XLogTable({
       )}
 
       {/* 선택 개수와 해제 버튼은 Pane 타이틀바로 올렸다 — 머리가 둘이면 목록이 그만큼 짧아진다 */}
+      {/* 행은 왼쪽에 2px 표시 막대(에러·선택)를 둔다 — 머리도 같은 자리를 비워야 열 경계선이 이어진다 */}
       <div
-        className={`${cols} shrink-0 items-center border-b border-line px-3 py-1 text-micro font-medium tracking-wide text-fg-faint uppercase`}
+        ref={headRef}
+        style={gridStyle}
+        className={`${XLOG_GRID} ${XLOG_CELLS} shrink-0 border-b border-l-2 border-b-line-table border-l-transparent px-3 text-micro font-medium tracking-wide text-fg-faint uppercase`}
       >
-        <SortHead sort={sort} onSort={onSort} col="time" label={t('시간')} />
-        <SortHead sort={sort} onSort={onSort} col="server" label={t('서버')} />
-        <SortHead sort={sort} onSort={onSort} col="url" label="URL" />
-        <SortHead sort={sort} onSort={onSort} col="ip" label="IP" />
-        <SortHead sort={sort} onSort={onSort} col="elapsed" label="Elapsed" align="right" />
-        {/* 지금 점 높이가 무엇인지 — 축 이름을 그대로 쓴다 */}
-        {showY && (
-          <SortHead
-            sort={sort}
-            onSort={onSort}
-            col="y"
-            label={yAxisShortLabel(yAxisMode)}
-            align="right"
-            tone="text-accent-bright normal-case"
-            title={t('차트 Y축이 그리는 값입니다')}
-          />
-        )}
+        {colKeys.map((k, i) => (
+          <div key={k} className="relative flex items-center py-1">
+            {k === 'time' && <SortHead sort={sort} onSort={onSort} col="time" label={t('시간')} />}
+            {k === 'server' && <SortHead sort={sort} onSort={onSort} col="server" label={t('서버')} />}
+            {k === 'url' && <SortHead sort={sort} onSort={onSort} col="url" label="URL" />}
+            {k === 'ip' && <SortHead sort={sort} onSort={onSort} col="ip" label="IP" />}
+            {k === 'elapsed' && <SortHead sort={sort} onSort={onSort} col="elapsed" label="Elapsed" align="right" />}
+            {/* 지금 점 높이가 무엇인지 — 축 이름을 그대로 쓴다 */}
+            {k === 'y' && (
+              <SortHead
+                sort={sort}
+                onSort={onSort}
+                col="y"
+                label={yAxisShortLabel(yAxisMode)}
+                align="right"
+                tone="text-accent-bright normal-case"
+                title={t('차트 Y축이 그리는 값입니다')}
+              />
+            )}
+            {i < colKeys.length - 1 && (
+              <ColResizer
+                onDrag={(delta, at) => onColWidthsChange(resizeAt(at.widths, colKeys, i, delta, at.measured))}
+                onReset={() => onColWidthsChange(resetAt(colWidths, colKeys, i))}
+                snapshot={() => ({ widths: colWidths, measured: measureCols() })}
+              />
+            )}
+          </div>
+        ))}
       </div>
 
-      <div className="flex-1 divide-y divide-line/40 overflow-y-auto">
+      <div className="flex-1 divide-y divide-line-table/50 overflow-y-auto">
         {/* 목록은 항상 떠 있으므로 비었을 때 **채우는 방법**을 알려줘야 한다.
             "없음" 만 쓰면 고장인지 사용법을 모르는 건지 구분이 안 된다. */}
         {xlogs.length === 0 && (
@@ -2783,7 +2885,7 @@ function XLogTable({
               key={i}
               onClick={() => onRowClick(x)}
               className={[
-                'cursor-pointer border-l-2 px-3 py-1 text-body',
+                'cursor-pointer border-l-2 px-3 text-body',
                 isActive
                   ? 'border-l-accent bg-accent/12'
                   : hasErr
@@ -2791,14 +2893,14 @@ function XLogTable({
                     : 'border-l-transparent hover:bg-hover/60',
               ].join(' ')}
             >
-              <div className={`${cols} items-center`}>
-                <span className="tnum font-mono text-micro text-fg-dim">
+              <div style={gridStyle} className={`${XLOG_GRID} ${XLOG_CELLS} [&>*]:py-1`}>
+                <span className="tnum truncate font-mono text-micro text-fg-dim">
                   {formatTimeMs(x.endTime)}
                 </span>
                 <span className="truncate text-fg-muted" title={fullName}>
                   {agentName}
                 </span>
-                <span className="flex min-w-0 items-center gap-1.5">
+                <span className="flex items-center gap-1.5">
                   {hasErr && (
                     <span className="shrink-0 rounded-sm bg-danger/20 px-1 text-micro font-bold text-danger">
                       ERR
@@ -2811,7 +2913,7 @@ function XLogTable({
                 <span className="tnum truncate font-mono text-micro text-fg-faint" title={x.ipAddr}>
                   {x.ipAddr || '—'}
                 </span>
-                <span className={`tnum text-right font-mono ${durationTone(x.elapsed)}`}>
+                <span className={`tnum truncate text-right font-mono ${durationTone(x.elapsed)}`}>
                   {x.elapsed.toLocaleString()}ms
                 </span>
                 {showY && (
@@ -2824,7 +2926,7 @@ function XLogTable({
               {/* **왜 걸렸는지 보여준다.** 목록만 좁혀 놓으면 검색어가 어디에 맞았는지
                   알 수 없어 매번 상세를 열어 봐야 한다. */}
               {hit && (
-                <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
+                <div className="flex min-w-0 items-baseline gap-1.5 px-2 pb-1">
                   <span className="shrink-0 rounded-sm bg-accent/15 px-1 font-mono text-micro text-accent-bright">
                     {hit.first.kind}
                   </span>

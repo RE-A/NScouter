@@ -742,6 +742,8 @@ export interface UiLayout {
   active_tab: string;
   /** 'type' | 'group' — 서비스 목록을 무엇으로 묶는가 */
   agent_group_by: string;
+  /** 트랜잭션 표의 열 너비(px). 열 이름 → 너비. 예전 설정에는 없다 */
+  xlog_cols?: Record<string, number>;
 }
 
 /**
