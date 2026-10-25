@@ -131,6 +131,9 @@ pub struct UiLayout {
     pub active_tab: String,
     /// 서비스 목록을 무엇으로 묶는가. `"type"`(오브젝트 종류) 또는 `"group"`(이름의 부모 경로)
     pub agent_group_by: String,
+    /// XLog 트랜잭션 표의 열 너비(px). 열 이름(`time`·`server`·`ip`·`elapsed`·`y`) → 너비.
+    /// 없는 열은 기본 너비다. URL 은 남는 자리라 안 든다 (`xlogColumns.ts`)
+    pub xlog_cols: std::collections::BTreeMap<String, f32>,
 }
 
 impl Default for UiLayout {
@@ -143,6 +146,7 @@ impl Default for UiLayout {
             table_h: 240.0,
             active_tab: "xlog".to_string(),
             agent_group_by: "type".to_string(),
+            xlog_cols: std::collections::BTreeMap::new(),
         }
     }
 }

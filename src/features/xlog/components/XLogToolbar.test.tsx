@@ -4,11 +4,13 @@
 //   · 빈 칸에서도 포함↔제외가 뒤집힌다 (조건 줄이 없어 방향이 안 바뀌던 것)
 //   · 그렇게 정해 둔 방향으로 줄이 만들어진다 — 방향 먼저, 글자 나중이 막히면 안 된다
 //   · 글자를 지워 줄이 사라져도 방향 표시는 남는다
+//   · 과거로 넘어가면 구간 칸은 **그때의** 최근 10분이다 — 툴바가 처음 그려진 때가 아니다
 
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { XLogToolbar } from './XLogToolbar';
 import { DEFAULT_CHART_CONFIG, DEFAULT_FILTER, type XLogFilterState } from '../types/xlog';
+import { toLocalInput, type XLogMode } from '../types/timeRange';
 
 function open(filter: Partial<XLogFilterState> = {}) {
   const onFilterChange = vi.fn();
@@ -126,5 +128,42 @@ describe('트랜잭션 찾기', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /트랜잭션 찾기/ }));
     expect(onWideSearch).toHaveBeenCalled();
+  });
+});
+
+describe('과거 구간 칸', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  function toolbar(mode: XLogMode) {
+    return (
+      <XLogToolbar
+        config={DEFAULT_CHART_CONFIG}
+        filter={DEFAULT_FILTER}
+        onConfigChange={vi.fn()}
+        onFilterChange={vi.fn()}
+        mode={mode}
+        onModeChange={vi.fn()}
+        pastRange={null}
+        onPastRangeChange={vi.fn()}
+        onWideSearch={vi.fn()}
+        onOpenSaved={vi.fn()}
+        onOpenFilters={vi.fn()}
+      />
+    );
+  }
+
+  it('몇 시간 켜 두고 과거로 가도 그때의 최근 10분이다 — 앱을 켠 때의 10분이 아니다', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const opened = new Date(2026, 9, 26, 9, 0).getTime();
+    vi.setSystemTime(opened);
+    const view = render(toolbar('live'));
+
+    const later = opened + 6 * 60 * 60_000;
+    vi.setSystemTime(later);
+    view.rerender(toolbar('past'));
+
+    const [from, to] = Array.from(view.container.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]'));
+    expect(from.value).toBe(toLocalInput(later - 10 * 60_000));
+    expect(to.value).toBe(toLocalInput(later));
   });
 });

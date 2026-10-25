@@ -24,6 +24,14 @@
   --border: #1e1e3a;
   --border-strong: #252542;
 
+  /* ── 표의 칸 경계 ───────────────────────────────────
+     «트랜잭션 목록의 열 경계가 안 보인다» 가 나와서 재 봤다. 행 구분선은 `--border` 를
+     40% 로 깔아 **모든 테마에서 1.04~1.07:1** — 없는 것과 같았고, 열 경계는 아예 없었다.
+     `--border` 는 올릴 수 없으므로(패널 구분선, 2:1 미만 규칙) 표에만 쓰는 선을 따로 둔다.
+     **배경 대비 1.9:1 안팎** — 칸은 또렷이 갈리되 글자(4.5:1 이상)보다는 한참 약하다.
+     행 구분선은 이것을 반만 깐다(≈1.4:1). */
+  --border-table: #41414f;
+
   /* ── 제어 요소 경계 ─────────────────────────────────
      «버튼이 버튼인지 모르겠다» 가 나와서 재 봤다. 테두리를 그려도 `--border` 는
      놓이는 모든 배경에서 **1.16~1.19:1** 이라 없는 것과 다름이 없었다
@@ -174,6 +182,7 @@
 
   --border: #e3e6ec;
   --border-strong: #d2d7e0;
+  --border-table: #aeb2bc;
   --border-control: #6b7280;
   --border-control-hover: #434a56;
 
@@ -235,6 +244,7 @@
 
   --border: #20252c;
   --border-strong: #2a313a;
+  --border-table: #40454d;
   --border-control: #747c88;
   --border-control-hover: #a7aeb9;
 
@@ -285,6 +295,7 @@
 
   --border: #272219;
   --border-strong: #342d23;
+  --border-table: #4e4539;
   --border-control: #8a7c66;
   --border-control-hover: #b9ab94;
 
@@ -335,6 +346,7 @@
 
   --border: #1d1d1d;
   --border-strong: #2e2e2e;
+  --border-table: #3f3f3f;
   --border-control: #8f8f8f;
   --border-control-hover: #d0d0d0;
 

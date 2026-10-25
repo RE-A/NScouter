@@ -27,6 +27,8 @@
   --color-line-search: var(--border-search);
   /* 누를 수 있는 것의 경계 — 구분선(line)과 **역할이 다르다** (tokens.css 주석) */
   --color-line-control: var(--border-control);
+  /* 표의 칸 경계 — 패널 구분선(line)보다 또렷하다 (tokens.css 주석) */
+  --color-line-table: var(--border-table);
 
   /* 글자 */
   --color-fg: var(--text);

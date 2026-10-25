@@ -57,7 +57,7 @@ const THEMES = themeVars();
 /** 색 토큰은 테마마다 다 있어야 한다 — 빠지면 다른 테마의 색이 섞여 보인다 */
 const COLOR_TOKENS = [
   ...BACKGROUNDS,
-  '--border', '--border-strong', '--border-control', '--border-control-hover',
+  '--border', '--border-strong', '--border-control', '--border-control-hover', '--border-table',
   '--bg-search', '--border-search',
   '--text', '--text-muted', '--text-dim', '--text-faint',
   '--accent', '--accent-soft', '--accent-bright',
@@ -134,6 +134,12 @@ describe.each([...THEMES.keys()])('%s 테마', theme => {
 
   it('구분선은 은은하다 — 또렷해지면 목록이 격자로 덮인다', () => {
     expect(contrast(get(theme, '--border'), get(theme, '--bg-surface'))).toBeLessThan(2);
+  });
+
+  it('표의 칸 경계는 또렷하되 글자보다 약하다 — 열이 갈려 보여야 한다', () => {
+    const r = contrast(get(theme, '--border-table'), get(theme, '--bg-surface'));
+    expect(r, `${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(1.7);
+    expect(r, `${r.toFixed(2)}:1`).toBeLessThan(2.5);
   });
 
   it('호버 경계가 평상시보다 또렷하다 — 밝아지는 것이 «눌린다» 는 신호다', () => {

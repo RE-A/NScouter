@@ -29,6 +29,7 @@ describe('toLayout', () => {
       tableH: 300,
       activeTab: 'counter',
       agentGroupBy: 'type',
+      xlogCols: {},
     });
   });
 
@@ -101,8 +102,15 @@ describe('toLayout', () => {
       tableH: 250,
       activeTab: 'alert' as const,
       agentGroupBy: 'group' as const,
+      xlogCols: { server: 180, ip: 120 },
     };
     expect(toLayout(fromLayout(l))).toEqual(l);
+  });
+
+  it('열 너비가 없던 예전 설정은 기본 너비다 — 이상한 값은 버린다', () => {
+    const base = { services_w: 200, detail_w: 420, table_h: 240, active_tab: 'xlog', agent_group_by: 'type' };
+    expect(toLayout(base).xlogCols).toEqual({});
+    expect(toLayout({ ...base, xlog_cols: { server: 150, url: 400, ip: -1 } }).xlogCols).toEqual({ server: 150 });
   });
 });
 

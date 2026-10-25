@@ -14,6 +14,7 @@ import type {
 } from '../api/scouterApi';
 import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
+import { normalizeColWidths, type XLogColWidths } from '../components/xlogColumns';
 import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
 import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTab, type XLogTabsState } from './xlogTabs';
 import type { XLogMode } from '../types/timeRange';
@@ -28,6 +29,8 @@ export interface StoredLayout {
   activeTab: TabId;
   /** 서비스 목록을 무엇으로 묶는가 */
   agentGroupBy: GroupBy;
+  /** 트랜잭션 표의 열 너비. 끌어서 정한 것만 있다 */
+  xlogCols: XLogColWidths;
 }
 
 export const DEFAULT_LAYOUT: StoredLayout = {
@@ -36,6 +39,7 @@ export const DEFAULT_LAYOUT: StoredLayout = {
   tableH: PANE.tableDefaultH,
   activeTab: 'xlog',
   agentGroupBy: 'type',
+  xlogCols: {},
 };
 
 const TABS: readonly TabId[] = ['xlog', 'active', 'visualize', 'counter', 'alert'];
@@ -71,6 +75,7 @@ export function toLayout(saved: UiLayout | undefined): StoredLayout {
     agentGroupBy: GROUP_BYS.includes(saved.agent_group_by as GroupBy)
       ? (saved.agent_group_by as GroupBy)
       : 'type',
+    xlogCols: normalizeColWidths(saved.xlog_cols),
   };
 }
 
@@ -81,6 +86,7 @@ export function fromLayout(l: StoredLayout): UiLayout {
     table_h: l.tableH,
     active_tab: l.activeTab,
     agent_group_by: l.agentGroupBy,
+    xlog_cols: { ...l.xlogCols },
   };
 }
 
