@@ -99,6 +99,15 @@ export function XLogToolbar({
     if (pastRange) setDraft(pastRange);
   }, [pastRange]);
 
+  // **과거로 넘어가는 그때의** 최근 10분으로 채운다. 칸의 기본값은 툴바가 처음 그려진 때(앱을 켠 때·탭을
+  // 옮긴 때)라, 몇 시간 켜 두고 과거로 가면 아침의 10분이 떠 있고 `조회` 가 그것을 받았다.
+  // 버튼이 아니라 모드를 본다 — 단축키(Ctrl+R)로 넘어가도 같아야 한다.
+  useEffect(() => {
+    if (mode === 'past' && pastRange === null) setDraft(defaultPastRange(Date.now()));
+    // 모드가 바뀔 때만. pastRange 가 null 로 돌아가는 것(실시간으로 갈 때)에 다시 돌 이유가 없다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   const check = checkRange(draft, Date.now());
 
   return (
