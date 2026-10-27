@@ -128,3 +128,20 @@ export function panRange(range: PastRange, deltaRatio: number): PastRange {
   return clampToDay(shifted, span, range.stime + span / 2);
 }
 
+
+/**
+ * 판 머리에 적는 과거 구간 — `00:19:10–00:29:10`, 오늘이 아니면 앞에 날짜(`10/26 `).
+ *
+ * **24시간제로 적는다.** 툴바의 시각 칸은 시스템 형식이라 `12:19 AM` 처럼 나와, 같은 구간이
+ * 두 곳에서 다르게 읽혔다. 머리는 화면이 정한 형식 하나로 적는다.
+ */
+export function pastRangeLabel(range: PastRange, now: number): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  const hms = (ms: number) => {
+    const d = new Date(ms);
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  };
+  const s = new Date(range.stime);
+  const day = yyyymmdd(range.stime) === yyyymmdd(now) ? '' : `${s.getMonth() + 1}/${s.getDate()} `;
+  return `${day}${hms(range.stime)}–${hms(range.etime)}`;
+}

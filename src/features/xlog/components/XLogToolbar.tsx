@@ -1,9 +1,8 @@
 // src/features/xlog/components/XLogToolbar.tsx
 
 import React, { useEffect, useState } from 'react';
-import type { TextFilter, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
-import { firstRule, setFirstRule, Y_AXIS_CONFIGS } from '../types/xlog';
-import { Y_MAX_PRESETS_SEC } from '../engine/yScale';
+import type { TextFilter, XLogFilterState } from '../types/xlog';
+import { firstRule, setFirstRule } from '../types/xlog';
 import type { PastRange, XLogMode } from '../types/timeRange';
 import {
   checkRange,
@@ -13,10 +12,16 @@ import {
 } from '../types/timeRange';
 import { t } from '../../../i18n';
 
+/**
+ * XLog 조회 조건 — **한 줄이다.**
+ *
+ * 예전에는 두 줄째(«조건 더보기»)에 Y축·범위·저장본·Y최대·밀집·응답이 섞여 있어, 무엇이 점을
+ * 거르고(응답) 무엇이 그리는 모양만 바꾸는지(Y축·범위·Y최대·밀집) 무엇이 아예 다른 일인지(저장본)
+ * 구분되지 않았다. 거르는 것만 여기 남기고, 그리는 모양은 판 머리의 «차트 ▾»
+ * (`XLogChartSettings`), 저장본은 트랜잭션 목록 머리로 옮겼다.
+ */
 interface XLogToolbarProps {
-  config: XLogChartConfig;
   filter: XLogFilterState;
-  onConfigChange: (c: Partial<XLogChartConfig>) => void;
   onFilterChange: (f: Partial<XLogFilterState>) => void;
   mode: XLogMode;
   onModeChange: (m: XLogMode) => void;
@@ -30,16 +35,10 @@ interface XLogToolbarProps {
    * 이건 «어디 있는지 모르는 걸 찾는다» 다.
    */
   onWideSearch?: () => void;
-  /** 저장해 둔 프로파일 목록을 연다 */
-  onOpenSaved?: () => void;
   /** 필터 창을 연다 */
   onOpenFilters?: () => void;
-  // 셋 다 **없으면 버튼을 안 그린다** — 떼어 낸 창은 그 창들이 메인 창 탭을 고치므로 두지 않는다
+  // 둘 다 **없으면 버튼을 안 그린다** — 떼어 낸 창은 그 창들이 메인 창 탭을 고치므로 두지 않는다
 }
-
-const Y_AXIS_OPTIONS: YAxisMode[] = [
-  'elapsed', 'cpu', 'sqlTime', 'sqlCount', 'apiCallTime', 'apiCallCount', 'heapUsed',
-];
 
 /**
  * 이전에는 레이블과 값이 같은 밝기(T.text)라 "Y축"과 "응답시간"이 같은 무게로 읽혔다.
@@ -50,23 +49,15 @@ const Y_AXIS_OPTIONS: YAxisMode[] = [
  */
 const CONTROL =
   'rounded border border-line-control bg-input px-1.5 py-0.5 text-body text-fg';
-/**
- * 고르기 상자. `px-1.5` 가 기본 스타일의 오른쪽 여백(직접 그린 화살표 자리, index.css)을
- * 덮어써서 `5분` 같은 짧은 값이 화살표 밑으로 들어갔다. 오른쪽만 되살린다.
- */
-const SELECT = `${CONTROL} pr-[26px]`;
 
 export function XLogToolbar({
-  config,
   filter,
-  onConfigChange,
   onFilterChange,
   mode,
   onModeChange,
   pastRange,
   onPastRangeChange,
   onWideSearch,
-  onOpenSaved,
   onOpenFilters,
 }: XLogToolbarProps) {
   /** 인라인 칸에 안 보이는 조건 수. 창을 열지 않고도 «더 걸려 있다» 를 안다 */
@@ -74,24 +65,6 @@ export function XLogToolbar({
   // 입력 중인 값. **조회를 눌러야** 실제 구간이 된다 —
   // 타이핑할 때마다 수만 건을 다시 받으면 안 된다.
   const [draft, setDraft] = useState<PastRange>(() => defaultPastRange(Date.now()));
-
-  /**
-   * 접어 둔 줄에서 **지금 걸려 있는** 조건 수.
-   *
-   * 접히는 것과 꺼지는 것은 다르다 — 접어 둔 조건이 여전히 거르고 있는데
-   * 화면에 아무 표시가 없으면 «왜 이만큼만 나오지» 의 답이 숨는다.
-   */
-  const hiddenActive =
-    (filter.elapsedMs > 0 ? 1 : 0) +
-    (config.showDensity ? 1 : 0);
-
-  /**
-   * 두 줄째를 펼친가.
-   *
-   * **걸려 있는 것이 있으면 열고 시작한다.** 접은 줄 안에 조건이 숨은 채로
-   * 시작하면, 지난번에 걸어 둔 조건을 모르고 «데이터가 안 나온다» 로 읽는다.
-   */
-  const [showMore, setShowMore] = useState(() => hiddenActive > 0);
 
   // 휠로 확대하면 구간이 밖에서 바뀐다. 입력칸이 따라가지 않으면
   // 화면이 보여주는 구간과 입력값이 어긋나 어느 쪽이 진짜인지 알 수 없다.
@@ -169,14 +142,7 @@ export function XLogToolbar({
           </button>
           {/* 막힌 이유를 말해 주지 않으면 버튼이 왜 안 눌리는지 알 수 없다 */}
           {!check.ok && <span className="text-micro text-warn">{check.reason}</span>}
-          {check.ok && pastRange && (
-            <span className="text-micro text-fg-faint">
-              {new Date(pastRange.stime).toLocaleTimeString('ko-KR', { hour12: false })}~
-              {new Date(pastRange.etime).toLocaleTimeString('ko-KR', { hour12: false })}
-              {/* 보이지 않는 단축키는 없는 것과 같다 */}
-              <span className="ml-2 text-fg-faint">{t('휠=확대 · Shift+휠=이동')}</span>
-            </span>
-          )}
+          {/* 조회한 구간과 휠 단축키는 판 머리의 «과거 …» 에 적힌다 — 여기 또 적으면 한 줄에 안 들어간다 */}
           <span className="h-4 w-px bg-line" aria-hidden />
         </>
       )}
@@ -208,18 +174,31 @@ export function XLogToolbar({
         onChange={v => onFilterChange({ patterns: setFirstRule(filter, 'ip', v) })}
       />
 
-      {/* **접어 둔 조건이 몇 개인지를 적어 둔다.** 안 적으면 «왜 이만큼만 보이지» 의
-          답이 접힌 줄 안에 숨는다 — 거르고 있는 것은 항상 드러나야 한다. */}
-      <button
-        type="button"
-        onClick={() => setShowMore(v => !v)}
-        aria-expanded={showMore}
-        title={t('Y축·범위·저장본·Y최대·밀집·응답을 여닫습니다')}
-        className="btn px-2 py-0.5 text-micro"
-      >
-        {showMore ? t('조건 접기') : t('조건 더보기')}
-        {hiddenActive > 0 ? ` ${hiddenActive}` : ''}
-      </button>
+      {/* 응답시간은 초로 받는다 — Y축이 Elapsed(sec) 라 눈으로 본 값을 그대로 옮기게 된다.
+          내부는 ms 다. 0.2 같은 소수도 받으므로 예전 ms 입력이 하던 일을 잃지 않는다. */}
+      <Field label={t('응답')}>
+        <Direction
+          exclude={filter.elapsedExclude}
+          onChange={v => onFilterChange({ elapsedExclude: v })}
+          onLabel={t('이상')}
+          offLabel={t('미만')}
+        />
+        <input
+          type="number"
+          className={`${CONTROL} tnum w-14 text-right font-mono`}
+          value={filter.elapsedMs === 0 ? '' : filter.elapsedMs / 1000}
+          min={0}
+          step={0.1}
+          placeholder="0"
+          aria-label={t('응답시간 (초)')}
+          title={t('0 이나 빈 칸이면 조건 없음')}
+          onChange={e => {
+            const sec = Number(e.target.value);
+            onFilterChange({ elapsedMs: Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 0 });
+          }}
+        />
+        <span className="text-micro text-fg-faint">{t('초')}</span>
+      </Field>
 
       {/* 조건이 두 줄을 넘어가면 인라인으로는 못 다룬다 — 거기서부터는 창이 맡는다 */}
       {onOpenFilters && <button
@@ -249,113 +228,6 @@ export function XLogToolbar({
       </button>}
       </div>
 
-      {/* 두 줄째 — 자주 안 건드리는 것들. 접어 두면 찾는 줄이 한 눈에 들어온다. */}
-      {showMore && (
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-1">
-        {/* 한 번 정하면 잘 안 바꾸는 것들 — 무엇을 어떤 폭으로 그리나, 파일로 남긴 것 열기 */}
-        <Field label={t('Y축')}>
-          <select
-            className={SELECT}
-            title={t('점의 높이를 무엇으로 볼지. 응답시간·CPU·SQL 시간·SQL 건수 등')}
-            value={config.yAxisMode}
-            onChange={e => onConfigChange({ yAxisMode: e.target.value as YAxisMode })}
-          >
-            {Y_AXIS_OPTIONS.map(mode => (
-              <option key={mode} value={mode}>
-                {Y_AXIS_CONFIGS[mode].label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={t('범위')}>
-          <select
-            className={SELECT}
-            title={t('가로축이 담는 시간. 좁힐수록 점이 덜 겹친다')}
-            value={config.timeRangeMs}
-            onChange={e => onConfigChange({ timeRangeMs: Number(e.target.value) })}
-          >
-            <option value={60_000}>{t('1분')}</option>
-            <option value={300_000}>{t('5분')}</option>
-            <option value={600_000}>{t('10분')}</option>
-            <option value={1_800_000}>{t('30분')}</option>
-          </select>
-        </Field>
-        <span className="h-4 w-px bg-line" aria-hidden />
-        {/* 저장본은 **접속과 무관하다.** 콜렉터에서 이미 밀려난 트랜잭션도 열리므로
-            연결 상태와 상관없이 늘 눌린다 */}
-        {onOpenSaved && <button
-          onClick={onOpenSaved}
-          title={t('파일로 남겨 둔 프로파일을 엽니다')}
-          className="btn px-2 py-0.5 text-micro"
-        >
-          {t('저장본')}
-        </button>}
-        <span className="h-4 w-px bg-line" aria-hidden />
-        {/* 축보다 큰 점은 **천장에 붙어** 그려진다(예전에는 통째로 사라졌다).
-            축은 사람이 정한다 — 자동으로 늘리면 튀는 것 하나에 나머지가 바닥에 깔린다.
-            Ctrl+휠로도 움직인다. */}
-        <Field label={t('Y최대')}>
-          <select
-            className={SELECT}
-            title={t('세로축의 최대값. 이보다 큰 것은 맨 위에 붙습니다 (Ctrl+휠로도 조절)')}
-            value={String(config.yMax)}
-            onChange={e => onConfigChange({ yMax: Number(e.target.value) })}
-          >
-            {Y_MAX_PRESETS_SEC.map(sec => (
-              <option key={sec} value={sec}>
-                {sec}{t('초')}
-              </option>
-            ))}
-            {/* 프리셋에 없는 값(Ctrl+휠로 만든 것)도 목록에 보여야 «지금 얼마인지» 를 안다 */}
-            {!Y_MAX_PRESETS_SEC.includes(config.yMax as (typeof Y_MAX_PRESETS_SEC)[number]) && (
-              <option value={config.yMax}>
-                {config.yMax}{t('초')}
-              </option>
-            )}
-          </select>
-        </Field>
-        {/* 점 하나가 5x5 를 막아 촘촘한 구간에서는 대부분이 안 그려진다 —
-            화면은 «여기 좀 있네» 인데 실제로는 한 덩어리다.
-            **늘 켜 두지 않는다**: 열이 깔리면 점 색(어느 서버인가)이 읽기 어려워진다. */}
-        <label
-          className="flex cursor-pointer items-center gap-1.5 text-body text-fg-muted hover:text-fg"
-          title={t('겹쳐서 안 그려진 것까지 세어 붐비는 자리를 밝기로 보여줍니다')}
-        >
-          <input
-            type="checkbox"
-            checked={config.showDensity}
-            onChange={e => onConfigChange({ showDensity: e.target.checked })}
-          />
-          {t('밀집')}
-        </label>
-
-        {/* 응답시간은 초로 받는다 — Y축이 Elapsed(sec) 라 눈으로 본 값을 그대로 옮기게 된다.
-            내부는 ms 다. 0.2 같은 소수도 받으므로 예전 ms 입력이 하던 일을 잃지 않는다. */}
-        <Field label={t('응답')}>
-          <Direction
-            exclude={filter.elapsedExclude}
-            onChange={v => onFilterChange({ elapsedExclude: v })}
-            onLabel={t('이상')}
-            offLabel={t('미만')}
-          />
-          <input
-            type="number"
-            className={`${CONTROL} tnum w-16 text-right font-mono`}
-            value={filter.elapsedMs === 0 ? '' : filter.elapsedMs / 1000}
-            min={0}
-            step={0.1}
-            placeholder="0"
-            title={t('0 이나 빈 칸이면 조건 없음')}
-            onChange={e => {
-              const sec = Number(e.target.value);
-              onFilterChange({ elapsedMs: Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : 0 });
-            }}
-          />
-          <span className="text-micro text-fg-faint">{t('초')}</span>
-        </Field>
-
-        </div>
-      )}
     </div>
   );
 }

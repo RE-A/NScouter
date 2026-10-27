@@ -1,6 +1,7 @@
 // src/features/xlog/components/XLogChart.tsx
 
 import React, { memo, useCallback, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useXLogCanvas } from '../hooks/useXLogCanvas';
 import { useXLogStream } from '../hooks/useXLogStream';
 import {
@@ -16,10 +17,12 @@ import { useConnectionReset } from '../hooks/useConnectionReset';
 import { useLiveBackfill } from '../hooks/useLiveBackfill';
 import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import type { PastRange } from '../types/timeRange';
-import { panRange, zoomRange } from '../types/timeRange';
+import { panRange, pastRangeLabel, zoomRange } from '../types/timeRange';
 import { stepYMax } from '../engine/yScale';
 import { T, F } from '../../../styles/tokens';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
+import { XLogChartSettings } from './XLogChartSettings';
 
 interface XLogChartProps {
   config: XLogChartConfig;
@@ -85,6 +88,14 @@ interface XLogChartProps {
    * (`useConnectionReset`).
    */
   connectionEpoch?: number;
+  /**
+   * 판 머리(모드·구간·멈춤·차트 설정)를 그릴 자리.
+   *
+   * **머리줄을 한 줄 더 쌓지 않으려고 남의 줄에 얹는다.** 판이 하나면 탭 줄 오른쪽, 화면을
+   * 나누면 그 판의 머리다. 멈춤 상태는 여기(차트)가 쥐고 있어 포털로 그린다.
+   * 자리가 없으면(null) 차트 위에 한 줄로 그린다.
+   */
+  headerSlot?: HTMLElement | null;
 }
 
 /**
@@ -118,6 +129,7 @@ export const XLogChart = memo(function XLogChart({
   refreshSignal = 0,
   active = true,
   connectionEpoch = 0,
+  headerSlot = null,
 }: XLogChartProps) {
   /**
    * 화면을 멈춘 상태.
@@ -316,117 +328,143 @@ export const XLogChart = memo(function XLogChart({
       : `${t('데이터 시각이 이 PC 보다')} ${sec}${t('초 뒤처집니다 — 오른쪽이 비어 보일 수 있습니다')}`;
   })();
 
-  return (
-    <div
-      style={{ position: 'relative', width: '100%', height: '100%' }}
-      onWheel={handleWheel}
-    >
-      <canvas
-        ref={canvasRef}
-        style={{
-          display: 'block',
-          width: '100%',
-          height: '100%',
-          cursor: 'crosshair',
-        }}
-      />
-
-      {/* **멈춤은 차트 위에 둔다.** 멈춘 그림 바로 옆에 있어야 «왜 안 흐르지» 가 안 생긴다.
-          실시간일 때만 뜻이 있다 — 과거 구간은 원래 고정된 그림이다. */}
+  const paused = pauseState.at !== null;
+  /**
+   * 판 머리 — 지금 무엇을 보고 있나(실시간·멈춤·과거 구간)와 그 그림을 다루는 것.
+   *
+   * **과거면 구간을 적는다.** 며칠 전 구간을 띄워 둔 판이 «0 dots» 만 보여서, 고장인지 과거를
+   * 보는 중인지 알 수 없었다. 멈춤은 멈춘 그림 바로 위에 있어야 «왜 안 흐르지» 가 안 생긴다.
+   */
+  const chrome = (
+    <div className="flex min-w-0 shrink-0 items-center gap-1.5 text-micro font-normal tracking-normal normal-case">
+      {isPast && pastRange ? (
+        <span
+          className="tnum truncate rounded-sm bg-accent/15 px-1.5 py-0.5 font-mono text-accent-bright"
+          title={t('과거 구간을 보는 중입니다. 휠=확대 · Shift+휠=이동 · 툴바의 «실시간» 으로 돌아갑니다')}
+        >
+          {t('과거')} {pastRangeLabel(pastRange, Date.now())}
+        </span>
+      ) : isPast ? (
+        <span className="rounded-sm bg-accent/15 px-1.5 py-0.5 text-accent-bright">
+          {t('과거 — 툴바에서 구간을 고르고 «조회»')}
+        </span>
+      ) : paused ? (
+        // **멈춘 사이에도 받고 있다**는 것을 수로 보여준다. 안 보여주면 멈춘 동안
+        // 아무 일도 없었던 것으로 읽히고, 재개할 이유도 흐려진다.
+        <span className="rounded-sm bg-warn/15 px-1.5 py-0.5 text-warn">
+          {t('멈춤')} · {t('멈춘 뒤')} <span className="tnum font-mono">{pausedFor.toLocaleString()}</span>
+          {t('건')}
+        </span>
+      ) : (
+        <span className="flex items-center gap-1 text-fg-dim">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ok" />
+          {t('실시간')}
+        </span>
+      )}
+      {/* 실시간일 때만 뜻이 있다 — 과거 구간은 원래 고정된 그림이다 */}
       {!isPast && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={togglePause}
-            aria-pressed={pauseState.at !== null}
-            title={
-              pauseState.at === null
-                ? t('화면을 멈춥니다. 받는 것은 계속합니다')
-                : t('다시 흐르게 합니다')
-            }
-            // 차트 위에 떠 있는 단추라 배경을 깔아야 점과 안 섞인다.
-            className="btn bg-overlay px-2 py-0.5 text-micro shadow-lg"
-          >
-            {pauseState.at === null ? `⏸ ${t('멈춤')}` : `▶ ${t('재개')}`}
-          </button>
-
-          {/* **멈춘 사이에도 받고 있다**는 것을 수로 보여준다. 안 보여주면 멈춘 동안
-              아무 일도 없었던 것으로 읽히고, 재개할 이유도 흐려진다. */}
-          {pauseState.at !== null && (
-            <span className="rounded border border-line-strong bg-overlay px-2 py-0.5 text-micro text-fg-muted shadow-lg">
-              {t('멈춘 뒤')} <span className="tnum font-mono text-fg">{pausedFor.toLocaleString()}</span>
-              {t('건')}
-            </span>
-          )}
-        </div>
+        <Button
+          size="xs"
+          onClick={togglePause}
+          aria-pressed={paused}
+          title={paused ? t('다시 흐르게 합니다') : t('화면을 멈춥니다. 받는 것은 계속합니다')}
+        >
+          {paused ? `▶ ${t('재개')}` : `⏸ ${t('멈춤')}`}
+        </Button>
       )}
-
-      {/* 과거 조회는 수만 건이라 몇 초 걸린다. 진행 상황이 없으면 멈춘 것처럼 보인다. */}
-      {isPast && (past.loading || past.error) && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-line-strong bg-overlay px-3 py-1 text-body shadow-lg">
-          {past.error ? (
-            <span className="text-danger">{past.error}</span>
-          ) : (
-            <span className="text-fg-muted">
-              {t('불러오는 중…')} <span className="tnum font-mono text-fg">
-                {(past.progress?.loaded ?? 0).toLocaleString()}
-              </span>{t('건')}
-            </span>
-          )}
-        </div>
+      {onConfigChange && (
+        <XLogChartSettings config={config} onConfigChange={onConfigChange} live={!isPast} />
       )}
-      {/* **뒤늦게 차오르는 중이라고 말한다.** 아무 말이 없으면 왼쪽이 빈 것을 보고
-          «데이터가 없다» 로 읽고, 다 찬 뒤에 다시 보면 «없다더니 있네» 가 된다. */}
-      {!isPast && backfill.loading && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-line-strong bg-overlay px-3 py-1 text-micro text-fg-muted shadow-lg">
-          {t('과거 구간 채우는 중…')} <span className="tnum font-mono text-fg">
-            {backfill.loaded.toLocaleString()}
-          </span>{t('건')}
-        </div>
-      )}
+    </div>
+  );
 
-      {isPast && !past.loading && past.progress?.truncated && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-warn/50 bg-overlay px-3 py-1 text-body text-warn shadow-lg">
-          {t('너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요')}
-        </div>
+  return (
+    <div className="flex h-full w-full flex-col">
+      {active && headerSlot && createPortal(chrome, headerSlot)}
+      {active && !headerSlot && (
+        <div className="flex shrink-0 items-center justify-end border-b border-line px-2 py-0.5">{chrome}</div>
       )}
+      <div
+        style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0 }}
+        onWheel={handleWheel}
+      >
+        <canvas
+          ref={canvasRef}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            cursor: 'crosshair',
+          }}
+        />
 
-      {/* **시계가 어긋나면 점이 창 밖에 놓인다.**
-          차트의 오른쪽 끝은 이 PC 의 «지금» 이다. 콜렉터 쪽 시각이 앞서면 방금 온 점이
-          오른쪽 밖으로, 뒤처지면 오른쪽이 빈 채로 남는다 — 스트림은 멀쩡한데
-          화면에서만 사라진 것처럼 보인다. 조용히 두면 원인을 찾을 길이 없다. */}
-      {/* **그림 위에 띄우지 않는다.** 가운데 아래에 뒀더니 점을 가렸다 —
-          안내가 정작 보려던 것을 덮으면 안내가 아니다. 차트 맨 아래 한 줄로 눕힌다. */}
-      {!isPast && capWarning !== null && (
-        <div className="absolute inset-x-0 bottom-0 truncate border-t border-warn/40 bg-overlay/95 px-2 py-0.5 text-micro text-warn">
-          {capWarning}
-        </div>
-      )}
+        {/* 과거 조회는 수만 건이라 몇 초 걸린다. 진행 상황이 없으면 멈춘 것처럼 보인다. */}
+        {isPast && (past.loading || past.error) && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-line-strong bg-overlay px-3 py-1 text-body shadow-lg">
+            {past.error ? (
+              <span className="text-danger">{past.error}</span>
+            ) : (
+              <span className="text-fg-muted">
+                {t('불러오는 중…')} <span className="tnum font-mono text-fg">
+                  {(past.progress?.loaded ?? 0).toLocaleString()}
+                </span>{t('건')}
+              </span>
+            )}
+          </div>
+        )}
+        {/* **뒤늦게 차오르는 중이라고 말한다.** 아무 말이 없으면 왼쪽이 빈 것을 보고
+            «데이터가 없다» 로 읽고, 다 찬 뒤에 다시 보면 «없다더니 있네» 가 된다. */}
+        {!isPast && backfill.loading && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-line-strong bg-overlay px-3 py-1 text-micro text-fg-muted shadow-lg">
+            {t('과거 구간 채우는 중…')} <span className="tnum font-mono text-fg">
+              {backfill.loaded.toLocaleString()}
+            </span>{t('건')}
+          </div>
+        )}
 
-      {/* 왼쪽을 덜 채웠다(상한에 걸렸거나 조회가 실패했다). 조용히 두면
-          «그 시간대에 트래픽이 없었다» 로 읽힌다.
-          상한 안내가 떠 있으면 그쪽이 먼저다 — 같은 자리에 두 줄을 겹칠 수 없다. */}
-      {!isPast && capWarning === null && !backfill.loading && backfillNotice !== null && (
-        <div className="absolute inset-x-0 bottom-0 truncate border-t border-warn/40 bg-overlay/95 px-2 py-0.5 text-micro text-warn">
-          {backfillNotice}
-        </div>
-      )}
+        {isPast && !past.loading && past.progress?.truncated && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded border border-warn/50 bg-overlay px-3 py-1 text-body text-warn shadow-lg">
+            {t('너무 많아 일부만 표시합니다 — 구간을 좁혀 주세요')}
+          </div>
+        )}
 
-      {!isPast && skewWarning !== null && (
-        <div className="absolute top-2 right-2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
-          {skewWarning}
-        </div>
-      )}
+        {/* **시계가 어긋나면 점이 창 밖에 놓인다.**
+            차트의 오른쪽 끝은 이 PC 의 «지금» 이다. 콜렉터 쪽 시각이 앞서면 방금 온 점이
+            오른쪽 밖으로, 뒤처지면 오른쪽이 빈 채로 남는다 — 스트림은 멀쩡한데
+            화면에서만 사라진 것처럼 보인다. 조용히 두면 원인을 찾을 길이 없다. */}
+        {/* **그림 위에 띄우지 않는다.** 가운데 아래에 뒀더니 점을 가렸다 —
+            안내가 정작 보려던 것을 덮으면 안내가 아니다. 차트 맨 아래 한 줄로 눕힌다. */}
+        {!isPast && capWarning !== null && (
+          <div className="absolute inset-x-0 bottom-0 truncate border-t border-warn/40 bg-overlay/95 px-2 py-0.5 text-micro text-warn">
+            {capWarning}
+          </div>
+        )}
 
-      {streamError && (
-        <div style={errorBannerStyle}>
-          <span>{streamError}</span>
-          <button onClick={clearError} style={closeBtnStyle}>✕</button>
-        </div>
-      )}
+        {/* 왼쪽을 덜 채웠다(상한에 걸렸거나 조회가 실패했다). 조용히 두면
+            «그 시간대에 트래픽이 없었다» 로 읽힌다.
+            상한 안내가 떠 있으면 그쪽이 먼저다 — 같은 자리에 두 줄을 겹칠 수 없다. */}
+        {!isPast && capWarning === null && !backfill.loading && backfillNotice !== null && (
+          <div className="absolute inset-x-0 bottom-0 truncate border-t border-warn/40 bg-overlay/95 px-2 py-0.5 text-micro text-warn">
+            {backfillNotice}
+          </div>
+        )}
 
-      {/* 선택 개수 배지는 뺐다 — 바로 아래 목록이 같은 값을 "선택 19건" 으로 이미 말한다.
-          같은 일을 하는 컨트롤 두 개가 표현만 달랐다("개" vs "건"). */}
+        {!isPast && skewWarning !== null && (
+          <div className="absolute top-2 right-2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
+            {skewWarning}
+          </div>
+        )}
+
+        {streamError && (
+          <div style={errorBannerStyle}>
+            <span>{streamError}</span>
+            <button onClick={clearError} style={closeBtnStyle}>✕</button>
+          </div>
+        )}
+
+        {/* 선택 개수 배지는 뺐다 — 바로 아래 목록이 같은 값을 "선택 19건" 으로 이미 말한다.
+            같은 일을 하는 컨트롤 두 개가 표현만 달랐다("개" vs "건"). */}
+      </div>
     </div>
   );
 });

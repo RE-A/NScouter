@@ -36,6 +36,11 @@ interface XLogTabBarProps {
   onAdd: () => void;
   /** 이름을 바꾼다. 빈 글자면 붙인 이름을 지운다 */
   onRename: (key: string, title: string) => void;
+  /**
+   * 줄 오른쪽 빈자리. 판이 하나일 때 그 판의 머리(모드·멈춤·차트 설정)가 여기 얹힌다 —
+   * 차트 위에 머리줄을 한 줄 더 쌓지 않으려고.
+   */
+  slotRef?: (el: HTMLDivElement | null) => void;
 }
 
 export const XLogTabBar = memo(function XLogTabBar({
@@ -48,6 +53,7 @@ export const XLogTabBar = memo(function XLogTabBar({
   onClose,
   onAdd,
   onRename,
+  slotRef,
 }: XLogTabBarProps) {
   const full = tabs.length >= MAX_XLOG_TABS;
   /** 이름을 고치고 있는 탭과 입력 중인 글자 */
@@ -104,6 +110,7 @@ export const XLogTabBar = memo(function XLogTabBar({
     return (
       <div className="flex shrink-0 items-center border-b border-line bg-raised px-3 py-0.5">
         <AddButton onAdd={onAdd} full={full} />
+        <div ref={slotRef} className="ml-auto flex min-w-0 items-center" />
       </div>
     );
   }
@@ -198,6 +205,7 @@ export const XLogTabBar = memo(function XLogTabBar({
         );
       })}
       <AddButton onAdd={onAdd} full={full} />
+      <div ref={slotRef} className="ml-auto flex min-w-0 items-center" />
       {menu && (
         <ContextMenu
           x={menu.x}

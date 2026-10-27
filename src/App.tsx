@@ -335,15 +335,6 @@ export default function App({ windowLabel }: {
   const xlogMode = curTab.mode;
   const pastRange = curTab.pastRange;
 
-  const setConfig = useCallback(
-    (v: XLogChartConfig | ((p: XLogChartConfig) => XLogChartConfig)) =>
-      setXLogTabs(s =>
-        patchActiveTab(s, {
-          config: typeof v === 'function' ? v(activeXLogTab(s).config) : v,
-        }),
-      ),
-    [],
-  );
   const setFilter = useCallback(
     (v: XLogFilterState | ((p: XLogFilterState) => XLogFilterState)) =>
       setXLogTabs(s =>
@@ -825,7 +816,6 @@ export default function App({ windowLabel }: {
     startAlertStream().catch(() => {});
   }, [isConnected, isMain]);
 
-  const handleConfigChange = useCallback((p: Partial<XLogChartConfig>) => setConfig(prev => ({ ...prev, ...p })), []);
   const handleFilterChange = useCallback((p: Partial<XLogFilterState>) => setFilter(prev => ({ ...prev, ...p })), []);
   /**
    * 접속 창이 «붙었다» 고 알릴 때.
@@ -1751,8 +1741,13 @@ export default function App({ windowLabel }: {
     if (!a) { a = [...set]; hashArraysRef.current.set(set, a); }
     return a;
   };
+  /**
+   * 탭 줄 오른쪽 빈자리 — 판이 하나일 때 그 판의 머리(모드·멈춤·차트 설정)가 얹힌다.
+   * 차트 위에 머리줄을 따로 쌓지 않으려는 것이다 (XLogChart `headerSlot`).
+   */
+  const [tabRowSlot, setTabRowSlot] = useState<HTMLDivElement | null>(null);
   const renderXLogTab = useCallback(
-    (tab: XLogTab, visible: boolean) => {
+    (tab: XLogTab, visible: boolean, paneSlot: HTMLElement | null) => {
       // **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
       // 트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다.
       // 지금 판이 아니면 그 판의 고르기 사정을 따로 풀지 않는다 — 고르라는 말만 한다.
@@ -1777,12 +1772,14 @@ export default function App({ windowLabel }: {
           onConfigChange={paneHandlers(tab.key).config}
           onPastRangeChange={paneHandlers(tab.key).range}
           active={visible}
+          // 나눴으면 그 판의 머리, 하나면 탭 줄 오른쪽
+          headerSlot={paneSlot ?? (visible && xlogTabs.panes.length === 1 ? tabRowSlot : null)}
         />
       );
     },
     // paneHandlers·hashArray 는 ref 위의 캐시라 deps 가 아니다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal],
+    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, tabRowSlot, xlogTabs.panes.length],
   );
 
   /**
@@ -2110,21 +2107,19 @@ export default function App({ windowLabel }: {
             onClose={handleXLogTabClose}
             onAdd={handleXLogTabAdd}
             onRename={handleXLogTabRename}
+            slotRef={setTabRowSlot}
           />
           {/* 탭마다 따로 세운다 — 툴바가 쥔 입력 중인 과거 구간이 탭을 옮겨도 남아,
               다른 탭의 날짜가 칸에 떠 있었다 */}
           <XLogToolbar
             key={xlogTabs.activeKey}
-            config={config}
             filter={filter}
-            onConfigChange={handleConfigChange}
             onFilterChange={handleFilterChange}
             mode={xlogMode}
             onModeChange={setXLogMode}
             pastRange={pastRange}
             onPastRangeChange={handlePastRangeChange}
             onWideSearch={() => setShowWideSearch(true)}
-            onOpenSaved={() => setShowSaved(true)}
             onOpenFilters={() => setShowFilters(true)}
           />
           {/* 분할 배치.
@@ -2134,7 +2129,8 @@ export default function App({ windowLabel }: {
               wsSize 는 이제 배치가 아니라 **끌기 한계 계산에만** 쓴다. */}
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <Pane title="XLog" className="min-h-0 flex-1">
+              {/* 제목 줄은 없다 — 탭 줄이 이 판의 머리다(«XLOG» 가 탭 줄 바로 밑에 한 줄 더 있었다) */}
+              <Pane className="min-h-0 flex-1">
                 {/* 탭을 전부 띄워 두고 판에 놓인 것만 보인다 (XLogSplit).
                     받고 그리는 것은 **보이는 판만** 한다(`active`) — 안 그러면 탭 수만큼
                     같은 스트림이 쌓이고 숨겨둔 판에 매 프레임 헛돈을 쓴다. */}
@@ -2171,7 +2167,8 @@ export default function App({ windowLabel }: {
                 className="shrink-0"
                 style={{ height: tableH }}
                 aside={
-                  hasSelected ? (
+                  <span className="flex min-w-0 items-center gap-2">
+                  {hasSelected && (
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="shrink-0 whitespace-nowrap text-micro normal-case text-fg-dim">
                         <span className="tnum font-mono text-fg-muted">
@@ -2214,7 +2211,19 @@ export default function App({ windowLabel }: {
                         ✕
                       </Button>
                     </span>
-                  ) : null
+                  )}
+                  {/* 저장본(파일로 남긴 프로파일)은 **트랜잭션을 보는 자리**에서 연다 — 툴바 두 줄째의
+                      조건들 사이에 끼어 있어 거르는 것의 하나로 읽혔다. 접속과 무관하게 늘 눌린다 */}
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setShowSaved(true)}
+                    title={t('파일로 남겨 둔 프로파일을 엽니다')}
+                    className="shrink-0 normal-case"
+                  >
+                    {t('저장본')}
+                  </Button>
+                  </span>
                 }
               >
                 <div className="flex h-full flex-col">

@@ -261,18 +261,13 @@ export function ConnectionDialog({
         />
         {t('자동 연결')}
       </label>
-      <button type="submit" disabled={loading} style={btnStyle}>
+      {/* 글자색을 바탕(accent)에 맞춘다 — 테마 글자색(T.text)을 쓰던 때는 라이트 테마에서 파랑 위 검은 글씨였다 */}
+      <Button type="submit" variant="primary" size="md" disabled={loading}>
         {loading ? t('연결 중…') : t('연결')}
-      </button>
-      <button
-        type="button"
-        onClick={handleDemo}
-        disabled={loading}
-        style={{ ...btnStyle, background: T.success }}
-        title={t('실제 Collector 없이 합성 데이터로 차트 테스트')}
-      >
+      </Button>
+      <Button size="md" onClick={handleDemo} disabled={loading} title={t('실제 Collector 없이 합성 데이터로 차트 테스트')}>
         Demo
-      </button>
+      </Button>
       {error && <span style={{ color: T.error, fontSize: F.body }}>{error}</span>}
     </form>
   );
@@ -309,12 +304,3 @@ const autoLabelStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const btnStyle: React.CSSProperties = {
-  background: T.accent,
-  border: 'none',
-  borderRadius: 4,
-  color: T.text,
-  padding: '4px 14px',
-  fontSize: F.base,
-  cursor: 'pointer',
-};

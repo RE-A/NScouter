@@ -215,6 +215,12 @@ export const EN: Record<string, string> = {
   '닫기': 'Close',
   '닫기 (Esc)': 'Close (Esc)',
   '모두 지우기': 'Clear all',
+  // 판 머리 (XLogChart · XLogChartSettings)
+  'Y축·범위·Y최대·밀집 — 점을 거르지 않고 그리는 모양만 바꿉니다': 'Y axis · range · Y max · density — changes how dots are drawn, not which are shown',
+  '과거 — 툴바에서 구간을 고르고 «조회»': 'Past — pick a range in the toolbar and press «Query»',
+  '과거 구간을 보는 중입니다. 휠=확대 · Shift+휠=이동 · 툴바의 «실시간» 으로 돌아갑니다': 'Viewing a past range. Wheel = zoom · Shift+wheel = pan · «Live» in the toolbar returns',
+  '응답시간 (초)': 'Response time (sec)',
+  '차트 설정': 'Chart settings',
   '받아 둔 알림을 이 화면에서 지웁니다': 'Clears the received alerts from this view',
   '검색': 'Search',
   '취소': 'Cancel',

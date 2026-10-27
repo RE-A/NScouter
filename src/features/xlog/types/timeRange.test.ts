@@ -11,6 +11,7 @@ import {
   MAX_PAST_SPAN_MS,
   MIN_PAST_SPAN_MS,
   panRange,
+  pastRangeLabel,
   toLocalInput,
   yyyymmdd,
   zoomRange,
@@ -175,3 +176,17 @@ describe('panRange', () => {
 });
 
 // 확대는 이미 받아둔 데이터 안에서 일어난다. 휠마다 수만 건을 다시 받으면 못 쓴다.
+
+describe('pastRangeLabel', () => {
+  it('오늘이면 시각만, 24시간제로', () => {
+    const now = new Date(2026, 9, 26, 15, 0).getTime();
+    const r = { stime: new Date(2026, 9, 26, 0, 19, 10).getTime(), etime: new Date(2026, 9, 26, 0, 29, 10).getTime() };
+    expect(pastRangeLabel(r, now)).toBe('00:19:10–00:29:10');
+  });
+
+  it('오늘이 아니면 날짜를 붙인다 — 며칠 전 구간을 지금으로 읽지 않게', () => {
+    const now = new Date(2026, 9, 28, 9, 0).getTime();
+    const r = { stime: new Date(2026, 9, 26, 13, 5, 0).getTime(), etime: new Date(2026, 9, 26, 13, 15, 0).getTime() };
+    expect(pastRangeLabel(r, now)).toBe('10/26 13:05:00–13:15:00');
+  });
+});

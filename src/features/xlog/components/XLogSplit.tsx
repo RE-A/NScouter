@@ -12,7 +12,7 @@
 // 받아 둔 점을 잃고 과거 구간을 다시 조회해야 한다 — 그래서 자식 순서는 탭 순서 그대로 두고
 // 자리(grid-area)만 바꾼다.
 
-import { memo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useRef, useState, type ReactNode } from 'react';
 import type { DropSide, SplitDir, XLogTab } from '../hooks/xlogTabs';
 import { Divider } from '../../../components/Divider';
 import { PANE } from '../../../components/paneSizing';
@@ -58,8 +58,11 @@ interface XLogSplitProps {
   activeKey: string;
   dir: SplitDir;
   ratio: number;
-  /** 탭 하나의 차트. `visible` 이 거짓이면 숨겨 둔 판이다 */
-  renderTab: (tab: XLogTab, visible: boolean) => ReactNode;
+  /**
+   * 탭 하나의 차트. `visible` 이 거짓이면 숨겨 둔 판이다.
+   * `headerSlot` 은 판 머리의 빈자리 — 화면을 나눴을 때만 있다. 차트가 제 머리(모드·멈춤·설정)를 거기 그린다
+   */
+  renderTab: (tab: XLogTab, visible: boolean, headerSlot: HTMLElement | null) => ReactNode;
   onFocus: (key: string) => void;
   onDrop: (key: string, target: string, side: DropSide) => void;
   onClosePane: (key: string) => void;
@@ -102,6 +105,22 @@ export const XLogSplit = memo(function XLogSplit({
   onRatioDelta,
 }: XLogSplitProps) {
   const boxRef = useRef<HTMLDivElement>(null);
+  /** 판마다 머리의 빈자리 (차트가 포털로 그린다) */
+  const [slots, setSlots] = useState<Record<string, HTMLElement | null>>({});
+  /**
+   * 판마다 **같은 ref 함수**를 준다. 그릴 때마다 새 함수면 React 가 옛 것에 null, 새 것에 요소를
+   * 차례로 넘겨 자리가 null→요소로 출렁이고, 그게 다시 그리기를 부른다.
+   */
+  const slotRefs = useRef(new Map<string, (el: HTMLElement | null) => void>());
+  const slotRef = useCallback((key: string) => {
+    let f = slotRefs.current.get(key);
+    if (!f) {
+      f = (el: HTMLElement | null) =>
+        setSlots(prev => (prev[key] === el ? prev : { ...prev, [key]: el }));
+      slotRefs.current.set(key, f);
+    }
+    return f;
+  }, []);
   /** 끌고 있는 탭이 놓일 곳. 끌기가 아니면 null */
   const [hover, setHover] = useState<{ target: string; side: DropSide } | null>(null);
 
@@ -187,6 +206,7 @@ export const XLogSplit = memo(function XLogSplit({
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate">{labels[i]}</span>
+                <div ref={slotRef(tab.key)} className="flex min-w-0 items-center" />
                 <button
                   type="button"
                   onClick={() => onDetach(tab.key)}
@@ -207,7 +227,9 @@ export const XLogSplit = memo(function XLogSplit({
                 </button>
               </div>
             )}
-            <div className={`min-h-0 flex-1 ${split ? 'p-1' : 'p-2'}`}>{renderTab(tab, visible)}</div>
+            <div className={`min-h-0 flex-1 ${split ? 'p-1' : 'p-2'}`}>
+              {renderTab(tab, visible, split ? (slots[tab.key] ?? null) : null)}
+            </div>
             {hover?.target === tab.key && (
               <div
                 className={`pointer-events-none absolute rounded border-2 border-accent bg-accent/15 ${PREVIEW[hover.side]}`}
