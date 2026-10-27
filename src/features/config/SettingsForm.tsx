@@ -22,6 +22,7 @@ import {
 import type { ConfigScope } from './catalog/types';
 import { buildSections, isVisible, type SettingItem } from './settingsModel';
 import { t } from '../../i18n';
+import { Button } from '../../components/Button';
 
 interface SettingsFormProps {
   scope: ConfigScope;
@@ -217,35 +218,38 @@ export const SettingsForm = memo(function SettingsForm({
               </span>
             )}
             <div className="flex-1" />
-            <button
+            <Button
+              variant="ghost"
+              size="md"
               onClick={() => {
                 setEdits(new Map());
                 setConfirming(false);
               }}
               disabled={busy}
-              className="rounded px-2 py-1 text-small text-fg-dim hover:bg-hover hover:text-fg"
             >
               {t('모두 되돌리기')}
-            </button>
+            </Button>
             {confirming ? (
-              <button
+              <Button
+                variant="danger"
+                size="md"
                 onClick={doSave}
                 disabled={busy}
-                className="rounded border border-danger px-3 py-1 text-small text-danger hover:bg-danger/10 disabled:opacity-50"
               >
                 {busy ? t('저장 중…') : t('덮어쓰기')}
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
+                variant="primary"
+                size="md"
                 onClick={() => setConfirming(true)}
                 // **틀린 값이 있으면 저장하지 않는다.** 숫자 자리에 글자가 들어가면
                 // 서버는 조용히 기본값을 쓴다 — 저장은 됐는데 설정은 안 먹는다.
                 disabled={invalid > 0}
                 title={invalid > 0 ? t('빨갛게 표시된 값을 먼저 고치세요') : undefined}
-                className="rounded bg-accent px-3 py-1 text-small text-white hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line-strong disabled:text-fg-faint"
               >
                 {t('저장…')}
-              </button>
+              </Button>
             )}
           </div>
         </footer>

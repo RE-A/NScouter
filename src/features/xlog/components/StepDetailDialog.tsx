@@ -15,6 +15,8 @@ import { CopyButton } from '../../../components/CopyButton';
 import { formatSql } from './sqlFormat';
 import { detectFormat, formatBody } from './textFormat';
 import { t } from '../../../i18n';
+import { Dialog } from '../../../components/Dialog';
+import { Button } from '../../../components/Button';
 
 interface StepDetailDialogProps {
   /** 배지에 적을 종류 글자 (`SQL`·`API`·`MSG`…) */
@@ -69,13 +71,6 @@ export const StepDetailDialog = memo(function StepDetailDialog({
     preRef.current?.querySelector('[data-hit="on"]')?.scrollIntoView?.({ block: 'center' });
   }, [hit, hits]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const step = (d: number) => {
     if (hits.length === 0) return;
@@ -83,112 +78,107 @@ export const StepDetailDialog = memo(function StepDetailDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-label={t('본문 전체 보기')}
-        onClick={e => e.stopPropagation()}
-        className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl"
-      >
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
+    <Dialog
+      onClose={onClose}
+      widthClass="w-full max-w-4xl"
+      bodyClassName="flex flex-col"
+      ariaLabel={t('본문 전체 보기')}
+      title={
+        <>
           <span className="font-mono text-micro text-fg-dim">{kind}</span>
-          <h2 className="min-w-0 truncate text-base font-medium text-fg" title={title}>
+          <span className="min-w-0 truncate text-base font-medium text-fg" title={title}>
             {title}
-          </h2>
-          <div className="flex-1" />
+          </span>
+        </>
+      }
+      headerExtra={
+        <>
           <span className="shrink-0 font-mono text-micro text-fg-faint">
             {body.length.toLocaleString()}
             {t('자')}
           </span>
-          <button
-            onClick={onClose}
-            className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-          >
-            ✕
-          </button>
-        </header>
-
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
-          {/* **원문으로 돌아갈 수 있어야 한다.** 나눈 모양이 원문과 다르게 보일 때
-              무엇이 실제로 오갔는지 확인할 방법이 있어야 근거로 쓸 수 있다. */}
-          {splittable && (
-            <button
-              type="button"
-              onClick={() => setPretty(p => !p)}
-              aria-pressed={pretty}
-              className={`rounded px-2 py-0.5 text-micro ${
-                pretty ? 'bg-accent/15 text-accent-bright' : 'text-fg-dim hover:bg-hover hover:text-fg'
-              }`}
-            >
-              {t('정렬해 보기')}
-            </button>
-          )}
+        </>
+      }
+    >
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
+        {/* **원문으로 돌아갈 수 있어야 한다.** 나눈 모양이 원문과 다르게 보일 때
+            무엇이 실제로 오갔는지 확인할 방법이 있어야 근거로 쓸 수 있다. */}
+        {splittable && (
           <button
             type="button"
-            onClick={() => setWrap(w => !w)}
-            aria-pressed={wrap}
+            onClick={() => setPretty(p => !p)}
+            aria-pressed={pretty}
             className={`rounded px-2 py-0.5 text-micro ${
-              wrap ? 'bg-accent/15 text-accent-bright' : 'text-fg-dim hover:bg-hover hover:text-fg'
+              pretty ? 'bg-accent/15 text-accent-bright' : 'text-fg-dim hover:bg-hover hover:text-fg'
             }`}
           >
-            {t('줄 바꿔 보기')}
+            {t('정렬해 보기')}
           </button>
-
-          <div className="flex-1" />
-
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') step(e.shiftKey ? -1 : 1);
-            }}
-            placeholder={t('본문에서 찾기')}
-            aria-label={t('본문에서 찾기')}
-            className="search-field w-56 text-micro"
-          />
-          {query.trim() !== '' && (
-            <span className="font-mono text-micro text-fg-faint">
-              {hits.length === 0 ? t('없음') : `${hit + 1}/${hits.length}`}
-            </span>
-          )}
-          {hits.length > 0 && (
-            <span className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => step(-1)}
-                aria-label={t('이전 적중')}
-                className="rounded px-1.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                onClick={() => step(1)}
-                aria-label={t('다음 적중')}
-                className="rounded px-1.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-              >
-                ↓
-              </button>
-            </span>
-          )}
-          {/* **보고 있는 모양 그대로 복사한다.** 정렬해 둔 채 원문이 복사되면
-              창에서 고른 자리와 붙여 넣은 것이 어긋난다. */}
-          <CopyButton text={shown} />
-        </div>
-
-        <pre
-          ref={preRef}
-          className={`min-h-0 flex-1 overflow-auto bg-base px-4 py-3 font-mono text-small leading-relaxed text-fg ${
-            wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+        )}
+        <button
+          type="button"
+          onClick={() => setWrap(w => !w)}
+          aria-pressed={wrap}
+          className={`rounded px-2 py-0.5 text-micro ${
+            wrap ? 'bg-accent/15 text-accent-bright' : 'text-fg-dim hover:bg-hover hover:text-fg'
           }`}
         >
-          <Marked text={shown} query={query.trim()} active={hit} hits={hits} />
-        </pre>
+          {t('줄 바꿔 보기')}
+        </button>
+
+        <div className="flex-1" />
+
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') step(e.shiftKey ? -1 : 1);
+          }}
+          placeholder={t('본문에서 찾기')}
+          aria-label={t('본문에서 찾기')}
+          className="search-field w-56 text-micro"
+        />
+        {query.trim() !== '' && (
+          <span className="font-mono text-micro text-fg-faint">
+            {hits.length === 0 ? t('없음') : `${hit + 1}/${hits.length}`}
+          </span>
+        )}
+        {hits.length > 0 && (
+          <span className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="xs"
+              type="button"
+              onClick={() => step(-1)}
+              aria-label={t('이전 적중')}
+            >
+              ↑
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              type="button"
+              onClick={() => step(1)}
+              aria-label={t('다음 적중')}
+            >
+              ↓
+            </Button>
+          </span>
+        )}
+        {/* **보고 있는 모양 그대로 복사한다.** 정렬해 둔 채 원문이 복사되면
+            창에서 고른 자리와 붙여 넣은 것이 어긋난다. */}
+        <CopyButton text={shown} />
       </div>
-    </div>
+
+      <pre
+        ref={preRef}
+        className={`min-h-0 flex-1 overflow-auto bg-base px-4 py-3 font-mono text-small leading-relaxed text-fg ${
+          wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+        }`}
+      >
+        <Marked text={shown} query={query.trim()} active={hit} hits={hits} />
+      </pre>
+    </Dialog>
   );
 });
 

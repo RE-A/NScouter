@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pane } from './components/Pane';
+import { TooltipLayer } from './components/TooltipLayer';
 import { Divider } from './components/Divider';
 import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './components/paneSizing';
 import { ConnectionDialog } from './features/xlog/components/ConnectionDialog';
@@ -220,6 +221,7 @@ import { T, F, FONT_UI } from './styles/tokens';
 import { SectionHeader } from './components/SectionHeader';
 import { t, useT } from './i18n';
 import { useViewOptions } from './features/xlog/hooks/useViewOptions';
+import { Button } from './components/Button';
 
 /** 기존 지역 팔레트 `C` 를 토큰으로 대체. 값은 styles/tokens.css 하나에만 있다. */
 const C = {
@@ -1893,6 +1895,8 @@ export default function App({ windowLabel }: {
     // key 로 갈아끼우는 이유: memo 로 막아 둔 자식(차트 등)까지 확실히 새 언어로 그린다.
     // 언어 바꾸기는 드문 일이라 이 정도 비용은 값이 싸다.
     <div style={appStyle} key={lang}>
+      {/* 기본 툴팁(title)을 대신 그린다 — 메뉴를 덮지 않고 테마를 따른다 (TooltipLayer.tsx) */}
+      <TooltipLayer />
       {/* ── 헤더 ── */}
       {/* 헤더 3구역: 정체(로고+서버) | 탐색(탭) | 상태·설정
           이전에는 9개 요소가 같은 무게로 나열돼 눈이 갈 곳을 못 정했다. */}
@@ -2199,14 +2203,16 @@ export default function App({ windowLabel }: {
                                 : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
                         </span>
                       )}
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         onClick={handleClearSelection}
                         title={t('선택 해제')}
                         aria-label={t('선택 해제')}
-                        className="shrink-0 rounded px-1 text-micro text-fg-faint hover:text-fg"
+                        className="shrink-0"
                       >
                         ✕
-                      </button>
+                      </Button>
                     </span>
                   ) : null
                 }
@@ -2991,7 +2997,10 @@ function AlertFullView({
       <div style={tabPageHeaderStyle}>
         <span>{t('알림')}</span>
         {alerts.length > 0 && (
-          <button onClick={onClear} style={{ ...closeBtnStyle, marginLeft: 8, fontSize: F.small, color: T.textFaint }}>Clear</button>
+          // 화면 말은 한국어로 — 영어로 «Clear» 만 떠 있었다
+          <Button variant="ghost" size="xs" onClick={onClear} className="ml-2" title={t('받아 둔 알림을 이 화면에서 지웁니다')}>
+            {t('모두 지우기')}
+          </Button>
         )}
       </div>
       <div style={{ ...colHeaderStyle, flexShrink: 0 }}>
@@ -3226,16 +3235,5 @@ const colHeaderStyle: React.CSSProperties = {
   borderBottom: `1px solid ${C.border}`,
   gap: 8,
   flexShrink: 0,
-};
-
-const closeBtnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: C.textDim,
-  cursor: 'pointer',
-  fontSize: F.base,
-  padding: '2px 4px',
-  lineHeight: 1,
-  borderRadius: 3,
 };
 

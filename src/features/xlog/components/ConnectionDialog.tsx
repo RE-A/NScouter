@@ -12,6 +12,7 @@ import {
 } from '../api/scouterApi';
 import { connectToServer } from '../api/connectFlow';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface ConnectionDialogProps {
   onConnected: (serverId: string) => void;
@@ -199,13 +200,14 @@ export function ConnectionDialog({
   // 여기선 행동(끊기)만 남긴다.
   if (isConnected) {
     return (
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={handleDisconnect}
         disabled={loading}
-        className="rounded px-2 py-1 text-micro text-fg-dim hover:text-fg disabled:opacity-50"
       >
         {loading ? '…' : t('연결 해제')}
-      </button>
+      </Button>
     );
   }
 

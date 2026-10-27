@@ -64,7 +64,7 @@ describe('본문 전체 보기', () => {
 
   it('Esc 로 닫는다', () => {
     const { onClose } = open();
-    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@
 
 import { memo, useEffect, useState } from 'react';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface ConfigEditorProps {
   /** 경고문에 적을 대상 이름 */
@@ -83,37 +84,41 @@ export const ConfigEditor = memo(function ConfigEditor({
         {confirming ? (
           <>
             <span className="text-micro text-warn">{t('정말 덮어쓸까요?')}</span>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setConfirming(false)}
               disabled={busy}
-              className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
             >
               {t('아니요')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
               onClick={save}
               disabled={busy}
-              className="rounded border border-danger px-2 py-0.5 text-micro text-danger hover:bg-danger/10 disabled:opacity-50"
             >
               {busy ? t('저장 중…') : t('덮어쓰기')}
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onCancel}
-              className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
             >
               {t('편집 취소')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => setConfirming(true)}
               disabled={!dirty}
               title={dirty ? undefined : t('바뀐 내용이 없습니다')}
-              className="btn border-accent-bright px-2 py-0.5 text-micro text-accent-bright"
             >
               {t('저장…')}
-            </button>
+            </Button>
           </>
         )}
       </footer>

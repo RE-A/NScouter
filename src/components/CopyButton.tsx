@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { t } from '../i18n';
+import { Button } from './Button';
 
 /**
  * 눌러서 클립보드로. 복사했다는 것을 **버튼 자신이** 잠깐 말한다.
@@ -22,7 +23,9 @@ export function CopyButton({ text }: { text: string }) {
   }, [done]);
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="xs"
       type="button"
       onClick={e => {
         // 행 클릭(상세 열기)까지 번지면 복사하려다 다른 창이 뜬다.
@@ -32,9 +35,9 @@ export function CopyButton({ text }: { text: string }) {
         void navigator.clipboard?.writeText(text).then(() => setDone(true)).catch(() => {});
       }}
       title={t('이 문장을 클립보드로 복사합니다')}
-      className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+      className="mt-0.5"
     >
       {done ? t('복사됨') : t('복사')}
-    </button>
+    </Button>
   );
 }

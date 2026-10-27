@@ -18,6 +18,8 @@ import {
 } from '../api/scouterApi';
 import { formatTime } from '../utils/colorPalette';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
+import { Dialog } from '../../../components/Dialog';
 
 interface SavedProfileDialogProps {
   onOpen: (saved: SavedProfile) => void;
@@ -81,90 +83,69 @@ export const SavedProfileDialog = memo(function SavedProfileDialog({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        onKeyDown={e => {
-          if (e.key === 'Escape') onClose();
-        }}
-        className="max-h-[80vh] w-[40rem] overflow-hidden rounded border border-line-strong bg-surface p-4"
-      >
-        <div className="mb-1 flex items-baseline justify-between">
-          <h2 className="text-body font-semibold text-fg">{t('저장한 프로파일')}</h2>
-          <button
-            onClick={onClose}
-            aria-label={t('닫기')}
-            className="rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+    <Dialog title={t('저장한 프로파일')} onClose={onClose} bodyClassName="overflow-hidden px-4 py-3">
+      {/* 어디에 쌓이는지 밝힌다 — 지우는 것도 여는 것도 결국 폴더에서 한다 */}
+      <p className="mb-3 flex items-center gap-2 text-micro text-fg-dim">
+        <span className="truncate font-mono" title={dir}>{dir || '—'}</span>
+        {dir && (
+          <Button
+            size="xs"
+            /* `openPath` 가 아니라 `revealItemInDir` 다 — 기본 권한에 들어 있는
+               쪽이라 capability 를 넓히지 않는다. 탐색기에서 이 폴더를 짚어 준다 */
+            onClick={() => { void revealItemInDir(dir).catch(() => {}); }}
+            className="shrink-0"
           >
-            ✕
-          </button>
-        </div>
+            {t('폴더 열기')}
+          </Button>
+        )}
+      </p>
 
-        {/* 어디에 쌓이는지 밝힌다 — 지우는 것도 여는 것도 결국 폴더에서 한다 */}
-        <p className="mb-3 flex items-center gap-2 text-micro text-fg-dim">
-          <span className="truncate font-mono" title={dir}>{dir || '—'}</span>
-          {dir && (
-            <button
-              /* `openPath` 가 아니라 `revealItemInDir` 다 — 기본 권한에 들어 있는
-                 쪽이라 capability 를 넓히지 않는다. 탐색기에서 이 폴더를 짚어 준다 */
-              onClick={() => { void revealItemInDir(dir).catch(() => {}); }}
-              className="shrink-0 rounded border border-line px-1.5 py-0.5 hover:bg-hover hover:text-fg"
-            >
-              {t('폴더 열기')}
-            </button>
-          )}
+      {load.kind === 'loading' && (
+        <p className="py-6 text-center text-body text-fg-dim">{t('조회 중…')}</p>
+      )}
+      {load.kind === 'error' && (
+        <p className="rounded border-l-2 border-danger bg-danger/10 px-2 py-1.5 text-small text-danger">
+          {load.message}
         </p>
+      )}
+      {load.kind === 'ok' && load.rows.length === 0 && (
+        <p className="py-6 text-center text-small text-fg-faint">
+          {t('저장한 프로파일이 없습니다. 상세 패널의 «저장» 을 누르면 여기 쌓입니다.')}
+        </p>
+      )}
 
-        {load.kind === 'loading' && (
-          <p className="py-6 text-center text-body text-fg-dim">{t('조회 중…')}</p>
-        )}
-        {load.kind === 'error' && (
-          <p className="rounded border-l-2 border-danger bg-danger/10 px-2 py-1.5 text-small text-danger">
-            {load.message}
-          </p>
-        )}
-        {load.kind === 'ok' && load.rows.length === 0 && (
-          <p className="py-6 text-center text-small text-fg-faint">
-            {t('저장한 프로파일이 없습니다. 상세 패널의 «저장» 을 누르면 여기 쌓입니다.')}
-          </p>
-        )}
+      {openError && (
+        <p className="mb-2 rounded border-l-2 border-danger bg-danger/10 px-2 py-1.5 text-small text-danger">
+          {openError}
+        </p>
+      )}
 
-        {openError && (
-          <p className="mb-2 rounded border-l-2 border-danger bg-danger/10 px-2 py-1.5 text-small text-danger">
-            {openError}
-          </p>
-        )}
-
-        {load.kind === 'ok' && load.rows.length > 0 && (
-          <ul className="max-h-[52vh] divide-y divide-line/40 overflow-y-auto rounded border border-line">
-            {load.rows.map(row => (
-              <li key={row.path}>
-                <button
-                  onClick={() => open(row)}
-                  disabled={opening !== null}
-                  className="flex w-full items-baseline gap-3 px-2 py-1.5 text-left hover:bg-hover disabled:cursor-progress"
-                >
-                  <span className="min-w-0 flex-1 truncate text-small text-fg" title={row.service}>
-                    {row.service}
-                  </span>
-                  <span className="tnum shrink-0 font-mono text-micro text-fg-dim">
-                    {savedAtLabel(row.saved_at)}
-                  </span>
-                  <span className="tnum shrink-0 font-mono text-micro text-fg-faint">
-                    {sizeLabel(row.size)}
-                  </span>
-                  {opening === row.path && (
-                    <span className="shrink-0 text-micro text-accent-bright">{t('여는 중…')}</span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
+      {load.kind === 'ok' && load.rows.length > 0 && (
+        <ul className="max-h-[52vh] divide-y divide-line-table/50 overflow-y-auto rounded border border-line-table">
+          {load.rows.map(row => (
+            <li key={row.path}>
+              <button
+                onClick={() => open(row)}
+                disabled={opening !== null}
+                className="flex w-full items-baseline gap-3 px-2 py-1.5 text-left hover:bg-hover disabled:cursor-progress"
+              >
+                <span className="min-w-0 flex-1 truncate text-small text-fg" title={row.service}>
+                  {row.service}
+                </span>
+                <span className="tnum shrink-0 font-mono text-micro text-fg-dim">
+                  {savedAtLabel(row.saved_at)}
+                </span>
+                <span className="tnum shrink-0 font-mono text-micro text-fg-faint">
+                  {sizeLabel(row.size)}
+                </span>
+                {opening === row.path && (
+                  <span className="shrink-0 text-micro text-accent-bright">{t('여는 중…')}</span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Dialog>
   );
 });

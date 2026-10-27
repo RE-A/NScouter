@@ -13,6 +13,8 @@ import type { AgentObject } from '../types/xlog';
 import { getSearchMax } from '../api/scouterApi';
 import type { WideProgress } from '../hooks/wideSearchAll';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
+import { Dialog } from '../../../components/Dialog';
 
 export interface WideSearchValues {
   stime: number;
@@ -117,27 +119,39 @@ export const WideSearchDialog = memo(function WideSearchDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
+    <Dialog
+      title={t('넓은 구간에서 찾기')}
+      onClose={onClose}
+      widthClass="w-[34rem]"
+      footer={
+        <>
+          {/* 넓은 구간은 수십 번 나눠 묻는다 — 몇 건 모았고 어디까지 왔는지 보여 줘야 기다릴지 정한다 */}
+          {progress && (
+            <span className="mr-auto text-micro text-fg-dim" role="status">
+              <span className="tnum font-mono text-fg-muted">{progress.found.toLocaleString()}</span>
+              {t('건')} · {Math.round(progress.done * 100)}% · {t('요청')} {progress.requests}
+            </span>
+          )}
+          {running ? (
+            <Button size="md" onClick={onCancel} title={t('그때까지 모은 것을 목록으로 보냅니다')}>
+              {t('멈추기')}
+            </Button>
+          ) : (
+            <Button size="md" onClick={onClose}>
+              {t('취소')}
+            </Button>
+          )}
+          <Button variant="primary" size="md" onClick={submit} disabled={badRange || running}>
+            {running ? t('찾는 중…') : t('찾기')}
+          </Button>
+        </>
+      }
     >
       <div
-        onClick={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === 'Enter') submit();
         }}
-        className="max-h-[90vh] w-[34rem] overflow-y-auto rounded border border-line-strong bg-surface p-4"
       >
-        <div className="mb-1 flex items-baseline justify-between">
-          <h2 className="text-body font-semibold text-fg">{t('넓은 구간에서 찾기')}</h2>
-          <button
-            onClick={onClose}
-            aria-label={t('닫기')}
-            className="rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-          >
-            ✕
-          </button>
-        </div>
 
         {/* **상한을 먼저 말한다.** 찾고 나서 알려주면 이미 «없다» 고 읽은 뒤다 */}
         <p className="mb-3 text-micro text-fg-dim">
@@ -214,13 +228,9 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           {t('그냥 치면 «포함»으로 찾습니다. * 를 직접 쓰면 그 자리만 아무 글자로 봅니다.')}
         </p>
 
-        <button
-          type="button"
-          onClick={() => setShowFree(v => !v)}
-          className="mb-2 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-        >
+        <Button variant="ghost" size="xs" onClick={() => setShowFree(v => !v)} className="mb-2">
           {showFree ? t('앱 자유 필드 접기') : t('앱 자유 필드 (text1~5)')}
-        </button>
+        </Button>
         {showFree && (
           <>
             <Row label="text1">
@@ -241,40 +251,8 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           </>
         )}
 
-        <div className="mt-3 flex items-center justify-end gap-2">
-          {/* 넓은 구간은 수십 번 나눠 묻는다 — 몇 건 모았고 어디까지 왔는지 보여 줘야 기다릴지 정한다 */}
-          {progress && (
-            <span className="mr-auto text-micro text-fg-dim" role="status">
-              <span className="tnum font-mono text-fg-muted">{progress.found.toLocaleString()}</span>
-              {t('건')} · {Math.round(progress.done * 100)}% · {t('요청')} {progress.requests}
-            </span>
-          )}
-          {running ? (
-            <button
-              onClick={onCancel}
-              title={t('그때까지 모은 것을 목록으로 보냅니다')}
-              className="rounded border border-line-strong px-3 py-1 text-small text-fg-muted hover:bg-hover"
-            >
-              {t('멈추기')}
-            </button>
-          ) : (
-            <button
-              onClick={onClose}
-              className="rounded border border-line-strong px-3 py-1 text-small text-fg-muted hover:bg-hover"
-            >
-              {t('취소')}
-            </button>
-          )}
-          <button
-            onClick={submit}
-            disabled={badRange || running}
-            className="btn border-accent-bright px-3 py-1 text-small text-accent-bright"
-          >
-            {running ? t('찾는 중…') : t('찾기')}
-          </button>
-        </div>
       </div>
-    </div>
+    </Dialog>
   );
 });
 

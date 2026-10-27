@@ -37,6 +37,8 @@ import { buildPropertyRows, type PropertyRow } from './objectProperties';
 import { getAgentColor } from '../utils/colorPalette';
 // 이 파일에는 시각을 담은 지역 변수 t 가 있어 별명을 쓴다
 import { t as tr } from '../../../i18n';
+import { Dialog } from '../../../components/Dialog';
+import { Button } from '../../../components/Button';
 
 export type InspectKind =
   | 'active'
@@ -228,88 +230,80 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
 
   useEffect(load, [load]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const q = filter.trim().toLowerCase();
 
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-8"
-      onClick={onClose}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl"
-      >
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
-          <h2 className="text-base font-medium text-fg">{tr(TITLE[kind])}</h2>
-          <span className="min-w-0 truncate text-micro text-fg-dim" title={objName}>
-            {objName}
-          </span>
-          <div className="flex-1" />
-          <input
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            placeholder={tr('검색')}
-            className="search-field w-40 rounded py-0.5 pr-2 text-body"
-          />
-          {kind === 'stack' && stackText && (
-            <>
-              <span className="font-mono text-micro text-fg-dim">
-                {stackTimeLabel(stackText.time)}
-              </span>
-              <button
-                onClick={() => setStackText(null)}
-                className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+    <>
+      <Dialog
+        onClose={onClose}
+        widthClass="w-full max-w-3xl"
+        bodyClassName="flex flex-col"
+        zClass="z-40"
+        title={
+          <>
+            <span className="text-base font-medium text-fg">{tr(TITLE[kind])}</span>
+            <span className="min-w-0 truncate text-micro text-fg-dim" title={objName}>
+              {objName}
+            </span>
+          </>
+        }
+        headerExtra={
+          <>
+            <input
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              placeholder={tr('검색')}
+              className="search-field w-40 rounded py-0.5 pr-2 text-body"
+            />
+            {kind === 'stack' && stackText && (
+              <>
+                <span className="font-mono text-micro text-fg-dim">
+                  {stackTimeLabel(stackText.time)}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setStackText(null)}
+                >
+                  {tr('← 목록')}
+                </Button>
+              </>
+            )}
+            {kind === 'dump' && dumpText && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDumpText(null)}
               >
                 {tr('← 목록')}
+              </Button>
+            )}
+            {kind === 'dump' && !dumpText && (
+              // **부수효과가 있는 버튼이다** — 에이전트에 파일이 생긴다. 그래서 문구를 명령형으로 둔다.
+              <button
+                onClick={createDump}
+                disabled={busy}
+                title={tr('대상 JVM 의 스레드 덤프를 지금 떠서 에이전트에 파일로 남깁니다')}
+                className={`rounded border border-line-strong px-2 py-0.5 text-micro ${
+                  busy ? 'cursor-not-allowed text-fg-faint' : 'text-accent-bright hover:bg-hover'
+                }`}
+              >
+                {busy ? tr('뜨는 중…') : tr('지금 덤프 뜨기')}
               </button>
-            </>
-          )}
-          {kind === 'dump' && dumpText && (
-            <button
-              onClick={() => setDumpText(null)}
-              className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
+            )}
+            {/* 스냅샷이라 자동 갱신하지 않는다 — 다시 보려면 눌러야 한다 */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={load}
+              title={tr('다시 조회')}
             >
-              {tr('← 목록')}
-            </button>
-          )}
-          {kind === 'dump' && !dumpText && (
-            // **부수효과가 있는 버튼이다** — 에이전트에 파일이 생긴다. 그래서 문구를 명령형으로 둔다.
-            <button
-              onClick={createDump}
-              disabled={busy}
-              title={tr('대상 JVM 의 스레드 덤프를 지금 떠서 에이전트에 파일로 남깁니다')}
-              className={`rounded border border-line-strong px-2 py-0.5 text-micro ${
-                busy ? 'cursor-not-allowed text-fg-faint' : 'text-accent-bright hover:bg-hover'
-              }`}
-            >
-              {busy ? tr('뜨는 중…') : tr('지금 덤프 뜨기')}
-            </button>
-          )}
-          {/* 스냅샷이라 자동 갱신하지 않는다 — 다시 보려면 눌러야 한다 */}
-          <button
-            onClick={load}
-            title={tr('다시 조회')}
-            className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-          >
-            {tr('새로고침')}
-          </button>
-          <button
-            onClick={onClose}
-            aria-label={tr('닫기')}
-            className="rounded px-1.5 text-fg-dim hover:text-fg"
-          >
-            ✕
-          </button>
-        </header>
-
+              {tr('새로고침')}
+            </Button>
+          </>
+        }
+      >
         <div className="min-h-0 flex-1 overflow-auto">
           {kind === 'actions' && <ObjectActions objHash={objHash} />}
           {kind !== 'actions' && loading && <Note>{tr('조회 중…')}</Note>}
@@ -418,7 +412,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
             </PageBtn>
           </footer>
         )}
-      </div>
+      </Dialog>
 
       {pickedActive?.txid && (
         <ThreadDetailDialog
@@ -430,7 +424,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
           onClose={() => setPickedActive(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 

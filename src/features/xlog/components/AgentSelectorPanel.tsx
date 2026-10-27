@@ -14,6 +14,7 @@ import { t } from '../../../i18n';
 import { getAgentColor } from '../utils/colorPalette';
 import { useViewOptions } from '../hooks/useViewOptions';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
+import { Button } from '../../../components/Button';
 
 interface AgentSelectorPanelProps {
   isConnected: boolean;
@@ -259,14 +260,16 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         {/* **«전부» 라는 상태는 없다.** 고른 것이 곧 보는 것이라, 여기 적히는 수가
             화면에 그려지는 서버 수와 같다. 0 이면 화면도 비어 있다. */}
         {filtering ? (
-          <button
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={handleClearFilter}
             title={t('고른 서버를 모두 풉니다')}
-            className="rounded px-1.5 py-0.5 text-micro text-accent-bright hover:bg-hover"
+            className="text-accent-bright"
           >
             <span className="tnum font-mono">{selectedHashes.size}</span>
             {t('대 선택 · 해제')}
-          </button>
+          </Button>
         ) : (
           <span className="px-1.5 text-micro text-fg-faint">{t('고른 서버 없음')}</span>
         )}

@@ -6,7 +6,7 @@
 //
 // 저장은 설정 창과 같은 방식이다 — `config.json` 을 읽어 이 항목만 얹어 다시 쓴다.
 
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { getConfig, saveConfig } from '../xlog/api/scouterApi';
 import { KPI_DEFS, type KpiId } from './kpi';
 import { DEFAULT_THRESHOLDS, fromThresholds, type ThresholdMap } from './threshold';
@@ -19,6 +19,8 @@ import {
   type DraftMap,
 } from './thresholdDraft';
 import { t } from '../../i18n';
+import { Button } from '../../components/Button';
+import { Dialog } from '../../components/Dialog';
 
 interface ThresholdDialogProps {
   value: ThresholdMap;
@@ -35,12 +37,6 @@ export const ThresholdDialog = memo(function ThresholdDialog({
   const [draft, setDraft] = useState<DraftMap>(() => toDraft(value));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
 
   const patch = (id: KpiId, next: Partial<Draft>) =>
     setDraft(prev => ({ ...prev, [id]: { ...prev[id], ...next } }));
@@ -67,101 +63,89 @@ export const ThresholdDialog = memo(function ThresholdDialog({
   }, [draft, onApply, onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        className="max-h-[85vh] w-[34rem] overflow-y-auto rounded border border-line-strong bg-surface p-4"
-      >
-        <div className="mb-1 flex items-baseline justify-between">
-          <h2 className="text-body font-semibold text-fg">{t('지표 임계값')}</h2>
-          <button
-            onClick={onClose}
-            aria-label={t('닫기')}
-            className="rounded px-1 text-fg-dim hover:text-fg"
-          >
-            ✕
-          </button>
-        </div>
-        <p className="mb-3 text-micro text-fg-faint">
-          {t('값이 주의 이상이면 노랑, 위험 이상이면 빨강으로 표시합니다. 끄면 색을 쓰지 않습니다 — 사이트마다 정상 범위가 달라 TPS·액티브는 기본이 꺼져 있습니다.')}
-        </p>
-
-        <div className="mb-3">
-          {KPI_DEFS.map(def => {
-            const row = draft[def.id];
-            const err = rowError(row);
-            return (
-              <div key={def.id} className="border-b border-line py-1.5 last:border-b-0">
-                <div className="flex items-center gap-2">
-                  <label className="flex w-32 shrink-0 cursor-pointer items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={row.enabled}
-                      onChange={e => patch(def.id, { enabled: e.target.checked })}
-                    />
-                    <span className={`text-small ${row.enabled ? 'text-fg' : 'text-fg-faint'}`}>
-                      {t(def.label)}
-                    </span>
-                  </label>
-
-                  <span className="w-10 shrink-0 text-right text-micro text-fg-dim">{t('주의')}</span>
-                  <input
-                    value={row.warn}
-                    onChange={e => patch(def.id, { warn: e.target.value })}
-                    disabled={!row.enabled}
-                    inputMode="decimal"
-                    spellCheck={false}
-                    className="w-20 rounded border border-line bg-input px-1.5 py-0.5 text-right text-small text-fg tabular-nums disabled:text-fg-faint"
-                  />
-
-                  <span className="w-10 shrink-0 text-right text-micro text-fg-dim">{t('위험')}</span>
-                  <input
-                    value={row.danger}
-                    onChange={e => patch(def.id, { danger: e.target.value })}
-                    disabled={!row.enabled}
-                    inputMode="decimal"
-                    spellCheck={false}
-                    className="w-20 rounded border border-line bg-input px-1.5 py-0.5 text-right text-small text-fg tabular-nums disabled:text-fg-faint"
-                  />
-
-                  <span className="w-8 shrink-0 text-micro text-fg-faint">{def.unit}</span>
-                </div>
-                {err && <p className="mt-0.5 pl-6 text-micro text-danger">{t(err)}</p>}
-              </div>
-            );
-          })}
-        </div>
-
-        {error && <p className="mb-2 text-micro text-danger">{error}</p>}
-
-        <div className="flex items-center justify-between border-t border-line pt-3">
-          <button
-            onClick={() => setDraft(toDraft(DEFAULT_THRESHOLDS))}
-            className="rounded border border-line px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-          >
+    <Dialog
+      title={t('지표 임계값')}
+      onClose={onClose}
+      widthClass="w-[34rem]"
+      footer={
+        <>
+          <Button onClick={() => setDraft(toDraft(DEFAULT_THRESHOLDS))} className="mr-auto">
             {t('기본값으로')}
-          </button>
-          <button
+          </Button>
+          <Button size="md" onClick={onClose}>
+            {t('취소')}
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
             onClick={handleSave}
             disabled={saving || blocked}
             // 눌리지 않는 버튼은 이유를 말해야 한다. 어느 줄이 남았는지는 그 줄이 비어 있어 보인다.
             title={unfinished ? t('켜 둔 지표 중 빈 칸이 있습니다') : undefined}
-            className="btn border-accent-bright px-3 py-0.5 text-micro text-accent-bright"
           >
             {saving ? t('저장 중…') : t('저장')}
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-micro text-fg-faint">
+        {t('값이 주의 이상이면 노랑, 위험 이상이면 빨강으로 표시합니다. 끄면 색을 쓰지 않습니다 — 사이트마다 정상 범위가 달라 TPS·액티브는 기본이 꺼져 있습니다.')}
+      </p>
 
-        {/* **적어 둔 자리를 말해 준다.** 손으로 고칠 수 있는 파일이고,
-            여러 대에 같은 기준을 깔 때는 그쪽이 빠르다. */}
-        <p className="mt-2 text-micro text-fg-faint">
-          {t('config.json 의')} <code className="font-mono">kpi_thresholds</code>{' '}
-          {t('에 저장됩니다.')}
-        </p>
+      <div className="mb-3">
+        {KPI_DEFS.map(def => {
+          const row = draft[def.id];
+          const err = rowError(row);
+          return (
+            <div key={def.id} className="border-b border-line py-1.5 last:border-b-0">
+              <div className="flex items-center gap-2">
+                <label className="flex w-32 shrink-0 cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={row.enabled}
+                    onChange={e => patch(def.id, { enabled: e.target.checked })}
+                  />
+                  <span className={`text-small ${row.enabled ? 'text-fg' : 'text-fg-faint'}`}>
+                    {t(def.label)}
+                  </span>
+                </label>
+
+                <span className="w-10 shrink-0 text-right text-micro text-fg-dim">{t('주의')}</span>
+                <input
+                  value={row.warn}
+                  onChange={e => patch(def.id, { warn: e.target.value })}
+                  disabled={!row.enabled}
+                  inputMode="decimal"
+                  spellCheck={false}
+                  className="w-20 rounded border border-line bg-input px-1.5 py-0.5 text-right text-small text-fg tabular-nums disabled:text-fg-faint"
+                />
+
+                <span className="w-10 shrink-0 text-right text-micro text-fg-dim">{t('위험')}</span>
+                <input
+                  value={row.danger}
+                  onChange={e => patch(def.id, { danger: e.target.value })}
+                  disabled={!row.enabled}
+                  inputMode="decimal"
+                  spellCheck={false}
+                  className="w-20 rounded border border-line bg-input px-1.5 py-0.5 text-right text-small text-fg tabular-nums disabled:text-fg-faint"
+                />
+
+                <span className="w-8 shrink-0 text-micro text-fg-faint">{def.unit}</span>
+              </div>
+              {err && <p className="mt-0.5 pl-6 text-micro text-danger">{t(err)}</p>}
+            </div>
+          );
+        })}
       </div>
-    </div>
+
+      {error && <p className="mb-2 text-micro text-danger">{error}</p>}
+
+      {/* **적어 둔 자리를 말해 준다.** 손으로 고칠 수 있는 파일이고,
+          여러 대에 같은 기준을 깔 때는 그쪽이 빠르다. */}
+      <p className="mt-2 text-micro text-fg-faint">
+        {t('config.json 의')} <code className="font-mono">kpi_thresholds</code>{' '}
+        {t('에 저장됩니다.')}
+      </p>
+    </Dialog>
   );
 });

@@ -14,6 +14,7 @@ import { stepDepth } from './stepLayout';
 import type { ProfileStep } from '../types/profile';
 import type { SXLog } from '../types/xlog';
 import { t } from '../../../i18n';
+import { Dialog } from '../../../components/Dialog';
 
 interface ProfileTextDialogProps {
   xlog: SXLog;
@@ -50,51 +51,47 @@ export const ProfileTextDialog = memo(function ProfileTextDialog({
   }, [xlog, steps, texts, objName, serviceName]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-label={t('프로파일 전문')}
-        onClick={e => e.stopPropagation()}
-        className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl"
-      >
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
-          <h2 className="min-w-0 truncate text-base font-medium text-fg" title={serviceName}>
+    <Dialog
+      onClose={onClose}
+      widthClass="w-full max-w-5xl"
+      bodyClassName="flex flex-col"
+      ariaLabel={t('프로파일 전문')}
+      title={
+        <>
+          <span className="min-w-0 truncate text-base font-medium text-fg" title={serviceName}>
             {t('프로파일 전문')}
-          </h2>
+          </span>
           <span className="min-w-0 truncate font-mono text-micro text-fg-dim">{serviceName}</span>
-          <div className="flex-1" />
+        </>
+      }
+      headerExtra={
+        <>
           <span className="shrink-0 font-mono text-micro text-fg-faint">
             {steps.length.toLocaleString()}
             {t('개 스텝')}
           </span>
-          <button onClick={onClose} className="btn-ghost px-2 py-0.5 text-micro">
-            ✕
-          </button>
-        </header>
-
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
-          <button
-            type="button"
-            onClick={() => setWrap(w => !w)}
-            aria-pressed={wrap}
-            className="btn px-2 py-0.5 text-micro"
-          >
-            {t('긴 줄 접기')}
-          </button>
-          <CopyButton text={body} />
-        </div>
-
-        <pre
-          className={`min-h-0 flex-1 overflow-auto bg-base px-4 py-3 font-mono text-small leading-relaxed text-fg ${
-            wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
-          }`}
+        </>
+      }
+    >
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setWrap(w => !w)}
+          aria-pressed={wrap}
+          className="btn px-2 py-0.5 text-micro"
         >
-          {body}
-        </pre>
+          {t('긴 줄 접기')}
+        </button>
+        <CopyButton text={body} />
       </div>
-    </div>
+
+      <pre
+        className={`min-h-0 flex-1 overflow-auto bg-base px-4 py-3 font-mono text-small leading-relaxed text-fg ${
+          wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+        }`}
+      >
+        {body}
+      </pre>
+    </Dialog>
   );
 });

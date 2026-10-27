@@ -19,6 +19,7 @@ import { formatSql } from '../xlog/components/sqlFormat';
 import { CopyButton } from '../../components/CopyButton';
 import { formatElapsed, resourceOf, sortRows } from './activeModel';
 import { t } from '../../i18n';
+import { Dialog } from '../../components/Dialog';
 
 interface QueryDetailDialogProps {
   /** 연 줄 */
@@ -68,13 +69,6 @@ export const QueryDetailDialog = memo(function QueryDetailDialog({
     };
   }, [isSql, row.obj_hash, row.id, row.txid, res.label]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   /** 화면에 놓을 문장. 값이 있고 채우기를 켰으면 채운 문장이다 */
   const statement = useMemo(() => {
@@ -89,125 +83,114 @@ export const QueryDetailDialog = memo(function QueryDetailDialog({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-8"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-label={isSql ? t('쿼리 상세') : t('외부 호출 상세')}
-        onClick={e => e.stopPropagation()}
-        className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl"
-      >
-        <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
+    <Dialog
+      onClose={onClose}
+      widthClass="w-full max-w-3xl"
+      bodyClassName="flex flex-col"
+      ariaLabel={isSql ? t('쿼리 상세') : t('외부 호출 상세')}
+      title={
+        <>
           <span
             className={`font-mono text-micro ${isSql ? 'text-[var(--cat-sql)]' : 'text-[var(--cat-api)]'}`}
           >
             {isSql ? 'SQL' : 'API'}
           </span>
-          <h2 className="text-base font-medium text-fg">
+          <span className="text-base font-medium text-fg">
             {isSql ? t('쿼리 상세') : t('외부 호출 상세')}
-          </h2>
-          <div className="flex-1" />
-          <button
-            onClick={onClose}
-            className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
-          >
-            ✕
-          </button>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <section className="border-b border-line px-4 py-3">
-            <div className="mb-1.5 flex items-center gap-2">
-              <h3 className="text-micro tracking-wide text-fg-dim uppercase">
-                {isSql ? t('문장') : t('호출 대상')}
-              </h3>
-              <div className="flex-1" />
-              {isSql && bind.kind === 'ok' && bind.params !== '' && (
-                <label className="flex items-center gap-1 text-micro text-fg-dim">
-                  <input type="checkbox" checked={inline} onChange={e => setInline(e.target.checked)} />
-                  {t('값 채워 보기')}
-                </label>
-              )}
-              <CopyButton text={statement.text} />
-            </div>
-            <pre className="max-h-[40vh] overflow-auto rounded border border-line bg-base px-3 py-2 font-mono text-small leading-relaxed whitespace-pre-wrap text-fg">
-              {isSql ? formatSql(statement.text) : statement.text}
-            </pre>
-
-            {isSql && (
-              <div className="mt-2 text-micro">
-                {bind.kind === 'loading' && <span className="text-fg-faint">{t('바인드 값을 묻는 중…')}</span>}
-                {bind.kind === 'ok' && bind.params === '' && (
-                  <span className="text-fg-faint">{t('이 문장에는 바인드 값이 없습니다.')}</span>
-                )}
-                {bind.kind === 'ok' && bind.params !== '' && (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-mono text-fg-muted">
-                      {t('바인드:')} {bind.params}
-                    </span>
-                    {inline && statement.placeholders > statement.bound && (
-                      // 모자라게 채운 문장을 그대로 실행하면 틀린다. 남은 자리를 알린다.
-                      <span className="text-warn">
-                        {t('자리표시자')} {statement.placeholders}
-                        {t('개 중')} {statement.bound}
-                        {t('개만 채웠습니다 — 남은 자리는 ? 그대로입니다.')}
-                      </span>
-                    )}
-                    {/* 에이전트는 값 하나를 정해진 길이에서 자른다. 복사해 실행하기 전에 알아야 한다 */}
-                    <span className="text-fg-faint">
-                      {t('값마다 에이전트 설정 trace_sql_parameter_max_length (기본 20자) 에서 잘릴 수 있습니다.')}
-                    </span>
-                  </div>
-                )}
-                {bind.kind === 'gone' && (
-                  <span className="text-fg-faint">
-                    {t('이미 끝난 트랜잭션이라 바인드 값을 받지 못했습니다.')}
-                  </span>
-                )}
-                {bind.kind === 'moved' && (
-                  <span className="text-warn">
-                    {t('여는 사이에 다음 쿼리로 넘어가 이 문장의 바인드 값을 받지 못했습니다.')}
-                  </span>
-                )}
-                {bind.kind === 'error' && <span className="text-danger">{bind.message}</span>}
-              </div>
-            )}
-          </section>
-
-          <section className="px-4 py-3">
-            <h3 className="mb-1.5 text-micro tracking-wide text-fg-dim uppercase">
-              {isSql ? t('이 쿼리에 매달린 트랜잭션') : t('이 호출에 매달린 트랜잭션')}{' '}
-              <span className="font-mono text-fg-faint">{same.length}</span>
+          </span>
+        </>
+      }
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <section className="border-b border-line px-4 py-3">
+          <div className="mb-1.5 flex items-center gap-2">
+            <h3 className="text-micro tracking-wide text-fg-dim uppercase">
+              {isSql ? t('문장') : t('호출 대상')}
             </h3>
-            <ol className="divide-y divide-line/40 rounded border border-line">
-              {same.map(r => (
-                <li key={`${r.obj_hash}:${r.id}:${r.txid ?? r.service}`}>
-                  <button
-                    onClick={r.txid ? () => onOpenStack(r) : undefined}
-                    disabled={r.txid === null}
-                    title={r.txid ? t('스택 트레이스 보기') : t('이 행은 상세를 물을 수 없습니다')}
-                    className={`flex w-full items-baseline gap-3 px-3 py-1.5 text-left ${
-                      r.txid ? 'hover:bg-hover/60' : 'cursor-default'
-                    } ${r === row ? 'bg-accent/10' : ''}`}
-                  >
-                    <span className="w-[72px] shrink-0 text-right font-mono text-small tabular-nums text-fg">
-                      {formatElapsed(r.elapsed)}
+            <div className="flex-1" />
+            {isSql && bind.kind === 'ok' && bind.params !== '' && (
+              <label className="flex items-center gap-1 text-micro text-fg-dim">
+                <input type="checkbox" checked={inline} onChange={e => setInline(e.target.checked)} />
+                {t('값 채워 보기')}
+              </label>
+            )}
+            <CopyButton text={statement.text} />
+          </div>
+          <pre className="max-h-[40vh] overflow-auto rounded border border-line bg-base px-3 py-2 font-mono text-small leading-relaxed whitespace-pre-wrap text-fg">
+            {isSql ? formatSql(statement.text) : statement.text}
+          </pre>
+
+          {isSql && (
+            <div className="mt-2 text-micro">
+              {bind.kind === 'loading' && <span className="text-fg-faint">{t('바인드 값을 묻는 중…')}</span>}
+              {bind.kind === 'ok' && bind.params === '' && (
+                <span className="text-fg-faint">{t('이 문장에는 바인드 값이 없습니다.')}</span>
+              )}
+              {bind.kind === 'ok' && bind.params !== '' && (
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-mono text-fg-muted">
+                    {t('바인드:')} {bind.params}
+                  </span>
+                  {inline && statement.placeholders > statement.bound && (
+                    // 모자라게 채운 문장을 그대로 실행하면 틀린다. 남은 자리를 알린다.
+                    <span className="text-warn">
+                      {t('자리표시자')} {statement.placeholders}
+                      {t('개 중')} {statement.bound}
+                      {t('개만 채웠습니다 — 남은 자리는 ? 그대로입니다.')}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-small text-fg" title={r.service}>
-                      {r.service}
-                    </span>
-                    <span className="shrink-0 truncate text-micro text-fg-faint">
-                      {serverName(r.obj_hash)} · {r.name}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </section>
-        </div>
+                  )}
+                  {/* 에이전트는 값 하나를 정해진 길이에서 자른다. 복사해 실행하기 전에 알아야 한다 */}
+                  <span className="text-fg-faint">
+                    {t('값마다 에이전트 설정 trace_sql_parameter_max_length (기본 20자) 에서 잘릴 수 있습니다.')}
+                  </span>
+                </div>
+              )}
+              {bind.kind === 'gone' && (
+                <span className="text-fg-faint">
+                  {t('이미 끝난 트랜잭션이라 바인드 값을 받지 못했습니다.')}
+                </span>
+              )}
+              {bind.kind === 'moved' && (
+                <span className="text-warn">
+                  {t('여는 사이에 다음 쿼리로 넘어가 이 문장의 바인드 값을 받지 못했습니다.')}
+                </span>
+              )}
+              {bind.kind === 'error' && <span className="text-danger">{bind.message}</span>}
+            </div>
+          )}
+        </section>
+
+        <section className="px-4 py-3">
+          <h3 className="mb-1.5 text-micro tracking-wide text-fg-dim uppercase">
+            {isSql ? t('이 쿼리에 매달린 트랜잭션') : t('이 호출에 매달린 트랜잭션')}{' '}
+            <span className="font-mono text-fg-faint">{same.length}</span>
+          </h3>
+          <ol className="divide-y divide-line/40 rounded border border-line">
+            {same.map(r => (
+              <li key={`${r.obj_hash}:${r.id}:${r.txid ?? r.service}`}>
+                <button
+                  onClick={r.txid ? () => onOpenStack(r) : undefined}
+                  disabled={r.txid === null}
+                  title={r.txid ? t('스택 트레이스 보기') : t('이 행은 상세를 물을 수 없습니다')}
+                  className={`flex w-full items-baseline gap-3 px-3 py-1.5 text-left ${
+                    r.txid ? 'hover:bg-hover/60' : 'cursor-default'
+                  } ${r === row ? 'bg-accent/10' : ''}`}
+                >
+                  <span className="w-[72px] shrink-0 text-right font-mono text-small tabular-nums text-fg">
+                    {formatElapsed(r.elapsed)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-small text-fg" title={r.service}>
+                    {r.service}
+                  </span>
+                  <span className="shrink-0 truncate text-micro text-fg-faint">
+                    {serverName(r.obj_hash)} · {r.name}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
       </div>
-    </div>
+    </Dialog>
   );
 });

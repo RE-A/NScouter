@@ -20,6 +20,7 @@ import { ActiveServiceList } from './ActiveServiceList';
 import { toDateString } from '../utils/xlogDate';
 import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface ActiveServicePanelProps {
   /**
@@ -161,12 +162,12 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
                 className="rounded border border-line-control bg-input px-1 py-0.5 text-micro text-fg"
               />
               {!isToday && (
-                <button
+                <Button
+                  size="xs"
                   onClick={() => setDay('')}
-                  className="rounded border border-line px-1.5 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
                 >
                   {t('오늘')}
-                </button>
+                </Button>
               )}
             </div>
           </div>

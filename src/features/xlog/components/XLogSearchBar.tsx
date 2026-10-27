@@ -7,6 +7,7 @@ import { memo, useState } from 'react';
 import type React from 'react';
 import type { ProfileSearchState } from '../hooks/useProfileSearch';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface XLogSearchBarProps {
   /** Ctrl+F 가 여기로 포커스를 옮긴다 */
@@ -52,20 +53,21 @@ export const XLogSearchBar = memo(function XLogSearchBar({
       />
 
       {state.running ? (
-        <button
+        <Button
+          size="sm"
           onClick={onCancel}
-          className="rounded border border-line-strong px-2 py-0.5 text-micro text-warn hover:bg-hover"
+          className="text-warn"
         >
           {t('중단')}
-        </button>
+        </Button>
       ) : (
-        <button
+        <Button
+          size="sm"
           onClick={() => onRun(draft)}
           disabled={!canRun}
-          className="btn border-accent-bright px-2 py-0.5 text-micro text-accent-bright"
         >
           {t('검색')}
-        </button>
+        </Button>
       )}
 
       {/* 무엇을 훑는지 늘 보인다 — 비용이 곧 범위라 숫자를 숨기면 안 된다 */}
@@ -87,12 +89,13 @@ export const XLogSearchBar = memo(function XLogSearchBar({
       {state.error && <span className="text-micro text-danger">{state.error}</span>}
 
       {state.query !== '' && !state.running && (
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={onClear}
-          className="rounded px-1.5 py-0.5 text-micro text-fg-faint hover:bg-hover hover:text-fg"
         >
           {t('검색 해제')}
-        </button>
+        </Button>
       )}
     </div>
   );

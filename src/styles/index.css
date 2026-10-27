@@ -190,6 +190,20 @@
     cursor: not-allowed;
   }
 
+  /* 그 화면의 **주된 일** 하나 — 저장·찾기·적용. 화면마다 하나만 둔다(둘이면 어느 것이 주인지 모른다) */
+  .btn-primary {
+    border-color: var(--accent);
+    background-color: var(--accent);
+    color: #fff;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    border-color: var(--accent-bright);
+    background-color: var(--accent);
+    color: #fff;
+    filter: brightness(1.1);
+  }
+
   /* 되돌릴 수 없는 것(GC·덤프·연결 해제)은 색으로도 구분한다 */
   .btn-danger {
     border-color: var(--error);

@@ -17,6 +17,7 @@ import { saveCsvExport } from '../api/scouterApi';
 import { toFileStamp } from '../utils/xlogDate';
 import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface SummaryPanelProps {
   /** javaee 종류들. 여럿이면 종류마다 물어 id 로 더한다 (Rust `merge_summary`) */
@@ -232,20 +233,22 @@ export const SummaryPanel = memo(function SummaryPanel({
             <div className="flex-1" />
             {/* 내보내기는 **받아 온 것이 있을 때만** 뜬다. 빈 파일을 만들 이유가 없다 */}
             {(kind === 'error' ? errorRows.length : rows.length) > 0 && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={exportCsv}
                 title={t('화면에 보이는 50줄이 아니라 받아 온 전부를 CSV 로 남깁니다')}
-                className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
               >
                 {t('내보내기')}
-              </button>
+              </Button>
             )}
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={load}
-              className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
             >
               {t('새로고침')}
-            </button>
+            </Button>
           </div>
 
           {exported && (
@@ -408,13 +411,15 @@ function ErrorTable({
               </span>
               <span className="text-right">
                 {/* 요약에서 실제 트랜잭션으로 바로 넘어가는 통로. 이게 이 탭의 핵심이다 */}
-                <button
+                <Button
+                  variant="ghost"
+                  size="xs"
                   onClick={() => onOpenTxid(r.txid, txidDate(r.txid))}
                   title={t('이 에러가 난 트랜잭션을 연다')}
-                  className="rounded px-1.5 py-0.5 text-micro text-accent-bright hover:bg-hover"
+                  className="text-accent-bright"
                 >
                   {t('열기')}
-                </button>
+                </Button>
               </span>
             </li>
           );

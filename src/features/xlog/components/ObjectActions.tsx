@@ -16,6 +16,7 @@ import {
   type DumpKind,
 } from '../api/scouterApi';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface ObjectActionsProps {
   objHash: number;
@@ -212,12 +213,13 @@ function Action({
         >
           {t('실행')}
         </button>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onCancel}
-          className="rounded px-2 py-0.5 text-micro text-fg-dim hover:bg-hover hover:text-fg"
         >
           {t('취소')}
-        </button>
+        </Button>
       </div>
     );
   }

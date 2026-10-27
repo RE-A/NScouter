@@ -11,6 +11,7 @@ import React, { memo, useEffect, useRef, useState } from 'react';
 import type { ServerProfile } from '../api/scouterApi';
 import { displayName, sameTarget } from './serverProfiles';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface ServerSwitcherProps {
   profiles: readonly ServerProfile[];
@@ -134,22 +135,26 @@ export const ServerSwitcher = memo(function ServerSwitcher({
                 {!editingThis && (
                   <>
                     {/* 이름 짓기를 우클릭이나 더블클릭에 숨기지 않는다 — 있는 줄 모르면 없는 기능이다 */}
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="xs"
                       onClick={() => setEditing({ target: p, draft: p.name })}
                       aria-label={`${label} ${t('이름 바꾸기')}`}
                       title={t('이 서버를 부를 이름을 정합니다')}
-                      className="shrink-0 rounded px-1 text-micro text-fg-faint hover:text-fg"
+                      className="shrink-0"
                     >
                       ✎
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
                       onClick={() => onRemove(p)}
                       aria-label={`${label} ${t('지우기')}`}
                       title={t('목록에서 지웁니다')}
-                      className="shrink-0 rounded px-1 text-micro text-fg-faint hover:text-danger"
+                      className="shrink-0 hover:text-danger"
                     >
                       ✕
-                    </button>
+                    </Button>
                   </>
                 )}
               </div>
