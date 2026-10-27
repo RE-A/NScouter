@@ -72,14 +72,16 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   /** 화면 언어 */
   const [lang, setLangValue] = useState<Lang>('ko');
   /** 색 벌 */
-  const [theme, setTheme] = useState<ThemeId>('dark');
+  const [theme, setTheme] = useState<ThemeId>(currentTheme);
   /**
    * 마지막으로 **저장된** 테마.
    *
    * 고르는 즉시 화면에 걸지만(색 조합은 봐야 고를 수 있다), 저장 없이 닫으면
    * 되돌려야 한다 — «구경만 했는데 바뀜어 있다» 가 되면 어디서 바뎀지 모른다.
    */
-  const savedTheme = useRef<ThemeId>('dark');
+  // **지금 걸린 테마에서 시작한다.** 'dark' 로 두면 설정을 읽기 전에 닫힐 때(StrictMode 가 effect 를
+  // 한 번 걷었다 다시 거는 것도 그렇다) 라이트를 쓰던 화면이 어두운 색으로 바뀌었다
+  const savedTheme = useRef<ThemeId>(currentTheme());
   /** 논리 서비스 묶기 규칙 */
   const [groupRule, setGroupRule] = useState<GroupRule>(DEFAULT_GROUP_RULE);
   /**
@@ -564,7 +566,7 @@ const backdropStyle: React.CSSProperties = {
 
 const modalStyle: React.CSSProperties = {
   background: T.bgRaised,
-  border: '1px solid #1e1e3a',
+  border: `1px solid ${T.border}`,
   borderRadius: 8,
   width: 500,
   maxWidth: '90vw',
@@ -581,7 +583,7 @@ const modalHeaderStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '14px 18px',
-  borderBottom: '1px solid #1e1e3a',
+  borderBottom: `1px solid ${T.border}`,
 };
 
 const modalTitleStyle: React.CSSProperties = {
@@ -652,7 +654,7 @@ const codeStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   background: T.bgSurface,
-  border: '1px solid #252542',
+  border: `1px solid ${T.borderStrong}`,
   borderRadius: 4,
   color: T.text,
   padding: '7px 10px',
@@ -688,13 +690,13 @@ const modalFooterStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   padding: '12px 18px',
-  borderTop: '1px solid #1e1e3a',
+  borderTop: `1px solid ${T.border}`,
   gap: 8,
 };
 
 const cancelBtnStyle: React.CSSProperties = {
   background: T.bgHover,
-  border: '1px solid #252542',
+  border: `1px solid ${T.borderStrong}`,
   borderRadius: 4,
   color: T.textMuted,
   fontSize: F.body,
@@ -751,7 +753,7 @@ const swatchCell: React.CSSProperties = {
 
 const saveBtnStyle: React.CSSProperties = {
   background: T.accent,
-  border: '1px solid #4f72ff',
+  border: `1px solid ${T.accent}`,
   borderRadius: 4,
   color: T.text,
   fontSize: F.body,

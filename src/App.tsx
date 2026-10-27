@@ -3029,8 +3029,9 @@ function AlertFullView({
 }
 
 const alertRowStyle = (stripe: boolean): React.CSSProperties => ({
-  display: 'flex', alignItems: 'flex-start', padding: '5px 14px', borderBottom: '1px solid #12122a',
-  fontSize: F.body, gap: 8, background: stripe ? 'rgba(255,255,255,0.01)' : 'transparent',
+  // 색은 토큰으로 — 어두운 색을 박아 두었을 때 라이트 테마에서 행마다 검은 줄이 그어졌다
+  display: 'flex', alignItems: 'flex-start', padding: '5px 14px', borderBottom: `1px solid ${T.borderTable}`,
+  fontSize: F.body, gap: 8, background: stripe ? T.bgRaised : 'transparent',
 });
 const alertChipStyle = (color: string): React.CSSProperties => ({
   background: color, color: T.text, fontSize: F.micro, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: 0.5,
