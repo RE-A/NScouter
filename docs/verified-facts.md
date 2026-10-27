@@ -1882,3 +1882,14 @@ objHash 유무:
 - `profile_thread_memory_usage_enabled`, `profile_thread_cputime_enabled` 둘 다 기본 false 다(`Configure` 생성자·`apply` 의 `getBoolean(…, false)`).
   뒤의 것은 **프로파일 스텝의** cputime 용이라 XLog 의 `cpu` 와는 무관하다.
 - 그래서 화면은 CPU 0 을 «1ms 미만», Heap 0 을 «수집 안 함» 으로 적는다 (`XLogDetailPanel`).
+
+### F-65. 알림 레벨은 **0 부터 INFO** 다 (DEBUG 없음)
+
+콜렉터 2.21.3 의 `scouter.lang.AlertLevel`(`scouter-server-2.21.3.jar`)을 `javap -constants` 로 열었다.
+
+```
+INFO = 0   WARN = 1   ERROR = 2   FATAL = 3
+```
+
+- 실제 알림도 맞는다: 호스트 에이전트의 `WARNING_CPU_HIGH` 는 level 1, `FATAL_CPU_HIGH` 는 level 3 으로 왔다.
+- 앱은 0.7.0 까지 0=DEBUG 로 한 칸 밀려 읽어 **모든 알림이 한 단계 가볍게** 보였다(경고가 INFO, FATAL 이 ERROR).
