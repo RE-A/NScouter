@@ -221,6 +221,11 @@ export const EN: Record<string, string> = {
   '과거 구간을 보는 중입니다. 휠=확대 · Shift+휠=이동 · 툴바의 «실시간» 으로 돌아갑니다': 'Viewing a past range. Wheel = zoom · Shift+wheel = pan · «Live» in the toolbar returns',
   '응답시간 (초)': 'Response time (sec)',
   '차트 설정': 'Chart settings',
+  // 서버 목록 머리 (AgentSelectorPanel)
+  '타입별': 'By type',
+  '그룹별': 'By group',
+  '목록을 무엇으로 묶을지 — 타입(tomcat · datasource · linux) · 그룹(이름의 부모 경로) · 서비스(같은 서비스의 ECS Task)':
+    'How to group the list — type (tomcat · datasource · linux) · group (parent path of the name) · service (ECS tasks of one service)',
   '받아 둔 알림을 이 화면에서 지웁니다': 'Clears the received alerts from this view',
   '검색': 'Search',
   '취소': 'Cancel',
@@ -468,6 +473,8 @@ export const EN: Record<string, string> = {
 
   '언어': 'Language',
   '이름 · 타입 찾기': 'find by name or type',
+  // 좁은 칸용 — 묶기 고르기와 한 줄을 나눠 쓴다
+  '이름·타입 찾기': 'name or type',
   '검색어 지우기': 'clear search',
   '건 찾음': ' found',
   '건 중': ' of',

@@ -184,7 +184,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       title={t('설정')}
       onClose={onClose}
       widthClass="w-[500px]"
-      bodyClassName="overflow-y-auto px-[18px] py-4"
+      bodyClassName="flex flex-col gap-5 overflow-y-auto px-[18px] py-4"
       footer={
         <>
           {saved && <span className="mr-auto text-body text-ok">{t('저장 완료')}</span>}

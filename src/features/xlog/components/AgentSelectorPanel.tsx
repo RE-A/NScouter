@@ -60,6 +60,13 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   /** 접어 둔 묶음 이름들 */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   /**
+   * XLog 를 안 만드는 종류(커넥션 풀·호스트)를 **처음 한 번 접어 둔다.**
+   *
+   * 서버 목록은 XLog 를 고르는 자리인데, WAS 넷 사이에 HikariPool 넷·호스트 하나가 같은 무게로
+   * 깔려 정작 고를 것이 아래로 밀렸다. 고르기는 건드리지 않는다 — 접기만 한다. 사람이 펼치면 그대로 둔다.
+   */
+  const autoCollapsed = React.useRef(false);
+  /**
    * 보기로 켜 둔 종류들. **비어 있으면 «거를 것이 없다»** 다 (`agentTree.matchesType`).
    *
    * 서버 고르기(`selectedHashes`)와 **다른 축**이다. 저쪽은 «무엇을 그릴지» 고,
@@ -176,6 +183,13 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   /** 검색 중에는 접힘을 무시한다 — 찾은 걸 숨기면 검색이 아니다 */
   const searching = query.trim() !== '';
 
+  useEffect(() => {
+    if (autoCollapsed.current || groupBy !== 'type' || agents.length === 0) return;
+    autoCollapsed.current = true;
+    const quiet = new Set(agents.map(a => a.obj_type).filter(ty => !isJavaeeObjectType(ty)));
+    if (quiet.size > 0) setCollapsed(prev => new Set([...prev, ...quiet]));
+  }, [agents, groupBy]);
+
   const toggleGroup = useCallback((type: string) => {
     setCollapsed(prev => {
       const next = new Set(prev);
@@ -281,33 +295,11 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
           {/* **두 기준은 서로를 대신하지 못한다.** 타입은 «무엇인가», 그룹은 «어디에
               속하는가» 다. 운영에서는 obj_type 에 시스템 이름을 넣어 쓰기도 해서
               겹치기도 하지만, 그때도 그룹 쪽이 한 겹 더 잘게 나눈다. */}
-          <div className="mb-1.5 flex items-center gap-1">
-            <span className="text-micro text-fg-dim">{t('묶기')}</span>
-            {(['type', 'group', 'service'] as const).map(b => (
-              <button
-                key={b}
-                onClick={() => onGroupByChange(b)}
-                title={
-                  b === 'type'
-                    ? t('오브젝트 종류로 묶습니다 (tomcat · datasource · linux)')
-                    : b === 'group'
-                      ? t('이름의 부모 경로로 묶습니다 (/CJFW/PRD-FSCP)')
-                      : t('같은 서비스의 ECS Task 들을 한 마디로 묶습니다')
-                }
-                className={`rounded px-1.5 py-0.5 text-micro ${
-                  groupBy === b
-                    ? 'bg-accent/20 text-accent-bright'
-                    : 'text-fg-faint hover:bg-hover hover:text-fg'
-                }`}
-              >
-                {b === 'type' ? t('타입') : b === 'group' ? t('그룹') : t('서비스')}
-              </button>
-            ))}
-          </div>
           {/* 종류 거르기 — **묶기와 다른 축이다.** 묶기는 «어떻게 쌓을지» 고
               이건 «무엇을 볼지» 다. 그룹으로 묶어 놓고 WAS 만 보는 일이 실제로 잦다.
               종류가 하나뿐인 환경에서는 통째로 안 뜬다. */}
-          {multiType && (
+          {/* 타입으로 묶었으면 목록의 마디가 곧 종류라 이 줄은 같은 말을 한 번 더 한다 — 그때는 안 그린다 */}
+          {multiType && groupBy !== 'type' && (
             <div className="mb-1.5 flex flex-wrap items-center gap-1">
               <span className="text-micro text-fg-dim">{t('종류')}</span>
               {kinds.map(k => {
@@ -340,13 +332,28 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               )}
             </div>
           )}
+          {/* 찾기와 묶기를 한 줄에 — 목록 앞에 조작 줄이 다섯이라 고를 서버가 아래로 밀렸다.
+              **두 기준은 서로를 대신하지 못한다.** 타입은 «무엇인가», 그룹은 «어디에 속하는가»,
+              서비스는 «같은 서비스의 ECS Task 들» 이다. */}
           <div className="flex items-center gap-1">
             <input
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder={t('이름 · 타입 찾기')}
+              placeholder={t('이름·타입 찾기')}
+              aria-label={t('이름 · 타입 찾기')}
               className="search-field min-w-0 flex-1 rounded py-0.5 pr-1.5 text-small"
             />
+            <select
+              value={groupBy}
+              onChange={e => onGroupByChange(e.target.value as GroupBy)}
+              aria-label={t('묶기')}
+              title={t('목록을 무엇으로 묶을지 — 타입(tomcat · datasource · linux) · 그룹(이름의 부모 경로) · 서비스(같은 서비스의 ECS Task)')}
+              className="shrink-0 rounded border border-line-control bg-input py-0.5 pr-[22px] pl-1.5 text-micro text-fg"
+            >
+              <option value="type">{t('타입별')}</option>
+              <option value="group">{t('그룹별')}</option>
+              <option value="service">{t('서비스별')}</option>
+            </select>
             {searching && (
               <button
                 onClick={() => setQuery('')}

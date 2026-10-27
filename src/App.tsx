@@ -2056,7 +2056,7 @@ export default function App({ windowLabel }: {
           지우지 않고 숨긴다 — 펼쳐 둔 묶음·스크롤이 돌아왔을 때 그대로여야 한다. */}
       <div ref={xlogWsRef} className="flex min-h-0 flex-1 overflow-hidden bg-base p-1">
         <Pane
-          title="Services"
+          title={t('서버')}
           className="shrink-0"
           // 클래스(hidden)로 숨기면 Pane 의 flex 와 부딪쳐 어느 쪽이 이길지 순서에 달린다
           style={activeTab === 'alert' ? { width: servicesW, display: 'none' } : { width: servicesW }}
