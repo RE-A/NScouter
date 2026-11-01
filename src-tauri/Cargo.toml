@@ -24,6 +24,13 @@ sha2 = "0.10"
 hex = "0.4"
 # StackPack 의 본문이 GZIP 이다 (ASIS CompressUtil.doZip). 직접 풀 방법이 없다.
 flate2 = "1"
+# 로컬 MCP 서버 (Claude Code · Cursor 가 붙는다). 앱 안에 Streamable HTTP 로 연다 — `src/mcp/`
+rmcp = { version = "3.8", features = ["transport-streamable-http-server"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# MCP 서버를 끌 때 쓰는 취소 토큰 (rmcp 가 받는 타입)
+tokio-util = "0.7"
+# MCP 접속 토큰을 만든다
+getrandom = "0.3"
 
 # 실서버 테스트에서 XLog endTime → yyyyMMdd 변환에만 쓴다 (프로덕션 코드는 프론트에서 계산).
 [dev-dependencies]

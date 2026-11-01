@@ -985,4 +985,23 @@ export const EN: Record<string, string> = {
   '장애': 'Down',
   '살아 있는 Task 없음': 'No live task',
   '지금은 살아 있는 Task 가 있습니다': 'a task is live now',
+  // AI 연결 (McpSection.tsx)
+  'AI 연결 (MCP)': 'AI connection (MCP)',
+  'Claude Code · Cursor 가 이 앱을 거쳐 문제 있는 트랜잭션을 찾고 상세를 읽게 합니다. 앱이 켜져 있고 콜렉터에 접속해 있을 때만 붙습니다.':
+    'Lets Claude Code and Cursor find problem transactions and read their details through this app. Works only while the app is running and connected to a collector.',
+  '이 PC(127.0.0.1)에서만 열리고, 토큰이 있어야 읽습니다. 읽기만 합니다. 여기 값은 바로 적용됩니다.':
+    'Opens on this PC (127.0.0.1) only and requires the token. Read-only. Changes here apply immediately.',
+  '켜기': 'Enable',
+  '시작 못 함': 'Failed to start',
+  '1024~65535': '1024–65535',
+  'SQL 바인딩 값도 넘기기': 'Also send SQL bind values',
+  '끄면 SQL 문장만 넘깁니다. 켜면 실제 값(개인정보일 수 있음)이 AI 쪽으로 나갑니다.':
+    'Off: only SQL statements are sent. On: actual values (possibly personal data) go to the AI.',
+  '토큰': 'Token',
+  '새로 만들기': 'Regenerate',
+  '새 토큰을 만듭니다. 예전 토큰으로 등록한 클라이언트는 다시 등록해야 합니다':
+    'Creates a new token. Clients registered with the old token must be registered again',
+  'Claude Code — 터미널에서 한 번 실행': 'Claude Code — run once in a terminal',
+  'Cursor — ~/.cursor/mcp.json (프로젝트만이면 .cursor/mcp.json) 에 넣기':
+    'Cursor — put in ~/.cursor/mcp.json (or .cursor/mcp.json for one project)',
 };

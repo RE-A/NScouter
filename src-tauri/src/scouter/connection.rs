@@ -36,7 +36,7 @@ pub struct ScouterConnection {
 }
 
 /// 지금 시각(ms, 이 PC)
-fn local_now_ms() -> i64 {
+pub fn local_now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)

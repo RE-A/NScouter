@@ -21,6 +21,7 @@ import { getObjectList } from '../xlog/api/scouterApi';
 import type { AgentObject } from '../xlog/types/xlog';
 import { Button } from '../../components/Button';
 import { Dialog } from '../../components/Dialog';
+import { McpSection } from './McpSection';
 
 /**
  * 단축키가 무엇을 하는지.
@@ -435,6 +436,17 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
             </label>
           );
         })}
+      </div>
+
+      {/* AI 연결 — **저장 단추와 따로 바로 적용된다** (McpSection 머리말) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('AI 연결 (MCP)')}</div>
+        <div style={sectionDescStyle}>
+          {t('Claude Code · Cursor 가 이 앱을 거쳐 문제 있는 트랜잭션을 찾고 상세를 읽게 합니다. 앱이 켜져 있고 콜렉터에 접속해 있을 때만 붙습니다.')}
+          <br />
+          {t('이 PC(127.0.0.1)에서만 열리고, 토큰이 있어야 읽습니다. 읽기만 합니다. 여기 값은 바로 적용됩니다.')}
+        </div>
+        <McpSection />
       </div>
 
       {/* 단축키 — **적어 두지 않으면 없는 기능이다.** 목록은 판정 코드가 그대로 준다 */}

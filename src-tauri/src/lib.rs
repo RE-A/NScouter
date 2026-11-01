@@ -3,6 +3,7 @@
 pub mod commands;
 pub mod config;
 pub mod export_store;
+pub mod mcp;
 pub mod object_history_store;
 pub mod profile_store;
 pub mod scouter;
@@ -90,6 +91,7 @@ pub fn run() {
             });
         })
         .manage(AppState::new_with_config(config, config_path))
+        .manage(mcp::McpState::default())
         .invoke_handler(tauri::generate_handler![
             connect_scouter,
             disconnect_scouter,
@@ -158,6 +160,9 @@ pub fn run() {
             get_search_max,
             get_connection_info,
             refresh_connection,
+            mcp::mcp_sync,
+            mcp::mcp_configure,
+            mcp::mcp_regenerate_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -111,7 +111,36 @@ pub struct AppConfig {
     /// 껐을 때 열려 있던 상세 탭들
     #[serde(default)]
     pub open_details: Vec<OpenDetailPrefs>,
+    /// 로컬 MCP 서버 (Claude Code · Cursor 가 붙는 자리). `src/mcp/`
+    #[serde(default)]
+    pub mcp: McpPrefs,
 }
+
+/// 로컬 MCP 서버 설정.
+///
+/// **기본은 끔이다.** 켜면 이 PC 의 다른 프로그램이 토큰만 있으면 트랜잭션을 읽어 간다.
+/// 설정 창이 «저장» 과 따로 바로 적용한다(`mcp_configure`) — 그래서 `save_config` 가
+/// 이 칸은 덮어쓰지 않는다(설정 창이 열 때 읽어 둔 옛 토큰이 새 토큰을 되돌리지 않게).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct McpPrefs {
+    pub enabled: bool,
+    /// 127.0.0.1 의 이 포트로 연다
+    pub port: u16,
+    /// `Authorization: Bearer …` 로 받을 값. 비어 있으면 켤 때 만든다
+    pub token: String,
+    /// SQL 바인딩 값(실제 데이터)을 넘길지. **기본은 가린다** — 개인정보가 섞여 나간다
+    pub bind_values: bool,
+}
+
+impl Default for McpPrefs {
+    fn default() -> Self {
+        Self { enabled: false, port: DEFAULT_MCP_PORT, token: String::new(), bind_values: false }
+    }
+}
+
+/// MCP 기본 포트. 콜렉터(6100)·웹앱(6180) 과 겹치지 않는 자리
+pub const DEFAULT_MCP_PORT: u16 = 7100;
 
 /// 끌어서 정한 패널 크기. 픽셀이다.
 ///
@@ -445,6 +474,7 @@ impl Default for AppConfig {
             kpi_thresholds: Vec::new(),
             saved_filters: Vec::new(),
             open_details: Vec::new(),
+            mcp: McpPrefs::default(),
         }
     }
 }
@@ -610,6 +640,16 @@ mod bind_default_tests {
         let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");
         assert_eq!(cfg.servers[0].pass, "");
         assert_eq!(cfg.servers[0].name, "");
+    }
+
+    #[test]
+    fn mcp_는_없으면_꺼져_있고_값을_가린다() {
+        let old = r#"{"auto_connect":false}"#;
+        let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
+        assert!(!cfg.mcp.enabled, "켜 두면 이 PC 의 다른 프로그램이 트랜잭션을 읽어 간다");
+        assert!(!cfg.mcp.bind_values);
+        assert_eq!(cfg.mcp.port, DEFAULT_MCP_PORT);
+        assert_eq!(cfg.mcp.token, "");
     }
 
     #[test]

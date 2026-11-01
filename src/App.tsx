@@ -87,6 +87,7 @@ import {
   startAlertStream,
   getConfig,
   getConnectionInfo,
+  mcpSync,
   saveUiState,
   searchXLogList,
   saveXLogProfile,
@@ -571,6 +572,16 @@ export default function App({ windowLabel }: {
       .catch(() => {})
       .finally(() => { if (!cancelled && isMain) setHydrated(true); });
     return () => { cancelled = true; };
+  }, [isMain]);
+
+  /**
+   * 로컬 MCP 서버를 설정대로 켠다(꺼져 있으면 아무것도 안 한다). **메인 창만** —
+   * 서버는 앱에 하나다. 시간대를 함께 알려 준다(콜렉터 날짜 디렉토리, F-18).
+   * 실패는 설정 창이 보여 준다(`McpStatus.error`). 여기서는 조용히 둔다.
+   */
+  useEffect(() => {
+    if (!isMain) return;
+    mcpSync().catch(() => {});
   }, [isMain]);
 
   /**

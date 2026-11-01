@@ -24,6 +24,11 @@ vi.mock('../xlog/api/scouterApi', () => ({
     api.saved.push(c);
     return Promise.resolve();
   },
+  // AI 연결 칸이 열 때 상태를 한 번 묻는다
+  mcpSync: () =>
+    Promise.resolve({ enabled: false, running: false, port: 7100, token: '', bind_values: false, error: null }),
+  mcpConfigure: () => Promise.reject(new Error('not used')),
+  mcpRegenerateToken: () => Promise.reject(new Error('not used')),
 }));
 
 function theme(): string | null {

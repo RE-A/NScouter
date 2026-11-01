@@ -2414,8 +2414,13 @@ pub async fn save_config(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = state.config_path.clone();
+    let mut cfg = state.config.lock().await;
+    // **MCP 칸은 덮어쓰지 않는다.** 설정 창은 열 때 읽은 사본 전체를 보내는데, MCP 는 그 창 안에서
+    // 바로 적용된다(`mcp_configure`·토큰 재발급). 사본을 그대로 쓰면 방금 바꾼 토큰이 되돌아간다.
+    let mut new_config = new_config;
+    new_config.mcp = cfg.mcp.clone();
     new_config.save(&path)?;
-    *state.config.lock().await = new_config;
+    *cfg = new_config;
     log::info!("config.json 저장 완료: {}", path.display());
     Ok(())
 }

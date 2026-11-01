@@ -741,6 +741,19 @@ export interface AppConfig {
   saved_filters?: SavedFilterPrefs[];
   /** 껐을 때 열려 있던 상세 탭들 */
   open_details?: OpenDetailPrefs[];
+  /**
+   * 로컬 MCP 서버. **설정 창의 «저장» 으로는 안 바뀐다** — `mcpConfigure` 로 바로 적용하고,
+   * `save_config` 는 이 칸을 덮어쓰지 않는다(열 때 읽은 옛 토큰이 새 토큰을 되돌리지 않게).
+   */
+  mcp?: McpPrefs;
+}
+
+/** Rust `McpPrefs` 와 짝이다 */
+export interface McpPrefs {
+  enabled: boolean;
+  port: number;
+  token: string;
+  bind_values: boolean;
 }
 
 /** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
@@ -932,6 +945,38 @@ export async function getConfig(): Promise<AppConfig> {
 
 export async function saveConfig(newConfig: AppConfig): Promise<void> {
   return invoke<void>('save_config', { newConfig });
+}
+
+// ─── 로컬 MCP 서버 (Claude Code · Cursor) ─────────────────────
+
+/** MCP 서버 상태. `error` 는 켜려다 실패한 까닭(포트를 이미 쓰는 중 등) */
+export interface McpStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  token: string;
+  bind_values: boolean;
+  error: string | null;
+}
+
+/** 이 PC 시간대(ms). 콜렉터의 날짜 디렉토리(F-18)를 정하는 데 쓴다 */
+function tzOffsetMs(): number {
+  return -new Date().getTimezoneOffset() * 60_000;
+}
+
+/** 시간대를 알려 주고 설정대로 켜거나 끈다. 메인 창이 뜰 때 부른다 */
+export async function mcpSync(): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_sync', { tzOffsetMs: tzOffsetMs() });
+}
+
+/** 켜기·포트·바인딩 값 허용을 바로 적용한다 */
+export async function mcpConfigure(enabled: boolean, port: number, bindValues: boolean): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_configure', { enabled, port, bindValues });
+}
+
+/** 토큰을 새로 만든다. 예전 토큰을 든 클라이언트는 끊긴다 */
+export async function mcpRegenerateToken(): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_regenerate_token');
 }
 
 /**
