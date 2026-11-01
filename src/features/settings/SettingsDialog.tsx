@@ -2,7 +2,7 @@
 
 import { clampWideMax, WIDE_MAX_CHOICES, WIDE_TOTAL_CAP } from '../xlog/hooks/wideSearchAll';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
+import { clearCache, getCacheInfo, getConfig, saveConfig, type AppConfig, type CacheInfo } from '../xlog/api/scouterApi';
 import {
   applyConfigToViewOptions,
   clampFontScale,
@@ -54,6 +54,17 @@ interface SettingsDialogProps {
  * 손으로 친 수(0, 10억)가 그대로 들어오면 화면이 비거나 앱이 무거워진다.
  */
 const BUFFER_CHOICES = [100_000, 300_000, 500_000, 1_000_000] as const;
+
+/** 로컬 캐시 상한으로 고를 수 있는 값(MB). 기본 2GB */
+const CACHE_CHOICES = [1024, 2048, 3072, 5120] as const;
+const DEFAULT_CACHE_MB = 2048;
+
+/** 바이트 → 사람이 읽는 크기 */
+function humanBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)}GB`;
+  if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2)}MB`;
+  return `${Math.round(n / 1024)}KB`;
+}
 
 /**
  * 대략적인 메모리(MB).
@@ -115,6 +126,11 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);
   /** 트랜잭션 찾기로 모두 모을 최대 건수 */
   const [wideMax, setWideMax] = useState<number>(WIDE_TOTAL_CAP);
+  /** 로컬 캐시 상한(MB) */
+  const [cacheMb, setCacheMb] = useState<number>(DEFAULT_CACHE_MB);
+  /** 로컬 캐시가 지금 쓰는 양 */
+  const [cacheInfo, setCacheInfo] = useState<CacheInfo | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -136,7 +152,9 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       savedTheme.current = th;
       setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
       setWideMax(clampWideMax(cfg.wide_search_max ?? WIDE_TOTAL_CAP));
+      setCacheMb(cfg.cache_max_mb ?? DEFAULT_CACHE_MB);
     }).catch(() => {});
+    getCacheInfo().then(setCacheInfo).catch(() => {});
     // 미리보기는 지금 붙어 있을 때만 된다. 안 붙어 있으면 조용히 비워 둔다.
     getObjectList().then(setSample).catch(() => {});
   }, []);
@@ -162,6 +180,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         auto_remove_inactive_min: cleanupMin,
         xlog_buffer_max: bufferMax,
         wide_search_max: wideMax,
+        cache_max_mb: cacheMb,
       };
       await saveConfig(next);
       setConfig(next);
@@ -178,7 +197,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     }
     // **여기 빠뜨리면 조용히 옛 값이 저장된다.** `theme` 이 빠져 있어서, 테마를 고르고
     // 저장하면 처음 값(dark)이 그대로 쓰였다 — 화면에서는 「바꿔도 안 먹는다」로 보인다.
-  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, wideMax, theme, groupRule, cleanupMin]);
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, wideMax, cacheMb, theme, groupRule, cleanupMin]);
 
   return (
     <Dialog
@@ -408,6 +427,38 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         </div>
         <div style={{ ...sectionDescStyle, marginTop: 6 }}>
           {t('다 모았을 때의 대략적인 메모리:')} {estimatedMb(wideMax)}MB
+        </div>
+      </div>
+
+      {/* 로컬 캐시 — **한 번 받은 것은 다시 받지 않는다** (Rust `cache` 머리말) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('로컬 캐시')}</div>
+        <div style={sectionDescStyle}>
+          {t('지난 XLog·프로파일·이름 사전을 이 PC 에 담아 두고, 같은 구간을 다시 볼 때 콜렉터에 묻지 않습니다. 에러·느린 트랜잭션의 프로파일은 미리 받아 둡니다. 상한을 넘으면 오래된 것부터 지웁니다.')}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {CACHE_CHOICES.map(v => (
+            <Button key={v} onClick={() => setCacheMb(v)} aria-pressed={v === cacheMb} size="md">
+              {v / 1024}GB
+            </Button>
+          ))}
+        </div>
+        <div style={{ ...sectionDescStyle, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>
+            {t('지금 사용:')} {cacheInfo ? humanBytes(cacheInfo.total_bytes) : '-'}
+            {cacheInfo && cacheInfo.files > 1 ? ` · ${t('콜렉터')} ${cacheInfo.files}${t('개')}` : ''}
+          </span>
+          <Button
+            size="xs"
+            disabled={clearing}
+            onClick={() => {
+              setClearing(true);
+              clearCache().then(setCacheInfo).catch(e => setError(String(e))).finally(() => setClearing(false));
+            }}
+            title={t('담아 둔 것을 다 지웁니다. 다음 조회부터 다시 콜렉터에서 받아 쌓습니다')}
+          >
+            {clearing ? t('비우는 중…') : t('비우기')}
+          </Button>
         </div>
       </div>
 

@@ -48,6 +48,10 @@ pub struct AppConfig {
     /// 화면 쪽에서 1만~100만으로 자른다.
     #[serde(default = "default_wide_search_max")]
     pub wide_search_max: u32,
+    /// 로컬 캐시(`{data_dir}/cache/`) 전체 상한(MB) — 콜렉터 여럿의 파일을 합친 것. 기본 2GB.
+    /// 넘으면 안 쓴 지 오래된 콜렉터의 파일부터, 그다음 지금 콜렉터의 오래된 XLog 부터 지운다
+    #[serde(default = "default_cache_max_mb")]
+    pub cache_max_mb: u32,
     /// 화면 언어. `"ko"` 또는 `"en"`.
     ///
     /// Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같다.
@@ -423,6 +427,11 @@ fn default_font_scale() -> f32 {
 }
 
 /// 파생 기본값(0)이면 버퍼가 한 건도 못 담는다.
+/// 파생 기본값(0)이면 캐시가 한 건도 못 담는다
+pub fn default_cache_max_mb() -> u32 {
+    2048
+}
+
 fn default_wide_search_max() -> u32 {
     300_000
 }
@@ -458,6 +467,7 @@ impl Default for AppConfig {
             ui_font_scale: 1.0,
             xlog_buffer_max: default_buffer_max(),
             wide_search_max: default_wide_search_max(),
+            cache_max_mb: default_cache_max_mb(),
             ui_language: "ko".to_string(),
             ui_theme: default_theme(),
             ui_layout: UiLayout::default(),

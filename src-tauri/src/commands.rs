@@ -2336,11 +2336,67 @@ pub async fn save_config(
     let mut new_config = new_config;
     new_config.mcp = cfg.mcp.clone();
     new_config.save(&path)?;
+    let cache_changed = cfg.cache_max_mb != new_config.cache_max_mb;
     *cfg = new_config;
+    drop(cfg);
     log::info!("config.json 저장 완료: {}", path.display());
+    // 캐시 상한을 바꿨으면 바로 적용한다 (줄였으면 지금 지운다)
+    if cache_changed {
+        if let Some(db) = state.cache_handle().await {
+            state.apply_cache_limit(&db).await;
+        }
+    }
     Ok(())
 }
 
+
+// ─── 로컬 캐시 ──────────────────────────────────────────────
+
+/// 로컬 캐시가 얼마나 쓰고 있나 (설정 창)
+#[derive(serde::Serialize)]
+pub struct CacheInfo {
+    pub dir: String,
+    /// 캐시 폴더 전체 (모든 콜렉터)
+    pub total_bytes: u64,
+    /// 콜렉터 파일 수
+    pub files: usize,
+    /// 지금 붙어 있는 콜렉터의 파일이 쓰는 것. 붙어 있지 않으면 0
+    pub current_bytes: u64,
+}
+
+#[tauri::command]
+pub async fn get_cache_info(state: State<'_, AppState>) -> Result<CacheInfo, String> {
+    let dir = state.cache_dir().await;
+    let files = crate::cache::files(&dir);
+    let current_bytes = state.cache_handle().await.map(|db| db.used_bytes()).unwrap_or(0);
+    Ok(CacheInfo {
+        dir: dir.display().to_string(),
+        total_bytes: files.iter().map(|(_, n, _)| n).sum(),
+        files: files.len(),
+        current_bytes,
+    })
+}
+
+/// 로컬 캐시를 다 비운다 — 지금 콜렉터의 파일은 속을 비우고, 다른 콜렉터의 파일은 지운다.
+/// 다음 조회부터 다시 콜렉터에서 받아 쌓는다
+#[tauri::command]
+pub async fn clear_cache(state: State<'_, AppState>) -> Result<CacheInfo, String> {
+    let dir = state.cache_dir().await;
+    let current = state.cache_handle().await;
+    if let Some(db) = &current {
+        db.clear();
+    }
+    for (p, _, _) in crate::cache::files(&dir) {
+        if current.as_ref().is_some_and(|db| db.path() == p) {
+            continue;
+        }
+        for ext in ["db", "db-wal", "db-shm"] {
+            let _ = std::fs::remove_file(p.with_extension(ext));
+        }
+    }
+    log::info!("로컬 캐시를 비웠다: {}", dir.display());
+    get_cache_info(state).await
+}
 
 // ─── 프로파일 저장본 ──────────────────────────────────────────
 //

@@ -247,9 +247,18 @@ impl AppState {
         };
         if let Some(db) = &db {
             log::info!("로컬 캐시: {}", db.path().display());
+            self.apply_cache_limit(db).await;
         }
         self.text_cache.lock().await.attach(db.clone());
         *self.cache.lock().await = db;
+    }
+
+    /// 설정 «로컬 캐시 상한» 을 적용한다 — 다른 콜렉터의 파일을 먼저 줄이고, 남은 몫을 지금 파일의 상한으로
+    pub async fn apply_cache_limit(&self, db: &CacheDb) {
+        let budget = self.config.lock().await.cache_max_mb as u64 * 1024 * 1024;
+        let dir = self.cache_dir().await;
+        let mine = crate::cache::prune_others(&dir, db.path(), budget);
+        db.set_max_bytes(mine);
     }
 
     /// 지금 붙어 있는 캐시

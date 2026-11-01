@@ -29,11 +29,57 @@ const SCHEMA_VERSION: i64 = 3;
 /// 캐시 폴더 이름 (`{data_dir}/cache/`)
 pub const DIR_NAME: &str = "cache";
 
+/// 설정을 읽기 전의 상한 (설정 기본값과 같다 — `config::default_cache_max_mb`)
+const DEFAULT_MAX_BYTES: u64 = 2048 * 1024 * 1024;
+
+/// 캐시 폴더의 파일들 — (경로, 크기, 마지막으로 바뀐 때). WAL·SHM 은 본 파일 크기에 더한다
+pub fn files(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("db") {
+            continue;
+        }
+        let meta = |q: &Path| std::fs::metadata(q).ok();
+        let Some(m) = meta(&p) else { continue };
+        let side: u64 = ["db-wal", "db-shm"]
+            .iter()
+            .filter_map(|x| meta(&p.with_extension(x)).map(|m| m.len()))
+            .sum();
+        out.push((p.clone(), m.len() + side, m.modified().unwrap_or(std::time::UNIX_EPOCH)));
+    }
+    out
+}
+
+/// 지금 콜렉터 파일 말고 다른 파일들이 `budget` 을 넘으면 안 쓴 지 오래된 것부터 지운다.
+/// 남은 몫(지금 콜렉터가 쓸 수 있는 바이트)을 돌려준다
+pub fn prune_others(dir: &Path, current: &Path, budget: u64) -> u64 {
+    let mut others: Vec<_> = files(dir).into_iter().filter(|(p, _, _)| p != current).collect();
+    others.sort_by_key(|(_, _, t)| *t);
+    let mut total: u64 = others.iter().map(|(_, n, _)| n).sum();
+    // 지금 콜렉터에 적어도 절반은 남긴다
+    let keep_for_current = budget / 2;
+    for (p, n, _) in &others {
+        if total + keep_for_current <= budget {
+            break;
+        }
+        for ext in ["db", "db-wal", "db-shm"] {
+            let _ = std::fs::remove_file(p.with_extension(ext));
+        }
+        log::info!("캐시 상한 때문에 다른 콜렉터의 캐시를 지웠다: {}", p.display());
+        total -= n;
+    }
+    budget.saturating_sub(total)
+}
+
 pub struct CacheDb {
     db: Mutex<Connection>,
     path: PathBuf,
     /// 프로파일을 담은 횟수 — 몇 번마다 상한을 본다 (`profile.rs`)
     profile_puts: std::sync::atomic::AtomicU32,
+    /// 이 파일이 쓸 수 있는 바이트 (설정 «로컬 캐시 상한» 에서 다른 콜렉터 몫을 뺀 것)
+    max_bytes: std::sync::atomic::AtomicU64,
 }
 
 /// 파일 이름으로 쓸 콜렉터 키. 호스트에 든 `:`·`/` 같은 글자는 `_` 로 바꾼다
@@ -67,11 +113,47 @@ impl CacheDb {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|e| e.to_string())?;
         migrate(&conn).map_err(|e| format!("캐시 스키마 실패: {e}"))?;
-        Ok(Self { db: Mutex::new(conn), path, profile_puts: std::sync::atomic::AtomicU32::new(0) })
+        Ok(Self {
+            db: Mutex::new(conn),
+            path,
+            profile_puts: std::sync::atomic::AtomicU32::new(0),
+            max_bytes: std::sync::atomic::AtomicU64::new(DEFAULT_MAX_BYTES),
+        })
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// 이 파일이 쓸 수 있는 바이트
+    pub fn max_bytes(&self) -> u64 {
+        self.max_bytes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// 상한을 바꾼다. 줄었으면 바로 정리한다
+    pub fn set_max_bytes(&self, v: u64) {
+        let before = self.max_bytes.swap(v, std::sync::atomic::Ordering::Relaxed);
+        if v < before {
+            self.evict_xlog(v);
+            self.evict_profiles(profile::max_rows(v));
+        }
+    }
+
+    /// 이 파일이 실제로 쓰는 바이트
+    pub fn used_bytes(&self) -> u64 {
+        self.with(|c| xlog::used_bytes(c)).unwrap_or(0)
+    }
+
+    /// 다 비운다 (설정 «비우기»)
+    pub fn clear(&self) {
+        let r = self.with(|c| {
+            c.execute_batch(
+                "DELETE FROM text; DELETE FROM xlog; DELETE FROM xlog_cover; DELETE FROM profile; VACUUM;",
+            )
+        });
+        if let Err(e) = r {
+            log::warn!("캐시 비우기 실패: {e}");
+        }
     }
 
     pub(crate) fn with<T>(&self, f: impl FnOnce(&mut Connection) -> rusqlite::Result<T>) -> rusqlite::Result<T> {
@@ -163,6 +245,37 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[&1], "select 1");
         assert_eq!(db.texts("service", &[1])[&1], "/a", "종류가 다르면 다른 글자다");
+    }
+
+    #[test]
+    fn 상한을_넘으면_안_쓴_지_오래된_콜렉터_파일부터_지운다() {
+        let dir = std::env::temp_dir().join(format!("nscouter-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, n: usize| std::fs::write(dir.join(name), vec![0u8; n]).unwrap();
+        write("old_1.db", 400);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write("new_1.db", 300);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write("cur_1.db", 10);
+        let cur = dir.join("cur_1.db");
+        // 상한 1000, 지금 콜렉터에 절반(500)은 남긴다 → 다른 파일 합 700 이 500 아래로 — 오래된 것만 지운다
+        let mine = prune_others(&dir, &cur, 1000);
+        assert!(!dir.join("old_1.db").exists(), "오래된 것부터");
+        assert!(dir.join("new_1.db").exists());
+        assert!(cur.exists(), "지금 콜렉터 파일은 안 지운다");
+        assert_eq!(mine, 700);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 비우면_다_없어진다() {
+        let db = CacheDb::open_in_memory().unwrap();
+        db.put_texts(&[("sql".into(), 1, "select 1".into())]);
+        db.put_profile_blob(1, &[1, 2, 3]);
+        db.clear();
+        assert!(db.texts("sql", &[1]).is_empty());
+        assert!(db.profile_blob(1).is_none());
     }
 
     #[test]

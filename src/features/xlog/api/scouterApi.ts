@@ -727,6 +727,8 @@ export interface AppConfig {
   xlog_buffer_max?: number;
   /** 트랜잭션 찾기로 모두 모을 최대 건수. 없으면 300,000 */
   wide_search_max?: number;
+  /** 로컬 캐시 전체 상한(MB) — 콜렉터 여럿을 합친 것. 없으면 2048 */
+  cache_max_mb?: number;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
   ui_layout?: UiLayout;
   /** XLog 스캐터 차트 설정 */
@@ -942,6 +944,28 @@ export async function getConfig(): Promise<AppConfig> {
 
 export async function saveConfig(newConfig: AppConfig): Promise<void> {
   return invoke<void>('save_config', { newConfig });
+}
+
+// ─── 로컬 캐시 ────────────────────────────────────────────────
+
+/** 로컬 캐시가 얼마나 쓰고 있나 (Rust `CacheInfo`) */
+export interface CacheInfo {
+  dir: string;
+  /** 캐시 폴더 전체 (모든 콜렉터) */
+  total_bytes: number;
+  /** 콜렉터 파일 수 */
+  files: number;
+  /** 지금 붙어 있는 콜렉터의 파일이 쓰는 것 */
+  current_bytes: number;
+}
+
+export async function getCacheInfo(): Promise<CacheInfo> {
+  return invoke<CacheInfo>('get_cache_info');
+}
+
+/** 다 비운다. 다음 조회부터 다시 콜렉터에서 받아 쌓는다 */
+export async function clearCache(): Promise<CacheInfo> {
+  return invoke<CacheInfo>('clear_cache');
 }
 
 // ─── 로컬 MCP 서버 (Claude Code · Cursor) ─────────────────────

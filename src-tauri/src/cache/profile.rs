@@ -6,7 +6,7 @@
 // 콜렉터가 주는 그대로(`TRANX_PROFILE_FULL` 의 스텝 바이트)를 deflate 로 줄여 담는다 —
 // 사전을 푼 글자를 담지 않는 이유는 사전 캐시가 따로 있고(`text`), 그러면 크기가 몇 배가 되기 때문이다.
 //
-// **크기**: 건수 상한(`MAX_ROWS`)을 넘으면 오래 담아 둔 것부터 지운다. 파일 전체 상한(`xlog::MAX_BYTES`)은
+// **크기**: 건수 상한(`max_rows`)을 넘으면 오래 담아 둔 것부터 지운다. 파일 전체 상한(설정 «로컬 캐시 상한»)은
 // XLog 쪽 정리가 맡는다.
 
 use std::io::{Read, Write};
@@ -22,8 +22,13 @@ use crate::scouter::connection::{local_now_ms, ScouterConnection};
 use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
 use crate::scouter::protocol::CMD_TRANX_PROFILE_FULL;
 
-/// 담아 둘 프로파일 수. 압축하면 건당 몇 KB 라 0.8GB 남짓이다
-pub const MAX_ROWS: i64 = 200_000;
+/// 압축한 프로파일 한 건의 대략 크기 — 건수 상한을 정하는 데만 쓴다
+const APPROX_BYTES: u64 = 4_096;
+
+/// 담아 둘 프로파일 수. 캐시 상한의 1/3 쯤 — 2GB 면 17만 건 남짓
+pub fn max_rows(max_bytes: u64) -> i64 {
+    ((max_bytes / 3 / APPROX_BYTES) as i64).max(1_000)
+}
 
 /// 몇 건 담을 때마다 상한을 볼지 — 셈(COUNT)이 공짜가 아니다
 const CHECK_EVERY: u32 = 500;
@@ -93,7 +98,7 @@ impl CacheDb {
             return;
         }
         if self.profile_puts.fetch_add(1, Ordering::Relaxed) % CHECK_EVERY == CHECK_EVERY - 1 {
-            self.evict_profiles(MAX_ROWS);
+            self.evict_profiles(max_rows(self.max_bytes()));
         }
     }
 

@@ -24,9 +24,6 @@ use crate::scouter::protocol::CMD_TRANX_LOAD_TIME_GROUP_V2;
 /// 이보다 최근은 «다 받았다» 고 적지 않는다
 pub const SEAL_MS: i64 = 5 * 60_000;
 
-/// 콜렉터 하나의 캐시 파일 상한(바이트). 넘으면 오래된 XLog 부터 지운다.
-/// 시간당 50만 건 서비스면 하루 남짓을 담는다
-pub const MAX_BYTES: u64 = 2_500_000_000;
 
 /// 넘었을 때 한 번에 지우는 폭 — 가장 오래된 것부터 한 시간씩
 const EVICT_STEP_MS: i64 = 3_600_000;
@@ -117,7 +114,7 @@ impl CacheDb {
             log::warn!("캐시 XLog 쓰기 실패: {e}");
             return;
         }
-        self.evict_xlog(MAX_BYTES);
+        self.evict_xlog(self.max_bytes());
     }
 
     /// 오브젝트들의 `[s, e]` 를 «다 받았다» 고 적는다. 겹치거나 맞닿은 구간은 합친다
@@ -175,7 +172,7 @@ impl CacheDb {
 }
 
 /// 파일이 실제로 쓰는 바이트 (지운 뒤 비어 있는 페이지는 뺀다)
-fn used_bytes(c: &Connection) -> rusqlite::Result<u64> {
+pub(crate) fn used_bytes(c: &Connection) -> rusqlite::Result<u64> {
     let pages: i64 = c.query_row("PRAGMA page_count", [], |r| r.get(0))?;
     let free: i64 = c.query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
     let size: i64 = c.query_row("PRAGMA page_size", [], |r| r.get(0))?;

@@ -997,4 +997,12 @@ export const EN: Record<string, string> = {
   // 넓은 구간 찾기 — 대소문자 없이 (WideSearchDialog.tsx)
   '구간을 받아 조건으로 거릅니다. 모두': 'Fetches the range and filters it by your conditions. Collects up to',
   '대소문자는 가리지 않습니다.': 'Case is ignored.',
+  // 로컬 캐시 (SettingsDialog.tsx)
+  '로컬 캐시': 'Local cache',
+  '지난 XLog·프로파일·이름 사전을 이 PC 에 담아 두고, 같은 구간을 다시 볼 때 콜렉터에 묻지 않습니다. 에러·느린 트랜잭션의 프로파일은 미리 받아 둡니다. 상한을 넘으면 오래된 것부터 지웁니다.':
+    'Keeps past XLogs, profiles and the name dictionary on this PC so the same range is not fetched from the collector again. Profiles of error and slow transactions are fetched ahead. Oldest data is removed beyond the limit.',
+  '지금 사용:': 'In use:',
+  '비우기': 'Clear',
+  '비우는 중…': 'Clearing…',
+  '담아 둔 것을 다 지웁니다. 다음 조회부터 다시 콜렉터에서 받아 쌓습니다': 'Deletes everything cached. It fills up again from the collector on the next queries',
 };
