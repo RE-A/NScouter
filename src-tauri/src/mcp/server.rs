@@ -212,7 +212,7 @@ impl NScouterMcp {
 
     #[tool(
         name = "get_transaction_details",
-        description = "트랜잭션 몇 건(최대 5)의 상세 — 헤더(서비스·서버·응답시간·에러), 스텝에 붙은 에러, 느린 스텝, 같은 SQL/API 를 묶은 합계(되풀이 = N+1 의심), 앞부분 흐름. 한 건에 10KB 남짓으로 줄여 준다. SQL 바인딩 값은 앱 설정에서 허용했을 때만 싣는다."
+        description = "트랜잭션 몇 건(최대 5)의 상세 — 헤더(서비스·서버·응답시간·에러), 스텝에 붙은 에러, 느린 스텝, 같은 SQL/API 를 묶은 합계(되풀이 = N+1 의심), 앞부분 흐름. 한 건에 10KB 남짓으로 줄여 준다. SQL 바인딩 값은 기본으로 싣는다(앱 설정에서 끌 수 있다)."
     )]
     async fn get_transaction_details(&self, Parameters(a): Parameters<DetailArgs>) -> Result<String, String> {
         if a.refs.is_empty() {

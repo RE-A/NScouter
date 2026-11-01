@@ -129,13 +129,14 @@ pub struct McpPrefs {
     pub port: u16,
     /// `Authorization: Bearer …` 로 받을 값. 비어 있으면 켤 때 만든다
     pub token: String,
-    /// SQL 바인딩 값(실제 데이터)을 넘길지. **기본은 가린다** — 개인정보가 섞여 나간다
+    /// 상세 조회에 SQL 바인딩 값(실제 데이터)을 실을지. **기본은 싣는다** — 값이 없으면
+    /// «어떤 값으로 느렸나» 를 재현할 수 없다. 비밀번호 같은 값은 앱 쪽에서 따로 암호화해 둔다고 했다
     pub bind_values: bool,
 }
 
 impl Default for McpPrefs {
     fn default() -> Self {
-        Self { enabled: false, port: DEFAULT_MCP_PORT, token: String::new(), bind_values: false }
+        Self { enabled: false, port: DEFAULT_MCP_PORT, token: String::new(), bind_values: true }
     }
 }
 
@@ -643,11 +644,17 @@ mod bind_default_tests {
     }
 
     #[test]
-    fn mcp_는_없으면_꺼져_있고_값을_가린다() {
+    fn mcp_는_없으면_꺼져_있고_바인딩_값은_싣는다() {
         let old = r#"{"auto_connect":false}"#;
         let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
         assert!(!cfg.mcp.enabled, "켜 두면 이 PC 의 다른 프로그램이 트랜잭션을 읽어 간다");
-        assert!(!cfg.mcp.bind_values);
+        assert!(cfg.mcp.bind_values);
+        // 칸 일부만 있는 설정도 기본값을 따른다 (bool 파생 기본값 false 가 끼어들면 안 된다)
+        let part: AppConfig = serde_json::from_str(r#"{"mcp":{"enabled":true}}"#).expect("파싱 실패");
+        assert!(part.mcp.bind_values);
+        // 끈 사람은 끈 채로
+        let off: AppConfig = serde_json::from_str(r#"{"mcp":{"bind_values":false}}"#).expect("파싱 실패");
+        assert!(!off.mcp.bind_values);
         assert_eq!(cfg.mcp.port, DEFAULT_MCP_PORT);
         assert_eq!(cfg.mcp.token, "");
     }
