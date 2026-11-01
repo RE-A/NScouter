@@ -4,7 +4,8 @@
 // 시간이고, 많은 서비스는 시간당 50만 건이라 같은 구간을 다시 받는 값이 크다.
 // 여기 담는 것은 **한 번 정해지면 바뀌지 않는 것**뿐이다:
 //   · 이름 사전 (해시 → 글자) — 해시는 글자에서 나온다
-//   · 지난 XLog (`xlog.rs`) — 끝난 트랜잭션은 바뀌지 않는다. 최근 5분은 늦게 오는 것이 있어 담지 않는다
+//   · 지난 XLog (`xlog.rs`) — 끝난 트랜잭션은 바뀌지 않는다. 최근 5분은 늦게 오는 것이 있어 덮었다고 적지 않는다
+//   · 프로파일 (`profile.rs`) — 트랜잭션이 끝날 때 한 번 쓰인다
 //
 // **캐시는 덤이다.** 파일을 못 열거나 쓰다 실패해도 조회는 콜렉터로 그대로 간다 — 여기서 난
 // 오류를 화면으로 올리지 않고 로그만 남긴다.
@@ -18,10 +19,12 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 
+pub mod prefetch;
+pub mod profile;
 pub mod xlog;
 
 /// 스키마 판. 바꾸면 `migrate` 에 단계를 더한다
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// 캐시 폴더 이름 (`{data_dir}/cache/`)
 pub const DIR_NAME: &str = "cache";
@@ -29,6 +32,8 @@ pub const DIR_NAME: &str = "cache";
 pub struct CacheDb {
     db: Mutex<Connection>,
     path: PathBuf,
+    /// 프로파일을 담은 횟수 — 몇 번마다 상한을 본다 (`profile.rs`)
+    profile_puts: std::sync::atomic::AtomicU32,
 }
 
 /// 파일 이름으로 쓸 콜렉터 키. 호스트에 든 `:`·`/` 같은 글자는 `_` 로 바꾼다
@@ -62,7 +67,7 @@ impl CacheDb {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|e| e.to_string())?;
         migrate(&conn).map_err(|e| format!("캐시 스키마 실패: {e}"))?;
-        Ok(Self { db: Mutex::new(conn), path })
+        Ok(Self { db: Mutex::new(conn), path, profile_puts: std::sync::atomic::AtomicU32::new(0) })
     }
 
     pub fn path(&self) -> &Path {
@@ -131,6 +136,9 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
     }
     if v < 2 {
         xlog::create_tables(c)?;
+    }
+    if v < 3 {
+        profile::create_tables(c)?;
     }
     c.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
 }

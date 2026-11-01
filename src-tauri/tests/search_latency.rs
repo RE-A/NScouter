@@ -145,7 +145,7 @@ fn probe_search_workers_under_latency() {
     println!("표본 {}건\n", targets.len());
 
     // 캐시를 고르게 해 둔다 — 뒤 회차가 공짜로 빨라지면 비교가 안 된다.
-    let _ = fetch_profiles_parallel(HOST, PORT, session, &targets, 8);
+    let _ = fetch_profiles_parallel(HOST, PORT, session, &targets, 8, None);
 
     let n = targets.len();
     for one_way_ms in [0u64, 5, 20, 50] {
@@ -157,7 +157,7 @@ fn probe_search_workers_under_latency() {
                 continue;
             }
             let t = Instant::now();
-            let got = fetch_profiles_parallel(HOST, port, session, &targets, workers);
+            let got = fetch_profiles_parallel(HOST, port, session, &targets, workers, None);
             let el = t.elapsed();
             let ok = got.iter().filter(|v| v.is_some()).count();
             println!(

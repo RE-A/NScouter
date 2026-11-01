@@ -6,7 +6,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::connection::ScouterConnection;
 use super::pack::{AnyPack, MapPack, XLogPack};
@@ -132,6 +132,10 @@ fn poll_once(
             }
             Some(AnyPack::XLog(xlog)) => {
                 n_xlog += 1;
+                // 에러·느린 것은 프로파일을 미리 받아 둔다 (`cache::prefetch`) — 막히지 않는다
+                if let Some(p) = app.try_state::<crate::cache::prefetch::Prefetcher>() {
+                    p.offer(&xlog);
+                }
                 batch.push(xlog);
                 if batch.len() >= EMIT_CHUNK {
                     let _ = app.emit("xlog-data", XLogColumns::from(std::mem::take(&mut batch)));

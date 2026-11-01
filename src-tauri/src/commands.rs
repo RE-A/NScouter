@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::cache::profile::full_profile_steps;
 use crate::cache::xlog::past_page;
 use crate::config::AppConfig;
 use crate::scouter::configure::{
@@ -36,7 +37,7 @@ use crate::scouter::objtype::{
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
 use crate::scouter::past::PastCursor;
 use crate::scouter::search::{SearchXLogFilter, WideMatcher};
-use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, XLogProfilePack};
+use crate::scouter::profile::XLogProfilePack;
 use crate::scouter::protocol::*;
 use crate::scouter::alert::build_alert_param;
 use crate::scouter::streaming::{run_xlog_stream, StreamCursor, StreamEnd};
@@ -1405,8 +1406,9 @@ pub async fn search_profiles(
 
     // 1) 프로파일은 워커 여러 개로 나눠 받는다. 여기가 검색 시간의 거의 전부다.
     let fetch_targets = targets.clone();
+    let cache = state.cache_handle().await;
     let fetched = tokio::task::spawn_blocking(move || {
-        fetch_profiles_parallel(&host, port, session, &fetch_targets, SEARCH_WORKERS)
+        fetch_profiles_parallel(&host, port, session, &fetch_targets, SEARCH_WORKERS, cache.as_deref())
     })
     .await
     .map_err(|e| format!("검색 작업 실패: {e}"))?;
@@ -1512,6 +1514,7 @@ pub fn fetch_profiles_parallel(
     session: i64,
     targets: &[SearchTarget],
     workers: usize,
+    cache: Option<&crate::cache::CacheDb>,
 ) -> Vec<Option<Vec<crate::scouter::profile::ProfileStep>>> {
     let mut out: Vec<Option<Vec<crate::scouter::profile::ProfileStep>>> =
         targets.iter().map(|_| None).collect();
@@ -1539,8 +1542,9 @@ pub fn fetch_profiles_parallel(
                         conn.session = session;
                         part.into_iter()
                             .map(|(i, t)| {
+                                // 담아 둔 것은 캐시에서, 아니면 콜렉터에서 받아 담는다 (`cache::profile`)
                                 let steps = t.txid.parse::<i64>().ok().and_then(|txid| {
-                                    fetch_profile_steps(&mut conn, txid, &t.date, t.obj_hash).ok()
+                                    full_profile_steps(&mut conn, cache, txid, &t.date).ok()
                                 });
                                 (i, steps)
                             })
@@ -1555,37 +1559,6 @@ pub fn fetch_profiles_parallel(
         out[i] = steps;
     }
     out
-}
-
-/// 프로파일 스텝만 꺼낸다 (검색용).
-///
-/// `get_xlog_profile` 과 같은 요청이지만 **커넥션을 이미 쥔 채** 부른다 —
-/// 검색은 수백 번 반복하므로 매번 락을 잡았다 놓으면 그 사이 다른 요청이 끼어든다.
-fn fetch_profile_steps(
-    conn: &mut crate::scouter::connection::ScouterConnection,
-    txid: i64,
-    date: &str,
-    obj_hash: i32,
-) -> Result<Vec<crate::scouter::profile::ProfileStep>, String> {
-    let mut param = MapPack::new();
-    param.put("txid", ScouterValue::Decimal(txid));
-    param.put("date", ScouterValue::Text(date.to_string()));
-    param.put("objHash", ScouterValue::Decimal(obj_hash as i64));
-
-    let session = conn.session;
-    conn.send_request(CMD_TRANX_PROFILE, session, &param)
-        .map_err(|e| format!("프로파일 요청 실패: {e}"))?;
-
-    let mut steps = Vec::new();
-    loop {
-        match conn.read_next_pack().map_err(|e| format!("프로파일 응답 수신 실패: {e}"))? {
-            // 분할 전송이면 이어 붙인다.
-            Some(AnyPack::Profile(p)) => steps.extend(p.steps),
-            Some(_) => {}
-            None => break,
-        }
-    }
-    Ok(steps)
 }
 
 /// 상한 없는 프로파일.
@@ -1604,18 +1577,12 @@ pub async fn get_xlog_full_profile(
 ) -> Result<XLogProfilePack, String> {
     let txid_i64: i64 = txid.parse().map_err(|_| format!("잘못된 txid: {txid}"))?;
 
+    let cache = state.cache_handle().await;
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
-    let param = build_full_profile_param(&date, txid_i64);
-    let session = conn.session;
-    conn.send_request(CMD_TRANX_PROFILE_FULL, session, &param)
-        .map_err(|e| format!("전체 프로파일 요청 실패: {e}"))?;
-
-    let blob = conn
-        .read_blob_stream()
-        .map_err(|e| format!("전체 프로파일 수신 실패: {e}"))?;
-    let steps = parse_profile_steps(blob);
+    // 한 번 받은 프로파일은 캐시에서 준다 (`cache::profile`)
+    let steps = full_profile_steps(conn, cache.as_deref(), txid_i64, &date)?;
 
     log::debug!("get_xlog_full_profile: txid={txid_i64} → 스텝 {}개", steps.len());
     // 응답에 헤더가 없다. 요청 값으로 채운다 (N-16 과 같은 이유).

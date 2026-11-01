@@ -29,9 +29,10 @@ use crate::scouter::dictionary::{fetch_texts, TextCache};
 use crate::scouter::object::{build_daily_object_param, parse_daily_objects};
 use crate::scouter::objtype::{date_key, split_by_day};
 use crate::scouter::pack::{AnyPack, MapPack, XLogPack};
+use crate::cache::profile::full_profile_steps;
 use crate::cache::xlog::past_page;
 use crate::scouter::past::PastCursor;
-use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
+use crate::scouter::profile::ProfileStep;
 use crate::scouter::protocol::*;
 use crate::scouter::value::ScouterValue;
 use crate::state::AppState;
@@ -456,7 +457,23 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
     let mut profile_facts = None;
     if let Some(needle) = &q.profile {
         let candidates = res.matched;
-        let rows = std::mem::take(&mut res.rows);
+        // 캐시에 있는 프로파일은 묻지 않고 바로 연다 — 상한(`PROFILE_FETCH_MAX`)은 새로 물을 것에만 건다
+        let all = std::mem::take(&mut res.rows);
+        let cached = state
+            .cache_handle_blocking()
+            .map(|db| db.profile_has(&all.iter().map(|x| x.txid).collect::<Vec<_>>()))
+            .unwrap_or_default();
+        let mut fetch = 0usize;
+        let rows: Vec<XLogPack> = all
+            .into_iter()
+            .filter(|x| {
+                if cached.contains(&x.txid) {
+                    return true;
+                }
+                fetch += 1;
+                fetch <= digest::PROFILE_FETCH_MAX
+            })
+            .collect();
         let searched = rows.len();
         let (found, failed) = search_profiles(conn, state, &rows, needle, tz)?;
         // 걸린 것만으로 다시 센다 — 요약(건수·서비스별)이 «프로파일에 걸린 것» 의 것이어야 한다
@@ -611,7 +628,8 @@ fn search_profiles(
         .collect();
     let host = state.conn_host.blocking_lock().clone();
     let port = *state.conn_port.blocking_lock();
-    let fetched = fetch_profiles_parallel(&host, port, conn.session, &targets, SEARCH_WORKERS);
+    let cache = state.cache_handle_blocking();
+    let fetched = fetch_profiles_parallel(&host, port, conn.session, &targets, SEARCH_WORKERS, cache.as_deref());
     let failed = fetched.iter().filter(|f| f.is_none()).count();
 
     let mut wants: Vec<(&'static str, i32)> = Vec::new();
@@ -667,12 +685,9 @@ fn detail_one(
         return Ok(json!({ "ref": reference, "error": "트랜잭션을 찾지 못했습니다 (날짜가 다르거나 콜렉터에서 지워졌을 수 있습니다)" }));
     };
 
-    // 프로파일은 팩이 아니라 `[3][blob]` 청크로 온다 — `read_next_pack` 으로 읽으면 안 된다 (F-26)
-    let session = conn.session;
-    conn.send_request(CMD_TRANX_PROFILE_FULL, session, &build_full_profile_param(date, txid))
-        .map_err(|e| format!("프로파일 요청 실패: {e}"))?;
-    let blob = conn.read_blob_stream().map_err(|e| format!("프로파일 수신 실패: {e}"))?;
-    let steps: Vec<ProfileStep> = parse_profile_steps(blob);
+    // 한 번 받은 프로파일은 캐시에서 준다 (`cache::profile`)
+    let cache = state.cache_handle_blocking();
+    let steps: Vec<ProfileStep> = full_profile_steps(conn, cache.as_deref(), txid, date)?;
 
     let mut wants = detail_hashes(&xlog, &steps);
     wants.push((text_type::OBJECT, xlog.obj_hash));

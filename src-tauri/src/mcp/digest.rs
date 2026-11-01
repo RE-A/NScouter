@@ -546,15 +546,19 @@ pub struct ProfileFacts {
     pub needle: String,
     /// XLog 조건에 걸린 건수 (프로파일을 열어 볼 후보)
     pub candidates: u64,
-    /// 그중 실제로 열어 본 건수 (상한 `PROFILE_CANDIDATES`)
+    /// 그중 실제로 열어 본 건수 — 캐시에 있는 것 전부 + 새로 물은 것(상한 `PROFILE_FETCH_MAX`)
     pub searched: usize,
     /// 프로파일을 못 받은 건수 — 조용히 빼면 «안 걸렸다» 와 구별되지 않는다
     pub failed: usize,
 }
 
-/// 프로파일 본문 검색에서 열어 볼 후보의 상한. 건당 요청 하나라 수가 곧 시간이다
-/// (가까운 콜렉터 약 2.5ms/건, 왕복 40ms 면 약 8.5ms/건 — `SEARCH_WORKERS` 주석)
-pub const PROFILE_CANDIDATES: usize = 2_000;
+/// 프로파일 본문 검색에서 **콜렉터에 새로 물어** 열어 볼 수의 상한. 건당 요청 하나라 수가 곧 시간이다
+/// (가까운 콜렉터 약 2.5ms/건, 왕복 40ms 면 약 8.5ms/건 — `SEARCH_WORKERS` 주석).
+/// 로컬 캐시에 있는 프로파일은 이 수에 안 든다 — 묻지 않고 바로 연다
+pub const PROFILE_FETCH_MAX: usize = 2_000;
+
+/// 프로파일 본문 검색의 후보로 남겨 둘 XLog 수 (캐시에 있는 것 + 새로 물을 것)
+pub const PROFILE_CANDIDATES: usize = 20_000;
 
 /// 프로파일에서 걸린 자리 — 표에 실을 한 줄
 pub struct ProfileHitView {
@@ -635,7 +639,7 @@ pub fn search_result_json(
         }
         if p.candidates as usize > p.searched {
             note.push_str(&format!(
-                "프로파일 검색: XLog 조건에 걸린 {}건 중 {}건({} 순)만 열어 봤습니다. 조건을 좁히면 빠짐없이 찾습니다. ",
+                "프로파일 검색: XLog 조건에 걸린 {}건 중 {}건만 열어 봤습니다(로컬 캐시에 있는 것 전부 + 없는 것은 {} 순 {PROFILE_FETCH_MAX}건). 조건을 좁히면 빠짐없이 찾습니다. ",
                 p.candidates,
                 p.searched,
                 res.sort.name()

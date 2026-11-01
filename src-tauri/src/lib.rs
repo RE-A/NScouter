@@ -69,8 +69,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // 로그 플러그인이 붙으면서 문턱을 Trace 로 올려놓는다(`attach_logger`).
         // **그 뒤에** 제자리로 내린다 — 플러그인 setup 이 앱 setup 보다 먼저 돈다.
-        .setup(move |_app| {
+        .setup(move |app| {
             log::set_max_level(initial_level);
+            // 문제 트랜잭션의 프로파일을 뒤에서 미리 받아 둔다 (`cache::prefetch`)
+            tauri::Manager::manage(app, cache::prefetch::start(app.handle().clone()));
             Ok(())
         })
         // 메인 창을 닫으면 앱을 끝낸다 — 떼어 낸 XLog 창(`detached-*`)만 남으면
