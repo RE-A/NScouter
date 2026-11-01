@@ -100,10 +100,64 @@ pub fn fetch_texts(
     }
 
     // 최대 100개씩 분할 요청
-    let r = hashes.chunks(100).try_for_each(|chunk| fetch_chunk(conn, cache, type_key, chunk));
+    let chunks: Vec<&[i32]> = hashes.chunks(100).collect();
+    let r = if chunks.len() <= 1 {
+        chunks.iter().try_for_each(|chunk| fetch_chunk(conn, cache, type_key, chunk))
+    } else {
+        fetch_chunks_parallel(conn, cache, type_key, &chunks)
+    };
     // 받은 만큼은 실패해도 남긴다
     cache.flush();
     r
+}
+
+/// 묶음이 여럿이면 소켓을 몇 개 더 열어 **동시에** 묻는다.
+///
+/// 요청 하나가 소켓 하나라(F-1) 왕복이 크면 묶음 수 × 왕복 둘이 그대로 쌓인다 — 왕복 500ms 에서
+/// SQL 3,000개(30묶음)를 순서대로 물으면 30초다. 프로파일 검색을 처음 돌릴 때 이만큼을 푼다.
+const TEXT_WORKERS: usize = 8;
+
+fn fetch_chunks_parallel(
+    conn: &mut ScouterConnection,
+    cache: &mut TextCache,
+    type_key: &str,
+    chunks: &[&[i32]],
+) -> io::Result<()> {
+    let workers = TEXT_WORKERS.min(chunks.len());
+    let siblings: Vec<io::Result<ScouterConnection>> = (1..workers).map(|_| conn.sibling()).collect();
+    let results: Vec<io::Result<TextCache>> = std::thread::scope(|sc| {
+        let mine: Vec<&[i32]> = chunks.iter().step_by(workers).copied().collect();
+        let mut handles = Vec::new();
+        for (w, sib) in siblings.into_iter().enumerate() {
+            let part: Vec<&[i32]> = chunks.iter().skip(w + 1).step_by(workers).copied().collect();
+            handles.push(sc.spawn(move || -> io::Result<TextCache> {
+                let mut c = sib?;
+                let mut local = TextCache::new();
+                part.iter().try_for_each(|chunk| fetch_chunk(&mut c, &mut local, type_key, chunk))?;
+                Ok(local)
+            }));
+        }
+        let mut local = TextCache::new();
+        let first = mine.iter().try_for_each(|chunk| fetch_chunk(conn, &mut local, type_key, chunk)).map(|_| local);
+        std::iter::once(first)
+            .chain(handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err(io::Error::other("사전 조회 스레드 실패")))))
+            .collect()
+    });
+    let mut err = None;
+    for r in results {
+        match r {
+            // 받은 만큼은 담는다 — 한 일꾼이 실패해도 나머지 몫은 쓸 수 있다
+            Ok(local) => {
+                for ((k, h), t) in local.inner {
+                    cache.insert(k, h, t);
+                }
+            }
+            Err(e) => {
+                err.get_or_insert(e);
+            }
+        }
+    }
+    err.map_or(Ok(()), Err)
 }
 
 fn fetch_chunk(

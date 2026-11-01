@@ -639,7 +639,7 @@ pub fn search_result_json(
         }
         if p.candidates as usize > p.searched {
             note.push_str(&format!(
-                "프로파일 검색: XLog 조건에 걸린 {}건 중 {}건만 열어 봤습니다(로컬 캐시에 있는 것 전부 + 없는 것은 {} 순 {PROFILE_FETCH_MAX}건). 조건을 좁히면 빠짐없이 찾습니다. ",
+                "프로파일 검색: XLog 조건에 걸린 {}건 중 {}건만 열어 봤습니다(로컬 캐시에 있는 것 전부 + 없는 것은 {} 순으로 {PROFILE_FETCH_MAX}건·15초까지). 조건을 좁히면 빠짐없이 찾습니다. ",
                 p.candidates,
                 p.searched,
                 res.sort.name()

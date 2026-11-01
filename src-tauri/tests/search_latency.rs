@@ -88,6 +88,15 @@ fn pipe(mut from: TcpStream, mut to: TcpStream, one_way: Duration) {
     let _ = writer.join();
 }
 
+/// 잴 한쪽 지연(ms) 목록. `PROBE_ONE_WAY_MS=250` 처럼 바꿔 잰다 (왕복은 두 배)
+fn one_ways(default: &[u64]) -> Vec<u64> {
+    std::env::var("PROBE_ONE_WAY_MS")
+        .ok()
+        .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .filter(|v: &Vec<u64>| !v.is_empty())
+        .unwrap_or_else(|| default.to_vec())
+}
+
 fn yyyymmdd_local(ms: i64) -> String {
     use chrono::{Local, TimeZone};
     Local.timestamp_millis_opt(ms).unwrap().format("%Y%m%d").to_string()
@@ -148,7 +157,7 @@ fn probe_search_workers_under_latency() {
     let _ = fetch_profiles_parallel(HOST, PORT, session, &targets, 8, None);
 
     let n = targets.len();
-    for one_way_ms in [0u64, 5, 20, 50] {
+    for one_way_ms in one_ways(&[0, 5, 20, 50]) {
         let port = start_delay_proxy(Duration::from_millis(one_way_ms));
         println!("── 왕복 {}ms (한쪽 {}ms) ──", one_way_ms * 2, one_way_ms);
         for workers in [1usize, 8, 16, 32, 64] {
@@ -192,6 +201,9 @@ fn fetch_range(port: u16, session: i64, hashes: &[i32], date: &str, s: i64, e: i
                 _ => {}
             }
         }
+        if std::env::var("PROBE_VERBOSE").is_ok() {
+            println!("    페이지: {rows}건 hasMore={} last={} (이전 {})", next.has_more, next.last_xlog_time, cursor.last_xlog_time);
+        }
         if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
             return seen.len();
         }
@@ -227,30 +239,32 @@ fn probe_scan_parallel_under_latency() {
     let span = 9 * 60_000;
     let (s, e) = (now - span, now);
     let date = yyyymmdd_local(s);
-    let slices: Vec<(i64, i64)> = (0..3).map(|i| (s + i * span / 3, s + (i + 1) * span / 3)).collect();
-
-    for one_way_ms in [0u64, 10, 20] {
+    for one_way_ms in one_ways(&[0, 10, 20]) {
         let port = start_delay_proxy(Duration::from_millis(one_way_ms));
-        // 페이지를 작게 잡아 «페이지 수 × 왕복» 이 드러나게 한다 (운영 50만 건/시간이면 5,000 건 페이지가 이만큼 나온다)
-        for page in [500i32, 5000] {
+        // 페이지가 클수록 왕복(연결 맺기 + 요청) 수가 준다. 조각이 많을수록 동시에 받는다
+        let pages: Vec<i32> = std::env::var("PROBE_PAGES")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+            .filter(|v: &Vec<i32>| !v.is_empty())
+            .unwrap_or_else(|| vec![500, 5000, 20000]);
+        for page in pages {
             let t = Instant::now();
             let n1 = fetch_range(port, session, &hashes, &date, s, e, page);
             let seq = t.elapsed();
-            let t = Instant::now();
-            let n4: usize = thread::scope(|sc| {
-                let hs = &hashes;
-                let d = &date;
-                let h: Vec<_> = slices.iter().map(|&(a, b)| sc.spawn(move || fetch_range(port, session, hs, d, a, b, page))).collect();
-                h.into_iter().map(|j| j.join().unwrap()).sum()
-            });
-            let par = t.elapsed();
-            println!(
-                "왕복 {:>2}ms · 페이지 {page:>4}: 순차 {:>6.2}s ({n1}건) · 조각 3개 동시 {:>6.2}s ({n4}건) → {:.1}배",
-                one_way_ms * 2,
-                seq.as_secs_f64(),
-                par.as_secs_f64(),
-                seq.as_secs_f64() / par.as_secs_f64().max(0.001)
-            );
+            let mut line = format!("왕복 {:>3}ms · 페이지 {page:>5}: 순차 {:>6.2}s ({n1}건)", one_way_ms * 2, seq.as_secs_f64());
+            for k in [4i64, 8] {
+                let slices: Vec<(i64, i64)> = (0..k).map(|i| (s + i * span / k, s + (i + 1) * span / k)).collect();
+                let t = Instant::now();
+                let n: usize = thread::scope(|sc| {
+                    let hs = &hashes;
+                    let d = &date;
+                    let h: Vec<_> = slices.iter().map(|&(a, b)| sc.spawn(move || fetch_range(port, session, hs, d, a, b, page))).collect();
+                    h.into_iter().map(|j| j.join().unwrap()).sum()
+                });
+                let par = t.elapsed();
+                line += &format!(" · 조각 {k}개 {:>6.2}s ({n}건, {:.1}배)", par.as_secs_f64(), seq.as_secs_f64() / par.as_secs_f64().max(0.001));
+            }
+            println!("{line}");
         }
     }
 }

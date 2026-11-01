@@ -69,6 +69,14 @@ fn resolve_addr(host: &str, port: u16) -> io::Result<SocketAddr> {
 }
 
 impl ScouterConnection {
+    /// 같은 콜렉터·같은 세션으로 소켓을 하나 더 연다 — 여러 요청을 **동시에** 보낼 때.
+    /// 로그인은 다시 안 한다 — 세션은 소켓과 무관하게 쓸 수 있다 (F-1)
+    pub fn sibling(&self) -> io::Result<Self> {
+        let mut c = Self::connect(&self.host, self.port)?;
+        c.session = self.session;
+        Ok(c)
+    }
+
     /// Collector에 TCP 연결 후 매직 넘버 전송
     pub fn connect(host: &str, port: u16) -> io::Result<Self> {
         let (reader, writer) = Self::open_socket(host, port)?;

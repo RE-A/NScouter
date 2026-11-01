@@ -784,12 +784,18 @@ pub async fn load_past_xlog(
 ) -> Result<PastXLogPage, String> {
     let cache = state.cache_handle().await;
     let seal = state.seal_before().await;
-    let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
+    // **조회용 연결을 빌려 쓴다.** 화면이 구간을 조각으로 나눠 **동시에** 묻는다(`pastXLog.ts`) —
+    // 공용 연결 하나를 잠그면 조각이 줄을 서고, 그동안 상세·사전 조회까지 멈춘다
+    if state.connection.lock().await.is_none() {
+        return Err("연결되지 않음".to_string());
+    }
+    let mut conn = state.acquire_query_conn().await?;
 
     let cur = cursor.unwrap_or_default();
-    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
-    let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, stime, etime, page_count, &cur, seal)?;
+    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
+    // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
+    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, stime, etime, page_count, &cur, seal)?;
+    state.release_query_conn(conn).await;
     let (xlogs, next) = (page.rows, page.next);
 
     log::debug!(
@@ -806,9 +812,10 @@ pub async fn load_past_xlog(
 ///
 /// 화면이 쓰는 500(`pastXLog.PAGE_COUNT`)보다 크게 잡는다. 저쪽은 페이지마다 점을
 /// 그려 줘야 해서 첫 응답이 빠른 편이 낫지만, 여기서는 **다 세기 전에는 보여줄 것이
-/// 없다** — 왕복 수를 줄이는 편이 낫다. 연결당 명령이 하나라(F-1) 왕복 하나가 곧
-/// TCP 연결 하나다.
-const DISTRIBUTION_PAGE_COUNT: i32 = 5_000;
+/// 없다** — 왕복 수를 줄이는 편이 낫다. 연결당 명령이 하나라(F-1) 요청 하나가 곧
+/// TCP 연결 하나(왕복 둘 이상)다. 왕복 500ms 실측(`probe_scan_parallel_under_latency`, 9분 1.2만 건):
+/// 페이지 500 이 18.3초, 5,000 이 1.6초, **20,000 이 0.9초** — 그래서 20,000 이다.
+const DISTRIBUTION_PAGE_COUNT: i32 = 20_000;
 
 /// 분포를 세는 데 쓰는 트랜잭션 수의 상한.
 ///
@@ -898,7 +905,7 @@ pub struct WidePage {
 
 /// 넓은 구간 찾기 한 페이지에서 받는 건수. MCP 목록 조회·분포와 같은 이유로 크게 잡는다 —
 /// 거르기 전 건수라 화면으로 가는 양은 조건에 걸린 것뿐이다
-const WIDE_PAGE_COUNT: i32 = 5_000;
+const WIDE_PAGE_COUNT: i32 = 20_000;
 
 /// 넓은 구간에서 조건으로 XLog 찾기 — **한 조각의 한 페이지.**
 ///
@@ -1491,15 +1498,16 @@ pub async fn search_profiles(
 /// 검색이 동시에 여는 커넥션 수.
 ///
 /// 요청마다 소켓을 새로 여는 구조(F-1)라 **동시에 보내면 그만큼 빨라진다.**
-/// 실측(`probe_search_throughput`): 순차 4.0ms/건, 워커 8에서 1.0ms/건(3.9배),
-/// 워커 16에서 0.8ms/건(5.3배). 16이 조금 더 빠르지만 그만큼 콜렉터의
-/// 동시 연결을 쓴다 — 운영 서버를 생각해 8로 둔다.
+/// 실측(`probe_search_workers_under_latency`, 프로파일 200건):
 ///
-/// **이 값은 콜렉터가 가까울 때의 값이다.** 왕복을 늘려 가며 다시 재 보니
-/// (`tests/search_latency.rs`) 한 건에 왕복이 두 번 드는 구조라 먼 콜렉터에서는
-/// 워커 수가 그대로 배수가 된다 — 왕복 40ms 에서 워커 8 은 8.5ms/건, 32 는 2.5ms/건.
-/// 운영 콜렉터의 왕복과 동시 연결 상한을 알면 이 값을 올릴 근거가 된다(백로그 B-3).
-pub const SEARCH_WORKERS: usize = 8;
+/// | 왕복 | 워커 8 | 16 | 32 | 64 |
+/// |---|---|---|---|---|
+/// | 0.2ms (로컬) | 1.0ms/건 | 0.8 | — | — |
+/// | 40ms | 8.5ms/건 | — | 2.5 | — |
+/// | **500ms** | 94ms/건 (18.8초) | 49 (9.8초) | **26 (5.3초)** | 20 (4.0초) |
+///
+/// 운영 콜렉터를 왕복 500ms 로 보고 32 로 둔다. 64 는 조금 더 빠르지만 연결이 두 배다.
+pub const SEARCH_WORKERS: usize = 32;
 
 /// 프로파일을 워커 여러 개로 나눠 받는다. **결과는 `targets` 순서 그대로**다.
 ///

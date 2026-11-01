@@ -8,7 +8,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadPastXLogs, MAX_PAGES, PAGE_COUNT } from './pastXLog';
+import { loadPastXLogs, MAX_PAGES, MIN_SLICE_MS, PAGE_COUNT, PAST_PARALLEL, planSlices } from './pastXLog';
 import type { XLogPack } from '../types/xlog';
 
 /** txid 만 다른 최소 XLogPack */
@@ -37,7 +37,11 @@ async function run(signal?: AbortSignal) {
   return { rows, progress, last: progress[progress.length - 1] };
 }
 
-beforeEach(() => vi.mocked(invoke).mockReset());
+// **중괄호로 감싼다.** `() => mock.mockReset()` 는 mock 자신을 돌려주고, Vitest 는 돌려받은 함수를
+// 정리 훅으로 여겨 테스트가 끝날 때 인자 없이 한 번 부른다 — 인자를 읽는 가짜 구현이 거기서 깨진다
+beforeEach(() => {
+  vi.mocked(invoke).mockReset();
+});
 
 describe('loadPastXLogs', () => {
   it('한 페이지로 끝나면 한 번만 부른다', async () => {
@@ -108,5 +112,56 @@ describe('loadPastXLogs', () => {
     const first = vi.mocked(invoke).mock.calls[0][1] as { cursor: unknown; pageCount: number };
     expect(first.cursor).toBeNull();
     expect(first.pageCount).toBe(PAGE_COUNT);
+  });
+});
+
+describe('loadPastXLogs — 조각으로 나눠 동시에', () => {
+  it('구간을 조각으로 고르게 나누고 빈틈·겹침 없이 잇는다', () => {
+    const sl = planSlices(0, 60 * MIN_SLICE_MS);
+    expect(sl.length).toBe(PAST_PARALLEL);
+    expect(sl[0][0]).toBe(0);
+    expect(sl[sl.length - 1][1]).toBe(60 * MIN_SLICE_MS);
+    for (let i = 1; i < sl.length; i++) expect(sl[i][0]).toBe(sl[i - 1][1]);
+    // 짧은 구간은 한 번에
+    expect(planSlices(0, 30_000)).toEqual([[0, 30_000]]);
+  });
+
+  it('조각마다 따로 묻고, 한꺼번에 날아간다', async () => {
+    let inflight = 0;
+    let peak = 0;
+    vi.mocked(invoke).mockImplementation(async (_cmd, args) => {
+      inflight++;
+      peak = Math.max(peak, inflight);
+      await new Promise(r => setTimeout(r, 1));
+      inflight--;
+      const a = args as { stime: number };
+      return page(['t' + a.stime], false, a.stime);
+    });
+    const rows: string[] = [];
+    let last = { done: false, truncated: false };
+    await loadPastXLogs({ ...QUERY, stime: 0, etime: 10 * MIN_SLICE_MS }, (r, p) => {
+      rows.push(...r.map(x => x.txid));
+      last = p;
+    });
+    expect(invoke).toHaveBeenCalledTimes(PAST_PARALLEL);
+    expect(peak).toBe(PAST_PARALLEL);
+    expect(rows.length).toBe(PAST_PARALLEL);
+    expect(last.done).toBe(true);
+  });
+
+  it('조각 경계에서 두 번 온 트랜잭션은 한 번만 담는다', async () => {
+    vi.mocked(invoke).mockImplementation(async () => page(['same', 'x'], false, 1));
+    const rows: string[] = [];
+    await loadPastXLogs({ ...QUERY, stime: 0, etime: 4 * MIN_SLICE_MS }, r => rows.push(...r.map(x => x.txid)));
+    expect(rows.sort()).toEqual(['same', 'x']);
+  });
+
+  it('상한은 조각을 합쳐 센다', async () => {
+    let t = 0;
+    vi.mocked(invoke).mockImplementation(async () => page(['y' + t], true, ++t));
+    let last = { truncated: false };
+    await loadPastXLogs({ ...QUERY, stime: 0, etime: 60 * MIN_SLICE_MS }, (_r, p) => { last = p; });
+    expect(last.truncated).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(MAX_PAGES);
   });
 });

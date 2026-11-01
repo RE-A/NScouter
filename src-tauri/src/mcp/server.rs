@@ -37,12 +37,19 @@ use crate::scouter::protocol::*;
 use crate::scouter::value::ScouterValue;
 use crate::state::AppState;
 
-/// 한 번에 받는 페이지 크기. 분포 조회(`DISTRIBUTION_PAGE_COUNT`)와 같은 이유로 크게 잡는다
-const PAGE_COUNT: i32 = 5_000;
+/// 한 번에 받는 페이지 크기. 분포 조회(`DISTRIBUTION_PAGE_COUNT`)와 같은 이유로 크게 잡는다 (왕복 500ms 실측 근거도 거기)
+const PAGE_COUNT: i32 = 20_000;
 /// 한 번의 목록 조회에서 훑을 트랜잭션 수의 상한. 넘으면 `truncated` 로 말한다
 const MAX_SCAN_ROWS: u64 = 200_000;
 /// 커서가 안 밀릴 때를 대비한 빗장
 const MAX_PAGES: u32 = 200;
+/// 프로파일 본문 검색에 쓸 시간. 넘으면 그때까지 연 것만으로 답한다 — 다 못 본 건수는 note 로 알린다.
+/// 목록 훑기·사전 풀기를 더해 한 번의 호출이 20초 안팎이 되게 15초로 둔다(왕복 500ms 실측)
+const PROFILE_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
+/// 그 시간을 재는 묶음 크기. 묶음 사이에서만 시간을 보므로 크면 그만큼 넘친다 —
+/// 256 이면 왕복 500ms 에서 한 묶음이 7초라 27초까지 갔다(실측). 워커(`SEARCH_WORKERS`)의 두 배
+const PROFILE_CHUNK: usize = 64;
+
 /// list_servers 가 돌려줄 최대 수
 const MAX_SERVERS: usize = 500;
 
@@ -238,11 +245,28 @@ impl NScouterMcp {
         let tz = self.app.state::<McpState>().tz_offset_ms();
         let bind_values = self.app.state::<AppState>().config.lock().await.mcp.bind_values;
 
+        // **한 건씩 차례로 묻지 않는다.** 한 건에 요청이 서넛(XLog·프로파일·사전)이고 요청마다 소켓을 새로 연다(F-1) —
+        // 왕복 500ms 면 5건을 차례로 열 때 10초가 넘는다. 건마다 소켓을 따로 열어 동시에 연다
         with_conn(&self.app, move |conn, state| {
-            let mut out = Vec::new();
-            for (reference, txid, date) in parsed {
-                out.push(detail_one(conn, state, &reference, txid, &date, tz, bind_values)?);
-            }
+            let results: Vec<Result<serde_json::Value, String>> = std::thread::scope(|sc| {
+                let mut handles = Vec::new();
+                for (reference, txid, date) in parsed.iter().skip(1) {
+                    let sib = conn.sibling();
+                    handles.push(sc.spawn(move || -> Result<serde_json::Value, String> {
+                        let mut c = sib.map_err(|e| format!("연결 실패: {e}"))?;
+                        detail_one(&mut c, state, reference, *txid, date, tz, bind_values)
+                    }));
+                }
+                let first = match parsed.first() {
+                    Some((reference, txid, date)) => vec![detail_one(conn, state, reference, *txid, date, tz, bind_values)],
+                    None => Vec::new(),
+                };
+                first
+                    .into_iter()
+                    .chain(handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("상세 조회 스레드 실패".into()))))
+                    .collect()
+            });
+            let out = results.into_iter().collect::<Result<Vec<_>, _>>()?;
             Ok(serde_json::Value::Array(out).to_string())
         })
         .await
@@ -474,8 +498,11 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
                 fetch <= digest::PROFILE_FETCH_MAX
             })
             .collect();
-        let searched = rows.len();
-        let (found, failed) = search_profiles(conn, state, &rows, needle, tz)?;
+        // 캐시에 있는 것을 앞으로 — 시간 상한에 걸려도 그건 다 본다 (같은 무리 안의 순서는 그대로)
+        let mut rows = rows;
+        rows.sort_by_key(|x| !cached.contains(&x.txid));
+        let (found, failed, searched) = search_profiles(conn, state, &rows, needle, tz)?;
+        rows.truncate(searched);
         // 걸린 것만으로 다시 센다 — 요약(건수·서비스별)이 «프로파일에 걸린 것» 의 것이어야 한다
         let mut again = Collector::new(q.sort, q.limit);
         for x in rows {
@@ -618,7 +645,7 @@ fn search_profiles(
     rows: &[XLogPack],
     needle: &str,
     tz: i64,
-) -> Result<(HashMap<i64, ProfileHitView>, usize), String> {
+) -> Result<(HashMap<i64, ProfileHitView>, usize, usize), String> {
     use crate::commands::{fetch_profiles_parallel, SearchTarget, SEARCH_WORKERS};
     use crate::scouter::profile_search::{collect_hashes, search_steps, StepTexts};
 
@@ -629,7 +656,17 @@ fn search_profiles(
     let host = state.conn_host.blocking_lock().clone();
     let port = *state.conn_port.blocking_lock();
     let cache = state.cache_handle_blocking();
-    let fetched = fetch_profiles_parallel(&host, port, conn.session, &targets, SEARCH_WORKERS, cache.as_deref());
+    // 묶음으로 나눠 받고, **시간 상한**(`PROFILE_BUDGET`)을 넘으면 거기서 멈춘다. 건수 상한만으로는
+    // 콜렉터가 멀 때 AI 쪽 호출이 몇 분씩 걸린다(왕복 500ms 면 2,000건에 50초 남짓)
+    let started = std::time::Instant::now();
+    let mut fetched: Vec<Option<Vec<ProfileStep>>> = Vec::with_capacity(targets.len());
+    for chunk in targets.chunks(PROFILE_CHUNK) {
+        if !fetched.is_empty() && started.elapsed() >= PROFILE_BUDGET {
+            break;
+        }
+        fetched.extend(fetch_profiles_parallel(&host, port, conn.session, chunk, SEARCH_WORKERS, cache.as_deref()));
+    }
+    let searched = fetched.len();
     let failed = fetched.iter().filter(|f| f.is_none()).count();
 
     let mut wants: Vec<(&'static str, i32)> = Vec::new();
@@ -659,8 +696,8 @@ fn search_profiles(
             out.insert(x.txid, ProfileHitView { count: found.len(), kind: first.kind.clone(), snippet: first.snippet.clone() });
         }
     }
-    log::debug!("mcp 프로파일 검색: {}건 중 {}건 적중, {failed}건 실패", rows.len(), out.len());
-    Ok((out, failed))
+    log::debug!("mcp 프로파일 검색: {}건 중 {searched}건을 열어 {}건 적중, {failed}건 실패", rows.len(), out.len());
+    Ok((out, failed, searched))
 }
 
 // ─── 상세 ────────────────────────────────────────────────────

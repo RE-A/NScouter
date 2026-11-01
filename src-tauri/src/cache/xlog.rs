@@ -248,9 +248,10 @@ pub fn past_page(
     let done = !next.has_more || rows.is_empty() || next.last_xlog_time <= cursor.last_xlog_time;
     if let Some(db) = cache {
         db.put_xlogs(&rows);
-        // 끝까지 받았을 때만 «다 받았다» 고 적는다. 빗장(커서가 안 밀림)으로 끝난 것은 아니다.
+        // **콜렉터가 «더 없다» 고 했을 때만** «다 받았다» 고 적는다. «더 있다» 면서 빈 페이지를 주거나
+        // 커서가 안 밀려 멈춘 것은 아니다 — 그걸 덮었다고 적으면 빠진 것이 캐시에 영영 구멍으로 남는다.
         // 앞부분을 캐시에서 받았어도 맞다 — 캐시가 덮은 끝(넘겨준 커서)부터 콜렉터가 이어 받았다
-        if done && (!next.has_more || rows.is_empty()) {
+        if !next.has_more {
             let to = etime.min(seal_before);
             if to >= stime {
                 db.mark_xlog(hashes, stime, to);
