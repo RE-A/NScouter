@@ -995,8 +995,8 @@ export const EN: Record<string, string> = {
   '시작 못 함': 'Failed to start',
   '1024~65535': '1024–65535',
   'SQL 바인딩 값도 넘기기': 'Also send SQL bind values',
-  '끄면 SQL 문장만 넘깁니다. 켜면 실제 값(개인정보일 수 있음)이 AI 쪽으로 나갑니다.':
-    'Off: only SQL statements are sent. On: actual values (possibly personal data) go to the AI.',
+  '상세 조회에 실제 값을 실을지입니다. 프로파일 본문 검색은 이 설정과 상관없이 값까지 찾습니다.':
+    'Whether details include actual values. Profile text search finds values regardless of this setting.',
   '토큰': 'Token',
   '새로 만들기': 'Regenerate',
   '새 토큰을 만듭니다. 예전 토큰으로 등록한 클라이언트는 다시 등록해야 합니다':

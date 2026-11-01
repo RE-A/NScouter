@@ -122,7 +122,7 @@ export function McpSection() {
         <span className="text-fg-muted">
           {t('SQL 바인딩 값도 넘기기')}
           <span className="block text-fg-faint">
-            {t('끄면 SQL 문장만 넘깁니다. 켜면 실제 값(개인정보일 수 있음)이 AI 쪽으로 나갑니다.')}
+            {t('상세 조회에 실제 값을 실을지입니다. 프로파일 본문 검색은 이 설정과 상관없이 값까지 찾습니다.')}
           </span>
         </span>
       </label>

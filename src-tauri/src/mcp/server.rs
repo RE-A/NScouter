@@ -17,8 +17,8 @@ use serde_json::json;
 use tauri::{AppHandle, Manager};
 
 use super::digest::{
-    self, detail_hashes, detail_json, parse_ref, resolve_window, search_result_json, Collector,
-    RowFilter, ScanFacts, SortBy, Texts, Window,
+    self, contains_rule, detail_hashes, detail_json, parse_ref, resolve_window, search_result_json, Collector,
+    GroupRule, Patterns, ProfileFacts, ProfileHitView, RowFilter, ScanFacts, ServerFilter, SortBy, Texts, Window,
 };
 use super::McpState;
 use crate::scouter::connection::{local_now_ms, ScouterConnection};
@@ -57,6 +57,22 @@ impl NScouterMcp {
 
 // ─── 인자 ────────────────────────────────────────────────────
 
+/// 글자 하나 또는 여러 개. 여러 개면 **포함은 OR**(하나라도 맞으면), 제외는 하나라도 맞으면 뺀다
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum OneOrMany {
+    One(String),
+    Many(Vec<String>),
+}
+
+fn many(v: Option<OneOrMany>) -> Vec<String> {
+    match v {
+        None => Vec::new(),
+        Some(OneOrMany::One(s)) => vec![s],
+        Some(OneOrMany::Many(v)) => v,
+    }
+}
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SearchArgs {
     /// 지금부터 몇 분 전까지 볼지. 기본 30, 최대 360. from/to 를 주면 구간 길이로 쓴다
@@ -65,16 +81,41 @@ pub struct SearchArgs {
     pub from: Option<String>,
     /// 구간 끝. 이 PC 시간대의 `YYYY-MM-DD HH:MM[:SS]`
     pub to: Option<String>,
-    /// 서버(오브젝트) 이름이나 종류에 들어 있는 글자. 대소문자 무시. 비우면 전체 서버
-    pub server: Option<String>,
-    /// 서비스(URL·메서드) 이름에 들어 있는 글자. 대소문자 무시
-    pub service: Option<String>,
-    /// 호출한 IP 에 들어 있는 글자
-    pub ip: Option<String>,
+    /// 훑을 서버(오브젝트) — 이름이나 종류에 들어 있는 글자. 여러 개면 OR. service_group 과도 OR. 비우면 전체 서버
+    pub server: Option<OneOrMany>,
+    /// 뺄 서버 — 이름이나 종류에 들어 있는 글자
+    pub server_exclude: Option<OneOrMany>,
+    /// 논리 서비스(앱 설정의 «서비스로 묶기» 규칙, list_servers 의 service_group 열) 이름. 완전 일치·대소문자 무시
+    pub service_group: Option<OneOrMany>,
+    /// 서비스(URL·메서드) 이름에 들어 있는 글자. 여러 개면 OR. 대소문자 무시
+    pub service: Option<OneOrMany>,
+    /// 뺄 서비스 이름 글자 (예: /health)
+    pub service_exclude: Option<OneOrMany>,
+    /// 호출한 IP 에 들어 있는 글자. 여러 개면 OR
+    pub ip: Option<OneOrMany>,
+    /// 뺄 IP 글자
+    pub ip_exclude: Option<OneOrMany>,
     /// 에러난 트랜잭션만
     pub error_only: Option<bool>,
     /// 이 응답시간(ms) 이상만
     pub min_elapsed_ms: Option<i32>,
+    /// 이 응답시간(ms) 미만만
+    pub max_elapsed_ms: Option<i32>,
+    /// 로그인 이름에 들어 있는 글자
+    pub login: Option<String>,
+    /// 설명(desc)에 들어 있는 글자
+    pub desc: Option<String>,
+    /// 앱 자유 필드 text1 에 들어 있는 글자 (text2~5 도 같다)
+    pub text1: Option<String>,
+    pub text2: Option<String>,
+    pub text3: Option<String>,
+    pub text4: Option<String>,
+    pub text5: Option<String>,
+    /// 앱에서 이름 붙여 담아 둔 조회 조건의 이름. 위 조건들과 함께 걸린다
+    pub saved_filter: Option<String>,
+    /// 프로파일 본문(SQL 문장·바인딩 값·API 주소·메서드·에러·로그 메시지)에 이 글자가 든 것만.
+    /// 트랜잭션마다 프로파일을 열어 보므로 느리다 — 위 조건에 걸린 것 중 sort 순으로 최대 2,000건만 열어 본다
+    pub profile_contains: Option<String>,
     /// `slowest`(기본, 느린 것부터) 또는 `latest`(최근 것부터)
     pub sort: Option<String>,
     /// 돌려줄 최대 건수. 기본 50, 최대 500
@@ -97,43 +138,76 @@ impl NScouterMcp {
     )]
     async fn list_servers(&self) -> Result<String, String> {
         let objects = with_conn(&self.app, |conn, _| realtime_objects(conn)).await?;
-        let mut rows: Vec<_> = objects.into_iter().map(|o| (o.obj_name, o.obj_type, o.alive)).collect();
+        let rule = group_rule(&self.app.state::<AppState>()).await;
+        let mut rows: Vec<_> = objects
+            .into_iter()
+            .map(|o| {
+                let group = rule.service_of(&o.obj_name, &o.tags);
+                (o.obj_name, o.obj_type, o.alive, group)
+            })
+            .collect();
         rows.sort();
         let total = rows.len();
         rows.truncate(MAX_SERVERS);
         let out = json!({
             "total": total,
             "returned": rows.len(),
-            "columns": ["name", "type", "alive"],
-            "rows": rows.iter().map(|(n, t, a)| json!([n, t, a])).collect::<Vec<_>>(),
+            "columns": ["name", "type", "alive", "service_group"],
+            "rows": rows.iter().map(|(n, t, a, g)| json!([n, t, a, g])).collect::<Vec<_>>(),
         });
         Ok(out.to_string())
     }
 
     #[tool(
         name = "search_transactions",
-        description = "구간 안의 트랜잭션(XLog)을 훑어 조건에 맞는 것을 짧은 행으로 돌려준다 — 프로파일은 싣지 않는다. 기본은 최근 30분·느린 순 50건, 최대 6시간·500건. 행마다 `ref` 가 있으니 자세히 볼 것만 골라 get_transaction_details 에 넘긴다. top_services 는 걸린 것을 서비스별로 센 요약이다."
+        description = "구간 안의 트랜잭션(XLog)을 훑어 조건에 맞는 것을 짧은 행으로 돌려준다 — 프로파일은 싣지 않는다. 기본은 최근 30분·느린 순 50건, 최대 6시간·500건. 조건은 앱 XLog 화면과 같다: 서버·서비스 묶음, 서비스/IP 포함·제외(여러 개면 포함은 OR), 에러만, 응답시간 이상/미만, 로그인·설명·text1~5, 담아 둔 조건(saved_filter). profile_contains 를 주면 프로파일 본문(SQL·바인딩 값·API·에러·메시지)까지 찾고 걸린 자리를 profile_hit 열에 싣는다(느리다 — 다른 조건으로 먼저 좁힐 것). 행마다 `ref` 가 있으니 자세히 볼 것만 골라 get_transaction_details 에 넘긴다. top_services 는 걸린 것을 서비스별로 센 요약이다."
     )]
     async fn search_transactions(&self, Parameters(a): Parameters<SearchArgs>) -> Result<String, String> {
+        let state = self.app.state::<AppState>();
         let tz = self.app.state::<McpState>().tz_offset_ms();
-        let offset = self.app.state::<AppState>().clock_offset_ms.lock().await.unwrap_or(0);
+        let offset = state.clock_offset_ms.lock().await.unwrap_or(0);
         let window = resolve_window(local_now_ms() + offset, tz, a.minutes, a.from.as_deref(), a.to.as_deref())?;
         let sort = SortBy::parse(a.sort.as_deref())?;
         let limit = (a.limit.unwrap_or(digest::DEFAULT_LIMIT as u32) as usize).clamp(1, digest::MAX_LIMIT);
-        let lower = |s: Option<String>| s.map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty());
-        let filter = RowFilter {
-            service: lower(a.service),
-            ip: a.ip.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
+
+        let mut filter = RowFilter {
             error_only: a.error_only.unwrap_or(false),
             min_elapsed_ms: a.min_elapsed_ms.unwrap_or(0).max(0),
+            max_elapsed_ms: a.max_elapsed_ms.unwrap_or(0).max(0),
+            service: Patterns::new(&many(a.service), &many(a.service_exclude)),
+            ip: Patterns::new(&many(a.ip), &many(a.ip_exclude)),
+            login: contains_rule(a.login.as_deref()),
+            desc: contains_rule(a.desc.as_deref()),
+            text: [a.text1, a.text2, a.text3, a.text4, a.text5].map(|t| contains_rule(t.as_deref())),
         };
-        let server = lower(a.server);
+        if let Some(name) = a.saved_filter.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            let cfg = state.config.lock().await;
+            let saved = cfg.saved_filters.iter().find(|f| f.name.trim().eq_ignore_ascii_case(name)).ok_or_else(|| {
+                let names: Vec<&str> = cfg.saved_filters.iter().map(|f| f.name.as_str()).collect();
+                format!("담아 둔 조건 «{name}» 이 없습니다. 있는 것: {names:?}")
+            })?;
+            filter.apply_saved(saved);
+        }
+        if filter.min_elapsed_ms > 0 && filter.max_elapsed_ms > 0 && filter.min_elapsed_ms >= filter.max_elapsed_ms {
+            return Err("min_elapsed_ms 가 max_elapsed_ms 보다 작아야 합니다 — 이대로면 한 건도 안 걸립니다".into());
+        }
+        let servers = ServerFilter {
+            names: Patterns::new(&many(a.server), &many(a.server_exclude)),
+            groups: many(a.service_group).into_iter().map(|g| g.trim().to_lowercase()).filter(|g| !g.is_empty()).collect(),
+        };
+        let rule = group_rule(&state).await;
+        let profile = contains_rule(a.profile_contains.as_deref());
 
-        with_conn(&self.app, move |conn, state| {
-            let out = scan(conn, state, window, tz, server.as_deref(), &filter, sort, limit)?;
-            Ok(out.to_string())
-        })
-        .await
+        // 프로파일 검색은 콜렉터에 연결을 여럿(`SEARCH_WORKERS`) 연다 — 한꺼번에 둘까지만 돈다.
+        // 셋째는 앞의 것이 끝날 때까지 기다린다
+        let mcp = self.app.state::<McpState>();
+        let _slot = match &profile {
+            Some(_) => Some(mcp.profile_slots.acquire().await.map_err(|e| format!("프로파일 검색 대기 실패: {e}"))?),
+            None => None,
+        };
+
+        let q = ScanQuery { window, tz, servers, rule, filter, profile, sort, limit };
+        with_conn(&self.app, move |conn, state| Ok(scan(conn, state, &q)?.to_string())).await
     }
 
     #[tool(
@@ -259,31 +333,46 @@ fn cache_texts(cache: &TextCache) -> impl Fn(&str, i32) -> Option<String> + '_ {
 
 // ─── 목록 훑기 ───────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
-fn scan(
-    conn: &mut ScouterConnection,
-    state: &AppState,
+/// 목록 조회 한 번의 조건
+pub struct ScanQuery {
     window: Window,
     tz: i64,
-    server: Option<&str>,
-    filter: &RowFilter,
+    servers: ServerFilter,
+    rule: GroupRule,
+    filter: RowFilter,
+    /// 프로파일 본문에서 찾을 글자 (소문자)
+    profile: Option<String>,
     sort: SortBy,
     limit: usize,
-) -> Result<serde_json::Value, String> {
-    // 오늘 살아 있는 서버는 그날 목록에 아직 없을 수 있다 — 지금 목록을 더한다
-    let alive: Vec<(i32, String, String)> =
-        realtime_objects(conn)?.into_iter().map(|o| (o.obj_hash, o.obj_name, o.obj_type)).collect();
-    let picks = |name: &str, kind: &str| match server {
-        None => true,
-        Some(s) => name.to_lowercase().contains(s) || kind.to_lowercase().contains(s),
-    };
+}
+
+/// 앱 설정의 «서비스로 묶기» 규칙
+async fn group_rule(state: &AppState) -> GroupRule {
+    let cfg = state.config.lock().await;
+    GroupRule::new(&cfg.group_rule.tag_key, &cfg.group_rule.pattern)
+}
+
+fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result<serde_json::Value, String> {
+    let (window, tz, filter) = (q.window, q.tz, &q.filter);
+    // 오늘 살아 있는 서버는 그날 목록에 아직 없을 수 있다 — 지금 목록을 더한다.
+    // 태그(서비스 묶기)는 살아 있는 것만 갖고 있다. 지난 Task 는 이름 규칙으로만 묶인다(화면과 같다)
+    let alive: Vec<(i32, String, String, Option<String>)> = realtime_objects(conn)?
+        .into_iter()
+        .map(|o| {
+            let g = q.rule.service_of(&o.obj_name, &o.tags);
+            (o.obj_hash, o.obj_name, o.obj_type, g)
+        })
+        .collect();
 
     let mut names: HashMap<i32, String> = HashMap::new();
-    let mut collector = Collector::new(sort, limit);
+    // 프로파일을 볼 때는 후보를 넉넉히 남긴다. 걸러진 뒤에 `limit` 으로 자른다
+    let keep = if q.profile.is_some() { digest::PROFILE_CANDIDATES } else { q.limit };
+    let mut collector = Collector::new(q.sort, keep);
     let mut seen: HashSet<i64> = HashSet::new();
     let mut scanned = 0u64;
     let mut truncated_at = None;
     let mut any_server = false;
+    let name_kinds = filter.name_kinds();
 
     'days: for (day_start, day_end) in split_by_day(window.stime, window.etime, tz) {
         let date = date_key(day_start, tz);
@@ -297,10 +386,13 @@ fn scan(
         let mut hashes: Vec<i32> = Vec::new();
         let candidates = daily
             .into_iter()
-            .map(|o| (o.obj_hash, o.obj_name, o.obj_type))
+            .map(|o| {
+                let g = q.rule.service_of(&o.obj_name, &[]);
+                (o.obj_hash, o.obj_name, o.obj_type, g)
+            })
             .chain(alive.iter().cloned());
-        for (h, name, kind) in candidates {
-            if picks(&name, &kind) && !hashes.contains(&h) {
+        for (h, name, kind, group) in candidates {
+            if q.servers.picks(&name, &kind, group.as_deref()) && !hashes.contains(&h) {
                 hashes.push(h);
                 names.entry(h).or_insert(name);
             }
@@ -334,12 +426,13 @@ fn scan(
                 }
             }
 
-            // 서비스 이름 조건은 이름을 풀어야 볼 수 있다 — 싼 조건을 넘은 것만 푼다
-            if filter.service.is_some() && !page.is_empty() {
-                let wants: Vec<(&'static str, i32)> = page.iter().map(|x| (text_type::SERVICE, x.service)).collect();
+            // 이름 조건(서비스·로그인·설명)은 이름을 풀어야 볼 수 있다 — 싼 조건을 넘은 것만 푼다
+            if !name_kinds.is_empty() && !page.is_empty() {
+                let wants: Vec<(&'static str, i32)> = page.iter().flat_map(|x| filter.name_hashes(x)).collect();
                 fill_texts(conn, state, &wants)?;
                 let cache = state.text_cache.blocking_lock();
-                page.retain(|x| filter.passes_service(cache.get(text_type::SERVICE, x.service)));
+                let texts = cache_texts(&cache);
+                page.retain(|x| filter.passes_names(x, &texts as &dyn Texts));
             }
             for x in page {
                 collector.add(x);
@@ -357,13 +450,33 @@ fn scan(
     }
 
     if !any_server {
-        return Err(match server {
-            Some(s) => format!("«{s}» 에 맞는 서버가 없습니다. list_servers 로 이름을 확인하세요"),
-            None => "이 구간에 서버(오브젝트)가 하나도 없습니다".into(),
+        return Err(if q.servers.is_empty() {
+            "이 구간에 서버(오브젝트)가 하나도 없습니다".into()
+        } else {
+            "server/service_group 조건에 맞는 서버가 없습니다. list_servers 로 이름과 service_group 을 확인하세요".into()
         });
     }
 
-    let res = collector.finish();
+    let mut res = collector.finish();
+    let mut hits: HashMap<i64, ProfileHitView> = HashMap::new();
+    let mut profile_facts = None;
+    if let Some(needle) = &q.profile {
+        let candidates = res.matched;
+        let rows = std::mem::take(&mut res.rows);
+        let searched = rows.len();
+        let (found, failed) = search_profiles(conn, state, &rows, needle, tz)?;
+        // 걸린 것만으로 다시 센다 — 요약(건수·서비스별)이 «프로파일에 걸린 것» 의 것이어야 한다
+        let mut again = Collector::new(q.sort, q.limit);
+        for x in rows {
+            if found.contains_key(&x.txid) {
+                again.add(x);
+            }
+        }
+        res = again.finish();
+        hits = found;
+        profile_facts = Some(ProfileFacts { needle: needle.clone(), candidates, searched, failed });
+    }
+
     let mut wants: Vec<(&'static str, i32)> = Vec::new();
     for x in &res.rows {
         wants.push((text_type::SERVICE, x.service));
@@ -374,7 +487,7 @@ fn scan(
     wants.extend(res.top_services.iter().map(|s| (text_type::SERVICE, s.service)));
     fill_texts(conn, state, &wants)?;
 
-    let facts = ScanFacts { window, tz_offset_ms: tz, scanned, truncated_at, servers: names.len() };
+    let facts = ScanFacts { window, tz_offset_ms: tz, scanned, truncated_at, servers: names.len(), profile: profile_facts };
     let cache = state.text_cache.blocking_lock();
     let texts = cache_texts(&cache);
     let server_name = |h: i32| names.get(&h).cloned().unwrap_or_else(|| format!("#{h}"));
@@ -385,7 +498,62 @@ fn scan(
         names.len(),
         res.matched
     );
-    Ok(search_result_json(&res, &facts, &server_name, &texts as &dyn Texts))
+    Ok(search_result_json(&res, &facts, &server_name, &texts as &dyn Texts, &hits))
+}
+
+/// 후보들의 프로파일을 열어 글자를 찾는다. 화면의 «프로파일 검색» 과 같은 길이다 —
+/// 워커 여럿(`SEARCH_WORKERS`)으로 받고, 사전은 한 번에 모아 풀고, `search_steps` 로 맞춘다.
+/// **바인딩 값도 찾는다**(`sql-param`) — «이 주문번호가 들어간 쿼리» 가 실제 용도다.
+///
+/// 돌려주는 것: txid → 걸린 자리, 프로파일을 못 받은 건수
+fn search_profiles(
+    conn: &mut ScouterConnection,
+    state: &AppState,
+    rows: &[XLogPack],
+    needle: &str,
+    tz: i64,
+) -> Result<(HashMap<i64, ProfileHitView>, usize), String> {
+    use crate::commands::{fetch_profiles_parallel, SearchTarget, SEARCH_WORKERS};
+    use crate::scouter::profile_search::{collect_hashes, search_steps, StepTexts};
+
+    let targets: Vec<SearchTarget> = rows
+        .iter()
+        .map(|x| SearchTarget { txid: x.txid.to_string(), obj_hash: x.obj_hash, date: date_key(x.end_time, tz) })
+        .collect();
+    let host = state.conn_host.blocking_lock().clone();
+    let port = *state.conn_port.blocking_lock();
+    let fetched = fetch_profiles_parallel(&host, port, conn.session, &targets, SEARCH_WORKERS);
+    let failed = fetched.iter().filter(|f| f.is_none()).count();
+
+    let mut wants: Vec<(&'static str, i32)> = Vec::new();
+    for steps in fetched.iter().flatten() {
+        let h = collect_hashes(steps);
+        wants.extend(h.method.into_iter().map(|x| (text_type::METHOD, x)));
+        wants.extend(h.sql.into_iter().map(|x| (text_type::SQL, x)));
+        wants.extend(h.apicall.into_iter().map(|x| (text_type::APICALL, x)));
+        wants.extend(h.error.into_iter().map(|x| (text_type::ERROR, x)));
+        wants.extend(h.hmsg.into_iter().map(|x| (text_type::HASH_MSG, x)));
+    }
+    wants.sort_unstable();
+    wants.dedup();
+    fill_texts(conn, state, &wants)?;
+
+    let guard = state.text_cache.blocking_lock();
+    let cache: &TextCache = &guard;
+    let get = |kind: &'static str| move |h: i32| cache.get(kind, h).map(str::to_string);
+    let (mf, sf, af, ef, hf) = (get(text_type::METHOD), get(text_type::SQL), get(text_type::APICALL), get(text_type::ERROR), get(text_type::HASH_MSG));
+    let texts = StepTexts { method: &mf, sql: &sf, apicall: &af, error: &ef, hmsg: &hf };
+
+    let mut out = HashMap::new();
+    for (x, steps) in rows.iter().zip(&fetched) {
+        let Some(steps) = steps else { continue };
+        let found = search_steps(steps, &texts, needle);
+        if let Some(first) = found.first() {
+            out.insert(x.txid, ProfileHitView { count: found.len(), kind: first.kind.clone(), snippet: first.snippet.clone() });
+        }
+    }
+    log::debug!("mcp 프로파일 검색: {}건 중 {}건 적중, {failed}건 실패", rows.len(), out.len());
+    Ok((out, failed))
 }
 
 // ─── 상세 ────────────────────────────────────────────────────

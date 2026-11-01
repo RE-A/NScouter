@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
+use crate::config::SavedFilterPrefs;
 use crate::scouter::objtype::{civil_from_days, date_key};
 use crate::scouter::pack::XLogPack;
 use crate::scouter::profile::ProfileStep;
@@ -190,39 +191,200 @@ impl SortBy {
     }
 }
 
-/// 콜렉터가 직접 못 거르는 조건 (과거 XLog 조회는 구간·서버만 받는다)
+/// 포함·제외 글자 묶음 (소문자). **화면 `passesPatterns` 와 같은 규칙이다** —
+/// 포함끼리는 OR(하나라도 맞으면), 제외는 하나라도 맞으면 뺀다(제외가 이긴다).
+/// 빈 글자는 조건이 아니다 — 빈 제외로 전부를 지우면 안 된다.
+#[derive(Debug, Clone, Default)]
+pub struct Patterns {
+    include: Vec<String>,
+    exclude: Vec<String>,
+}
+
+impl Patterns {
+    pub fn new(include: &[String], exclude: &[String]) -> Self {
+        let mut p = Self::default();
+        include.iter().for_each(|t| p.add(t, false));
+        exclude.iter().for_each(|t| p.add(t, true));
+        p
+    }
+
+    pub fn add(&mut self, text: &str, exclude: bool) {
+        let t = text.trim().to_lowercase();
+        if t.is_empty() {
+            return;
+        }
+        if exclude { self.exclude.push(t) } else { self.include.push(t) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.include.is_empty() && self.exclude.is_empty()
+    }
+
+    pub fn passes(&self, value: &str) -> bool {
+        let v = value.to_lowercase();
+        if self.exclude.iter().any(|e| v.contains(e.as_str())) {
+            return false;
+        }
+        self.include.is_empty() || self.include.iter().any(|i| v.contains(i.as_str()))
+    }
+}
+
+/// 소문자로 낮춘 «포함» 글자. 빈 글자는 조건이 아니다
+pub fn contains_rule(s: Option<&str>) -> Option<String> {
+    s.map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty())
+}
+
+/// 트랜잭션 조건 — XLog 화면의 필터(에러만 · 응답 이상/미만 · 서비스/IP 포함·제외 여러 줄)와
+/// 트랜잭션 찾기 창의 로그인·설명·text1~5. 콜렉터의 과거 조회는 구간·서버만 받으므로 여기서 거른다.
 #[derive(Debug, Clone, Default)]
 pub struct RowFilter {
-    /// 소문자로 낮춘 서비스 이름 일부
-    pub service: Option<String>,
-    pub ip: Option<String>,
     pub error_only: bool,
+    /// 이 응답시간(ms) **이상**만. 0 이면 조건 없음
     pub min_elapsed_ms: i32,
+    /// 이 응답시간(ms) **미만**만 (화면의 `미만`). 0 이면 조건 없음
+    pub max_elapsed_ms: i32,
+    pub service: Patterns,
+    pub ip: Patterns,
+    /// 로그인 이름에 들어 있는 글자 (소문자)
+    pub login: Option<String>,
+    /// 설명(desc)에 들어 있는 글자 (소문자)
+    pub desc: Option<String>,
+    /// 앱 자유 필드 text1~5 에 들어 있는 글자 (소문자)
+    pub text: [Option<String>; 5],
 }
 
 impl RowFilter {
-    /// 서비스 이름이 필요 없는 조건만 본다 — 이름 풀기(사전 조회)를 아끼려고 먼저 거른다
+    /// 이름을 풀지 않고 볼 수 있는 조건 — 사전 조회를 아끼려고 먼저 거른다
     pub fn passes_cheap(&self, x: &XLogPack) -> bool {
         if self.error_only && x.error == 0 {
             return false;
         }
-        if x.elapsed < self.min_elapsed_ms {
+        if self.min_elapsed_ms > 0 && x.elapsed < self.min_elapsed_ms {
             return false;
         }
-        if let Some(ip) = &self.ip {
-            if !x.ipaddr.contains(ip.as_str()) {
-                return false;
-            }
+        if self.max_elapsed_ms > 0 && x.elapsed >= self.max_elapsed_ms {
+            return false;
         }
-        true
+        if !self.ip.passes(&x.ipaddr) {
+            return false;
+        }
+        let fields = [&x.text1, &x.text2, &x.text3, &x.text4, &x.text5];
+        self.text
+            .iter()
+            .zip(fields)
+            .all(|(want, have)| want.as_ref().is_none_or(|w| have.to_lowercase().contains(w.as_str())))
     }
 
-    /// 서비스 이름 조건. 이름을 모르면(사전에 없음) 걸리지 않는 것으로 본다
-    pub fn passes_service(&self, name: Option<&str>) -> bool {
-        match &self.service {
-            None => true,
-            Some(want) => name.is_some_and(|n| n.to_lowercase().contains(want.as_str())),
+    /// 이름을 풀어야 볼 수 있는 조건에 쓰는 사전 종류들
+    pub fn name_kinds(&self) -> Vec<&'static str> {
+        let mut k = Vec::new();
+        if !self.service.is_empty() {
+            k.push(text_type::SERVICE);
         }
+        if self.login.is_some() {
+            k.push(text_type::LOGIN);
+        }
+        if self.desc.is_some() {
+            k.push(text_type::DESC);
+        }
+        k
+    }
+
+    /// 이 트랜잭션에서 풀어야 할 (사전 종류, 해시)
+    pub fn name_hashes(&self, x: &XLogPack) -> Vec<(&'static str, i32)> {
+        self.name_kinds()
+            .into_iter()
+            .map(|k| match k {
+                text_type::SERVICE => (k, x.service),
+                text_type::LOGIN => (k, x.login),
+                _ => (k, x.desc),
+            })
+            .collect()
+    }
+
+    /// 이름 조건. **못 푼 이름은 빈 이름으로 본다** (화면과 같다) — 포함이면 빠지고 제외면 남는다
+    pub fn passes_names(&self, x: &XLogPack, texts: &dyn Texts) -> bool {
+        if !self.service.is_empty() && !self.service.passes(&texts.text(text_type::SERVICE, x.service).unwrap_or_default()) {
+            return false;
+        }
+        let has = |want: &Option<String>, kind: &str, h: i32| match want {
+            None => true,
+            Some(w) => h != 0 && texts.text(kind, h).is_some_and(|n| n.to_lowercase().contains(w.as_str())),
+        };
+        has(&self.login, text_type::LOGIN, x.login) && has(&self.desc, text_type::DESC, x.desc)
+    }
+
+    /// 화면에서 이름 붙여 담아 둔 조건을 얹는다. 서비스·IP 줄은 더하고(같은 규칙으로 합쳐진다),
+    /// «에러만» 은 둘 중 하나라도 켜져 있으면 켠다. 응답시간은 **직접 준 값이 없을 때만** 담아 둔 값을 쓴다
+    pub fn apply_saved(&mut self, saved: &SavedFilterPrefs) {
+        for p in &saved.patterns {
+            match p.field.as_str() {
+                "service" => self.service.add(&p.text, p.exclude),
+                "ip" => self.ip.add(&p.text, p.exclude),
+                _ => {}
+            }
+        }
+        self.error_only |= saved.error_only;
+        if self.min_elapsed_ms == 0 && self.max_elapsed_ms == 0 && saved.elapsed_ms > 0 {
+            let ms = saved.elapsed_ms.min(i32::MAX as i64) as i32;
+            if saved.elapsed_exclude { self.max_elapsed_ms = ms } else { self.min_elapsed_ms = ms }
+        }
+    }
+}
+
+// ─── 서버 고르기 ─────────────────────────────────────────────
+
+/// 논리 서비스 묶기 규칙 — 화면 `instanceGroup.serviceNameOf` 와 같다.
+/// 태그(`tag_key`)가 있으면 그 값, 없으면 짧은 이름에 정규식을 걸어 `svc` 이름 그룹(없으면 첫 캡처).
+///
+/// **정규식은 Rust 문법으로 읽는다.** 화면(JavaScript)과 거의 같지만 lookbehind 같은 일부는
+/// 못 쓴다 — 그때는 컴파일이 안 돼 이름 규칙으로는 묶이지 않는다(태그로는 묶인다).
+pub struct GroupRule {
+    tag_key: String,
+    re: Option<regex::Regex>,
+}
+
+impl GroupRule {
+    pub fn new(tag_key: &str, pattern: &str) -> Self {
+        Self { tag_key: tag_key.to_string(), re: regex::Regex::new(pattern).ok() }
+    }
+
+    pub fn service_of(&self, obj_name: &str, tags: &[(String, String)]) -> Option<String> {
+        if let Some((_, v)) = tags.iter().find(|(k, v)| *k == self.tag_key && !v.trim().is_empty()) {
+            return Some(v.trim().to_string());
+        }
+        let short = obj_name.split('/').rfind(|s| !s.is_empty()).unwrap_or(obj_name);
+        let c = self.re.as_ref()?.captures(short)?;
+        let name = c.name("svc").or_else(|| c.get(1))?.as_str().trim();
+        (!name.is_empty()).then(|| name.to_string())
+    }
+}
+
+/// 어느 서버(오브젝트)를 훑을지. 화면에서 «서비스로 묶어 고른 것» 과 «낱개로 고른 것» 을
+/// 합쳐 보듯 **이름 포함과 서비스 묶음은 OR**, 제외는 어느 쪽이든 뺀다
+#[derive(Debug, Clone, Default)]
+pub struct ServerFilter {
+    /// 이름·종류에 들어 있는 글자
+    pub names: Patterns,
+    /// 논리 서비스 이름 (소문자, 완전 일치)
+    pub groups: Vec<String>,
+}
+
+impl ServerFilter {
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty() && self.groups.is_empty()
+    }
+
+    pub fn picks(&self, name: &str, kind: &str, group: Option<&str>) -> bool {
+        let (n, k) = (name.to_lowercase(), kind.to_lowercase());
+        if self.names.exclude.iter().any(|e| n.contains(e.as_str()) || k.contains(e.as_str())) {
+            return false;
+        }
+        if self.names.include.is_empty() && self.groups.is_empty() {
+            return true;
+        }
+        self.names.include.iter().any(|i| n.contains(i.as_str()) || k.contains(i.as_str()))
+            || group.is_some_and(|g| self.groups.iter().any(|w| *w == g.to_lowercase()))
     }
 }
 
@@ -329,6 +491,32 @@ pub struct ScanFacts {
     /// 상한에 걸려 구간을 다 못 훑었다. 그때 어디까지 봤나(epoch ms)
     pub truncated_at: Option<i64>,
     pub servers: usize,
+    /// 프로파일 본문 검색을 했으면 그 사실들
+    pub profile: Option<ProfileFacts>,
+}
+
+/// 프로파일 본문 검색
+pub struct ProfileFacts {
+    pub needle: String,
+    /// XLog 조건에 걸린 건수 (프로파일을 열어 볼 후보)
+    pub candidates: u64,
+    /// 그중 실제로 열어 본 건수 (상한 `PROFILE_CANDIDATES`)
+    pub searched: usize,
+    /// 프로파일을 못 받은 건수 — 조용히 빼면 «안 걸렸다» 와 구별되지 않는다
+    pub failed: usize,
+}
+
+/// 프로파일 본문 검색에서 열어 볼 후보의 상한. 건당 요청 하나라 수가 곧 시간이다
+/// (가까운 콜렉터 약 2.5ms/건, 왕복 40ms 면 약 8.5ms/건 — `SEARCH_WORKERS` 주석)
+pub const PROFILE_CANDIDATES: usize = 2_000;
+
+/// 프로파일에서 걸린 자리 — 표에 실을 한 줄
+pub struct ProfileHitView {
+    /// 이 트랜잭션에서 걸린 스텝 수
+    pub count: usize,
+    /// 처음 걸린 스텝: sql / sql-param / apicall / apicall-addr / method / message / socket / error / threadcall
+    pub kind: String,
+    pub snippet: String,
 }
 
 /// 이름 찾기. (사전 종류, 해시) → 글
@@ -348,6 +536,7 @@ pub fn search_result_json(
     facts: &ScanFacts,
     server_name: &dyn Fn(i32) -> String,
     texts: &dyn Texts,
+    hits: &HashMap<i64, ProfileHitView>,
 ) -> Value {
     let tz = facts.tz_offset_ms;
     let service = |h: i32| texts.text(text_type::SERVICE, h).unwrap_or_else(|| format!("#{h}"));
@@ -358,7 +547,7 @@ pub fn search_result_json(
             let err = (x.error != 0).then(|| {
                 clip(&texts.text(text_type::ERROR, x.error).unwrap_or_else(|| format!("#{}", x.error)), 120)
             });
-            json!([
+            let mut row = json!([
                 make_ref(x.txid, x.end_time, tz),
                 fmt_local(x.end_time, tz),
                 server_name(x.obj_hash),
@@ -371,7 +560,17 @@ pub fn search_result_json(
                 x.apicall_count,
                 x.apicall_time,
                 x.ipaddr,
-            ])
+            ]);
+            if facts.profile.is_some() {
+                let hit = hits.get(&x.txid).map(|h| {
+                    let more = if h.count > 1 { format!(" (+{})", h.count - 1) } else { String::new() };
+                    format!("{}: {}{more}", h.kind, h.snippet)
+                });
+                if let Value::Array(a) = &mut row {
+                    a.push(json!(hit));
+                }
+            }
+            row
         })
         .collect();
 
@@ -383,8 +582,24 @@ pub fn search_result_json(
             fmt_local(at, tz)
         );
     }
-    if res.matched as usize > res.rows.len() {
+    if let Some(p) = &facts.profile {
         if !note.is_empty() {
+            note.push(' ');
+        }
+        if p.candidates as usize > p.searched {
+            note.push_str(&format!(
+                "프로파일 검색: XLog 조건에 걸린 {}건 중 {}건({} 순)만 열어 봤습니다. 조건을 좁히면 빠짐없이 찾습니다. ",
+                p.candidates,
+                p.searched,
+                res.sort.name()
+            ));
+        }
+        if p.failed > 0 {
+            note.push_str(&format!("프로파일 {}건은 받지 못해 못 찾았습니다. ", p.failed));
+        }
+    }
+    if res.matched as usize > res.rows.len() {
+        if !note.is_empty() && !note.ends_with(' ') {
             note.push(' ');
         }
         note.push_str(&format!(
@@ -395,7 +610,13 @@ pub fn search_result_json(
         ));
     }
 
-    json!({
+    let note = note.trim_end().to_string();
+    let mut columns = vec!["ref", "time", "server", "service", "elapsed_ms", "error", "cpu_ms",
+                           "sql_count", "sql_ms", "api_count", "api_ms", "ip"];
+    if facts.profile.is_some() {
+        columns.push("profile_hit");
+    }
+    let mut out = json!({
         "window": {
             "from": fmt_local(facts.window.stime, tz),
             "to": fmt_local(facts.window.etime, tz),
@@ -416,10 +637,18 @@ pub fn search_result_json(
             "avg_ms": s.avg_ms,
             "max_ms": s.max_ms,
         })).collect::<Vec<_>>(),
-        "columns": ["ref", "time", "server", "service", "elapsed_ms", "error", "cpu_ms",
-                    "sql_count", "sql_ms", "api_count", "api_ms", "ip"],
+        "columns": columns,
         "rows": rows,
-    })
+    });
+    if let Some(p) = &facts.profile {
+        out["profile_search"] = json!({
+            "text": p.needle,
+            "candidates": p.candidates,
+            "searched": p.searched,
+            "failed": p.failed,
+        });
+    }
+    out
 }
 
 // ─── 상세 ────────────────────────────────────────────────────
@@ -862,21 +1091,114 @@ mod tests {
         assert_eq!(r.rows.iter().map(|x| x.txid).collect::<Vec<_>>(), vec![9, 8]);
     }
 
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
-    fn 조건은_에러_응답시간_ip_서비스를_본다() {
+    fn 포함은_or_제외가_이기고_빈_글자는_조건이_아니다() {
+        // 화면 passesPatterns 와 같은 규칙
+        let p = Patterns::new(&v(&["/shop/order", "/shop/cart"]), &v(&["/health", " "]));
+        assert!(p.passes("/SHOP/order/1"), "대소문자 무시, 둘 중 하나면 통과");
+        assert!(p.passes("/shop/cart"));
+        assert!(!p.passes("/shop/products"));
+        assert!(!p.passes("/shop/order/health"), "제외가 이긴다");
+        assert!(Patterns::new(&v(&[""]), &v(&[""])).is_empty(), "빈 줄이 전부를 지우면 안 된다");
+        assert!(Patterns::default().passes("아무거나"));
+    }
+
+    #[test]
+    fn 조건은_에러_응답시간_이상_미만_ip_text_를_본다() {
         let f = RowFilter {
-            service: Some("order".into()),
-            ip: Some("10.0.".into()),
             error_only: true,
             min_elapsed_ms: 1000,
+            max_elapsed_ms: 3000,
+            ip: Patterns::new(&v(&["10.0."]), &v(&["10.0.0.9"])),
+            text: [None, Some("vip".into()), None, None, None],
+            ..RowFilter::default()
         };
-        assert!(f.passes_cheap(&xlog(1, 0, 1500, 3)));
-        assert!(!f.passes_cheap(&xlog(1, 0, 1500, 0)), "에러만");
-        assert!(!f.passes_cheap(&xlog(1, 0, 999, 3)), "응답시간 문턱");
-        assert!(f.passes_service(Some("/api/Order/save")), "대소문자 무시");
-        assert!(!f.passes_service(Some("/api/user")));
-        assert!(!f.passes_service(None));
-        assert!(RowFilter::default().passes_service(None));
+        let mut x = xlog(1, 0, 1500, 3);
+        x.text2 = "grade=VIP".into();
+        assert!(f.passes_cheap(&x));
+        assert!(!f.passes_cheap(&XLogPack { error: 0, ..x.clone() }), "에러만");
+        assert!(!f.passes_cheap(&XLogPack { elapsed: 999, ..x.clone() }), "이상");
+        assert!(!f.passes_cheap(&XLogPack { elapsed: 3000, ..x.clone() }), "미만 — 같으면 빠진다");
+        assert!(!f.passes_cheap(&XLogPack { ipaddr: "10.0.0.9".into(), ..x.clone() }), "IP 제외");
+        assert!(!f.passes_cheap(&XLogPack { text2: String::new(), ..x.clone() }), "text2");
+        // 0 은 «조건 없음»
+        assert!(RowFilter::default().passes_cheap(&xlog(1, 0, 0, 0)));
+    }
+
+    #[test]
+    fn 이름_조건은_서비스_로그인_설명을_풀어서_본다() {
+        let f = RowFilter {
+            service: Patterns::new(&v(&["service-7"]), &[]),
+            login: Some("kim".into()),
+            ..RowFilter::default()
+        };
+        assert_eq!(f.name_kinds(), vec![text_type::SERVICE, text_type::LOGIN]);
+        let names = |kind: &str, h: i32| match kind {
+            "login" => Some(format!("Kim{h}")),
+            _ => Some(format!("{kind}-{h}")),
+        };
+        let mut x = xlog(1, 0, 10, 0);
+        x.login = 3;
+        assert!(f.passes_names(&x, &names));
+        assert!(!f.passes_names(&XLogPack { login: 0, ..x.clone() }, &names), "로그인이 없으면 못 건다");
+        // 못 푼 서비스는 빈 이름 — 포함 조건이면 빠진다
+        assert!(!f.passes_names(&x, &|_: &str, _: i32| None));
+        let only_ex = RowFilter { service: Patterns::new(&[], &v(&["health"])), ..RowFilter::default() };
+        assert!(only_ex.passes_names(&x, &|_: &str, _: i32| None), "제외 조건이면 남는다");
+    }
+
+    #[test]
+    fn 담아_둔_조건을_얹는다() {
+        let saved = SavedFilterPrefs {
+            name: "결제만".into(),
+            patterns: vec![
+                crate::config::PatternPrefs { field: "service".into(), text: "/pay".into(), exclude: false },
+                crate::config::PatternPrefs { field: "ip".into(), text: "10.9.".into(), exclude: true },
+            ],
+            error_only: true,
+            elapsed_ms: 2000,
+            elapsed_exclude: true,
+        };
+        let mut f = RowFilter::default();
+        f.apply_saved(&saved);
+        assert!(f.error_only);
+        assert_eq!((f.min_elapsed_ms, f.max_elapsed_ms), (0, 2000), "미만으로 담아 뒀다");
+        assert!(f.service.passes("/pay/approve") && !f.service.passes("/shop"));
+        assert!(!f.ip.passes("10.9.1.1"));
+        // 직접 준 응답시간이 이긴다
+        let mut g = RowFilter { min_elapsed_ms: 500, ..RowFilter::default() };
+        g.apply_saved(&saved);
+        assert_eq!((g.min_elapsed_ms, g.max_elapsed_ms), (500, 0));
+    }
+
+    #[test]
+    fn 서비스_묶기는_태그가_먼저고_없으면_이름_규칙이다() {
+        let rule = GroupRule::new("service", "^(?<svc>.+?)-ip-[0-9-]+");
+        assert_eq!(rule.service_of("/ecs/safs-ip-10-75-1-3", &[]).as_deref(), Some("safs"));
+        let tags = vec![("service".to_string(), "pay".to_string())];
+        assert_eq!(rule.service_of("/ecs/safs-ip-10-75-1-3", &tags).as_deref(), Some("pay"));
+        assert_eq!(rule.service_of("/vm/order-app", &[]), None);
+        // 이름 그룹이 없으면 첫 캡처
+        assert_eq!(GroupRule::new("x", "^(.+)-\\d+$").service_of("/a/svc-2", &[]).as_deref(), Some("svc"));
+        // 깨진 정규식은 묶지 않는다 (던지지 않는다)
+        assert_eq!(GroupRule::new("x", "(").service_of("/a/b", &[]), None);
+    }
+
+    #[test]
+    fn 서버는_이름_포함과_서비스_묶음이_or_이고_제외가_이긴다() {
+        let f = ServerFilter { names: Patterns::new(&v(&["order"]), &v(&["hikari"])), groups: v(&["safs"]) };
+        assert!(f.picks("/vm/order-app", "tomcat", None));
+        assert!(f.picks("/ecs/safs-ip-1", "tomcat", Some("SAFS")), "묶음 이름은 대소문자 무시");
+        assert!(!f.picks("/vm/order-app/HikariPool-1", "datasource", None), "제외가 이긴다");
+        assert!(!f.picks("/vm/shop-app", "tomcat", None));
+        assert!(f.picks("/vm/x", "linux", None) == false);
+        assert!(ServerFilter::default().picks("/vm/x", "linux", None), "비우면 전부");
+        let by_type = ServerFilter { names: Patterns::new(&v(&["tomcat"]), &[]), groups: vec![] };
+        assert!(by_type.picks("/vm/shop-app", "tomcat", None), "종류로도 고른다");
     }
 
     #[test]
@@ -890,8 +1212,9 @@ mod tests {
             scanned: 10,
             truncated_at: None,
             servers: 2,
+            profile: None,
         };
-        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &texts());
+        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &texts(), &HashMap::new());
         assert_eq!(v["columns"][0], "ref");
         assert_eq!(v["rows"][0][0], "42:20261101");
         assert_eq!(v["rows"][0][2], "srv1");
@@ -899,6 +1222,33 @@ mod tests {
         assert_eq!(v["rows"][0][5], "error-5");
         assert_eq!(v["truncated"], false);
         assert_eq!(v["note"], "");
+        assert_eq!(v["columns"].as_array().unwrap().len(), 12, "프로파일 검색을 안 했으면 열이 늘지 않는다");
+    }
+
+    #[test]
+    fn 프로파일_검색을_했으면_걸린_자리를_싣고_다_못_본_것을_말한다() {
+        let mut c = Collector::new(SortBy::Slowest, 50);
+        c.add(xlog(42, 0, 3000, 0));
+        c.add(xlog(43, 0, 2000, 0));
+        let res = c.finish();
+        let facts = ScanFacts {
+            window: Window { stime: 0, etime: 1 },
+            tz_offset_ms: 0,
+            scanned: 9000,
+            truncated_at: None,
+            servers: 1,
+            profile: Some(ProfileFacts { needle: "ord-77".into(), candidates: 5000, searched: 2000, failed: 3 }),
+        };
+        let mut hits = HashMap::new();
+        hits.insert(42, ProfileHitView { count: 3, kind: "sql-param".into(), snippet: "ORD-77, 1".into() });
+        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &texts(), &hits);
+        assert_eq!(v["columns"][12], "profile_hit");
+        assert_eq!(v["rows"][0][12], "sql-param: ORD-77, 1 (+2)");
+        assert_eq!(v["rows"][1][12], Value::Null);
+        assert_eq!(v["profile_search"]["searched"], 2000);
+        let note = v["note"].as_str().unwrap();
+        assert!(note.contains("5000건 중 2000건"), "{note}");
+        assert!(note.contains("3건은 받지 못해"), "{note}");
     }
 
     fn sql(i: i32, start: i64, hash: i32, elapsed: i32, param: &str) -> ProfileStep {

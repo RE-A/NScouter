@@ -38,9 +38,10 @@ use crate::state::AppState;
 /// 끌 때 기다리는 시간. 그 안에 안 끝나면 버리고 간다 — 같은 포트로 다시 열 때만 문제가 된다
 const STOP_WAIT: Duration = Duration::from_secs(3);
 
-#[derive(Default)]
 pub struct McpState {
     running: Mutex<Option<Running>>,
+    /// 프로파일 본문 검색을 한꺼번에 몇 개까지 돌릴지. 하나가 콜렉터 연결을 `SEARCH_WORKERS` 개 연다
+    pub(crate) profile_slots: tokio::sync::Semaphore,
     /// 이 PC 시간대(ms). 화면이 `mcp_sync` 로 알려 준다
     tz_offset_ms: AtomicI64,
     /// 마지막으로 켜려다 실패한 까닭 (포트가 이미 쓰이는 중 등)
@@ -52,6 +53,20 @@ struct Running {
     token: String,
     cancel: CancellationToken,
     task: JoinHandle<()>,
+}
+
+/// 동시에 도는 프로파일 본문 검색의 수
+const PROFILE_SEARCH_SLOTS: usize = 2;
+
+impl Default for McpState {
+    fn default() -> Self {
+        Self {
+            running: Mutex::new(None),
+            profile_slots: tokio::sync::Semaphore::new(PROFILE_SEARCH_SLOTS),
+            tz_offset_ms: AtomicI64::new(0),
+            last_error: Mutex::new(None),
+        }
+    }
 }
 
 impl McpState {
@@ -243,6 +258,16 @@ mod tests {
         assert_eq!(a.len(), 48);
         assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn 프로파일_검색은_한꺼번에_둘까지만_돈다() {
+        let st = McpState::default();
+        let a = st.profile_slots.try_acquire().unwrap();
+        let _b = st.profile_slots.try_acquire().unwrap();
+        assert!(st.profile_slots.try_acquire().is_err(), "셋째는 기다려야 한다");
+        drop(a);
+        assert!(st.profile_slots.try_acquire().is_ok());
     }
 
     #[test]

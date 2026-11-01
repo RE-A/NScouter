@@ -2448,6 +2448,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "log",
+ "regex",
  "rmcp",
  "serde",
  "serde_json",
