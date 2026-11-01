@@ -273,17 +273,12 @@ export const EN: Record<string, string> = {
   '트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수입니다. 넘으면 그 시각까지 찾은 것만 목록에 올리고 어디까지 찾았는지 알려 줍니다. 올릴수록 메모리를 쓰고 오래 걸립니다.': 'Maximum rows collected by Find transactions (wide range). Beyond it, only what was found up to that time is listed and the app tells you how far it got. Higher values use more memory and take longer.',
   '다 모았을 때의 대략적인 메모리:': 'Approximate memory when full:',
   '구간과 조건(서비스·IP·로그인 등)을 정해 서버에서 찾습니다. 드래그 없이 넓은 구간도 됩니다': 'Search on the server by range and conditions (service, IP, login…). Works for wide ranges without dragging',
-  '서버가 걸러서 보내 줍니다. 한 번에': 'The server filters for you. Up to',
-  '건까지 오므로, 넘으면 구간을 잘게 나눠 이어 찾습니다. 모두': 'rows come per request; beyond that the range is split and searched piece by piece, collecting up to',
   '건까지 모읍니다.': 'rows in total.',
   '(설정에서 바꿈)': '(change in Settings)',
   '요청': 'requests',
   '멈추기': 'Stop',
   '그때까지 모은 것을 목록으로 보냅니다': 'Send what was found so far to the list',
-  '1초 안에 서버 상한보다 많이 걸리는 구간이 있어, 그 1초는 상한만큼만 담았습니다. 조건을 좁히면 다 나옵니다.': 'Some second had more matches than the server limit; only the limit was kept for it. Narrow the conditions to get all.',
   '뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.': 'The rest was not searched. Search again starting after that time.',
-  '빽빽한 구간은 1초에': 'dense seconds capped at',
-  '건까지만': 'rows',
   '건에서 멈춤': ' rows — stopped',
   '찾다 멈춤': 'Stopped',
   '까지 찾음': ' searched up to here',
@@ -696,14 +691,9 @@ export const EN: Record<string, string> = {
     'Group by object kind (tomcat, datasource, linux)',
   '이름의 부모 경로로 묶습니다 (/CJFW/PRD-FSCP)': "Group by the name's parent path (/CJFW/PRD-FSCP)",
   '(그룹 없음)': '(no group)',
-  '서버가 걸러서 보내 줍니다. 상한을 확인하는 중입니다…':
-    'The collector filters and sends back the matches. Checking the limit…',
   '찾기': 'Search',
   '구간과 조건을 정해 서버에서 찾습니다': 'Pick a range and conditions; the collector does the filtering',
-  '서버가 걸러서 보내 줍니다. 최대': 'The collector filters and sends back at most ',
   '건까지만 오고, 그보다 많으면 잘립니다.': ' rows — anything beyond that is cut off.',
-  '(서버 설정에 상한이 안 적혀 있어 기본값으로 봅니다)':
-    '(the limit is not in the server config, so this is the default)',
   '그냥 치면 «포함»으로 찾습니다. * 를 직접 쓰면 그 자리만 아무 글자로 봅니다.':
     'Plain text matches anywhere in the value. Type * yourself to place your own wildcards.',
   '시작이 끝보다 앞서야 합니다': 'Start must come before end',
@@ -1004,4 +994,7 @@ export const EN: Record<string, string> = {
   'Claude Code — 터미널에서 한 번 실행': 'Claude Code — run once in a terminal',
   'Cursor — ~/.cursor/mcp.json (프로젝트만이면 .cursor/mcp.json) 에 넣기':
     'Cursor — put in ~/.cursor/mcp.json (or .cursor/mcp.json for one project)',
+  // 넓은 구간 찾기 — 대소문자 없이 (WideSearchDialog.tsx)
+  '구간을 받아 조건으로 거릅니다. 모두': 'Fetches the range and filters it by your conditions. Collects up to',
+  '대소문자는 가리지 않습니다.': 'Case is ignored.',
 };

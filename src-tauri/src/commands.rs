@@ -34,9 +34,7 @@ use crate::scouter::objtype::{
 };
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
 use crate::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
-use crate::scouter::search::{
-    build_search_xlog_param, parse_search_max, SearchXLogFilter, DEFAULT_SEARCH_MAX,
-};
+use crate::scouter::search::{SearchXLogFilter, WideMatcher};
 use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, XLogProfilePack};
 use crate::scouter::protocol::*;
 use crate::scouter::alert::build_alert_param;
@@ -911,114 +909,98 @@ pub async fn get_xlog_distribution(
     Ok(out)
 }
 
-/// 넓은 구간 검색 결과.
-///
-/// **`truncated` 를 반드시 화면에 보여야 한다.** 서버는 상한에서 그냥 끊고
-/// «잘렸다» 는 신호를 아무것도 주지 않는다 — 그대로 두면 «없다» 로 읽힌다 (F-54).
+/// 넓은 구간 찾기의 한 페이지.
 #[derive(serde::Serialize)]
-pub struct SearchXLogResult {
+pub struct WidePage {
+    /// 조건에 걸린 것만
     pub xlogs: Vec<XLogPack>,
-    /// 서버 상한. 못 읽었으면 기본값을 쓴다
-    pub max: i32,
-    /// 상한을 서버 설정에서 실제로 읽었는가. 아니면 `max` 는 추측이다
-    pub max_known: bool,
-    /// 상한에 닿았다 — **더 있었을 수 있다**
-    pub truncated: bool,
+    /// 다음 페이지 자리. `done` 이면 쓸 일이 없다
+    pub cursor: PastCursor,
+    /// 이 조각을 끝까지 받았다
+    pub done: bool,
+    /// 이 페이지에서 콜렉터가 준 건수 (거르기 전)
+    pub scanned: usize,
 }
 
-/// 서버가 한 번에 돌려주는 검색 결과의 상한.
+/// 넓은 구간 찾기 한 페이지에서 받는 건수. MCP 목록 조회·분포와 같은 이유로 크게 잡는다 —
+/// 거르기 전 건수라 화면으로 가는 양은 조건에 걸린 것뿐이다
+const WIDE_PAGE_COUNT: i32 = 5_000;
+
+/// 넓은 구간에서 조건으로 XLog 찾기 — **한 조각의 한 페이지.**
 ///
-/// **찾기 전에 물어본다.** 창을 열자마자 «최대 500건» 이라고 적어 두려면 그 500 이
-/// 어디서 온 값인지 알아야 한다 — 안 물어보고 기본값을 단정하면, 서버가 상한을
-/// 올려 뒀을 때 화면이 거짓말을 한다.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
-pub struct SearchMax {
-    pub max: i32,
-    /// 서버 설정에서 실제로 읽었는가. 아니면 기본값을 쓴 것이다
-    pub known: bool,
-}
-
+/// 콜렉터에 구간(과거 조회)을 묻고 조건은 **여기서 대소문자 없이** 맞춘다(`WideMatcher`).
+/// 콜렉터 검색(SEARCH_XLOG_LIST)은 대소문자를 가려 `order` 로 `/Order/…` 를 못 찾았다
+/// (`scouter::search` 머리말). 화면(`wideSearchAll.ts`)이 구간을 날짜·5분 조각으로 나눠
+/// 조각마다 `done` 이 될 때까지 부르고, 조각 넷을 한꺼번에 돌린다.
+///
+/// `obj_hashes` 는 그날 붙었던 오브젝트들이다 — 비어 있으면 찾을 데가 없다.
 #[tauri::command]
-pub async fn get_search_max(state: State<'_, AppState>) -> Result<SearchMax, String> {
-    let found = request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
-        .await
-        .ok()
-        .flatten()
-        .map(|m| parse_config_text(&m))
-        .as_deref()
-        .and_then(parse_search_max);
-    Ok(SearchMax { max: found.unwrap_or(DEFAULT_SEARCH_MAX), known: found.is_some() })
-}
-
-/// 넓은 구간에서 조건으로 XLog 찾기 (SEARCH_XLOG_LIST).
-///
-/// 스캐터 드래그를 대체하지 않는다. 좁은 구간은 다 받는 편이 낫다 —
-/// 잘림이 없고 오브젝트를 여럿 다룬다. 이건 «넓은 구간에서 몇 건» 을 위한 입구다.
-///
-/// 상한은 서버 설정에서 읽어 온다. `req_search_xlog_max_count` 를 못 찾으면
-/// 기본값(500)을 쓰되 `max_known=false` 로 «추측» 임을 알린다.
-///
-/// `max_hint` 가 있으면 **설정을 다시 읽지 않는다.** 화면이 상한에 닿은 구간을 잘게 나눠
-/// 이어 찾을 때(`wideSearchAll.ts`) 조각마다 설정을 읽으면 왕복이 두 배가 된다 —
-/// 첫 조각에서 받은 상한을 그대로 넘겨 온다.
-#[tauri::command]
-pub async fn search_xlog_list(
+pub async fn search_xlog_page(
     state: State<'_, AppState>,
     filter: SearchXLogFilter,
-    max_hint: Option<SearchMax>,
-) -> Result<SearchXLogResult, String> {
-    // 상한을 먼저 읽는다. 실패해도 검색은 한다 — 상한을 모른다고 못 찾을 이유는 없다.
-    let max_from_server = match max_hint {
-        Some(h) if h.known => Some(h.max),
-        Some(_) => None,
-        None => request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
-            .await
-            .ok()
-            .flatten()
-            .map(|m| parse_config_text(&m))
-            .as_deref()
-            .and_then(parse_search_max),
-    };
-
-    // **조회용 연결을 빌려 쓴다.** 화면이 상한에 닿은 구간을 나눠 여러 조각을 **한꺼번에** 묻는다
-    // (`wideSearchAll.ts`) — 공용 연결 하나를 잠그면 조각이 줄을 서서 넓은 구간이 몇 분씩 걸리고,
-    // 그동안 상세·사전 조회까지 멈춘다.
+    date: String,
+    obj_hashes: Vec<i32>,
+    cursor: Option<PastCursor>,
+) -> Result<WidePage, String> {
+    let cur = cursor.unwrap_or_default();
+    if obj_hashes.is_empty() {
+        return Ok(WidePage { xlogs: Vec::new(), cursor: cur, done: true, scanned: 0 });
+    }
+    // **조회용 연결을 빌려 쓴다.** 화면이 조각 넷을 한꺼번에 묻는다 — 공용 연결 하나를 잠그면
+    // 조각이 줄을 서고, 그동안 상세·사전 조회까지 멈춘다.
     if state.connection.lock().await.is_none() {
         return Err("연결되지 않음".to_string());
     }
     let mut conn = state.acquire_query_conn().await?;
-    let param = build_search_xlog_param(&filter);
+    let param = build_past_xlog_param(&obj_hashes, &date, filter.stime, filter.etime, WIDE_PAGE_COUNT, &cur);
     let session = conn.session;
-    let result = (|| -> Result<Vec<XLogPack>, String> {
-        conn.send_request(CMD_SEARCH_XLOG_LIST, session, &param)
-            .map_err(|e| format!("XLog 검색 요청 실패: {e}"))?;
-        let mut xlogs = Vec::new();
+    let fetched = (|| -> Result<(Vec<XLogPack>, PastCursor), String> {
+        conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param)
+            .map_err(|e| format!("트랜잭션 찾기 요청 실패: {e}"))?;
+        let mut rows = Vec::new();
+        let mut next = PastCursor::default();
         loop {
-            match conn.read_next_pack().map_err(|e| format!("XLog 검색 수신 실패: {e}"))? {
-                Some(AnyPack::XLog(x)) => xlogs.push(x),
+            match conn.read_next_pack().map_err(|e| format!("트랜잭션 찾기 수신 실패: {e}"))? {
+                Some(AnyPack::XLog(x)) => rows.push(x),
+                Some(AnyPack::Map(m)) => next = parse_past_cursor(&m),
                 Some(_) => {}
                 None => break,
             }
         }
-        Ok(xlogs)
+        Ok((rows, next))
     })();
     // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
-    let xlogs = match result {
-        Ok(x) => {
-            state.release_query_conn(conn).await;
-            x
-        }
-        Err(e) => return Err(e),
-    };
+    let (rows, next) = fetched?;
+    let scanned = rows.len();
+    let done = !next.has_more || scanned == 0 || next.last_xlog_time <= cur.last_xlog_time;
 
-    let max = max_from_server.unwrap_or(DEFAULT_SEARCH_MAX);
-    let truncated = xlogs.len() as i32 >= max;
-    log::debug!(
-        "search_xlog_list: {}건 (상한 {max}{}) truncated={truncated}",
-        xlogs.len(),
-        if max_from_server.is_some() { "" } else { ", 추측" }
-    );
-    Ok(SearchXLogResult { xlogs, max, max_known: max_from_server.is_some(), truncated })
+    let m = WideMatcher::new(&filter);
+    let mut hits: Vec<XLogPack> = rows.into_iter().filter(|x| m.passes_cheap(x)).collect();
+    let wants: Vec<(&'static str, i32)> = hits.iter().flat_map(|x| m.name_hashes(x)).collect();
+    if !wants.is_empty() {
+        let mut cache = state.text_cache.lock().await;
+        let mut by_kind: HashMap<&str, Vec<i32>> = HashMap::new();
+        for (k, h) in &wants {
+            by_kind.entry(k).or_default().push(*h);
+        }
+        for (kind, mut hashes) in by_kind {
+            hashes.sort_unstable();
+            hashes.dedup();
+            let missing = cache.missing(kind, &hashes);
+            if !missing.is_empty() {
+                if let Err(e) = fetch_texts(&mut conn, &mut cache, kind, &missing) {
+                    // 사전을 못 받은 연결은 버린다. 못 푼 이름은 «안 걸림» 이다
+                    return Err(format!("이름 조회 실패: {e}"));
+                }
+            }
+        }
+        let name = |k: &str, h: i32| cache.get(k, h).map(str::to_string);
+        hits.retain(|x| m.passes_names(x, &name));
+    }
+    state.release_query_conn(conn).await;
+
+    log::debug!("search_xlog_page: {date} {}~{} → {scanned}건 중 {}건, done={done}", filter.stime, filter.etime, hits.len());
+    Ok(WidePage { xlogs: hits, cursor: next, done, scanned })
 }
 
 /// 힙 히스토그램 — 클래스별 인스턴스 수와 점유 바이트.

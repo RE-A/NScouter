@@ -89,7 +89,8 @@ import {
   getConnectionInfo,
   mcpSync,
   saveUiState,
-  searchXLogList,
+  searchXLogPage,
+  getObjectListByDate,
   saveXLogProfile,
   saveConfig,
   saveServers,
@@ -1353,7 +1354,7 @@ export default function App({ windowLabel }: {
   const handleAlertBadgeClick = useCallback(() => setActiveTab('alert'), []);
 
   /**
-   * 넓은 구간에서 찾기 (SEARCH_XLOG_LIST).
+   * 넓은 구간에서 찾기 — 구간을 받아 Rust 가 **대소문자 없이** 거른다 (`wideSearchAll.ts`).
    *
    * 결과는 **기존 트랜잭션 목록으로 흘려보낸다** — 그래야 행을 눌러 상세를 열고
    * 프로파일 검색을 거는 지금 흐름이 그대로 쓰인다. 새 목록을 따로 만들면
@@ -1363,13 +1364,10 @@ export default function App({ windowLabel }: {
   const [wideRunning, setWideRunning] = useState(false);
   /**
    * 다 못 찾았다 — 그 까닭과 어디까지 찾았나. null 이면 다 찾았거나 검색 결과가 아니다.
-   *
-   * 상한(기본 500)에 닿으면 구간을 나눠 이어 찾으므로(`wideSearchAll.ts`) 이제 «500 에서 잘림» 은
-   * 없다. 남는 것은 1초에 상한을 넘는 빽빽한 구간, 모은 것이 너무 많아 멈춘 것, 멈춤을 누른 것이다.
+   * 모은 것이 너무 많아 멈췄거나(`cap`), 멈춤을 눌렀다(`cancelled`).
    */
   const [wideTruncated, setWideTruncated] = useState<{
-    kind: 'dense' | 'cap' | 'cancelled';
-    max: number;
+    kind: 'cap' | 'cancelled';
     stoppedAt: number | null;
   } | null>(null);
   const [wideProgress, setWideProgress] = useState<WideProgress | null>(null);
@@ -1380,7 +1378,13 @@ export default function App({ windowLabel }: {
       setWideRunning(true);
       wideCancelRef.current = false;
       setWideProgress({ found: 0, done: 0, requests: 0 });
-      searchAll(v, searchXLogList, {
+      // 그날 붙었던 오브젝트 + 지금 붙어 있는 것. 지난 Task(ECS)는 지금 목록에 없다
+      const live = [...agentMap.keys()];
+      const objectsOf = async (date: string) => {
+        const daily = await getObjectListByDate(date).catch(() => []);
+        return [...new Set([...daily.map(o => o.obj_hash), ...live])];
+      };
+      searchAll(v, searchXLogPage, objectsOf, {
         cap: wideSearchMax,
         // 조각마다 바로 화면 모양으로 — 수십만 건을 날것과 바꾼 것 두 벌로 들지 않는다
         map: xlogPackToSXLog,
@@ -1395,7 +1399,7 @@ export default function App({ windowLabel }: {
           setClearSignal(n => n + 1);
           resetSearch();
           setWideTruncated(
-            res.cut === 'none' ? null : { kind: res.cut, max: res.limit.max, stoppedAt: res.stoppedAt },
+            res.cut === 'none' ? null : { kind: res.cut, stoppedAt: res.stoppedAt },
           );
         })
         .catch(() => {})
@@ -1404,7 +1408,7 @@ export default function App({ windowLabel }: {
           setWideProgress(null);
         });
     },
-    [resetSearch, wideSearchMax],
+    [resetSearch, wideSearchMax, agentMap],
   );
 
   const [showSettings, setShowSettings] = useState(false);
@@ -2232,22 +2236,16 @@ export default function App({ windowLabel }: {
                       {/* 끌고 나면 다음 질문은 늘 같다 — «얼마나 느렸고 몇 개가 터졌나».
                           건수만 적혀 있으면 그 답을 목록을 훑어 눈으로 세야 한다. */}
                       <SelectionSummary stats={selection} />
-                      {/* **서버는 잘렸다는 신호를 주지 않는다.** 여기서 말하지 않으면
-                          없는 트랜잭션을 없다고 믿게 된다 (F-54). */}
+                      {/* **다 못 찾았으면 여기서 말한다.** 말하지 않으면
+                          안 찾은 뒤쪽의 트랜잭션을 없다고 믿게 된다. */}
                       {wideTruncated && (
                         <span
                           className="shrink-0 whitespace-nowrap rounded border border-warn/50 px-1 text-micro normal-case text-warn"
-                          title={
-                            wideTruncated.kind === 'dense'
-                              ? t('1초 안에 서버 상한보다 많이 걸리는 구간이 있어, 그 1초는 상한만큼만 담았습니다. 조건을 좁히면 다 나옵니다.')
-                              : t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')
-                          }
+                          title={t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')}
                         >
-                          {wideTruncated.kind === 'dense'
-                            ? `${t('빽빽한 구간은 1초에')} ${wideTruncated.max.toLocaleString()}${t('건까지만')}`
-                            : `${wideTruncated.kind === 'cap'
-                                ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')}`
-                                : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
+                          {`${wideTruncated.kind === 'cap'
+                            ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')}`
+                            : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
                         </span>
                       )}
                       <Button

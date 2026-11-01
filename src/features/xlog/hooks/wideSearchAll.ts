@@ -1,61 +1,49 @@
-// 넓은 구간 찾기 — **서버 상한(기본 500)을 넘어서까지** 찾는다.
+// 넓은 구간 찾기 — 구간을 조각으로 나눠 **넷씩 한꺼번에** 받고, 조건은 Rust 가 대소문자 없이 맞춘다.
 //
-// 콜렉터는 `req_search_xlog_max_count` 에서 그냥 끊고 «잘렸다» 는 신호를 주지 않는다(F-54).
-// 예전에는 닿으면 «구간을 나눠 다시 찾으라» 고만 했다 — 조건 하나만 걸어도 500 은 금방 넘어서
-// 사실상 한 시간도 못 찾았다. 사람이 하라던 그 일을 여기서 한다:
+// 예전에는 콜렉터 검색(SEARCH_XLOG_LIST)에 조건을 넘겼다. 그건 **대소문자를 가려서** `order` 로
+// `/Order/…` 를 못 찾았고(콜렉터 `StrMatch` — 우회 불가), 한 번에 500건에서 말없이 끊겨 구간을
+// 잘게 나눠 다시 물어야 했고, 오브젝트도 하나만 받았다. 지금은 과거 조회로 구간을 받아
+// Rust(`search_xlog_page`)가 거른다 — 세 가지가 다 없어졌다.
 //
-//   1. 구간 전체를 한 번 찾는다
-//   2. 상한에 닿았으면 그 조각을 더 잘게 나눠 **조각마다 다시** 찾는다
-//   3. 상한에 안 닿은 조각은 그게 전부다 — 다 모은다
+//   1. 구간을 **날짜**(콜렉터 날짜 디렉토리, F-18)와 **5분** 으로 자른다
+//   2. 조각 넷을 한꺼번에 — 조각마다 페이지(5,000건)를 끝까지 넘긴다
+//   3. 화면으로는 **걸린 것만** 온다 — 페이지마다 따로 와서 한 덩어리가 크지 않다(CLAUDE.md 3.3)
 //
-// 나누는 크기는 **받은 것이 덮은 시간**으로 짐작한다. 상한에 닿은 결과가 앞쪽 3분을 덮었으면
-// 그 구간은 3분에 500건꼴이다 — 그 60% 폭으로 자르면 조각마다 300건 남짓이라 거의 한 번에 끝난다.
-// 짐작이 안 서면(시간 순이 아니거나 한 시각에 몰렸으면) 반으로 자른다.
-//
-// **조각마다 따로 부른다.** 한 번에 다 받아 넘기면 수십만 건이 한 덩어리로 IPC 를 탄다(CLAUDE.md 3.3).
-// 조각은 많아야 상한(500)건이라 가볍고, 그 사이에 진행을 보여 주고 멈출 수 있다.
-// 조각은 **넷씩 한꺼번에** 묻는다(Rust 가 조회용 연결 풀에서 연결을 빌린다) — 하나씩이면 30만 건이 몇 분이다.
+// **늘 이른 조각부터 가져간다.** 그래야 상한·멈춤에서 «여기까지는 빈틈없이 찾았다» 를 말할 수 있다.
 
-import type { SearchMax, SearchXLogFilter, SearchXLogResult } from '../api/scouterApi';
+import type { PastCursor } from '../api/pastXLog';
+import type { SearchXLogFilter, WidePage } from '../api/scouterApi';
+import { yyyymmdd } from '../types/timeRange';
 import type { XLogPack } from '../types/xlog';
 
 /** 다 모아 이만큼이면 멈춘다 — 기본값. 설정 «트랜잭션 찾기 상한» 으로 100만까지 올린다(`clampWideMax`) */
 export const WIDE_TOTAL_CAP = 300_000;
 
-/** 이보다 좁은 조각은 더 안 나눈다. 1초에 상한을 넘기는 조건이면 나눠도 끝이 없다 */
-export const MIN_PIECE_MS = 1_000;
+/** 조각 폭. 시간당 50만 건 서비스면 4만 건 남짓 — 5,000건 페이지 9개다 */
+export const PIECE_MS = 5 * 60_000;
 
-/** 한 번에 쪼개는 조각 수의 상한 — 짐작이 크게 빗나가도 요청이 폭발하지 않게 */
-export const MAX_PIECES_PER_SPLIT = 64;
+/** 기본 동시 조각 수 — Rust 조회용 연결 풀이 쉬는 연결을 넷까지 들고 있다(`MAX_IDLE_QUERY_CONNS`) */
+export const WIDE_PARALLEL = 4;
 
-/** 상한에 닿은 결과를 보고 짐작한 조각 폭의 몫. 1 이면 조각마다 또 상한에 닿기 쉽다 */
-const FILL = 0.6;
+/** 조각 하나 — 하루 안에 든다 */
+export interface Piece {
+  /** `yyyymmdd` (이 PC 시간대) */
+  date: string;
+  s: number;
+  e: number;
+}
 
-/**
- * 상한에 닿은 `[s, e]` 를 나눌 조각들 — 시간 순.
- *
- * 더 못 나누면(`MIN_PIECE_MS` 이하) 빈 배열이다.
- */
-export function splitRange(
-  s: number,
-  e: number,
-  page: readonly Pick<XLogPack, 'end_time'>[],
-): [number, number][] {
-  const span = e - s;
-  if (span <= MIN_PIECE_MS) return [];
-
-  // 받은 것이 덮은 시간 — 가장 늦은 끝 시각까지
-  let last = s;
-  for (const x of page) if (x.end_time > last && x.end_time <= e) last = x.end_time;
-  const covered = last - s;
-  const piece = covered > 0 && covered < span ? Math.max(MIN_PIECE_MS, covered * FILL) : span / 2;
-
-  const n = Math.min(MAX_PIECES_PER_SPLIT, Math.max(2, Math.ceil(span / piece)));
-  const out: [number, number][] = [];
-  for (let i = 0; i < n; i++) {
-    const a = Math.round(s + (span * i) / n);
-    const b = i === n - 1 ? e : Math.round(s + (span * (i + 1)) / n);
-    out.push([a, b]);
+/** 구간을 날짜와 `piece` 폭으로 자른다 — 시간 순, 빈틈·겹침 없이 */
+export function planPieces(stime: number, etime: number, piece = PIECE_MS): Piece[] {
+  const out: Piece[] = [];
+  let s = stime;
+  while (s < etime) {
+    // 다음 로컬 자정
+    const d = new Date(s);
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const e = Math.min(s + Math.max(1, piece), midnight, etime);
+    out.push({ date: yyyymmdd(s), s, e });
+    s = e;
   }
   return out;
 }
@@ -72,14 +60,12 @@ export interface WideProgress {
 export interface WideResult<T = XLogPack> {
   /** 시간 순 */
   xlogs: T[];
-  limit: SearchMax;
   /**
    * 다 못 찾았을 때 그 까닭.
-   *   · `dense` — 1초 조각도 상한에 닿았다. 그 1초 안의 것은 상한만큼만 있다
    *   · `cap`   — 다 모은 것이 상한(`cap`)에 닿아 멈췄다. `stoppedAt` 뒤는 안 훑었다
    *   · `cancelled` — 멈춤을 눌렀다
    */
-  cut: 'none' | 'dense' | 'cap' | 'cancelled';
+  cut: 'none' | 'cap' | 'cancelled';
   /** `cap`·`cancelled` 일 때 **빈틈없이** 어디까지 훑었나 (epoch ms) */
   stoppedAt: number | null;
   requests: number;
@@ -88,110 +74,111 @@ export interface WideResult<T = XLogPack> {
 export interface WideOptions<T> {
   /** 모두 모을 최대 건수. 설정 «트랜잭션 찾기 상한» (`clampWideMax`) */
   cap?: number;
-  /** 한꺼번에 보낼 요청 수 */
+  /** 한꺼번에 돌릴 조각 수 */
   parallel?: number;
+  /** 조각 폭 (테스트용) */
+  piece?: number;
   /**
-   * 받은 것을 담기 전에 바꾼다(화면 모양으로). **조각마다 바로 바꾼다** — 다 모은 뒤 바꾸면
+   * 받은 것을 담기 전에 바꾼다(화면 모양으로). **페이지마다 바로 바꾼다** — 다 모은 뒤 바꾸면
    * 수십만 건이 날것과 바꾼 것 두 벌로 한때 메모리에 앉는다.
    */
   map?: (x: XLogPack) => T;
   onProgress?: (p: WideProgress) => void;
-  /** 참이면 다음 묶음을 보내기 전에 멈춘다 */
+  /** 참이면 다음 페이지를 보내기 전에 멈춘다 */
   isCancelled?: () => boolean;
 }
 
-/** 한 조각 찾기 — 테스트에서 갈아 끼운다 */
-export type SearchFn = (filter: SearchXLogFilter, maxHint?: SearchMax) => Promise<SearchXLogResult>;
+/** 한 페이지 찾기 — 테스트에서 갈아 끼운다 (`searchXLogPage`) */
+export type PageFn = (
+  filter: SearchXLogFilter,
+  date: string,
+  objHashes: number[],
+  cursor: PastCursor | null,
+) => Promise<WidePage>;
 
-/** 기본 동시 요청 수 — Rust 조회용 연결 풀이 쉬는 연결을 넷까지 들고 있다(`MAX_IDLE_QUERY_CONNS`) */
-export const WIDE_PARALLEL = 4;
+/** 그날 찾을 오브젝트들 — `objHash` 가 0(전체)이면 그날 붙었던 것 전부 */
+export type ObjectsFn = (date: string) => Promise<number[]>;
 
-/**
- * @remarks 조각을 **몇 개씩 한꺼번에** 묻는다(묶음). 묶음이 다 오면 상한에 닿은 조각을 나눠 앞에 다시 넣고,
- * 늘 **이른 시각부터** 묻는다 — 그래야 상한·멈춤에서 «여기까지는 빈틈없이 찾았다» 를 말할 수 있다.
- */
 export async function searchAll<T = XLogPack>(
   filter: SearchXLogFilter,
-  search: SearchFn,
+  page: PageFn,
+  objectsOf: ObjectsFn,
   opts: WideOptions<T> = {},
 ): Promise<WideResult<T>> {
   const cap = opts.cap ?? WIDE_TOTAL_CAP;
   const parallel = Math.max(1, opts.parallel ?? WIDE_PARALLEL);
   const map = opts.map ?? ((x: XLogPack) => x as unknown as T);
   const total = Math.max(1, filter.etime - filter.stime);
+  const pieces = planPieces(filter.stime, filter.etime, opts.piece);
+  const finished = pieces.map(() => false);
 
-  /** 아직 안 훑은 조각들 — 이른 것부터 */
-  let pending: [number, number][] = [[filter.stime, filter.etime]];
-  /** 다 훑은 조각들 */
-  const done: [number, number][] = [];
   const seen = new Set<string>();
   const out: { t: number; v: T }[] = [];
-  let limit: SearchMax | undefined;
+  const hashesByDate = new Map<string, Promise<number[]>>();
+  let next = 0;
   let doneMs = 0;
   let requests = 0;
-  let dense = false;
+  let stop: 'cap' | 'cancelled' | null = null;
 
   const report = () =>
     opts.onProgress?.({ found: out.length, done: Math.min(1, doneMs / total), requests });
 
-  /** 처음부터 빈틈없이 훑은 데까지 */
-  const prefixEnd = (): number => {
-    let cur = filter.stime;
-    for (const [s, e] of [...done].sort((a, b) => a[0] - b[0])) {
-      if (s > cur) break;
-      if (e > cur) cur = e;
+  const hashesOf = (date: string): Promise<number[]> => {
+    if (filter.objHash !== 0) return Promise.resolve([filter.objHash]);
+    let p = hashesByDate.get(date);
+    if (!p) {
+      p = objectsOf(date);
+      hashesByDate.set(date, p);
     }
-    return cur;
+    return p;
   };
 
-  while (pending.length > 0) {
-    if (opts.isCancelled?.()) return finish('cancelled', prefixEnd());
-
-    const wave = pending.splice(0, parallel);
-    const results = await Promise.all(wave.map(([s, e]) => search({ ...filter, stime: s, etime: e }, limit)));
-    requests += wave.length;
-
-    const splits: [number, number][] = [];
-    results.forEach((res, i) => {
-      const [s, e] = wave[i];
-      limit = { max: res.max, known: res.max_known };
-      // 상한에 닿았으면 버리고 나눠 다시 — 닿은 결과는 «앞쪽 일부» 라 그대로 쓰면 구멍이 남는다
-      if (res.truncated) {
-        const pieces = splitRange(s, e, res.xlogs);
-        if (pieces.length > 0) {
-          splits.push(...pieces);
+  /** 조각을 하나씩 가져가 끝까지 받는다 */
+  const worker = async () => {
+    while (stop === null && next < pieces.length) {
+      const i = next++;
+      const pc = pieces[i];
+      const hashes = await hashesOf(pc.date);
+      let cursor: PastCursor | null = null;
+      for (;;) {
+        if (opts.isCancelled?.()) stop ??= 'cancelled';
+        if (stop !== null) return;
+        const res = await page({ ...filter, stime: pc.s, etime: pc.e }, pc.date, hashes, cursor);
+        requests++;
+        // 조각 경계의 같은 시각은 양쪽에서 다 온다 — txid 로 한 번만 담는다
+        for (const x of res.xlogs) {
+          if (seen.has(x.txid)) continue;
+          seen.add(x.txid);
+          out.push({ t: x.end_time, v: map(x) });
+        }
+        if (res.done) break;
+        if (out.length >= cap) {
+          stop ??= 'cap';
+          report();
           return;
         }
-        // 더 못 나누는 1초 조각 — 받은 만큼이라도 담고 «빽빽해서 다 못 찾았다» 고 말한다
-        dense = true;
+        cursor = res.cursor;
       }
-      // 조각 경계의 같은 시각은 양쪽에서 다 온다 — txid 로 한 번만 담는다
-      for (const x of res.xlogs) {
-        if (seen.has(x.txid)) continue;
-        seen.add(x.txid);
-        out.push({ t: x.end_time, v: map(x) });
-      }
-      done.push([s, e]);
-      doneMs += e - s;
-    });
-    // 나눈 조각은 원래 자리로 — 늘 이른 것부터 묻는다
-    pending = [...splits, ...pending].sort((a, b) => a[0] - b[0]);
-    report();
-    if (out.length >= cap) return finish('cap', prefixEnd());
-  }
-  return finish(dense ? 'dense' : 'none', null);
+      finished[i] = true;
+      doneMs += pc.e - pc.s;
+      report();
+      if (out.length >= cap) stop ??= 'cap';
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(parallel, Math.max(1, pieces.length)) }, worker));
+
+  if (stop === null) return finish('none', null);
+  // 처음부터 빈틈없이 끝낸 조각까지
+  let stoppedAt = filter.stime;
+  for (let i = 0; i < pieces.length && finished[i]; i++) stoppedAt = pieces[i].e;
+  return finish(stop, stoppedAt);
 
   function finish(cut: WideResult<T>['cut'], stoppedAt: number | null): WideResult<T> {
     // 멈췄으면 **빈틈없이 훑은 데까지만** 담는다 — 그 뒤의 것까지 두면 «어디까지 찾았나» 가 거짓이 된다
     const kept = stoppedAt === null ? out : out.filter(o => o.t <= stoppedAt);
     kept.sort((a, b) => a.t - b.t);
-    return {
-      xlogs: kept.map(o => o.v),
-      limit: limit ?? { max: 0, known: false },
-      cut,
-      stoppedAt,
-      requests,
-    };
+    return { xlogs: kept.map(o => o.v), cut, stoppedAt, requests };
   }
 }
 

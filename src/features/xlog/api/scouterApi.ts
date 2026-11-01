@@ -22,6 +22,8 @@ import type {
   TypeActiveServices,
 } from '../types/object';
 
+import type { PastCursor } from './pastXLog';
+
 export interface ConnectParams {
   host: string;
   port: number;
@@ -887,22 +889,14 @@ export interface KpiThresholdPrefs {
   enabled: boolean;
 }
 
-/** 서버가 한 번에 돌려주는 상한. **찾기 전에 물어본다** — 안 물어보고 단정하면 화면이 거짓말한다 */
-export interface SearchMax {
-  max: number;
-  /** 서버 설정에서 실제로 읽었는가. 아니면 기본값이다 */
-  known: boolean;
-}
-
-export async function getSearchMax(): Promise<SearchMax> {
-  return invoke<SearchMax>('get_search_max');
-}
-
-/** 넓은 구간 검색 조건. 빈 항목은 Rust 가 요청에서 뺀다(= 안 가린다) */
+/**
+ * 넓은 구간 찾기 조건. 빈 칸은 조건이 아니다. **대소문자를 가리지 않는다** — 그냥 치면 «포함»,
+ * `*` 를 직접 쓰면 그 자리만 아무 글자다 (Rust `WideMatcher`).
+ */
 export interface SearchXLogFilter {
   stime: number;
   etime: number;
-  /** 0 이면 안 가린다. **리스트가 아니다** — 서버가 하나만 받는다 */
+  /** 0 이면 전체 오브젝트 */
   objHash: number;
   service: string;
   ip: string;
@@ -915,28 +909,31 @@ export interface SearchXLogFilter {
   text5: string;
 }
 
-export interface SearchXLogResult {
+/** 넓은 구간 찾기의 한 페이지 (Rust `WidePage`) */
+export interface WidePage {
+  /** 조건에 걸린 것만 */
   xlogs: XLogPack[];
-  /** 서버 상한 */
-  max: number;
-  /** 상한을 서버 설정에서 실제로 읽었는가. 아니면 `max` 는 추측이다 */
-  max_known: boolean;
-  /** 상한에 닿았다 — **더 있었을 수 있다** */
-  truncated: boolean;
+  /** 다음 페이지 자리 */
+  cursor: PastCursor;
+  /** 이 조각을 끝까지 받았다 */
+  done: boolean;
+  /** 이 페이지에서 콜렉터가 준 건수 (거르기 전) */
+  scanned: number;
 }
 
 /**
- * 넓은 구간에서 조건으로 XLog 찾기.
+ * 넓은 구간 찾기 — 조각 하나의 한 페이지.
  *
- * **`truncated` 를 반드시 화면에 보여야 한다.** 서버는 상한에서 그냥 끊고
- * «잘렸다» 는 신호를 아무것도 주지 않는다 (F-54).
+ * 콜렉터에 구간을 묻고 조건은 Rust 가 대소문자 없이 맞춘다. 콜렉터 검색(SEARCH_XLOG_LIST)은
+ * 대소문자를 가려 `order` 로 `/Order/…` 를 못 찾았다. 조각은 **하루 안**이어야 한다(날짜 디렉토리, F-18).
  */
-export async function searchXLogList(
+export async function searchXLogPage(
   filter: SearchXLogFilter,
-  /** 이미 아는 상한. 주면 서버 설정을 다시 읽지 않는다 (조각을 이어 찾을 때) */
-  maxHint?: SearchMax,
-): Promise<SearchXLogResult> {
-  return invoke<SearchXLogResult>('search_xlog_list', { filter, maxHint: maxHint ?? null });
+  date: string,
+  objHashes: number[],
+  cursor: PastCursor | null,
+): Promise<WidePage> {
+  return invoke<WidePage>('search_xlog_page', { filter, date, objHashes, cursor });
 }
 
 export async function getConfig(): Promise<AppConfig> {

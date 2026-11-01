@@ -339,7 +339,7 @@ export function ObjectInspector({ objHash, objName, kind, onClose }: ObjectInspe
           {!loading && !error && kind === 'sockets' && (
             <SocketTable
               rows={(sockets ?? []).filter(
-                s => !q || s.host.includes(q) || String(s.port).includes(q),
+                s => !q || s.host.toLowerCase().includes(q) || String(s.port).includes(q),
               )}
               serviceName={h => getCached('service', h)}
               textVersion={textVersion}
