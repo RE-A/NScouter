@@ -29,9 +29,10 @@ vi.mock('../xlog/api/scouterApi', () => ({
   clearCache: () => Promise.reject(new Error('not used')),
   // AI 연결 칸이 열 때 상태를 한 번 묻는다
   mcpSync: () =>
-    Promise.resolve({ enabled: false, running: false, port: 7100, token: '', bind_values: false, error: null }),
+    Promise.resolve({ enabled: false, running: false, port: 7165, token: '', bind_values: false, error: null, limits: {} }),
   mcpConfigure: () => Promise.reject(new Error('not used')),
   mcpRegenerateToken: () => Promise.reject(new Error('not used')),
+  mcpSetLimits: () => Promise.reject(new Error('not used')),
 }));
 
 function theme(): string | null {

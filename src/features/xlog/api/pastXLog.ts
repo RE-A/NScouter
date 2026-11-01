@@ -27,8 +27,15 @@ interface PastXLogPage {
 /** 한 번에 받아올 페이지 크기. 크면 왕복이 줄지만 첫 응답이 늦고 한 덩어리가 커진다. */
 export const PAGE_COUNT = 500;
 
-/** 한꺼번에 묻는 조각 수 (위 머리말의 실측) */
+/** 한꺼번에 묻는 조각 수의 기본값 (위 머리말의 실측). 설정 «콜렉터 요청» 에서 바꾼다 */
 export const PAST_PARALLEL = 8;
+
+let pastParallel = PAST_PARALLEL;
+
+/** 설정에서 온 조각 수를 건다 (`useViewOptions`) */
+export function setPastParallel(n: number | undefined): void {
+  pastParallel = Number.isFinite(n) && (n as number) >= 1 ? Math.min(16, Math.round(n as number)) : PAST_PARALLEL;
+}
 
 /** 조각을 이보다 잘게 나누지 않는다 — 짧은 구간은 한 번에 끝난다 */
 export const MIN_SLICE_MS = 60_000;
@@ -36,7 +43,7 @@ export const MIN_SLICE_MS = 60_000;
 /** 구간을 고르게 나눈 조각들 — 시간 순, 빈틈·겹침 없이 */
 export function planSlices(stime: number, etime: number): [number, number][] {
   const span = Math.max(0, etime - stime);
-  const n = Math.max(1, Math.min(PAST_PARALLEL, Math.ceil(span / MIN_SLICE_MS)));
+  const n = Math.max(1, Math.min(pastParallel, Math.ceil(span / MIN_SLICE_MS)));
   return Array.from({ length: n }, (_, i): [number, number] => [
     stime + Math.floor((span * i) / n),
     i === n - 1 ? etime : stime + Math.floor((span * (i + 1)) / n),

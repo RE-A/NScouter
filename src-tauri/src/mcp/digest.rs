@@ -21,8 +21,9 @@ const DAY_MS: i64 = 86_400_000;
 
 /// 목록 조회의 기본 구간(분)
 pub const DEFAULT_MINUTES: u32 = 30;
-/// 한 번에 훑을 수 있는 가장 긴 구간(분). 이보다 넓으면 콜렉터를 오래 붙잡는다
-pub const MAX_MINUTES: u32 = 360;
+/// 한 번에 훑을 수 있는 가장 긴 구간(분)의 기본값. 설정 `mcp.limits.max_minutes` 로 바꾼다 —
+/// 넓으면 콜렉터를 오래 붙잡는다
+pub const DEFAULT_MAX_MINUTES: u32 = 360;
 
 /// 훑을 구간 (epoch ms, `[stime, etime)`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,13 +44,14 @@ pub struct Window {
 pub fn resolve_window(
     now_ms: i64,
     tz_offset_ms: i64,
+    max_minutes: u32,
     minutes: Option<u32>,
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<Window, String> {
-    let minutes = minutes.unwrap_or(DEFAULT_MINUTES);
-    if minutes == 0 || minutes > MAX_MINUTES {
-        return Err(format!("minutes 는 1~{MAX_MINUTES} 사이여야 합니다 (받은 값 {minutes})"));
+    let minutes = minutes.unwrap_or(DEFAULT_MINUTES.min(max_minutes));
+    if minutes == 0 || minutes > max_minutes {
+        return Err(format!("minutes 는 1~{max_minutes} 사이여야 합니다 (받은 값 {minutes})"));
     }
     let span = minutes as i64 * 60_000;
     let from = from.map(str::trim).filter(|s| !s.is_empty());
@@ -71,8 +73,8 @@ pub fn resolve_window(
     if etime <= stime {
         return Err("구간의 끝이 시작보다 앞섭니다 (from < to 여야 하고, from 은 지금보다 앞이어야 합니다)".into());
     }
-    if etime - stime > MAX_MINUTES as i64 * 60_000 {
-        return Err(format!("구간은 최대 {}시간입니다. 좁혀서 다시 물어 주세요", MAX_MINUTES / 60));
+    if etime - stime > max_minutes as i64 * 60_000 {
+        return Err(format!("구간은 최대 {max_minutes}분입니다(앱 설정). 좁혀서 다시 물어 주세요"));
     }
     Ok(Window { stime, etime })
 }
@@ -206,9 +208,7 @@ pub fn parse_ref(r: &str) -> Result<(i64, String), String> {
 
 // ─── 목록 ────────────────────────────────────────────────────
 
-/// 목록에 돌려줄 수 있는 가장 많은 건수
-pub const MAX_LIMIT: usize = 500;
-/// 기본 건수
+/// 기본 건수 (설정 `mcp.limits.list_max` 를 넘지 않게 자른다)
 pub const DEFAULT_LIMIT: usize = 50;
 
 /// 무엇으로 줄 세우나
@@ -539,6 +539,8 @@ pub struct ScanFacts {
     pub servers: usize,
     /// 프로파일 본문 검색을 했으면 그 사실들
     pub profile: Option<ProfileFacts>,
+    /// 상세를 한 번에 볼 수 있는 수 (설정) — note 에 적는다
+    pub detail_max: usize,
 }
 
 /// 프로파일 본문 검색
@@ -546,18 +548,17 @@ pub struct ProfileFacts {
     pub needle: String,
     /// XLog 조건에 걸린 건수 (프로파일을 열어 볼 후보)
     pub candidates: u64,
-    /// 그중 실제로 열어 본 건수 — 캐시에 있는 것 전부 + 새로 물은 것(상한 `PROFILE_FETCH_MAX`)
+    /// 그중 실제로 열어 본 건수 — 캐시에 있는 것 전부 + 새로 물은 것(상한 `fetch_max`)
     pub searched: usize,
     /// 프로파일을 못 받은 건수 — 조용히 빼면 «안 걸렸다» 와 구별되지 않는다
     pub failed: usize,
+    /// 새로 물을 수 있는 최대 건수 · 시간(초) — note 에 적는다
+    pub fetch_max: usize,
+    pub budget_sec: u32,
 }
 
-/// 프로파일 본문 검색에서 **콜렉터에 새로 물어** 열어 볼 수의 상한. 건당 요청 하나라 수가 곧 시간이다
-/// (가까운 콜렉터 약 2.5ms/건, 왕복 40ms 면 약 8.5ms/건 — `SEARCH_WORKERS` 주석).
-/// 로컬 캐시에 있는 프로파일은 이 수에 안 든다 — 묻지 않고 바로 연다
-pub const PROFILE_FETCH_MAX: usize = 2_000;
-
-/// 프로파일 본문 검색의 후보로 남겨 둘 XLog 수 (캐시에 있는 것 + 새로 물을 것)
+/// 프로파일 본문 검색의 후보로 남겨 둘 XLog 수의 바닥 (캐시에 있는 것 + 새로 물을 것).
+/// 새로 물을 상한(설정 `mcp.limits.profile_fetch_max`)이 이보다 크면 그 값을 쓴다
 pub const PROFILE_CANDIDATES: usize = 20_000;
 
 /// 프로파일에서 걸린 자리 — 표에 실을 한 줄
@@ -639,10 +640,12 @@ pub fn search_result_json(
         }
         if p.candidates as usize > p.searched {
             note.push_str(&format!(
-                "프로파일 검색: XLog 조건에 걸린 {}건 중 {}건만 열어 봤습니다(로컬 캐시에 있는 것 전부 + 없는 것은 {} 순으로 {PROFILE_FETCH_MAX}건·15초까지). 조건을 좁히면 빠짐없이 찾습니다. ",
+                "프로파일 검색: XLog 조건에 걸린 {}건 중 {}건만 열어 봤습니다(로컬 캐시에 있는 것 전부 + 없는 것은 {} 순으로 {}건·{}초까지). 조건을 좁히면 빠짐없이 찾습니다. ",
                 p.candidates,
                 p.searched,
-                res.sort.name()
+                res.sort.name(),
+                p.fetch_max,
+                p.budget_sec
             ));
         }
         if p.failed > 0 {
@@ -654,10 +657,11 @@ pub fn search_result_json(
             note.push(' ');
         }
         note.push_str(&format!(
-            "걸린 {}건 중 {}건만 실었습니다({} 순). 상세는 get_transaction_details 에 ref 를 최대 5개씩 넘기세요.",
+            "걸린 {}건 중 {}건만 실었습니다({} 순). 상세는 get_transaction_details 에 ref 를 최대 {}개씩 넘기세요.",
             res.matched,
             res.rows.len(),
-            res.sort.name()
+            res.sort.name(),
+            facts.detail_max
         ));
     }
 
@@ -704,8 +708,6 @@ pub fn search_result_json(
 
 // ─── 상세 ────────────────────────────────────────────────────
 
-/// 한 번에 볼 수 있는 트랜잭션 수
-pub const MAX_DETAIL_REFS: usize = 5;
 
 /// 트랜잭션 하나에 쓸 글자 예산(바이트). 넘으면 흐름·글 길이를 줄여 다시 만든다
 pub const DETAIL_BUDGET_BYTES: usize = 12_000;
@@ -1089,20 +1091,20 @@ mod tests {
     #[test]
     fn 구간은_기본이_최근_30분이고_6시간을_넘지_못한다() {
         let now = parse_local_time("2026-11-01 13:00", KST).unwrap();
-        let w = resolve_window(now, KST, None, None, None).unwrap();
+        let w = resolve_window(now, KST, DEFAULT_MAX_MINUTES, None, None, None).unwrap();
         assert_eq!(w, Window { stime: now - 30 * 60_000, etime: now });
 
-        assert!(resolve_window(now, KST, Some(361), None, None).is_err());
-        assert!(resolve_window(now, KST, None, Some("2026-11-01 01:00"), Some("2026-11-01 08:00")).is_err());
+        assert!(resolve_window(now, KST, DEFAULT_MAX_MINUTES, Some(361), None, None).is_err());
+        assert!(resolve_window(now, KST, DEFAULT_MAX_MINUTES, None, Some("2026-11-01 01:00"), Some("2026-11-01 08:00")).is_err());
 
         // from 만 주면 그때부터 minutes, 지금을 넘지 않는다
-        let w = resolve_window(now, KST, Some(60), Some("2026-11-01 12:30"), None).unwrap();
+        let w = resolve_window(now, KST, DEFAULT_MAX_MINUTES, Some(60), Some("2026-11-01 12:30"), None).unwrap();
         assert_eq!(w.etime, now);
         // to 만 주면 그때까지
-        let w = resolve_window(now, KST, Some(10), None, Some("2026-11-01 09:00")).unwrap();
+        let w = resolve_window(now, KST, DEFAULT_MAX_MINUTES, Some(10), None, Some("2026-11-01 09:00")).unwrap();
         assert_eq!(w.etime - w.stime, 10 * 60_000);
         // 미래에서 시작하면 거른다
-        assert!(resolve_window(now, KST, None, Some("2026-11-01 14:00"), None).is_err());
+        assert!(resolve_window(now, KST, DEFAULT_MAX_MINUTES, None, Some("2026-11-01 14:00"), None).is_err());
     }
 
     #[test]
@@ -1290,6 +1292,7 @@ mod tests {
             unscanned: None,
             servers: 2,
             profile: None,
+            detail_max: 5,
         };
         let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &texts(), &HashMap::new());
         assert_eq!(v["columns"][0], "ref");
@@ -1314,7 +1317,8 @@ mod tests {
             scanned: 9000,
             unscanned: None,
             servers: 1,
-            profile: Some(ProfileFacts { needle: "ord-77".into(), candidates: 5000, searched: 2000, failed: 3 }),
+            detail_max: 5,
+            profile: Some(ProfileFacts { needle: "ord-77".into(), candidates: 5000, searched: 2000, failed: 3, fetch_max: 2000, budget_sec: 15 }),
         };
         let mut hits = HashMap::new();
         hits.insert(42, ProfileHitView { count: 3, kind: "sql-param".into(), snippet: "ORD-77, 1".into() });

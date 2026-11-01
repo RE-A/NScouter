@@ -2,7 +2,9 @@
 
 import { clampWideMax, WIDE_MAX_CHOICES, WIDE_TOTAL_CAP } from '../xlog/hooks/wideSearchAll';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clearCache, getCacheInfo, getConfig, saveConfig, type AppConfig, type CacheInfo } from '../xlog/api/scouterApi';
+import { clearCache, getCacheInfo, getConfig, saveConfig, type AppConfig, type CacheInfo, type PerfPrefs } from '../xlog/api/scouterApi';
+import { DEFAULT_PERF } from '../xlog/api/perfDefaults';
+import { NumberField } from './NumberField';
 import {
   applyConfigToViewOptions,
   clampFontScale,
@@ -131,6 +133,9 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   /** 로컬 캐시가 지금 쓰는 양 */
   const [cacheInfo, setCacheInfo] = useState<CacheInfo | null>(null);
   const [clearing, setClearing] = useState(false);
+  /** 콜렉터 동시 요청·페이지 크기·미리 받기 */
+  const [perf, setPerf] = useState<PerfPrefs>(DEFAULT_PERF);
+  const setPerfField = <K extends keyof PerfPrefs>(k: K, v: PerfPrefs[K]) => setPerf(p => ({ ...p, [k]: v }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -153,6 +158,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
       setWideMax(clampWideMax(cfg.wide_search_max ?? WIDE_TOTAL_CAP));
       setCacheMb(cfg.cache_max_mb ?? DEFAULT_CACHE_MB);
+      setPerf({ ...DEFAULT_PERF, ...cfg.perf });
     }).catch(() => {});
     getCacheInfo().then(setCacheInfo).catch(() => {});
     // 미리보기는 지금 붙어 있을 때만 된다. 안 붙어 있으면 조용히 비워 둔다.
@@ -181,6 +187,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         xlog_buffer_max: bufferMax,
         wide_search_max: wideMax,
         cache_max_mb: cacheMb,
+        perf,
       };
       await saveConfig(next);
       setConfig(next);
@@ -197,7 +204,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     }
     // **여기 빠뜨리면 조용히 옛 값이 저장된다.** `theme` 이 빠져 있어서, 테마를 고르고
     // 저장하면 처음 값(dark)이 그대로 쓰였다 — 화면에서는 「바꿔도 안 먹는다」로 보인다.
-  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, wideMax, cacheMb, theme, groupRule, cleanupMin]);
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, wideMax, cacheMb, perf, theme, groupRule, cleanupMin]);
 
   return (
     <Dialog
@@ -459,6 +466,38 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
           >
             {clearing ? t('비우는 중…') : t('비우기')}
           </Button>
+        </div>
+      </div>
+
+      {/* 콜렉터 요청 — **기본값은 왕복 500ms 를 기준으로 잰 값이다** (Rust `PerfPrefs` 머리말) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('콜렉터 요청')}</div>
+        <div style={sectionDescStyle}>
+          {t('콜렉터는 연결 하나에 요청 하나만 받아, 멀수록 요청마다 시간이 듭니다. 그래서 여러 개를 동시에 묻습니다. 기본값은 왕복 500ms 콜렉터를 기준으로 잰 값입니다 — 콜렉터가 가까우면 줄여도 되고, 콜렉터의 동시 연결이 빠듯하면 줄이세요.')}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+          <NumberField label={t('과거 조회 — 동시 조각')} value={perf.past_parallel} min={1} max={16} onChange={v => setPerfField('past_parallel', v)}
+            hint={t('과거 구간을 몇 조각으로 나눠 동시에 받을지')} />
+          <NumberField label={t('트랜잭션 찾기·AI — 동시 조각')} value={perf.scan_parallel} min={1} max={16} onChange={v => setPerfField('scan_parallel', v)}
+            hint={t('넓은 구간 찾기와 AI 목록 조회가 구간을 몇 조각씩 동시에 받을지')} />
+          <NumberField label={t('프로파일 — 동시 받기')} value={perf.profile_workers} min={1} max={64} onChange={v => setPerfField('profile_workers', v)}
+            hint={t('프로파일 검색(화면·AI)이 프로파일을 몇 개씩 동시에 받을지')} />
+          <NumberField label={t('이름 사전 — 동시 조회')} value={perf.text_workers} min={1} max={16} onChange={v => setPerfField('text_workers', v)}
+            hint={t('SQL 문장·서비스 이름을 100개 묶음으로 몇 개씩 동시에 물을지')} />
+          <NumberField label={t('구간 페이지 크기')} value={perf.page_rows} min={1000} max={50000} unit={t('건')} onChange={v => setPerfField('page_rows', v)}
+            hint={t('트랜잭션 찾기·응답시간 분포·AI 목록 조회가 한 번에 받는 건수. 클수록 요청이 줄고 메모리를 조금 더 씁니다')} />
+          <label style={radioRowStyle}>
+            <input type="checkbox" checked={perf.prefetch_enabled} onChange={e => setPerfField('prefetch_enabled', e.target.checked)} />
+            <span style={{ color: T.textMuted }}>{t('문제 트랜잭션의 프로파일 미리 받기')}</span>
+          </label>
+          <NumberField label={t('미리 받기 — 응답시간 이상')} value={perf.prefetch_min_elapsed_ms} min={500} max={60000} unit="ms"
+            disabled={!perf.prefetch_enabled} onChange={v => setPerfField('prefetch_min_elapsed_ms', v)}
+            hint={t('실시간으로 보는 중 이 응답시간 이상이거나 에러인 트랜잭션의 프로파일을 뒤에서 받아 둡니다')} />
+          <NumberField label={t('미리 받기 — 초당 최대')} value={perf.prefetch_per_sec} min={1} max={100} unit={t('건')}
+            disabled={!perf.prefetch_enabled} onChange={v => setPerfField('prefetch_per_sec', v)} />
+          <div>
+            <Button size="xs" onClick={() => setPerf(DEFAULT_PERF)}>{t('기본값으로')}</Button>
+          </div>
         </div>
       </div>
 

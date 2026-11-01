@@ -296,7 +296,7 @@ export default function App({ windowLabel }: {
   // **여기서 한 번은 불러야 한다.** 표시 설정(언어·글자 크기)은 이걸 처음 쓰는
   // 컴포넌트가 마운트될 때 config.json 을 읽는데, 그게 상세 패널이라
   // 앱을 켜고 아무것도 안 열면 저장해 둔 설정이 적용되지 않았다.
-  const { groupRule, autoRemoveInactiveMin, wideSearchMax } = useViewOptions();
+  const { groupRule, autoRemoveInactiveMin, wideSearchMax, scanParallel } = useViewOptions();
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -1386,6 +1386,7 @@ export default function App({ windowLabel }: {
       };
       searchAll(v, searchXLogPage, objectsOf, {
         cap: wideSearchMax,
+        parallel: scanParallel,
         // 조각마다 바로 화면 모양으로 — 수십만 건을 날것과 바꾼 것 두 벌로 들지 않는다
         map: xlogPackToSXLog,
         onProgress: setWideProgress,
@@ -1408,7 +1409,7 @@ export default function App({ windowLabel }: {
           setWideProgress(null);
         });
     },
-    [resetSearch, wideSearchMax, agentMap],
+    [resetSearch, wideSearchMax, scanParallel, agentMap],
   );
 
   const [showSettings, setShowSettings] = useState(false);

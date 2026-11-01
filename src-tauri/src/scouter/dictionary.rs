@@ -115,15 +115,14 @@ pub fn fetch_texts(
 ///
 /// 요청 하나가 소켓 하나라(F-1) 왕복이 크면 묶음 수 × 왕복 둘이 그대로 쌓인다 — 왕복 500ms 에서
 /// SQL 3,000개(30묶음)를 순서대로 물으면 30초다. 프로파일 검색을 처음 돌릴 때 이만큼을 푼다.
-const TEXT_WORKERS: usize = 8;
-
+/// 동시 수는 설정 `perf.text_workers` (기본 8).
 fn fetch_chunks_parallel(
     conn: &mut ScouterConnection,
     cache: &mut TextCache,
     type_key: &str,
     chunks: &[&[i32]],
 ) -> io::Result<()> {
-    let workers = TEXT_WORKERS.min(chunks.len());
+    let workers = (crate::tuning::perf().text_workers as usize).clamp(1, chunks.len());
     let siblings: Vec<io::Result<ScouterConnection>> = (1..workers).map(|_| conn.sibling()).collect();
     let results: Vec<io::Result<TextCache>> = std::thread::scope(|sc| {
         let mine: Vec<&[i32]> = chunks.iter().step_by(workers).copied().collect();

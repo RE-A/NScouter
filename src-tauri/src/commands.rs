@@ -808,14 +808,14 @@ pub async fn load_past_xlog(
     Ok(PastXLogPage { xlogs, cursor: next })
 }
 
-/// 분포를 셀 때 한 번에 받아 오는 페이지 크기.
+/// 분포를 셀 때 한 번에 받아 오는 페이지 크기 — 설정 `perf.page_rows` (기본 20,000, 근거는 `PerfPrefs`).
 ///
 /// 화면이 쓰는 500(`pastXLog.PAGE_COUNT`)보다 크게 잡는다. 저쪽은 페이지마다 점을
 /// 그려 줘야 해서 첫 응답이 빠른 편이 낫지만, 여기서는 **다 세기 전에는 보여줄 것이
-/// 없다** — 왕복 수를 줄이는 편이 낫다. 연결당 명령이 하나라(F-1) 요청 하나가 곧
-/// TCP 연결 하나(왕복 둘 이상)다. 왕복 500ms 실측(`probe_scan_parallel_under_latency`, 9분 1.2만 건):
-/// 페이지 500 이 18.3초, 5,000 이 1.6초, **20,000 이 0.9초** — 그래서 20,000 이다.
-const DISTRIBUTION_PAGE_COUNT: i32 = 20_000;
+/// 없다** — 왕복 수를 줄이는 편이 낫다.
+fn distribution_page_count() -> i32 {
+    crate::tuning::perf().page_rows as i32
+}
 
 /// 분포를 세는 데 쓰는 트랜잭션 수의 상한.
 ///
@@ -860,7 +860,7 @@ pub async fn get_xlog_distribution(
 
         for _ in 0..DISTRIBUTION_MAX_PAGES {
             // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
-            let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, day_start, day_end, DISTRIBUTION_PAGE_COUNT, &cursor, seal)
+            let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, day_start, day_end, distribution_page_count(), &cursor, seal)
                 .map_err(|e| format!("분포 조회: {e}"))?;
             for x in &page.rows {
                 if seen.insert(x.txid) {
@@ -903,9 +903,11 @@ pub struct WidePage {
     pub scanned: usize,
 }
 
-/// 넓은 구간 찾기 한 페이지에서 받는 건수. MCP 목록 조회·분포와 같은 이유로 크게 잡는다 —
+/// 넓은 구간 찾기 한 페이지에서 받는 건수 — 설정 `perf.page_rows`. MCP 목록 조회·분포와 같은 값이다 —
 /// 거르기 전 건수라 화면으로 가는 양은 조건에 걸린 것뿐이다
-const WIDE_PAGE_COUNT: i32 = 20_000;
+fn wide_page_count() -> i32 {
+    crate::tuning::perf().page_rows as i32
+}
 
 /// 넓은 구간에서 조건으로 XLog 찾기 — **한 조각의 한 페이지.**
 ///
@@ -937,7 +939,7 @@ pub async fn search_xlog_page(
     let mut conn = state.acquire_query_conn().await?;
     // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
     // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
-    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, filter.stime, filter.etime, WIDE_PAGE_COUNT, &cur, seal)
+    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, filter.stime, filter.etime, wide_page_count(), &cur, seal)
         .map_err(|e| format!("트랜잭션 찾기: {e}"))?;
     let (rows, next, done) = (page.rows, page.next, page.done);
     let scanned = rows.len();
@@ -1415,7 +1417,7 @@ pub async fn search_profiles(
     let fetch_targets = targets.clone();
     let cache = state.cache_handle().await;
     let fetched = tokio::task::spawn_blocking(move || {
-        fetch_profiles_parallel(&host, port, session, &fetch_targets, SEARCH_WORKERS, cache.as_deref())
+        fetch_profiles_parallel(&host, port, session, &fetch_targets, search_workers(), cache.as_deref())
     })
     .await
     .map_err(|e| format!("검색 작업 실패: {e}"))?;
@@ -1495,19 +1497,13 @@ pub async fn search_profiles(
     Ok(SearchBatch { hits, failed })
 }
 
-/// 검색이 동시에 여는 커넥션 수.
+/// 프로파일 검색이 동시에 여는 커넥션 수 — 설정 `perf.profile_workers` (기본 32).
 ///
-/// 요청마다 소켓을 새로 여는 구조(F-1)라 **동시에 보내면 그만큼 빨라진다.**
-/// 실측(`probe_search_workers_under_latency`, 프로파일 200건):
-///
-/// | 왕복 | 워커 8 | 16 | 32 | 64 |
-/// |---|---|---|---|---|
-/// | 0.2ms (로컬) | 1.0ms/건 | 0.8 | — | — |
-/// | 40ms | 8.5ms/건 | — | 2.5 | — |
-/// | **500ms** | 94ms/건 (18.8초) | 49 (9.8초) | **26 (5.3초)** | 20 (4.0초) |
-///
-/// 운영 콜렉터를 왕복 500ms 로 보고 32 로 둔다. 64 는 조금 더 빠르지만 연결이 두 배다.
-pub const SEARCH_WORKERS: usize = 32;
+/// 요청마다 소켓을 새로 여는 구조(F-1)라 **동시에 보내면 그만큼 빨라진다.** 왕복별 실측과 기본값의
+/// 근거는 `config::PerfPrefs` 에 있다.
+pub fn search_workers() -> usize {
+    crate::tuning::perf().profile_workers as usize
+}
 
 /// 프로파일을 워커 여러 개로 나눠 받는다. **결과는 `targets` 순서 그대로**다.
 ///
@@ -2346,6 +2342,8 @@ pub async fn save_config(
     new_config.save(&path)?;
     let cache_changed = cfg.cache_max_mb != new_config.cache_max_mb;
     *cfg = new_config;
+    // 동시 요청·페이지 크기 같은 조정값은 바로 쓴다 (`tuning`)
+    crate::tuning::apply(&cfg);
     drop(cfg);
     log::info!("config.json 저장 완료: {}", path.display());
     // 캐시 상한을 바꿨으면 바로 적용한다 (줄였으면 지금 지운다)

@@ -9,6 +9,7 @@ pub mod object_history_store;
 pub mod profile_store;
 pub mod scouter;
 pub mod state;
+pub mod tuning;
 
 use std::path::PathBuf;
 
@@ -166,6 +167,7 @@ pub fn run() {
             clear_cache,
             mcp::mcp_sync,
             mcp::mcp_configure,
+            mcp::mcp_set_limits,
             mcp::mcp_regenerate_token,
         ])
         .run(tauri::generate_context!())

@@ -37,18 +37,21 @@ use crate::scouter::protocol::*;
 use crate::scouter::value::ScouterValue;
 use crate::state::AppState;
 
-/// 한 번에 받는 페이지 크기. 분포 조회(`DISTRIBUTION_PAGE_COUNT`)와 같은 이유로 크게 잡는다 (왕복 500ms 실측 근거도 거기)
-const PAGE_COUNT: i32 = 20_000;
-/// 한 번의 목록 조회에서 훑을 트랜잭션 수의 상한. 넘으면 `truncated` 로 말한다
-const MAX_SCAN_ROWS: u64 = 200_000;
+// 조정값은 설정에서 온다 (`tuning`):
+//   · 페이지 크기 `perf.page_rows` (기본 20,000) — 근거는 `config::PerfPrefs`
+//   · 조각 동시 수 `perf.scan_parallel` (기본 4) — 화면의 «트랜잭션 찾기» 와 같은 값
+//   · 훑을 트랜잭션 상한 `mcp.limits.scan_max_rows` (기본 20만) — 넘으면 `truncated` 로 말한다
+//   · 프로파일 본문 검색 시간 `mcp.limits.profile_budget_sec` (기본 15초) — 목록 훑기·사전 풀기를 더해
+//     한 번의 호출이 20초 안팎이 되게(왕복 500ms 실측). 넘으면 그때까지 연 것만으로 답한다
+
 /// 커서가 안 밀릴 때를 대비한 빗장
 const MAX_PAGES: u32 = 200;
-/// 프로파일 본문 검색에 쓸 시간. 넘으면 그때까지 연 것만으로 답한다 — 다 못 본 건수는 note 로 알린다.
-/// 목록 훑기·사전 풀기를 더해 한 번의 호출이 20초 안팎이 되게 15초로 둔다(왕복 500ms 실측)
-const PROFILE_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
-/// 그 시간을 재는 묶음 크기. 묶음 사이에서만 시간을 보므로 크면 그만큼 넘친다 —
-/// 256 이면 왕복 500ms 에서 한 묶음이 7초라 27초까지 갔다(실측). 워커(`SEARCH_WORKERS`)의 두 배
-const PROFILE_CHUNK: usize = 64;
+/// 프로파일 본문 검색에서 시간을 재는 묶음 크기 — 프로파일 동시 받기 수의 두 배.
+/// 묶음 사이에서만 시간을 보므로 크면 그만큼 넘친다 — 256 이면 왕복 500ms 에서 한 묶음이 7초라
+/// 15초 상한이 27초까지 갔다(실측)
+fn profile_chunk() -> usize {
+    crate::commands::search_workers() * 2
+}
 
 /// list_servers 가 돌려줄 최대 수
 const MAX_SERVERS: usize = 500;
@@ -87,7 +90,7 @@ fn many(v: Option<OneOrMany>) -> Vec<String> {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SearchArgs {
-    /// 지금부터 몇 분 전까지 볼지. 기본 30, 최대 360. from/to 를 주면 구간 길이로 쓴다
+    /// 지금부터 몇 분 전까지 볼지. 기본 30, 상한은 앱 설정(기본 360). from/to 를 주면 구간 길이로 쓴다
     pub minutes: Option<u32>,
     /// 구간 시작. 이 PC 시간대의 `YYYY-MM-DD HH:MM[:SS]`
     pub from: Option<String>,
@@ -126,17 +129,17 @@ pub struct SearchArgs {
     /// 앱에서 이름 붙여 담아 둔 조회 조건의 이름. 위 조건들과 함께 걸린다
     pub saved_filter: Option<String>,
     /// 프로파일 본문(SQL 문장·바인딩 값·API 주소·메서드·에러·로그 메시지)에 이 글자가 든 것만.
-    /// 트랜잭션마다 프로파일을 열어 보므로 느리다 — 위 조건에 걸린 것 중 sort 순으로 최대 2,000건만 열어 본다
+    /// 트랜잭션마다 프로파일을 열어 보므로 느리다 — 위 조건에 걸린 것 중 sort 순으로 앱 설정의 건수·시간(기본 2,000건·15초)까지만 열어 본다
     pub profile_contains: Option<String>,
     /// `slowest`(기본, 느린 것부터) 또는 `latest`(최근 것부터)
     pub sort: Option<String>,
-    /// 돌려줄 최대 건수. 기본 50, 최대 500
+    /// 돌려줄 최대 건수. 기본 50, 상한은 앱 설정(기본 500)
     pub limit: Option<u32>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DetailArgs {
-    /// search_transactions 가 준 `ref`(`txid:yyyymmdd`). 한 번에 최대 5개
+    /// search_transactions 가 준 `ref`(`txid:yyyymmdd`). 한 번에 앱 설정의 수까지(기본 5)
     pub refs: Vec<String>,
 }
 
@@ -172,15 +175,17 @@ impl NScouterMcp {
 
     #[tool(
         name = "search_transactions",
-        description = "구간 안의 트랜잭션(XLog)을 훑어 조건에 맞는 것을 짧은 행으로 돌려준다 — 프로파일은 싣지 않는다. 기본은 최근 30분·느린 순 50건, 최대 6시간·500건. 조건은 앱 XLog 화면과 같다: 서버·서비스 묶음, 서비스/IP 포함·제외(여러 개면 포함은 OR), 에러만, 응답시간 이상/미만, 로그인·설명·text1~5, 담아 둔 조건(saved_filter). profile_contains 를 주면 프로파일 본문(SQL·바인딩 값·API·에러·메시지)까지 찾고 걸린 자리를 profile_hit 열에 싣는다(느리다 — 다른 조건으로 먼저 좁힐 것). 행마다 `ref` 가 있으니 자세히 볼 것만 골라 get_transaction_details 에 넘긴다. top_services 는 걸린 것을 서비스별로 센 요약이다."
+        description = "구간 안의 트랜잭션(XLog)을 훑어 조건에 맞는 것을 짧은 행으로 돌려준다 — 프로파일은 싣지 않는다. 기본은 최근 30분·느린 순 50건, 상한은 앱 설정(기본 6시간·500건). 조건은 앱 XLog 화면과 같다: 서버·서비스 묶음, 서비스/IP 포함·제외(여러 개면 포함은 OR), 에러만, 응답시간 이상/미만, 로그인·설명·text1~5, 담아 둔 조건(saved_filter). profile_contains 를 주면 프로파일 본문(SQL·바인딩 값·API·에러·메시지)까지 찾고 걸린 자리를 profile_hit 열에 싣는다(느리다 — 다른 조건으로 먼저 좁힐 것). 행마다 `ref` 가 있으니 자세히 볼 것만 골라 get_transaction_details 에 넘긴다. top_services 는 걸린 것을 서비스별로 센 요약이다."
     )]
     async fn search_transactions(&self, Parameters(a): Parameters<SearchArgs>) -> Result<String, String> {
         let state = self.app.state::<AppState>();
         let tz = self.app.state::<McpState>().tz_offset_ms();
         let offset = state.clock_offset_ms.lock().await.unwrap_or(0);
-        let window = resolve_window(local_now_ms() + offset, tz, a.minutes, a.from.as_deref(), a.to.as_deref())?;
+        let lim = crate::tuning::mcp();
+        let window = resolve_window(local_now_ms() + offset, tz, lim.max_minutes, a.minutes, a.from.as_deref(), a.to.as_deref())?;
         let sort = SortBy::parse(a.sort.as_deref())?;
-        let limit = (a.limit.unwrap_or(digest::DEFAULT_LIMIT as u32) as usize).clamp(1, digest::MAX_LIMIT);
+        let max = lim.list_max as usize;
+        let limit = (a.limit.map(|v| v as usize).unwrap_or(digest::DEFAULT_LIMIT)).clamp(1, max);
 
         let mut filter = RowFilter {
             error_only: a.error_only.unwrap_or(false),
@@ -210,11 +215,11 @@ impl NScouterMcp {
         let rule = group_rule(&state).await;
         let profile = contains_rule(a.profile_contains.as_deref());
 
-        // 프로파일 검색은 콜렉터에 연결을 여럿(`SEARCH_WORKERS`) 연다 — 한꺼번에 둘까지만 돈다.
-        // 셋째는 앞의 것이 끝날 때까지 기다린다
+        // 프로파일 검색은 콜렉터에 연결을 여럿(`perf.profile_workers`) 연다 — 한꺼번에 `mcp.limits.profile_searches`
+        // 개까지만 돈다(기본 2). 넘치는 것은 앞의 것이 끝날 때까지 기다린다
         let mcp = self.app.state::<McpState>();
         let _slot = match &profile {
-            Some(_) => Some(mcp.profile_slots.acquire().await.map_err(|e| format!("프로파일 검색 대기 실패: {e}"))?),
+            Some(_) => Some(mcp.profile_slot().await?),
             None => None,
         };
 
@@ -224,16 +229,17 @@ impl NScouterMcp {
 
     #[tool(
         name = "get_transaction_details",
-        description = "트랜잭션 몇 건(최대 5)의 상세 — 헤더(서비스·서버·응답시간·에러), 스텝에 붙은 에러, 느린 스텝, 같은 SQL/API 를 묶은 합계(되풀이 = N+1 의심), 앞부분 흐름. 한 건에 10KB 남짓으로 줄여 준다. SQL 바인딩 값은 기본으로 싣는다(앱 설정에서 끌 수 있다)."
+        description = "트랜잭션 몇 건(앱 설정, 기본 최대 5)의 상세 — 헤더(서비스·서버·응답시간·에러), 스텝에 붙은 에러, 느린 스텝, 같은 SQL/API 를 묶은 합계(되풀이 = N+1 의심), 앞부분 흐름. 한 건에 10KB 남짓으로 줄여 준다. SQL 바인딩 값은 기본으로 싣는다(앱 설정에서 끌 수 있다)."
     )]
     async fn get_transaction_details(&self, Parameters(a): Parameters<DetailArgs>) -> Result<String, String> {
         if a.refs.is_empty() {
             return Err("refs 가 비었습니다. search_transactions 가 준 ref 를 넘겨 주세요".into());
         }
-        if a.refs.len() > digest::MAX_DETAIL_REFS {
+        let detail_max = crate::tuning::mcp().detail_max as usize;
+        if a.refs.len() > detail_max {
             return Err(format!(
                 "한 번에 최대 {}건입니다 (받은 수 {}). 나눠서 물어 주세요",
-                digest::MAX_DETAIL_REFS,
+                detail_max,
                 a.refs.len()
             ));
         }
@@ -282,7 +288,7 @@ impl ServerHandler for NScouterMcp {
                 "NScouter(Scouter APM 클라이언트)가 붙어 있는 콜렉터의 트랜잭션을 읽는다. 읽기 전용이다. \
                  문제 있는 트랜잭션을 찾아 코드를 고치는 용도: \
                  ① search_transactions 로 구간·조건에 맞는 것을 짧게 훑고 \
-                 ② 고칠 만한 것의 ref 를 최대 5개씩 get_transaction_details 에 넘겨 에러·느린 SQL·되풀이 호출을 본다. \
+                 ② 고칠 만한 것의 ref 를 몇 개씩(앱 설정, 기본 5) get_transaction_details 에 넘겨 에러·느린 SQL·되풀이 호출을 본다. \
                  시각은 사용자 PC 시간대다.",
             )
     }
@@ -430,7 +436,8 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
         .collect();
 
     // 프로파일을 볼 때는 후보를 넉넉히 남긴다. 걸러진 뒤에 `limit` 으로 자른다
-    let keep = if q.profile.is_some() { digest::PROFILE_CANDIDATES } else { q.limit };
+    let lim = crate::tuning::mcp();
+    let keep = if q.profile.is_some() { digest::PROFILE_CANDIDATES.max(lim.profile_fetch_max as usize) } else { q.limit };
     let shared = SharedScan {
         collector: Mutex::new(Collector::new(q.sort, keep)),
         seen: Mutex::new(HashSet::new()),
@@ -439,12 +446,13 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
         stop: AtomicBool::new(false),
         error: Mutex::new(None),
         done: slices.iter().map(|_| AtomicBool::new(false)).collect(),
+        max_rows: lim.scan_max_rows as u64,
     };
 
     // **조각을 연결 여럿이 나눠 받는다.** 운영 콜렉터는 왕복이 커서 순서대로 받으면 페이지 수 × 왕복이
     // 그대로 시간이다. 첫 일꾼은 빌려 온 연결을, 나머지는 같은 세션으로 새 소켓을 연다(F-1 — 세션은
     // 소켓과 무관하다). 새 소켓을 못 열면 그 일꾼만 빠지고 나머지가 마저 받는다
-    let workers = SCAN_PARALLEL.min(slices.len()).max(1);
+    let workers = (crate::tuning::perf().scan_parallel as usize).min(slices.len()).max(1);
     let host = state.conn_host.blocking_lock().clone();
     let port = *state.conn_port.blocking_lock();
     let session = conn.session;
@@ -481,7 +489,7 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
     let mut profile_facts = None;
     if let Some(needle) = &q.profile {
         let candidates = res.matched;
-        // 캐시에 있는 프로파일은 묻지 않고 바로 연다 — 상한(`PROFILE_FETCH_MAX`)은 새로 물을 것에만 건다
+        // 캐시에 있는 프로파일은 묻지 않고 바로 연다 — 상한(`profile_fetch_max`)은 새로 물을 것에만 건다
         let all = std::mem::take(&mut res.rows);
         let cached = state
             .cache_handle_blocking()
@@ -495,7 +503,7 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
                     return true;
                 }
                 fetch += 1;
-                fetch <= digest::PROFILE_FETCH_MAX
+                fetch <= lim.profile_fetch_max as usize
             })
             .collect();
         // 캐시에 있는 것을 앞으로 — 시간 상한에 걸려도 그건 다 본다 (같은 무리 안의 순서는 그대로)
@@ -512,7 +520,14 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
         }
         res = again.finish();
         hits = found;
-        profile_facts = Some(ProfileFacts { needle: needle.clone(), candidates, searched, failed });
+        profile_facts = Some(ProfileFacts {
+            needle: needle.clone(),
+            candidates,
+            searched,
+            failed,
+            fetch_max: lim.profile_fetch_max as usize,
+            budget_sec: lim.profile_budget_sec,
+        });
     }
 
     let mut wants: Vec<(&'static str, i32)> = Vec::new();
@@ -525,7 +540,15 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
     wants.extend(res.top_services.iter().map(|s| (text_type::SERVICE, s.service)));
     fill_texts(conn, state, &wants)?;
 
-    let facts = ScanFacts { window, tz_offset_ms: tz, scanned, unscanned, servers: names.len(), profile: profile_facts };
+    let facts = ScanFacts {
+        window,
+        tz_offset_ms: tz,
+        scanned,
+        unscanned,
+        servers: names.len(),
+        profile: profile_facts,
+        detail_max: lim.detail_max as usize,
+    };
     let cache = state.text_cache.blocking_lock();
     let texts = cache_texts(&cache);
     let server_name = |h: i32| names.get(&h).cloned().unwrap_or_else(|| format!("#{h}"));
@@ -538,10 +561,6 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
     );
     Ok(search_result_json(&res, &facts, &server_name, &texts as &dyn Texts, &hits))
 }
-
-/// 조각을 동시에 받는 연결 수. 화면의 «트랜잭션 찾기»(`WIDE_PARALLEL`)와 같은 값이다.
-/// 운영 콜렉터의 왕복을 재면 이 값을 그에 맞춘다
-const SCAN_PARALLEL: usize = 4;
 
 /// 일꾼들이 함께 쓰는 것
 struct SharedScan {
@@ -556,6 +575,8 @@ struct SharedScan {
     error: Mutex<Option<String>>,
     /// 끝까지 받은 조각
     done: Vec<AtomicBool>,
+    /// 훑을 트랜잭션 상한 (`mcp.limits.scan_max_rows`)
+    max_rows: u64,
 }
 
 /// 조각을 하나씩 가져가 끝까지 받는다
@@ -579,7 +600,7 @@ fn scan_worker(
                 sh.stop.store(true, Ordering::Relaxed);
             }
         }
-        if sh.scanned.load(Ordering::Relaxed) >= MAX_SCAN_ROWS {
+        if sh.scanned.load(Ordering::Relaxed) >= sh.max_rows {
             sh.stop.store(true, Ordering::Relaxed);
         }
     }
@@ -597,10 +618,11 @@ fn scan_slice(
     let name_kinds = filter.name_kinds();
     let cache = state.cache_handle_blocking();
     let seal = state.seal_before_blocking();
+    let page_rows = crate::tuning::perf().page_rows as i32;
     let mut cursor = PastCursor::default();
     for _ in 0..MAX_PAGES {
         // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
-        let page = past_page(conn, cache.as_deref(), hashes, &sl.date, sl.stime, sl.etime, PAGE_COUNT, &cursor, seal)?;
+        let page = past_page(conn, cache.as_deref(), hashes, &sl.date, sl.stime, sl.etime, page_rows, &cursor, seal)?;
         let (raw, next, done) = (page.rows, page.next, page.done);
         let fresh: Vec<XLogPack> = {
             let mut seen = sh.seen.lock().unwrap_or_else(|p| p.into_inner());
@@ -625,7 +647,7 @@ fn scan_slice(
         if done {
             return Ok(true);
         }
-        if sh.scanned.load(Ordering::Relaxed) >= MAX_SCAN_ROWS {
+        if sh.scanned.load(Ordering::Relaxed) >= sh.max_rows {
             return Ok(false);
         }
         cursor = next;
@@ -635,7 +657,7 @@ fn scan_slice(
 }
 
 /// 후보들의 프로파일을 열어 글자를 찾는다. 화면의 «프로파일 검색» 과 같은 길이다 —
-/// 워커 여럿(`SEARCH_WORKERS`)으로 받고, 사전은 한 번에 모아 풀고, `search_steps` 로 맞춘다.
+/// 워커 여럿(설정 `perf.profile_workers`)으로 받고, 사전은 한 번에 모아 풀고, `search_steps` 로 맞춘다.
 /// **바인딩 값도 찾는다**(`sql-param`) — «이 주문번호가 들어간 쿼리» 가 실제 용도다.
 ///
 /// 돌려주는 것: txid → 걸린 자리, 프로파일을 못 받은 건수
@@ -646,7 +668,7 @@ fn search_profiles(
     needle: &str,
     tz: i64,
 ) -> Result<(HashMap<i64, ProfileHitView>, usize, usize), String> {
-    use crate::commands::{fetch_profiles_parallel, SearchTarget, SEARCH_WORKERS};
+    use crate::commands::{fetch_profiles_parallel, search_workers, SearchTarget};
     use crate::scouter::profile_search::{collect_hashes, search_steps, StepTexts};
 
     let targets: Vec<SearchTarget> = rows
@@ -656,15 +678,16 @@ fn search_profiles(
     let host = state.conn_host.blocking_lock().clone();
     let port = *state.conn_port.blocking_lock();
     let cache = state.cache_handle_blocking();
-    // 묶음으로 나눠 받고, **시간 상한**(`PROFILE_BUDGET`)을 넘으면 거기서 멈춘다. 건수 상한만으로는
+    // 묶음으로 나눠 받고, **시간 상한**(설정 `mcp.limits.profile_budget_sec`)을 넘으면 거기서 멈춘다. 건수 상한만으로는
     // 콜렉터가 멀 때 AI 쪽 호출이 몇 분씩 걸린다(왕복 500ms 면 2,000건에 50초 남짓)
     let started = std::time::Instant::now();
     let mut fetched: Vec<Option<Vec<ProfileStep>>> = Vec::with_capacity(targets.len());
-    for chunk in targets.chunks(PROFILE_CHUNK) {
-        if !fetched.is_empty() && started.elapsed() >= PROFILE_BUDGET {
+    let budget = std::time::Duration::from_secs(crate::tuning::mcp().profile_budget_sec as u64);
+    for chunk in targets.chunks(profile_chunk()) {
+        if !fetched.is_empty() && started.elapsed() >= budget {
             break;
         }
-        fetched.extend(fetch_profiles_parallel(&host, port, conn.session, chunk, SEARCH_WORKERS, cache.as_deref()));
+        fetched.extend(fetch_profiles_parallel(&host, port, conn.session, chunk, search_workers(), cache.as_deref()));
     }
     let searched = fetched.len();
     let failed = fetched.iter().filter(|f| f.is_none()).count();

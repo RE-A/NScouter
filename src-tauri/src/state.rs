@@ -143,6 +143,7 @@ impl AppState {
         #[cfg(not(debug_assertions))]
         let default_level = 0u8;
 
+        crate::tuning::apply(&config);
         Self {
             connection: Mutex::new(None),
             query_pool: Mutex::new(Vec::new()),

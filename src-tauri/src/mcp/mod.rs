@@ -40,8 +40,10 @@ const STOP_WAIT: Duration = Duration::from_secs(3);
 
 pub struct McpState {
     running: Mutex<Option<Running>>,
-    /// 프로파일 본문 검색을 한꺼번에 몇 개까지 돌릴지. 하나가 콜렉터 연결을 `SEARCH_WORKERS` 개 연다
-    pub(crate) profile_slots: tokio::sync::Semaphore,
+    /// 프로파일 본문 검색을 한꺼번에 몇 개까지 돌릴지(설정 `mcp.limits.profile_searches`).
+    /// 하나가 콜렉터 연결을 `perf.profile_workers` 개 연다. 수가 바뀌면 새 것으로 갈아 끼운다 —
+    /// 그때 돌던 검색은 옛 것을 쥔 채 끝난다
+    profile_slots: std::sync::Mutex<(usize, Arc<tokio::sync::Semaphore>)>,
     /// 이 PC 시간대(ms). 화면이 `mcp_sync` 로 알려 준다
     tz_offset_ms: AtomicI64,
     /// 마지막으로 켜려다 실패한 까닭 (포트가 이미 쓰이는 중 등)
@@ -55,14 +57,11 @@ struct Running {
     task: JoinHandle<()>,
 }
 
-/// 동시에 도는 프로파일 본문 검색의 수
-const PROFILE_SEARCH_SLOTS: usize = 2;
-
 impl Default for McpState {
     fn default() -> Self {
         Self {
             running: Mutex::new(None),
-            profile_slots: tokio::sync::Semaphore::new(PROFILE_SEARCH_SLOTS),
+            profile_slots: std::sync::Mutex::new((0, Arc::new(tokio::sync::Semaphore::new(0)))),
             tz_offset_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
         }
@@ -70,6 +69,19 @@ impl Default for McpState {
 }
 
 impl McpState {
+    /// 프로파일 본문 검색 자리 하나를 얻는다 — 다 차 있으면 빌 때까지 기다린다
+    pub async fn profile_slot(&self) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+        let sem = {
+            let want = crate::tuning::mcp().profile_searches as usize;
+            let mut g = self.profile_slots.lock().unwrap_or_else(|p| p.into_inner());
+            if g.0 != want {
+                *g = (want, Arc::new(tokio::sync::Semaphore::new(want)));
+            }
+            g.1.clone()
+        };
+        sem.acquire_owned().await.map_err(|e| format!("프로파일 검색 대기 실패: {e}"))
+    }
+
     pub fn tz_offset_ms(&self) -> i64 {
         self.tz_offset_ms.load(Ordering::Relaxed)
     }
@@ -83,6 +95,8 @@ pub struct McpStatus {
     pub port: u16,
     pub token: String,
     pub bind_values: bool,
+    /// 조회 한도 (범위로 자른 것)
+    pub limits: crate::config::McpLimits,
     /// 켜려다 실패했으면 그 까닭
     pub error: Option<String>,
 }
@@ -129,6 +143,7 @@ async fn apply(app: &AppHandle) -> McpStatus {
         port: prefs.port,
         token: prefs.token,
         bind_values: prefs.bind_values,
+        limits: prefs.limits.clamped(),
         error,
     }
 }
@@ -235,6 +250,19 @@ pub async fn mcp_configure(app: AppHandle, enabled: bool, port: u16, bind_values
     Ok(apply(&app).await)
 }
 
+/// 설정 창의 «AI 연결» 한도 — 목록·상세 건수, 구간 길이, 프로파일 검색 건수·시간·동시 수. 바로 적용한다
+#[tauri::command]
+pub async fn mcp_set_limits(app: AppHandle, limits: crate::config::McpLimits) -> Result<McpStatus, String> {
+    {
+        let state = app.state::<AppState>();
+        let mut cfg = state.config.lock().await;
+        cfg.mcp.limits = limits.clamped();
+        cfg.save(&state.config_path)?;
+        crate::tuning::apply(&cfg);
+    }
+    Ok(apply(&app).await)
+}
+
 /// 토큰을 새로 만든다. 켜져 있으면 새 토큰으로 다시 연다 — 예전 토큰을 든 클라이언트는 끊긴다
 #[tauri::command]
 pub async fn mcp_regenerate_token(app: AppHandle) -> Result<McpStatus, String> {
@@ -260,14 +288,16 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    #[test]
-    fn 프로파일_검색은_한꺼번에_둘까지만_돈다() {
+    #[tokio::test]
+    async fn 프로파일_검색은_설정한_수까지만_한꺼번에_돈다() {
         let st = McpState::default();
-        let a = st.profile_slots.try_acquire().unwrap();
-        let _b = st.profile_slots.try_acquire().unwrap();
-        assert!(st.profile_slots.try_acquire().is_err(), "셋째는 기다려야 한다");
+        // 기본 2
+        let a = st.profile_slot().await.unwrap();
+        let _b = st.profile_slot().await.unwrap();
+        let third = tokio::time::timeout(std::time::Duration::from_millis(50), st.profile_slot()).await;
+        assert!(third.is_err(), "셋째는 기다려야 한다");
         drop(a);
-        assert!(st.profile_slots.try_acquire().is_ok());
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), st.profile_slot()).await.is_ok());
     }
 
     #[test]

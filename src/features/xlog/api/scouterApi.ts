@@ -729,6 +729,8 @@ export interface AppConfig {
   wide_search_max?: number;
   /** 로컬 캐시 전체 상한(MB) — 콜렉터 여럿을 합친 것. 없으면 2048 */
   cache_max_mb?: number;
+  /** 콜렉터 동시 요청·페이지 크기·미리 받기. Rust `PerfPrefs` 와 짝이다 */
+  perf?: Partial<PerfPrefs>;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
   ui_layout?: UiLayout;
   /** XLog 스캐터 차트 설정 */
@@ -758,7 +760,32 @@ export interface McpPrefs {
   port: number;
   token: string;
   bind_values: boolean;
+  limits?: McpLimits;
 }
+
+/** MCP 조회 한도. Rust `McpLimits` 와 짝이다 (범위는 Rust 가 자른다) */
+export interface McpLimits {
+  list_max: number;
+  detail_max: number;
+  max_minutes: number;
+  scan_max_rows: number;
+  profile_fetch_max: number;
+  profile_budget_sec: number;
+  profile_searches: number;
+}
+
+/** 콜렉터 동시 요청·페이지 크기·미리 받기. Rust `PerfPrefs` 와 짝이다 */
+export interface PerfPrefs {
+  scan_parallel: number;
+  past_parallel: number;
+  profile_workers: number;
+  text_workers: number;
+  page_rows: number;
+  prefetch_enabled: boolean;
+  prefetch_min_elapsed_ms: number;
+  prefetch_per_sec: number;
+}
+
 
 /** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
 export interface UiLayout {
@@ -977,6 +1004,7 @@ export interface McpStatus {
   port: number;
   token: string;
   bind_values: boolean;
+  limits: McpLimits;
   error: string | null;
 }
 
@@ -993,6 +1021,11 @@ export async function mcpSync(): Promise<McpStatus> {
 /** 켜기·포트·바인딩 값 허용을 바로 적용한다 */
 export async function mcpConfigure(enabled: boolean, port: number, bindValues: boolean): Promise<McpStatus> {
   return invoke<McpStatus>('mcp_configure', { enabled, port, bindValues });
+}
+
+/** 조회 한도를 바로 적용한다 (범위를 넘으면 Rust 가 자른다) */
+export async function mcpSetLimits(limits: McpLimits): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_set_limits', { limits });
 }
 
 /** 토큰을 새로 만든다. 예전 토큰을 든 클라이언트는 끊긴다 */
