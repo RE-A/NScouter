@@ -252,6 +252,28 @@ impl AppState {
         *self.cache.lock().await = db;
     }
 
+    /// 지금 붙어 있는 캐시
+    pub async fn cache_handle(&self) -> Option<Arc<CacheDb>> {
+        self.cache.lock().await.clone()
+    }
+
+    /// `cache_handle` — 막히는 일꾼 스레드에서 (`spawn_blocking` 안)
+    pub fn cache_handle_blocking(&self) -> Option<Arc<CacheDb>> {
+        self.cache.blocking_lock().clone()
+    }
+
+    /// 콜렉터 시계로 «지금 − 5분». 이보다 뒤의 XLog 는 «다 받았다» 고 적지 않는다 (`cache::xlog`)
+    pub async fn seal_before(&self) -> i64 {
+        let offset = self.clock_offset_ms.lock().await.unwrap_or(0);
+        crate::scouter::connection::local_now_ms() + offset - crate::cache::xlog::SEAL_MS
+    }
+
+    /// `seal_before` — 막히는 일꾼 스레드에서
+    pub fn seal_before_blocking(&self) -> i64 {
+        let offset = self.clock_offset_ms.blocking_lock().unwrap_or(0);
+        crate::scouter::connection::local_now_ms() + offset - crate::cache::xlog::SEAL_MS
+    }
+
     /// 캐시를 뗀다 (접속을 끊거나 데모로 갈 때)
     pub async fn detach_cache(&self) {
         self.text_cache.lock().await.attach(None);

@@ -4,6 +4,7 @@
 // 시간이고, 많은 서비스는 시간당 50만 건이라 같은 구간을 다시 받는 값이 크다.
 // 여기 담는 것은 **한 번 정해지면 바뀌지 않는 것**뿐이다:
 //   · 이름 사전 (해시 → 글자) — 해시는 글자에서 나온다
+//   · 지난 XLog (`xlog.rs`) — 끝난 트랜잭션은 바뀌지 않는다. 최근 5분은 늦게 오는 것이 있어 담지 않는다
 //
 // **캐시는 덤이다.** 파일을 못 열거나 쓰다 실패해도 조회는 콜렉터로 그대로 간다 — 여기서 난
 // 오류를 화면으로 올리지 않고 로그만 남긴다.
@@ -17,8 +18,10 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 
+pub mod xlog;
+
 /// 스키마 판. 바꾸면 `migrate` 에 단계를 더한다
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// 캐시 폴더 이름 (`{data_dir}/cache/`)
 pub const DIR_NAME: &str = "cache";
@@ -66,7 +69,7 @@ impl CacheDb {
         &self.path
     }
 
-    fn with<T>(&self, f: impl FnOnce(&mut Connection) -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+    pub(crate) fn with<T>(&self, f: impl FnOnce(&mut Connection) -> rusqlite::Result<T>) -> rusqlite::Result<T> {
         // 다른 스레드가 쥔 채 죽었어도 연결 자체는 멀쩡하다 — 독을 걷고 쓴다
         let mut g = self.db.lock().unwrap_or_else(|p| p.into_inner());
         f(&mut g)
@@ -125,6 +128,9 @@ fn migrate(c: &Connection) -> rusqlite::Result<()> {
                 PRIMARY KEY (kind, hash)
             ) WITHOUT ROWID;",
         )?;
+    }
+    if v < 2 {
+        xlog::create_tables(c)?;
     }
     c.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
 }

@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::cache::xlog::past_page;
 use crate::config::AppConfig;
 use crate::scouter::configure::{
     attach_meta, escape_config_text, parse_config_desc, parse_config_entries, parse_config_text,
@@ -33,7 +34,7 @@ use crate::scouter::objtype::{
     TypeActiveServices,
 };
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
-use crate::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
+use crate::scouter::past::PastCursor;
 use crate::scouter::search::{SearchXLogFilter, WideMatcher};
 use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, XLogProfilePack};
 use crate::scouter::protocol::*;
@@ -780,31 +781,22 @@ pub async fn load_past_xlog(
     page_count: i32,
     cursor: Option<PastCursor>,
 ) -> Result<PastXLogPage, String> {
+    let cache = state.cache_handle().await;
+    let seal = state.seal_before().await;
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
     let cur = cursor.unwrap_or_default();
-    let param = build_past_xlog_param(&obj_hashes, &date, stime, etime, page_count, &cur);
-    let session = conn.session;
-    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param)
-        .map_err(|e| format!("과거 XLog 요청 실패: {e}"))?;
-
-    let mut xlogs = Vec::new();
-    let mut next = PastCursor::default();
-    loop {
-        match conn.read_next_pack().map_err(|e| format!("과거 XLog 수신 실패: {e}"))? {
-            Some(AnyPack::XLog(x)) => xlogs.push(x),
-            Some(AnyPack::Map(m)) => next = parse_past_cursor(&m),
-            Some(_) => {}
-            None => break,
-        }
-    }
+    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
+    let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, stime, etime, page_count, &cur, seal)?;
+    let (xlogs, next) = (page.rows, page.next);
 
     log::debug!(
-        "load_past_xlog: {}건, hasMore={}, nextTime={}",
+        "load_past_xlog: {}건, hasMore={}, nextTime={}{}",
         xlogs.len(),
         next.has_more,
-        next.last_xlog_time
+        next.last_xlog_time,
+        if page.from_cache { " (캐시)" } else { "" }
     );
     Ok(PastXLogPage { xlogs, cursor: next })
 }
@@ -843,6 +835,8 @@ pub async fn get_xlog_distribution(
     etime: i64,
     tz_offset_ms: i64,
 ) -> Result<ElapsedDistribution, String> {
+    let cache = state.cache_handle().await;
+    let seal = state.seal_before().await;
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
@@ -857,43 +851,22 @@ pub async fn get_xlog_distribution(
         let mut cursor = PastCursor::default();
 
         for _ in 0..DISTRIBUTION_MAX_PAGES {
-            let param = build_past_xlog_param(
-                &obj_hashes,
-                &date,
-                day_start,
-                day_end,
-                DISTRIBUTION_PAGE_COUNT,
-                &cursor,
-            );
-            let session = conn.session;
-            conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param)
-                .map_err(|e| format!("분포 조회 요청 실패: {e}"))?;
-
-            let mut next = PastCursor::default();
-            let mut rows = 0u32;
-            loop {
-                match conn.read_next_pack().map_err(|e| format!("분포 조회 수신 실패: {e}"))? {
-                    Some(AnyPack::XLog(x)) => {
-                        rows += 1;
-                        if seen.insert(x.txid) {
-                            acc.add(x.elapsed, x.error != 0);
-                        }
-                    }
-                    Some(AnyPack::Map(m)) => next = parse_past_cursor(&m),
-                    Some(_) => {}
-                    None => break,
+            // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
+            let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, day_start, day_end, DISTRIBUTION_PAGE_COUNT, &cursor, seal)
+                .map_err(|e| format!("분포 조회: {e}"))?;
+            for x in &page.rows {
+                if seen.insert(x.txid) {
+                    acc.add(x.elapsed, x.error != 0);
                 }
             }
-
             if acc.count() >= DISTRIBUTION_MAX_ROWS {
                 truncated = true;
                 break 'days;
             }
-            // 서버가 `hasMore` 를 계속 주면서 커서를 안 밀면 같은 페이지를 영원히 받는다.
-            if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
+            if page.done {
                 break;
             }
-            cursor = next;
+            cursor = page.next;
         }
     }
 
@@ -951,28 +924,15 @@ pub async fn search_xlog_page(
     if state.connection.lock().await.is_none() {
         return Err("연결되지 않음".to_string());
     }
+    let cache = state.cache_handle().await;
+    let seal = state.seal_before().await;
     let mut conn = state.acquire_query_conn().await?;
-    let param = build_past_xlog_param(&obj_hashes, &date, filter.stime, filter.etime, WIDE_PAGE_COUNT, &cur);
-    let session = conn.session;
-    let fetched = (|| -> Result<(Vec<XLogPack>, PastCursor), String> {
-        conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param)
-            .map_err(|e| format!("트랜잭션 찾기 요청 실패: {e}"))?;
-        let mut rows = Vec::new();
-        let mut next = PastCursor::default();
-        loop {
-            match conn.read_next_pack().map_err(|e| format!("트랜잭션 찾기 수신 실패: {e}"))? {
-                Some(AnyPack::XLog(x)) => rows.push(x),
-                Some(AnyPack::Map(m)) => next = parse_past_cursor(&m),
-                Some(_) => {}
-                None => break,
-            }
-        }
-        Ok((rows, next))
-    })();
+    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
     // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
-    let (rows, next) = fetched?;
+    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, filter.stime, filter.etime, WIDE_PAGE_COUNT, &cur, seal)
+        .map_err(|e| format!("트랜잭션 찾기: {e}"))?;
+    let (rows, next, done) = (page.rows, page.next, page.done);
     let scanned = rows.len();
-    let done = !next.has_more || scanned == 0 || next.last_xlog_time <= cur.last_xlog_time;
 
     let m = WideMatcher::new(&filter);
     let mut hits: Vec<XLogPack> = rows.into_iter().filter(|x| m.passes_cheap(x)).collect();

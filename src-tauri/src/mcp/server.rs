@@ -29,7 +29,8 @@ use crate::scouter::dictionary::{fetch_texts, TextCache};
 use crate::scouter::object::{build_daily_object_param, parse_daily_objects};
 use crate::scouter::objtype::{date_key, split_by_day};
 use crate::scouter::pack::{AnyPack, MapPack, XLogPack};
-use crate::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
+use crate::cache::xlog::past_page;
+use crate::scouter::past::PastCursor;
 use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, ProfileStep};
 use crate::scouter::protocol::*;
 use crate::scouter::value::ScouterValue;
@@ -550,19 +551,13 @@ fn scan_slice(
     sh: &SharedScan,
 ) -> Result<bool, String> {
     let name_kinds = filter.name_kinds();
+    let cache = state.cache_handle_blocking();
+    let seal = state.seal_before_blocking();
     let mut cursor = PastCursor::default();
     for _ in 0..MAX_PAGES {
-        let param = build_past_xlog_param(hashes, &sl.date, sl.stime, sl.etime, PAGE_COUNT, &cursor);
-        let mut next = PastCursor::default();
-        let mut raw: Vec<XLogPack> = Vec::new();
-        for p in request_all(conn, CMD_TRANX_LOAD_TIME_GROUP_V2, &param)? {
-            match p {
-                AnyPack::XLog(x) => raw.push(x),
-                AnyPack::Map(m) => next = parse_past_cursor(&m),
-                _ => {}
-            }
-        }
-        let rows = raw.len();
+        // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
+        let page = past_page(conn, cache.as_deref(), hashes, &sl.date, sl.stime, sl.etime, PAGE_COUNT, &cursor, seal)?;
+        let (raw, next, done) = (page.rows, page.next, page.done);
         let fresh: Vec<XLogPack> = {
             let mut seen = sh.seen.lock().unwrap_or_else(|p| p.into_inner());
             raw.into_iter().filter(|x| seen.insert(x.txid)).collect()
@@ -583,8 +578,7 @@ fn scan_slice(
             page.into_iter().for_each(|x| c.add(x));
         }
 
-        // 서버가 `hasMore` 를 계속 주면서 커서를 안 밀면 같은 페이지를 영원히 받는다
-        if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
+        if done {
             return Ok(true);
         }
         if sh.scanned.load(Ordering::Relaxed) >= MAX_SCAN_ROWS {
