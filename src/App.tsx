@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pane } from './components/Pane';
 import { TooltipLayer } from './components/TooltipLayer';
+import { setServerClockOffset } from './features/xlog/utils/serverClock';
 import { Divider } from './components/Divider';
 import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './components/paneSizing';
 import { ConnectionDialog } from './features/xlog/components/ConnectionDialog';
@@ -74,6 +75,7 @@ import { prunePicked } from './features/xlog/components/agentFilter';
 import {
   onConnected,
   onDisconnected,
+  refreshConnection,
   getObjectList,
   loadObjectHistory,
   saveObjectHistory,
@@ -599,6 +601,7 @@ export default function App({ windowLabel }: {
     getConnectionInfo()
       .then(info => {
         if (!info.connected) return;
+        setServerClockOffset(info.clock_offset_ms);
         setIsConnected(true);
         setServerId(info.server_id);
         setConnectionEpoch(n => n + 1);
@@ -709,9 +712,14 @@ export default function App({ windowLabel }: {
 
   useEffect(() => {
     return subscribe(
-      onConnected(id => { setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1); }),
+      onConnected(id => {
+        setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1);
+        // 콜렉터 시계 차는 접속 때 Rust 가 쟀다 — 실시간 «지금» 을 그 시계로 잡는다 (serverClock.ts)
+        getConnectionInfo().then(info => setServerClockOffset(info.clock_offset_ms)).catch(() => {});
+      }),
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
+        setServerClockOffset(null);
         // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
         setSelectedXLogs([]); clearNames(); clearObjectHistory(); setAgentMap(new Map());
         objectsRef.current = [];
@@ -1742,6 +1750,34 @@ export default function App({ windowLabel }: {
     return a;
   };
   /**
+   * 다시 받기 — F5 와 판 머리 «⟳».
+   *
+   * **연결부터 새로 맺는다.** «서버를 골라도 XLog 가 안 뜬다» 는 대개 콜렉터 재기동·네트워크
+   * 끊김 뒤 죽은 소켓을 쥔 채 남은 것이라, 화면만 다시 받으면 똑같이 비어 있었다.
+   * 연결을 새로 맺으며 시계 차도 다시 잰다. 그 뒤 지금 보는 화면의 데이터를 다시 받는다:
+   *   XLog 과거  구간을 다시 조회
+   *   XLog 실시간 받아 둔 것을 비우고 스트림을 다시 열어 창을 처음부터 채운다
+   *   Active     지금 한 번 더 묻는다
+   *   Counter·Visualize  패널들을 다시 세워 받는다
+   * 연결을 못 맺어도 화면은 다시 받는다 — 무엇이 안 되는지는 그쪽 오류가 말한다.
+   */
+  const [refreshing, setRefreshing] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const handleReload = useCallback(() => {
+    if (!isConnected) {
+      setRefreshSignal(n => n + 1);
+      return;
+    }
+    setRefreshing({ busy: true, error: null });
+    refreshConnection()
+      .then(info => {
+        setServerClockOffset(info.clock_offset_ms);
+        setRefreshing({ busy: false, error: null });
+      })
+      .catch((e: unknown) => setRefreshing({ busy: false, error: String(e) }))
+      .finally(() => setRefreshSignal(n => n + 1));
+  }, [isConnected]);
+
+  /**
    * 탭 줄 오른쪽 빈자리 — 판이 하나일 때 그 판의 머리(모드·멈춤·차트 설정)가 얹힌다.
    * 차트 위에 머리줄을 따로 쌓지 않으려는 것이다 (XLogChart `headerSlot`).
    */
@@ -1774,12 +1810,15 @@ export default function App({ windowLabel }: {
           active={visible}
           // 나눴으면 그 판의 머리, 하나면 탭 줄 오른쪽
           headerSlot={paneSlot ?? (visible && xlogTabs.panes.length === 1 ? tabRowSlot : null)}
+          onRefresh={handleReload}
+          refreshBusy={refreshing.busy}
+          refreshError={refreshing.error}
         />
       );
     },
     // paneHandlers·hashArray 는 ref 위의 캐시라 deps 가 아니다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, tabRowSlot, xlogTabs.panes.length],
+    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, tabRowSlot, xlogTabs.panes.length, handleReload, refreshing],
   );
 
   /**
@@ -1871,7 +1910,7 @@ export default function App({ windowLabel }: {
      *   Active     지금 한 번 더 묻는다
      *   Counter·Visualize  패널들을 다시 세워 받는다
      */
-    reload: () => setRefreshSignal(n => n + 1),
+    reload: handleReload,
   });
 
   const isStreaming = isConnected;

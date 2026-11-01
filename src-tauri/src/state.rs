@@ -113,6 +113,8 @@ pub struct AppState {
     pub xlog_subs: Mutex<HashMap<String, Vec<i32>>>,
     /// 붙어 있는 서버 이름. 미연결이면 None. 나중에 뜬 창이 접속 상태를 물을 때 쓴다
     pub server_id: Mutex<Option<String>>,
+    /// 콜렉터 시계 − PC 시계 (ms). 접속·새로고침 때 잰다. 화면의 실시간 «지금» 이 쓴다
+    pub clock_offset_ms: Mutex<Option<i64>>,
 }
 
 /// 액티브 목록에서 **사라졌다 돌아온** 트랜잭션을 찾기 위한 자취.
@@ -153,6 +155,7 @@ impl AppState {
             active_trace: Mutex::new(HashMap::new()),
             xlog_subs: Mutex::new(HashMap::new()),
             server_id: Mutex::new(None),
+            clock_offset_ms: Mutex::new(None),
         }
     }
 

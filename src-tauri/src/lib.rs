@@ -157,6 +157,7 @@ pub fn run() {
             search_xlog_list,
             get_search_max,
             get_connection_info,
+            refresh_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -11,6 +11,7 @@ import type { SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import { deriveStreamStatus } from '../utils/streamStatus';
 import { useTextResolver } from './useTextResolver';
 import { subscribeTheme } from '../../../styles/theme';
+import { serverNow } from '../utils/serverClock';
 
 /** 이 시간 넘게 XLog 가 없으면 "수신 없음"으로 본다. 폴링이 500ms 라 넉넉히 잡는다. */
 const STALE_AFTER_MS = 15_000;
@@ -41,7 +42,7 @@ export function useXLogCanvas(
   const rendererRef = useRef<XLogChartRenderer | null>(null);
   const rafRef = useRef<number>(0);
   /** 마지막으로 실제로 그린 시간 창. 드래그 미리보기가 같은 창을 써야 한다 */
-  const renderWindowRef = useRef<TimeWindow>(rollingWindow(Date.now(), config.timeRangeMs));
+  const renderWindowRef = useRef<TimeWindow>(rollingWindow(serverNow(), config.timeRangeMs));
   /**
    * 캔버스를 다시 그려야 한다는 표시.
    *
@@ -173,7 +174,8 @@ export function useXLogCanvas(
       const renderer = rendererRef.current;
 
       if (renderer) {
-        const now = Date.now();
+        // **콜렉터 시계로 그린다** (serverClock.ts) — PC 시계가 틀리면 오른쪽이 비거나 최신 점이 창 밖에 놓였다
+        const now = serverNow();
         // 과거 구간은 시간이 흘러도 창이 그대로다. "수신 없음" 판정도 하지 않는다 —
         // 다 받아온 뒤에는 더 올 게 없는 게 정상이다.
         const status = timeWindow

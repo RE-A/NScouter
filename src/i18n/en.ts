@@ -221,6 +221,16 @@ export const EN: Record<string, string> = {
   '과거 구간을 보는 중입니다. 휠=확대 · Shift+휠=이동 · 툴바의 «실시간» 으로 돌아갑니다': 'Viewing a past range. Wheel = zoom · Shift+wheel = pan · «Live» in the toolbar returns',
   '응답시간 (초)': 'Response time (sec)',
   '차트 설정': 'Chart settings',
+  // 콜렉터 시계 · 다시 받기 (serverClock.ts · XLogChart)
+  '늦습니다': 'behind',
+  '빠릅니다': 'ahead',
+  '이 PC 시계가 콜렉터보다': 'This PC clock is',
+  '실시간 화면은 콜렉터 시각으로 그립니다': 'the live view is drawn on the collector clock',
+  '다시 받기': 'Reload',
+  '다시 받기 (F5) — 연결을 새로 맺고 이 화면을 처음부터 다시 받습니다. 서버를 골라도 XLog 가 안 뜰 때': 'Reload (F5) — reconnect and fetch this view again from scratch. Use it when XLog stays empty after picking servers',
+  '연결을 새로 맺지 못했습니다': 'Could not reconnect',
+  '데이터에 맞추기': 'Align to data',
+  '지금 들어오는 점의 시각에 차트 오른쪽 끝을 맞춥니다. 다시 받기(F5)를 하면 콜렉터 시계로 돌아갑니다': 'Aligns the right edge to the time of incoming dots. Reload (F5) returns to the collector clock',
   // 서버 목록 머리 (AgentSelectorPanel)
   '타입별': 'By type',
   '그룹별': 'By group',
@@ -861,7 +871,7 @@ export const EN: Record<string, string> = {
   '기본값보다 큽니다': 'above the default',
 
   // ── 시계 어긋남 ───────────────────────────────────────
-  '데이터 시각이 이 PC 보다': 'Data timestamps are',
+  '데이터 시각이 지금보다': 'Data time is',
   '초 앞섭니다 — 최신 점이 창 밖에 있을 수 있습니다':
     's ahead of this PC — the newest dots may fall outside the window',
   '초 뒤처집니다 — 오른쪽이 비어 보일 수 있습니다':

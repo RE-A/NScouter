@@ -11,6 +11,7 @@ import {
   toLocalInput,
 } from '../types/timeRange';
 import { t } from '../../../i18n';
+import { serverNow } from '../utils/serverClock';
 
 /**
  * XLog 조회 조건 — **한 줄이다.**
@@ -64,7 +65,7 @@ export function XLogToolbar({
   const extraRules = Math.max(0, filter.patterns.filter(r => r.text.trim() !== '').length - 2);
   // 입력 중인 값. **조회를 눌러야** 실제 구간이 된다 —
   // 타이핑할 때마다 수만 건을 다시 받으면 안 된다.
-  const [draft, setDraft] = useState<PastRange>(() => defaultPastRange(Date.now()));
+  const [draft, setDraft] = useState<PastRange>(() => defaultPastRange(serverNow()));
 
   // 휠로 확대하면 구간이 밖에서 바뀐다. 입력칸이 따라가지 않으면
   // 화면이 보여주는 구간과 입력값이 어긋나 어느 쪽이 진짜인지 알 수 없다.
@@ -76,12 +77,13 @@ export function XLogToolbar({
   // 옮긴 때)라, 몇 시간 켜 두고 과거로 가면 아침의 10분이 떠 있고 `조회` 가 그것을 받았다.
   // 버튼이 아니라 모드를 본다 — 단축키(Ctrl+R)로 넘어가도 같아야 한다.
   useEffect(() => {
-    if (mode === 'past' && pastRange === null) setDraft(defaultPastRange(Date.now()));
+    if (mode === 'past' && pastRange === null) setDraft(defaultPastRange(serverNow()));
     // 모드가 바뀔 때만. pastRange 가 null 로 돌아가는 것(실시간으로 갈 때)에 다시 돌 이유가 없다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  const check = checkRange(draft, Date.now());
+  // «최근 10분» · «미래» 는 콜렉터 시계로 — PC 시계가 틀리면 조회 구간이 그만큼 밀린다
+  const check = checkRange(draft, serverNow());
 
   return (
     <div className="shrink-0 border-b border-line bg-raised px-3 py-1">

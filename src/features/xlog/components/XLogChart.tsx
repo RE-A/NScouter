@@ -23,6 +23,7 @@ import { T, F } from '../../../styles/tokens';
 import { t } from '../../../i18n';
 import { Button } from '../../../components/Button';
 import { XLogChartSettings } from './XLogChartSettings';
+import { CLOCK_NOTICE_MS, serverClockOffset, serverNow, setServerClockOffset } from '../utils/serverClock';
 
 interface XLogChartProps {
   config: XLogChartConfig;
@@ -96,6 +97,21 @@ interface XLogChartProps {
    * 자리가 없으면(null) 차트 위에 한 줄로 그린다.
    */
   headerSlot?: HTMLElement | null;
+  /** 다시 받기(F5 와 같다) — 연결을 새로 맺고 이 화면을 다시 받는다. 없으면 «⟳» 를 안 그린다 */
+  onRefresh?: () => void;
+  /** 연결을 새로 맺는 중 */
+  refreshBusy?: boolean;
+  /** 지난 새로고침이 실패한 까닭 */
+  refreshError?: string | null;
+}
+
+/** 시계 차를 읽기 좋게 — `45초`, `1분 5초`, `2시간 3분` */
+function formatOffset(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}${t('초')}`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}${t('분')}${sec % 60 ? ` ${sec % 60}${t('초')}` : ''}`;
+  return `${Math.floor(min / 60)}${t('시간')}${min % 60 ? ` ${min % 60}${t('분')}` : ''}`;
 }
 
 /**
@@ -130,6 +146,9 @@ export const XLogChart = memo(function XLogChart({
   active = true,
   connectionEpoch = 0,
   headerSlot = null,
+  onRefresh,
+  refreshBusy = false,
+  refreshError = null,
 }: XLogChartProps) {
   /**
    * 화면을 멈춘 상태.
@@ -167,16 +186,26 @@ export const XLogChart = memo(function XLogChart({
     config.timeRangeMs,
     objHashes,
     connected && !isPast,
-    connectionEpoch,
+    // 다시 받기(F5)도 «처음부터 채운다» 다 — 비운 저장소를 창 끝까지 다시 메운다
+    `${connectionEpoch}:${refreshSignal}`,
   );
 
   // **처음 마운트될 때는 다시 받지 않는다.** 이미 위에서 받고 있다.
+  // 실시간이면 **받아 둔 것을 비운다** — 스트림이 죽어 있던 사이의 빈 곳은 스트림이 되살아나도
+  // 안 메워진다. 비우면 다시 연 스트림의 첫 묶음과 왼쪽 메우기(backfill)가 창을 처음부터 채운다.
   const pastReload = past.reload;
   const firstRefresh = React.useRef(true);
   React.useEffect(() => {
     if (firstRefresh.current) { firstRefresh.current = false; return; }
-    if (isPast) pastReload();
-  }, [refreshSignal, isPast, pastReload]);
+    if (isPast) {
+      pastReload();
+    } else {
+      liveStore.clear();
+      setPauseState(NOT_PAUSED);
+    }
+    // 다시 받기 신호에만 반응한다 — 모드가 바뀔 때 비우면 실시간으로 돌아올 때마다 창이 빈다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSignal]);
   const store = isPast ? past.store : liveStore;
 
   // 접속이 바뀌면 이전 서버의 점을 버린다. 과거 구간을 보던 중이면 새 서버에서 다시 받는다.
@@ -212,7 +241,7 @@ export const XLogChart = memo(function XLogChart({
    * 과거 구간을 보는 중에는 뜻이 없다 — 이미 고정된 그림이다.
    */
   const togglePause = useCallback(() => {
-    setPauseState(cur => (cur.at === null ? pause(Date.now(), receivedTotal) : NOT_PAUSED));
+    setPauseState(cur => (cur.at === null ? pause(serverNow(), receivedTotal) : NOT_PAUSED));
   }, [receivedTotal]);
 
   // 과거로 가면 멈춤을 푼다. 돌아왔을 때 «왜 안 흐르지» 가 되지 않게.
@@ -301,7 +330,7 @@ export const XLogChart = memo(function XLogChart({
    */
   const capWarning = (() => {
     const at = store.lastDropAtMs;
-    if (at === null || Date.now() - at > CAP_NOTICE_MS) return null;
+    if (at === null || serverNow() - at > CAP_NOTICE_MS) return null;
     // **지금 걸려 있는 값**을 적는다. 설정에서 바꿀 수 있으므로 상수를 적으면 거짓이 된다.
     // **받은 것 기준**이라고 밝힌다. 화면 필터(서비스·IP·응답시간)는 그리기 직전에 걸리므로,
     // «화면에 4천 건인데 왜 10만이 넘느냐» 가 나온다 — 버퍼에는 거르기 전의 것이 들어 있다.
@@ -319,13 +348,32 @@ export const XLogChart = memo(function XLogChart({
     return null;
   })();
 
+  /**
+   * 데이터 시각이 «지금»(콜렉터 시계)과 크게 어긋나는가.
+   *
+   * 콜렉터 시계로 그리므로 **PC 시계가 틀린 것은 여기 안 걸린다.** 남는 것은 에이전트 시계가
+   * 콜렉터와 다르거나, 콜렉터가 시각을 안 알려 준(옛 버전) 경우다. 그때는 «데이터에 맞추기» 로
+   * 지금 들어오는 점의 시각에 창 끝을 맞춘다.
+   */
+  const skew = store.clockSkewMs;
   const skewWarning = (() => {
-    const skew = store.clockSkewMs;
     if (skew === null || Math.abs(skew) < SKEW_WARN_MS) return null;
     const sec = Math.round(Math.abs(skew) / 1000);
     return skew > 0
-      ? `${t('데이터 시각이 이 PC 보다')} ${sec}${t('초 앞섭니다 — 최신 점이 창 밖에 있을 수 있습니다')}`
-      : `${t('데이터 시각이 이 PC 보다')} ${sec}${t('초 뒤처집니다 — 오른쪽이 비어 보일 수 있습니다')}`;
+      ? `${t('데이터 시각이 지금보다')} ${sec}${t('초 앞섭니다 — 최신 점이 창 밖에 있을 수 있습니다')}`
+      : `${t('데이터 시각이 지금보다')} ${sec}${t('초 뒤처집니다 — 오른쪽이 비어 보일 수 있습니다')}`;
+  })();
+  const alignToData = useCallback(() => {
+    if (skew === null) return;
+    setServerClockOffset((serverClockOffset() ?? 0) + skew);
+    // 맞춘 뒤의 차는 다음 묶음이 다시 잰다. 그 전까지 경고가 남지 않게 지금 것을 지운다
+    liveStore.resetClockSkew();
+  }, [skew, liveStore]);
+
+  /** PC 시계가 콜렉터와 이만큼 다르다 — 콜렉터 시각으로 그리고 있다는 것을 판 머리에 적는다 */
+  const pcClockOff = (() => {
+    const off = serverClockOffset();
+    return off !== null && Math.abs(off) >= CLOCK_NOTICE_MS ? off : null;
   })();
 
   const paused = pauseState.at !== null;
@@ -374,6 +422,33 @@ export const XLogChart = memo(function XLogChart({
       )}
       {onConfigChange && (
         <XLogChartSettings config={config} onConfigChange={onConfigChange} live={!isPast} />
+      )}
+      {!isPast && pcClockOff !== null && (
+        <span
+          className="tnum rounded-sm px-1 text-fg-faint"
+          title={`${t('이 PC 시계가 콜렉터보다')} ${formatOffset(Math.abs(pcClockOff))} ${
+            pcClockOff > 0 ? t('늦습니다') : t('빠릅니다')
+          } — ${t('실시간 화면은 콜렉터 시각으로 그립니다')}`}
+        >
+          ⏱ PC {pcClockOff > 0 ? '−' : '+'}{formatOffset(Math.abs(pcClockOff))}
+        </span>
+      )}
+      {onRefresh && (
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={onRefresh}
+          disabled={refreshBusy}
+          aria-label={t('다시 받기')}
+          title={
+            refreshError
+              ? `${t('연결을 새로 맺지 못했습니다')}: ${refreshError}`
+              : t('다시 받기 (F5) — 연결을 새로 맺고 이 화면을 처음부터 다시 받습니다. 서버를 골라도 XLog 가 안 뜰 때')
+          }
+          className={refreshError ? 'text-danger' : ''}
+        >
+          <span aria-hidden className={refreshBusy ? 'inline-block animate-spin' : ''}>⟳</span>
+        </Button>
       )}
     </div>
   );
@@ -450,8 +525,15 @@ export const XLogChart = memo(function XLogChart({
         )}
 
         {!isPast && skewWarning !== null && (
-          <div className="absolute top-2 right-2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
-            {skewWarning}
+          <div className="absolute top-2 right-2 flex items-center gap-2 rounded border border-warn/50 bg-overlay px-2 py-1 text-micro text-warn shadow-lg">
+            <span>{skewWarning}</span>
+            <Button
+              size="xs"
+              onClick={alignToData}
+              title={t('지금 들어오는 점의 시각에 차트 오른쪽 끝을 맞춥니다. 다시 받기(F5)를 하면 콜렉터 시계로 돌아갑니다')}
+            >
+              {t('데이터에 맞추기')}
+            </Button>
           </div>
         )}
 

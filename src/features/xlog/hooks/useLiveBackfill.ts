@@ -14,6 +14,7 @@ import { XLogDataStore } from '../store/XLogDataStore';
 import { xlogPackToSXLog } from '../types/xlog';
 import { planBackfill, type BackfillCoverage } from '../types/backfill';
 import { yyyymmdd } from '../types/timeRange';
+import { serverNow } from '../utils/serverClock';
 
 /**
  * 채우기를 시작하기 전에 기다리는 시간.
@@ -54,13 +55,13 @@ export function useLiveBackfill(
   objHashes: number[],
   enabled: boolean,
   /**
-   * 연결 번호. 바뀌면 «어느 서버를 채워 봤나» 를 잊는다.
+   * 연결 번호(+ 다시 받기 번호). 바뀌면 «어느 서버를 채워 봤나» 를 잊는다.
    *
    * 끊겼다 붙으면 `enabled` 가 꺼졌다 켜지며 잊지만, 끊김과 재연결이 한 렌더에 묶이면
    * `enabled` 가 계속 켜져 있어 못 잊는다. 그러면 같은 이름(= 같은 objHash)의 서버로
    * 갈아탔을 때 «이미 채웠다» 로 보고 새 서버의 왼쪽 창을 안 채운다.
    */
-  connectionEpoch = 0,
+  connectionEpoch: number | string = 0,
 ): UseLiveBackfillResult {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(0);
@@ -93,7 +94,8 @@ export function useLiveBackfill(
       const known = new Set(coveredRef.current?.hashes ?? []);
       const freshSet = new Set(objHashes.filter(h => !known.has(h)));
       const plan = planBackfill({
-        now: Date.now(),
+        // 콜렉터 시계로 — PC 시계가 틀리면 창의 왼쪽 끝이 그만큼 어긋나 받을 구간이 비거나 겹친다
+        now: serverNow(),
         timeRangeMs,
         hashes: objHashes,
         covered: coveredRef.current,

@@ -40,7 +40,7 @@ use crate::scouter::search::{
 use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, XLogProfilePack};
 use crate::scouter::protocol::*;
 use crate::scouter::alert::build_alert_param;
-use crate::scouter::streaming::{run_xlog_stream, StreamCursor};
+use crate::scouter::streaming::{run_xlog_stream, StreamCursor, StreamEnd};
 use crate::scouter::summary::{
     build_summary_param, merge_error_summary, merge_summary, parse_error_summary, parse_summary,
     ErrorSummaryRow, SummaryRow,
@@ -70,6 +70,7 @@ pub async fn connect_scouter(
         .map_err(|e| format!("로그인 실패: {e}"))?;
 
     let server_id = conn.server_id.clone();
+    *state.clock_offset_ms.lock().await = conn.clock_offset_ms;
     *state.connection.lock().await = Some(conn);
     // **서버를 갈아탈 때 옛 연결을 버린다.** 남겨 두면 새 서버를 보는 중에
     // 이전 서버로 붙은 연결이 풀에서 나와 남의 답을 준다.
@@ -109,6 +110,7 @@ pub async fn disconnect_scouter(app: AppHandle, state: State<'_, AppState>) -> R
     state.streams.stop_all().await;
     *state.connection.lock().await = None;
     *state.server_id.lock().await = None;
+    *state.clock_offset_ms.lock().await = None;
     // 창마다 받던 것도 비운다 — 다른 서버에 붙으면 창들이 새로 알려 온다
     state.xlog_subs.lock().await.clear();
     // **조회용 연결도 버린다.** 안 버리면 이전 서버로 붙은 연결이 풀에 남아,
@@ -137,6 +139,14 @@ pub async fn start_xlog_stream(
     restart_xlog_stream(&app, &state).await
 }
 
+/// 스트림을 다시 붙일 때 기다리는 시간 — 처음 1초, 실패할 때마다 두 배, 10초까지
+const STREAM_RETRY_MIN_MS: u64 = 1_000;
+const STREAM_RETRY_MAX_MS: u64 = 10_000;
+
+fn next_backoff(ms: u64) -> u64 {
+    (ms * 2).min(STREAM_RETRY_MAX_MS)
+}
+
 /// 창들이 알린 오브젝트를 합쳐 스트림을 다시 연다. 합친 것이 비면 멈춘다.
 ///
 /// **데모 모드에서는 건드리지 않는다** — 합성 스트림이 같은 자리(XLog)를 쓰고 있다.
@@ -160,20 +170,39 @@ pub async fn restart_xlog_stream(app: &AppHandle, state: &AppState) -> Result<()
     let pass = state.conn_pass.lock().await.clone();
     let app = app.clone();
 
+    // **끊기면 스스로 다시 붙는다.** 연결·로그인이 안 되면 1초에서 10초까지 늘려 가며 다시 시도한다.
+    // 예전에는 한 번 실패하면 조용히 끝나(로그인 실패는 화면에 알리지도 않았다) 앱을 다시 켜야 했다.
     tokio::spawn(async move {
-        let mut stream_conn = match ScouterConnection::connect(&host, port) {
-            Ok(c) => c,
-            Err(e) => {
-                log::error!("XLog 스트림 연결 실패: {e}");
-                let _ = app.emit("xlog-error", serde_json::json!({ "message": format!("스트림 연결 실패: {e}") }));
-                return;
+        let mut backoff_ms: u64 = STREAM_RETRY_MIN_MS;
+        while !stop_flag.load(Ordering::Relaxed) {
+            let opened = ScouterConnection::connect(&host, port).and_then(|mut c| {
+                c.login(&user, &pass)?;
+                Ok(c)
+            });
+            match opened {
+                Ok(mut stream_conn) => {
+                    backoff_ms = STREAM_RETRY_MIN_MS;
+                    if run_xlog_stream(&mut stream_conn, union.clone(), app.clone(), stop_flag.clone()).await
+                        == StreamEnd::Stopped
+                    {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    log::error!("XLog 스트림 연결 실패, {}초 뒤 다시: {e}", backoff_ms / 1000);
+                    let _ = app.emit(
+                        "xlog-error",
+                        serde_json::json!({ "message": format!("스트림 연결 실패: {e} — {}초 뒤 다시 시도", backoff_ms / 1000) }),
+                    );
+                }
             }
-        };
-        if let Err(e) = stream_conn.login(&user, &pass) {
-            log::error!("XLog 스트림 로그인 실패: {e}");
-            return;
+            // 멈추라는 말을 기다리는 동안에도 듣는다 — 10초 자고 나서야 멈추면 새 스트림과 겹친다
+            let until = tokio::time::Instant::now() + tokio::time::Duration::from_millis(backoff_ms);
+            while tokio::time::Instant::now() < until && !stop_flag.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            }
+            backoff_ms = next_backoff(backoff_ms);
         }
-        run_xlog_stream(&mut stream_conn, union, app, stop_flag).await;
     });
 
     Ok(())
@@ -205,12 +234,49 @@ pub async fn forget_xlog_window(app: &AppHandle, state: &AppState, label: &str) 
 pub struct ConnectionInfo {
     pub connected: bool,
     pub server_id: String,
+    /// 콜렉터 시계 − PC 시계 (ms). 모르면 null
+    pub clock_offset_ms: Option<i64>,
 }
 
 #[tauri::command]
 pub async fn get_connection_info(state: State<'_, AppState>) -> Result<ConnectionInfo, String> {
     let sid = state.server_id.lock().await.clone();
-    Ok(ConnectionInfo { connected: sid.is_some(), server_id: sid.unwrap_or_default() })
+    Ok(ConnectionInfo {
+        connected: sid.is_some(),
+        server_id: sid.unwrap_or_default(),
+        clock_offset_ms: *state.clock_offset_ms.lock().await,
+    })
+}
+
+/// 연결 새로고침 (F5 · 판 머리 ⟳).
+///
+/// **«서버를 골라도 XLog 가 안 뜬다» 를 사람이 풀 수단이다.** 콜렉터가 다시 뜨거나 네트워크가
+/// 한 번 끊기면 주 연결·조회 연결·스트림 연결이 죽은 소켓을 쥔 채 남는다. 접속 창으로 끊고
+/// 다시 붙으면 고른 서버·탭·상세가 다 비워지므로, 그것들은 두고 **연결만** 새로 맺는다:
+///   · 주 연결을 새로 맺고 로그인 — 시계 차도 이때 다시 잰다
+///   · 조회용 연결 풀을 비운다 (죽은 연결이 풀에서 나오지 않게)
+///   · XLog 스트림을 새 연결로 다시 연다
+/// `scouter-connected` 는 내지 않는다 — 내면 화면이 «다른 서버로 갈아탔다» 로 읽고 다 비운다.
+#[tauri::command]
+pub async fn refresh_connection(app: AppHandle, state: State<'_, AppState>) -> Result<ConnectionInfo, String> {
+    let sid = state.server_id.lock().await.clone().ok_or("연결되지 않음")?;
+    if sid == DEMO_SERVER_ID {
+        return Ok(ConnectionInfo { connected: true, server_id: sid, clock_offset_ms: None });
+    }
+    let host = state.conn_host.lock().await.clone();
+    let port = *state.conn_port.lock().await;
+    let user = state.conn_user.lock().await.clone();
+    let pass = state.conn_pass.lock().await.clone();
+
+    let mut conn = ScouterConnection::connect(&host, port).map_err(|e| format!("연결 실패: {e}"))?;
+    conn.login(&user, &pass).map_err(|e| format!("로그인 실패: {e}"))?;
+    let offset = conn.clock_offset_ms;
+    *state.connection.lock().await = Some(conn);
+    state.clear_query_pool().await;
+    *state.clock_offset_ms.lock().await = offset;
+    restart_xlog_stream(&app, &state).await?;
+    log::info!("연결 새로고침: server_id={sid}, 시계 차={offset:?}ms");
+    Ok(ConnectionInfo { connected: true, server_id: sid, clock_offset_ms: offset })
 }
 
 // ─── stop_counter_stream ─────────────────────────────────────
@@ -2215,6 +2281,8 @@ pub async fn start_mock_stream(
     // 만든 버튼이 정작 아무것도 보여주지 못한다. 화면의 연결 상태는 Rust 가 쥐고 있으므로
     // 여기서 알려야 한다.
     *state.server_id.lock().await = Some(DEMO_SERVER_ID.to_string());
+    // 합성 데이터는 이 PC 시계로 만든다 — 맞출 시계가 없다
+    *state.clock_offset_ms.lock().await = None;
     let _ = app.emit("scouter-connected", DEMO_SERVER_ID);
 
     tokio::spawn(async move {
@@ -2454,4 +2522,20 @@ pub async fn save_csv_export(
 #[tauri::command]
 pub async fn get_export_dir(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.export_dir().await.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod stream_retry_tests {
+    use super::*;
+
+    #[test]
+    fn 다시_붙는_간격은_두_배씩_늘고_10초에서_멈춘다() {
+        let mut ms = STREAM_RETRY_MIN_MS;
+        let mut seen = vec![ms];
+        for _ in 0..5 {
+            ms = next_backoff(ms);
+            seen.push(ms);
+        }
+        assert_eq!(seen, vec![1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);
+    }
 }

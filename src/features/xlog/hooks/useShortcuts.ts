@@ -4,7 +4,7 @@
 // 다시 그려질 때마다(초당 여러 번) 리스너를 떼었다 붙인다.
 
 import { useEffect, useRef } from 'react';
-import { isEditableTarget, matchShortcut, type ShortcutAction } from './shortcuts';
+import { isEditableTarget, isPageReloadKey, matchShortcut, type ShortcutAction } from './shortcuts';
 
 export type ShortcutHandlers = Partial<Record<ShortcutAction, () => void>>;
 
@@ -16,6 +16,8 @@ export function useShortcuts(handlers: ShortcutHandlers, enabled = true): void {
     if (!enabled) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // 웹뷰의 «다시 읽기» 는 무엇이 걸려 있든 막는다 (isPageReloadKey)
+      if (isPageReloadKey(e)) e.preventDefault();
       const inEditable = isEditableTarget(e.target);
       const action = matchShortcut({
         key: e.key,

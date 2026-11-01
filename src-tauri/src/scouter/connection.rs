@@ -28,6 +28,25 @@ pub struct ScouterConnection {
     writer: BufWriter<TcpStream>,
     pub session: i64,
     pub server_id: String,
+    /// 콜렉터 시계 − 이 PC 시계 (ms). 로그인 응답의 `time`(F-5)으로 잰다. 못 쟀으면 None.
+    ///
+    /// 실시간 화면의 «지금» 은 이 값을 더한 콜렉터 시각이어야 한다 — PC 시계가 틀린 곳에서
+    /// 차트 오른쪽이 비거나 최신 점이 창 밖으로 나갔다. ASIS 클라이언트도 로그인 때 같은 차를 잰다.
+    pub clock_offset_ms: Option<i64>,
+}
+
+/// 지금 시각(ms, 이 PC)
+fn local_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 콜렉터 시계 − PC 시계. **보낸 때와 받은 때의 가운데**에 견준다 — 왕복의 절반만큼은
+/// 콜렉터가 `time` 을 적은 뒤에 흘렀다.
+pub fn clock_offset(server_ms: i64, sent_ms: i64, recv_ms: i64) -> i64 {
+    server_ms - (sent_ms + (recv_ms - sent_ms) / 2)
 }
 
 /// 호스트를 주소로 해석한다.
@@ -62,6 +81,7 @@ impl ScouterConnection {
             writer,
             session: 0,
             server_id: String::new(),
+            clock_offset_ms: None,
         })
     }
 
@@ -126,6 +146,7 @@ impl ScouterConnection {
         param.put("socksIp", ScouterValue::Text(String::new()));
         param.put("socksPort", ScouterValue::Decimal(0));
 
+        let sent_ms = local_now_ms();
         self.send_request(CMD_LOGIN, 0, &param)?;
 
         // 응답 수신: [HasNEXT][MapPack]...[NoNEXT]
@@ -175,6 +196,11 @@ impl ScouterConnection {
 
         self.session = session;
         self.server_id = server_id.clone();
+        // `time` 은 0 이거나 없을 수 있다(옛 콜렉터) — 그때는 모른다고 둔다. 0 으로 두면 «1970년» 이다
+        self.clock_offset_ms = map
+            .get_decimal("time")
+            .filter(|t| *t > 0)
+            .map(|t| clock_offset(t, sent_ms, local_now_ms()));
         log::info!("로그인 성공: session={session}, server_id={server_id}");
         Ok(())
     }
@@ -711,6 +737,14 @@ fn hostname_from_command() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 시계_차는_왕복의_가운데에_견준다() {
+        // 보낸 때 1000, 받은 때 1200 → 가운데 1100. 콜렉터가 61100 이라 했으면 PC 가 60초 늦다(+)
+        assert_eq!(clock_offset(61_100, 1_000, 1_200), 60_000);
+        // PC 가 빠르면 음수
+        assert_eq!(clock_offset(1_100 - 30_000, 1_000, 1_200), -30_000);
+    }
 
     #[test]
     fn 호스트명은_프로세스를_띄우지_않고_구한다() {

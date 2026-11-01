@@ -50,10 +50,20 @@ export async function disconnectScouter(): Promise<void> {
 export interface ConnectionInfo {
   connected: boolean;
   server_id: string;
+  /** 콜렉터 시계 − PC 시계 (ms). 로그인 응답의 `time` 으로 잰다. 모르면 null (`serverClock.ts`) */
+  clock_offset_ms: number | null;
 }
 
 export async function getConnectionInfo(): Promise<ConnectionInfo> {
   return invoke<ConnectionInfo>('get_connection_info');
+}
+
+/**
+ * 연결 새로고침 — 주 연결을 새로 맺고 시계 차를 다시 재고 XLog 스트림을 다시 연다.
+ * 고른 서버·탭·상세는 그대로다(`scouter-connected` 를 내지 않는다).
+ */
+export async function refreshConnection(): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>('refresh_connection');
 }
 
 export async function startXLogStream(objHashes: number[]): Promise<void> {
