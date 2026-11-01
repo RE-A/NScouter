@@ -33,6 +33,8 @@ tokio-util = "0.7"
 getrandom = "0.3"
 # MCP 에서 «서비스로 묶기» 규칙(설정의 정규식)을 적용한다
 regex = "1"
+# 로컬 캐시 (콜렉터별 SQLite 한 파일) — `src/cache/`. 라이브러리를 같이 빌드해 PC 에 SQLite 가 없어도 된다
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 # 실서버 테스트에서 XLog endTime → yyyyMMdd 변환에만 쓴다 (프로덕션 코드는 프론트에서 계산).
 [dev-dependencies]

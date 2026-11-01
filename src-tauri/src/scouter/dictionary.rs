@@ -4,6 +4,9 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::sync::Arc;
+
+use crate::cache::CacheDb;
 
 use super::connection::ScouterConnection;
 use super::pack::{AnyPack, MapPack};
@@ -12,33 +15,73 @@ use super::value::ScouterValue;
 
 // ─── TextCache ────────────────────────────────────────────────
 
-/// 텍스트 타입별 hash → text 로컬 캐시
+/// 텍스트 타입별 hash → text 로컬 캐시.
+///
+/// 메모리에 없으면 **디스크 캐시**(`crate::cache`, 콜렉터별 SQLite)를 먼저 보고, 거기도 없을 때만
+/// 콜렉터에 묻는다. 콜렉터에서 받은 것은 `flush` 때 디스크에 남긴다 — 앱을 다시 켜도 SQL 문장
+/// 수천 개를 다시 받지 않는다.
 #[derive(Default)]
 pub struct TextCache {
     /// (type_key, hash) → text
     inner: HashMap<(String, i32), String>,
+    /// 디스크 캐시. 접속한 콜렉터의 것이고, 접속 전·데모에서는 없다
+    store: Option<Arc<CacheDb>>,
+    /// 콜렉터에서 받았지만 아직 디스크에 안 남긴 것
+    pending: Vec<(String, i32, String)>,
 }
 
 impl TextCache {
     pub fn new() -> Self {
-        Self { inner: HashMap::new() }
+        Self::default()
+    }
+
+    /// 디스크 캐시를 붙이거나 뗀다 (콜렉터를 갈아탈 때)
+    pub fn attach(&mut self, store: Option<Arc<CacheDb>>) {
+        self.flush();
+        self.store = store;
     }
 
     pub fn get(&self, type_key: &str, hash: i32) -> Option<&str> {
         self.inner.get(&(type_key.to_string(), hash)).map(|s| s.as_str())
     }
 
+    /// 콜렉터에서 받은 글자. 디스크 캐시가 붙어 있으면 `flush` 때 남긴다
     pub fn insert(&mut self, type_key: impl Into<String>, hash: i32, text: impl Into<String>) {
-        self.inner.insert((type_key.into(), hash), text.into());
+        let (k, t) = (type_key.into(), text.into());
+        if self.store.is_some() {
+            self.pending.push((k.clone(), hash, t.clone()));
+        }
+        self.inner.insert((k, hash), t);
     }
 
-    /// 캐시에 없는 hash만 추려 반환
-    pub fn missing(&self, type_key: &str, hashes: &[i32]) -> Vec<i32> {
-        hashes
+    /// 캐시에 없는 hash만 추려 반환. **디스크에 있는 것은 메모리로 올리고 빼 준다**
+    pub fn missing(&mut self, type_key: &str, hashes: &[i32]) -> Vec<i32> {
+        let mem_miss: Vec<i32> = hashes
             .iter()
             .filter(|&&h| h != 0 && !self.inner.contains_key(&(type_key.to_string(), h)))
             .copied()
-            .collect()
+            .collect();
+        let Some(store) = &self.store else { return mem_miss };
+        if mem_miss.is_empty() {
+            return mem_miss;
+        }
+        let found = store.texts(type_key, &mem_miss);
+        let rest = mem_miss.into_iter().filter(|h| !found.contains_key(h)).collect();
+        for (h, t) in found {
+            self.inner.insert((type_key.to_string(), h), t);
+        }
+        rest
+    }
+
+    /// 콜렉터에서 받은 것을 디스크에 남긴다
+    pub fn flush(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        if let Some(store) = &self.store {
+            store.put_texts(&self.pending);
+        }
+        self.pending.clear();
     }
 }
 
@@ -57,10 +100,10 @@ pub fn fetch_texts(
     }
 
     // 최대 100개씩 분할 요청
-    for chunk in hashes.chunks(100) {
-        fetch_chunk(conn, cache, type_key, chunk)?;
-    }
-    Ok(())
+    let r = hashes.chunks(100).try_for_each(|chunk| fetch_chunk(conn, cache, type_key, chunk));
+    // 받은 만큼은 실패해도 남긴다
+    cache.flush();
+    r
 }
 
 fn fetch_chunk(
@@ -206,7 +249,7 @@ mod tests {
     fn 해시_0은_묻지_않는다() {
         // 0 은 «없음» 이다. 물어보면 콜렉터가 빈 값을 주고, 그 빈 값을 캐시에 넣으면
         // 다음부터 «있는데 빈 이름» 이 된다.
-        let c = TextCache::new();
+        let mut c = TextCache::new();
         assert_eq!(c.missing("service", &[0, 0]), Vec::<i32>::new());
     }
 
@@ -214,14 +257,40 @@ mod tests {
     fn 같은_해시가_여러_번_와도_목록에_그대로_남는다() {
         // 여기서 중복을 지우지 않는다 — 부르는 쪽이 이미 모아서 준다.
         // 지운다고 착각하면 «100개씩 나눠 묻기» 의 셈이 어긋난다.
-        let c = TextCache::new();
+        let mut c = TextCache::new();
         assert_eq!(c.missing("service", &[8, 8]), vec![8, 8]);
     }
 
     #[test]
     fn 캐시가_비어_있으면_전부_물어야_한다() {
-        let c = TextCache::new();
+        let mut c = TextCache::new();
         assert_eq!(c.missing("sql", &[1, 2, 3]), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn 디스크에_있는_것은_콜렉터에_묻지_않고_메모리로_올린다() {
+        let db = Arc::new(CacheDb::open_in_memory().unwrap());
+        db.put_texts(&[("sql".into(), 2, "select 2".into())]);
+        let mut c = TextCache::new();
+        c.attach(Some(db.clone()));
+        assert_eq!(c.missing("sql", &[1, 2]), vec![1], "디스크에 있는 2 는 빠진다");
+        assert_eq!(c.get("sql", 2), Some("select 2"));
+    }
+
+    #[test]
+    fn 콜렉터에서_받은_것은_flush_때_디스크에_남는다() {
+        let db = Arc::new(CacheDb::open_in_memory().unwrap());
+        let mut c = TextCache::new();
+        c.attach(Some(db.clone()));
+        c.insert("service", 9, "/a");
+        assert!(db.texts("service", &[9]).is_empty(), "flush 전에는 안 쓴다 — 한 묶음으로 쓴다");
+        c.flush();
+        assert_eq!(db.texts("service", &[9])[&9], "/a");
+        // 떼면 더는 남기지 않는다 (데모 데이터가 섞이지 않게)
+        c.attach(None);
+        c.insert("service", 10, "/demo");
+        c.flush();
+        assert!(db.texts("service", &[10]).is_empty());
     }
 
     #[test]

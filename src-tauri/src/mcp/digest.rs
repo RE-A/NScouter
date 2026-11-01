@@ -136,6 +136,52 @@ pub fn fmt_tz(tz_offset_ms: i64) -> String {
     format!("{sign}{:02}:{:02}", m / 60, m % 60)
 }
 
+// ─── 구간 조각 ───────────────────────────────────────────────
+
+/// 한 번에 받는 조각의 길이. 기본 조회(30분)가 조각 6개가 되어 연결 4개(`SCAN_PARALLEL`)가 고르게 일한다 —
+/// 10분이면 3조각이라 연결 하나가 놀고, 데이터가 한쪽에 몰리면 한 연결만 오래 일했다(실측).
+/// 시간당 50만 건 서비스면 5분이 4만 건 남짓(5,000건 페이지 9개)이다
+pub const SLICE_MS: i64 = 5 * 60_000;
+
+/// 훑을 조각 하나 — 하루(콜렉터 날짜 디렉토리) 안에 든다
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Slice {
+    /// `yyyymmdd`
+    pub date: String,
+    pub stime: i64,
+    pub etime: i64,
+}
+
+/// 구간을 날짜별로 자르고, 날짜 안에서 다시 `slice_ms` 로 자른다.
+///
+/// **조각으로 나누는 이유:** 연결 여럿으로 동시에 받으려면 서로 겹치지 않는 몫이 있어야 한다.
+/// 콜렉터의 과거 조회는 앞에서부터 페이지를 넘기는 방식이라 한 구간을 둘이 나눠 받을 수 없다.
+/// 최근 것부터 볼 때(`Latest`)는 뒤 조각부터 준다 — 상한에 걸려도 최근 것은 남는다.
+pub fn plan_slices(window: Window, tz_offset_ms: i64, slice_ms: i64, sort: SortBy) -> Vec<Slice> {
+    let mut out = Vec::new();
+    for (ds, de) in crate::scouter::objtype::split_by_day(window.stime, window.etime, tz_offset_ms) {
+        let date = date_key(ds, tz_offset_ms);
+        let mut s = ds;
+        while s < de {
+            let e = (s + slice_ms.max(1)).min(de);
+            out.push(Slice { date: date.clone(), stime: s, etime: e });
+            s = e;
+        }
+    }
+    if sort == SortBy::Latest {
+        out.reverse();
+    }
+    out
+}
+
+/// 다 못 훑은 조각들이 덮는 구간. 다 훑었으면 None
+pub fn unscanned_range(slices: &[Slice], done: &[bool]) -> Option<(i64, i64)> {
+    let left: Vec<&Slice> = slices.iter().zip(done).filter(|(_, d)| !**d).map(|(s, _)| s).collect();
+    let a = left.iter().map(|s| s.stime).min()?;
+    let b = left.iter().map(|s| s.etime).max()?;
+    Some((a, b))
+}
+
 // ─── 트랜잭션 참조 ───────────────────────────────────────────
 
 /// 목록이 주고 상세가 받는 참조 — `txid:yyyymmdd`.
@@ -488,8 +534,8 @@ pub struct ScanFacts {
     pub window: Window,
     pub tz_offset_ms: i64,
     pub scanned: u64,
-    /// 상한에 걸려 구간을 다 못 훑었다. 그때 어디까지 봤나(epoch ms)
-    pub truncated_at: Option<i64>,
+    /// 검사 상한에 걸려 다 못 훑은 구간 `(시작, 끝)` (epoch ms). 다 훑었으면 None
+    pub unscanned: Option<(i64, i64)>,
     pub servers: usize,
     /// 프로파일 본문 검색을 했으면 그 사실들
     pub profile: Option<ProfileFacts>,
@@ -575,11 +621,12 @@ pub fn search_result_json(
         .collect();
 
     let mut note = String::new();
-    if let Some(at) = facts.truncated_at {
+    if let Some((a, b)) = facts.unscanned {
         note = format!(
-            "검사 상한({}건)에 걸려 {} 까지만 훑었습니다. 구간을 좁히거나 server/service 조건을 더해 주세요.",
+            "검사 상한({}건)에 걸려 {} ~ {} 사이는 다 못 훑었습니다. 구간을 좁히거나 server/service 조건을 더해 주세요.",
             facts.scanned,
-            fmt_local(at, tz)
+            fmt_local(a, tz),
+            fmt_local(b, tz)
         );
     }
     if let Some(p) = &facts.profile {
@@ -628,7 +675,7 @@ pub fn search_result_json(
         "matched_errors": res.matched_errors,
         "returned": res.rows.len(),
         "sort": res.sort.name(),
-        "truncated": facts.truncated_at.is_some(),
+        "truncated": facts.unscanned.is_some(),
         "note": note,
         "top_services": res.top_services.iter().map(|s| json!({
             "service": clip(&service(s.service), 200),
@@ -1055,6 +1102,32 @@ mod tests {
     }
 
     #[test]
+    fn 구간은_날짜와_조각으로_나뉘고_최근순이면_뒤부터다() {
+        // KST 23:50 ~ 다음날 00:25, 10분 조각 → 23:50~24:00 / 00:00~00:10 / 00:10~00:20 / 00:20~00:25
+        let s = parse_local_time("2026-11-01 23:50", KST).unwrap();
+        let e = parse_local_time("2026-11-02 00:25", KST).unwrap();
+        let w = Window { stime: s, etime: e };
+        let sl = plan_slices(w, KST, 10 * 60_000, SortBy::Slowest);
+        assert_eq!(sl.len(), 4);
+        assert_eq!((sl[0].date.as_str(), sl[0].etime - sl[0].stime), ("20261101", 10 * 60_000));
+        assert_eq!(sl[1].date, "20261102", "자정에서 날짜가 바뀐다 — 날짜가 틀리면 0건이다");
+        assert_eq!(sl[3].etime, e);
+        // 기본 조회(30분)는 연결 4개보다 조각이 많아야 고르게 나뉜다
+        let thirty = Window { stime: s, etime: s + 30 * 60_000 };
+        assert!(plan_slices(thirty, KST, SLICE_MS, SortBy::Slowest).len() > 4);
+        assert!(sl.windows(2).all(|p| p[0].etime == p[1].stime), "빈틈·겹침 없이 잇는다");
+        let latest = plan_slices(w, KST, 10 * 60_000, SortBy::Latest);
+        assert_eq!(latest[0], sl[3]);
+    }
+
+    #[test]
+    fn 못_훑은_구간은_남은_조각을_덮는다() {
+        let sl: Vec<Slice> = (0..4).map(|i| Slice { date: "d".into(), stime: i * 10, etime: i * 10 + 10 }).collect();
+        assert_eq!(unscanned_range(&sl, &[true, true, true, true]), None);
+        assert_eq!(unscanned_range(&sl, &[true, false, true, false]), Some((10, 40)));
+    }
+
+    #[test]
     fn ref_는_날짜를_달고_되읽힌다() {
         // KST 2026-11-01 00:10 은 UTC 로는 10월 31일이다 — 날짜는 이 PC 기준이어야 한다
         let end = parse_local_time("2026-11-01 00:10", KST).unwrap();
@@ -1210,7 +1283,7 @@ mod tests {
             window: Window { stime: 0, etime: 1 },
             tz_offset_ms: KST,
             scanned: 10,
-            truncated_at: None,
+            unscanned: None,
             servers: 2,
             profile: None,
         };
@@ -1235,7 +1308,7 @@ mod tests {
             window: Window { stime: 0, etime: 1 },
             tz_offset_ms: 0,
             scanned: 9000,
-            truncated_at: None,
+            unscanned: None,
             servers: 1,
             profile: Some(ProfileFacts { needle: "ord-77".into(), candidates: 5000, searched: 2000, failed: 3 }),
         };

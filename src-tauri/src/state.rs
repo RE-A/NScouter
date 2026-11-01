@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::cache::CacheDb;
 use crate::config::{resolve_data_dir, AppConfig};
 use crate::scouter::connection::ScouterConnection;
 use crate::scouter::dictionary::TextCache;
@@ -115,6 +116,8 @@ pub struct AppState {
     pub server_id: Mutex<Option<String>>,
     /// 콜렉터 시계 − PC 시계 (ms). 접속·새로고침 때 잰다. 화면의 실시간 «지금» 이 쓴다
     pub clock_offset_ms: Mutex<Option<i64>>,
+    /// 접속한 콜렉터의 로컬 캐시 (`crate::cache`). 접속 전·데모·캐시를 못 열면 None
+    pub cache: Mutex<Option<Arc<CacheDb>>>,
 }
 
 /// 액티브 목록에서 **사라졌다 돌아온** 트랜잭션을 찾기 위한 자취.
@@ -156,6 +159,7 @@ impl AppState {
             xlog_subs: Mutex::new(HashMap::new()),
             server_id: Mutex::new(None),
             clock_offset_ms: Mutex::new(None),
+            cache: Mutex::new(None),
         }
     }
 
@@ -223,6 +227,35 @@ impl AppState {
     /// 내보내기 폴더. `{data_dir}/exports/`
     pub async fn export_dir(&self) -> PathBuf {
         self.data_sub_dir(crate::export_store::DIR_NAME).await
+    }
+
+    /// 로컬 캐시 폴더. `{data_dir}/cache/`
+    pub async fn cache_dir(&self) -> PathBuf {
+        self.data_sub_dir(crate::cache::DIR_NAME).await
+    }
+
+    /// 콜렉터 하나의 캐시를 열어 붙인다 (사전도 같이). 못 열면 캐시 없이 간다 — 조회는 그대로 된다
+    pub async fn attach_cache(&self, host: &str, port: u16) {
+        let dir = self.cache_dir().await;
+        let key = crate::cache::collector_key(host, port);
+        let db = match CacheDb::open(&dir, &key) {
+            Ok(db) => Some(Arc::new(db)),
+            Err(e) => {
+                log::warn!("로컬 캐시 없이 갑니다: {e}");
+                None
+            }
+        };
+        if let Some(db) = &db {
+            log::info!("로컬 캐시: {}", db.path().display());
+        }
+        self.text_cache.lock().await.attach(db.clone());
+        *self.cache.lock().await = db;
+    }
+
+    /// 캐시를 뗀다 (접속을 끊거나 데모로 갈 때)
+    pub async fn detach_cache(&self) {
+        self.text_cache.lock().await.attach(None);
+        *self.cache.lock().await = None;
     }
 
     /// 오브젝트 기록 폴더. `{data_dir}/object-history/`

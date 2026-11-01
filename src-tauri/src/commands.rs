@@ -95,6 +95,10 @@ pub async fn connect_scouter(
         let _ = cfg.save(&config_path);
     }
 
+    // 이 콜렉터의 로컬 캐시를 붙인다 — 이름 사전 등을 다시 받지 않게
+    let (h, p) = (state.conn_host.lock().await.clone(), *state.conn_port.lock().await);
+    state.attach_cache(&h, p).await;
+
     log::info!("Collector 연결 완료: server_id={server_id}");
     *state.server_id.lock().await = Some(server_id.clone());
     let _ = app.emit("scouter-connected", server_id);
@@ -111,6 +115,7 @@ pub async fn disconnect_scouter(app: AppHandle, state: State<'_, AppState>) -> R
     *state.connection.lock().await = None;
     *state.server_id.lock().await = None;
     *state.clock_offset_ms.lock().await = None;
+    state.detach_cache().await;
     // 창마다 받던 것도 비운다 — 다른 서버에 붙으면 창들이 새로 알려 온다
     state.xlog_subs.lock().await.clear();
     // **조회용 연결도 버린다.** 안 버리면 이전 서버로 붙은 연결이 풀에 남아,
@@ -2283,6 +2288,8 @@ pub async fn start_mock_stream(
     *state.server_id.lock().await = Some(DEMO_SERVER_ID.to_string());
     // 합성 데이터는 이 PC 시계로 만든다 — 맞출 시계가 없다
     *state.clock_offset_ms.lock().await = None;
+    // 합성 데이터를 진짜 콜렉터의 캐시에 섞지 않는다
+    state.detach_cache().await;
     let _ = app.emit("scouter-connected", DEMO_SERVER_ID);
 
     tokio::spawn(async move {

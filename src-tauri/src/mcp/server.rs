@@ -7,6 +7,8 @@
 // 비동기 일꾼 하나를 붙잡으면 화면 명령과 MCP 응답이 같이 밀린다.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -18,7 +20,8 @@ use tauri::{AppHandle, Manager};
 
 use super::digest::{
     self, contains_rule, detail_hashes, detail_json, parse_ref, resolve_window, search_result_json, Collector,
-    GroupRule, Patterns, ProfileFacts, ProfileHitView, RowFilter, ScanFacts, ServerFilter, SortBy, Texts, Window,
+    plan_slices, unscanned_range, GroupRule, Patterns, ProfileFacts, ProfileHitView, RowFilter, ScanFacts, ServerFilter, Slice,
+    SortBy, Texts, Window,
 };
 use super::McpState;
 use crate::scouter::connection::{local_now_ms, ScouterConnection};
@@ -364,17 +367,10 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
         })
         .collect();
 
+    // 날짜마다 훑을 서버. 날짜마다 그날 붙었던 오브젝트가 다르다(ECS Task 는 갈린다)
     let mut names: HashMap<i32, String> = HashMap::new();
-    // 프로파일을 볼 때는 후보를 넉넉히 남긴다. 걸러진 뒤에 `limit` 으로 자른다
-    let keep = if q.profile.is_some() { digest::PROFILE_CANDIDATES } else { q.limit };
-    let mut collector = Collector::new(q.sort, keep);
-    let mut seen: HashSet<i64> = HashSet::new();
-    let mut scanned = 0u64;
-    let mut truncated_at = None;
-    let mut any_server = false;
-    let name_kinds = filter.name_kinds();
-
-    'days: for (day_start, day_end) in split_by_day(window.stime, window.etime, tz) {
+    let mut by_date: HashMap<String, Vec<i32>> = HashMap::new();
+    for (day_start, _) in split_by_day(window.stime, window.etime, tz) {
         let date = date_key(day_start, tz);
         let daily = request_all(conn, CMD_OBJECT_LIST_LOAD_DATE, &build_daily_object_param(&date))?
             .into_iter()
@@ -397,57 +393,54 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
                 names.entry(h).or_insert(name);
             }
         }
-        if hashes.is_empty() {
-            continue;
-        }
-        any_server = true;
-
-        let mut cursor = PastCursor::default();
-        for _ in 0..MAX_PAGES {
-            let param = build_past_xlog_param(&hashes, &date, day_start, day_end, PAGE_COUNT, &cursor);
-            let mut next = PastCursor::default();
-            let mut rows = 0u32;
-            let mut page: Vec<XLogPack> = Vec::new();
-            for p in request_all(conn, CMD_TRANX_LOAD_TIME_GROUP_V2, &param)? {
-                match p {
-                    AnyPack::XLog(x) => {
-                        rows += 1;
-                        // 페이지 경계에서 같은 시각의 트랜잭션이 다시 온다 (F-28)
-                        if !seen.insert(x.txid) {
-                            continue;
-                        }
-                        scanned += 1;
-                        if filter.passes_cheap(&x) {
-                            page.push(x);
-                        }
-                    }
-                    AnyPack::Map(m) => next = parse_past_cursor(&m),
-                    _ => {}
-                }
-            }
-
-            // 이름 조건(서비스·로그인·설명)은 이름을 풀어야 볼 수 있다 — 싼 조건을 넘은 것만 푼다
-            if !name_kinds.is_empty() && !page.is_empty() {
-                let wants: Vec<(&'static str, i32)> = page.iter().flat_map(|x| filter.name_hashes(x)).collect();
-                fill_texts(conn, state, &wants)?;
-                let cache = state.text_cache.blocking_lock();
-                let texts = cache_texts(&cache);
-                page.retain(|x| filter.passes_names(x, &texts as &dyn Texts));
-            }
-            for x in page {
-                collector.add(x);
-            }
-
-            if scanned >= MAX_SCAN_ROWS {
-                truncated_at = Some(next.last_xlog_time.max(day_start));
-                break 'days;
-            }
-            if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
-                break;
-            }
-            cursor = next;
+        if !hashes.is_empty() {
+            by_date.insert(date, hashes);
         }
     }
+    let any_server = !by_date.is_empty();
+    let slices: Vec<Slice> = plan_slices(window, tz, digest::SLICE_MS, q.sort)
+        .into_iter()
+        .filter(|s| by_date.contains_key(&s.date))
+        .collect();
+
+    // 프로파일을 볼 때는 후보를 넉넉히 남긴다. 걸러진 뒤에 `limit` 으로 자른다
+    let keep = if q.profile.is_some() { digest::PROFILE_CANDIDATES } else { q.limit };
+    let shared = SharedScan {
+        collector: Mutex::new(Collector::new(q.sort, keep)),
+        seen: Mutex::new(HashSet::new()),
+        scanned: AtomicU64::new(0),
+        next: AtomicUsize::new(0),
+        stop: AtomicBool::new(false),
+        error: Mutex::new(None),
+        done: slices.iter().map(|_| AtomicBool::new(false)).collect(),
+    };
+
+    // **조각을 연결 여럿이 나눠 받는다.** 운영 콜렉터는 왕복이 커서 순서대로 받으면 페이지 수 × 왕복이
+    // 그대로 시간이다. 첫 일꾼은 빌려 온 연결을, 나머지는 같은 세션으로 새 소켓을 연다(F-1 — 세션은
+    // 소켓과 무관하다). 새 소켓을 못 열면 그 일꾼만 빠지고 나머지가 마저 받는다
+    let workers = SCAN_PARALLEL.min(slices.len()).max(1);
+    let host = state.conn_host.blocking_lock().clone();
+    let port = *state.conn_port.blocking_lock();
+    let session = conn.session;
+    std::thread::scope(|sc| {
+        let (shared, slices, by_date) = (&shared, &slices, &by_date);
+        for _ in 1..workers {
+            let host = host.clone();
+            sc.spawn(move || {
+                let Ok(mut c) = ScouterConnection::connect(&host, port) else { return };
+                c.session = session;
+                scan_worker(&mut c, state, slices, by_date, filter, shared);
+            });
+        }
+        scan_worker(conn, state, slices, by_date, filter, shared);
+    });
+    if let Some(e) = shared.error.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        return Err(e);
+    }
+    let scanned = shared.scanned.load(Ordering::Relaxed);
+    let done: Vec<bool> = shared.done.iter().map(|d| d.load(Ordering::Relaxed)).collect();
+    let unscanned = unscanned_range(&slices, &done);
+    let collector = shared.collector.into_inner().unwrap_or_else(|p| p.into_inner());
 
     if !any_server {
         return Err(if q.servers.is_empty() {
@@ -487,7 +480,7 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
     wants.extend(res.top_services.iter().map(|s| (text_type::SERVICE, s.service)));
     fill_texts(conn, state, &wants)?;
 
-    let facts = ScanFacts { window, tz_offset_ms: tz, scanned, truncated_at, servers: names.len(), profile: profile_facts };
+    let facts = ScanFacts { window, tz_offset_ms: tz, scanned, unscanned, servers: names.len(), profile: profile_facts };
     let cache = state.text_cache.blocking_lock();
     let texts = cache_texts(&cache);
     let server_name = |h: i32| names.get(&h).cloned().unwrap_or_else(|| format!("#{h}"));
@@ -499,6 +492,108 @@ fn scan(conn: &mut ScouterConnection, state: &AppState, q: &ScanQuery) -> Result
         res.matched
     );
     Ok(search_result_json(&res, &facts, &server_name, &texts as &dyn Texts, &hits))
+}
+
+/// 조각을 동시에 받는 연결 수. 화면의 «트랜잭션 찾기»(`WIDE_PARALLEL`)와 같은 값이다.
+/// 운영 콜렉터의 왕복을 재면 이 값을 그에 맞춘다
+const SCAN_PARALLEL: usize = 4;
+
+/// 일꾼들이 함께 쓰는 것
+struct SharedScan {
+    collector: Mutex<Collector>,
+    /// 조각 경계·페이지 경계에서 같은 트랜잭션이 다시 온다 (F-28)
+    seen: Mutex<HashSet<i64>>,
+    scanned: AtomicU64,
+    /// 다음에 가져갈 조각 번호
+    next: AtomicUsize,
+    /// 상한에 닿았거나 오류가 났다 — 새 조각을 가져가지 않는다
+    stop: AtomicBool,
+    error: Mutex<Option<String>>,
+    /// 끝까지 받은 조각
+    done: Vec<AtomicBool>,
+}
+
+/// 조각을 하나씩 가져가 끝까지 받는다
+fn scan_worker(
+    conn: &mut ScouterConnection,
+    state: &AppState,
+    slices: &[Slice],
+    by_date: &HashMap<String, Vec<i32>>,
+    filter: &RowFilter,
+    sh: &SharedScan,
+) {
+    while !sh.stop.load(Ordering::Relaxed) {
+        let i = sh.next.fetch_add(1, Ordering::Relaxed);
+        let Some(sl) = slices.get(i) else { break };
+        let hashes = &by_date[&sl.date];
+        match scan_slice(conn, state, sl, hashes, filter, sh) {
+            Ok(true) => sh.done[i].store(true, Ordering::Relaxed),
+            Ok(false) => {}
+            Err(e) => {
+                sh.error.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert(e);
+                sh.stop.store(true, Ordering::Relaxed);
+            }
+        }
+        if sh.scanned.load(Ordering::Relaxed) >= MAX_SCAN_ROWS {
+            sh.stop.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// 조각 하나를 페이지로 넘겨 가며 받는다. 끝까지 받았으면 true, 상한에 걸려 멈췄으면 false
+fn scan_slice(
+    conn: &mut ScouterConnection,
+    state: &AppState,
+    sl: &Slice,
+    hashes: &[i32],
+    filter: &RowFilter,
+    sh: &SharedScan,
+) -> Result<bool, String> {
+    let name_kinds = filter.name_kinds();
+    let mut cursor = PastCursor::default();
+    for _ in 0..MAX_PAGES {
+        let param = build_past_xlog_param(hashes, &sl.date, sl.stime, sl.etime, PAGE_COUNT, &cursor);
+        let mut next = PastCursor::default();
+        let mut raw: Vec<XLogPack> = Vec::new();
+        for p in request_all(conn, CMD_TRANX_LOAD_TIME_GROUP_V2, &param)? {
+            match p {
+                AnyPack::XLog(x) => raw.push(x),
+                AnyPack::Map(m) => next = parse_past_cursor(&m),
+                _ => {}
+            }
+        }
+        let rows = raw.len();
+        let fresh: Vec<XLogPack> = {
+            let mut seen = sh.seen.lock().unwrap_or_else(|p| p.into_inner());
+            raw.into_iter().filter(|x| seen.insert(x.txid)).collect()
+        };
+        sh.scanned.fetch_add(fresh.len() as u64, Ordering::Relaxed);
+        let mut page: Vec<XLogPack> = fresh.into_iter().filter(|x| filter.passes_cheap(x)).collect();
+
+        // 이름 조건(서비스·로그인·설명)은 이름을 풀어야 볼 수 있다 — 싼 조건을 넘은 것만 푼다
+        if !name_kinds.is_empty() && !page.is_empty() {
+            let wants: Vec<(&'static str, i32)> = page.iter().flat_map(|x| filter.name_hashes(x)).collect();
+            fill_texts(conn, state, &wants)?;
+            let cache = state.text_cache.blocking_lock();
+            let texts = cache_texts(&cache);
+            page.retain(|x| filter.passes_names(x, &texts as &dyn Texts));
+        }
+        if !page.is_empty() {
+            let mut c = sh.collector.lock().unwrap_or_else(|p| p.into_inner());
+            page.into_iter().for_each(|x| c.add(x));
+        }
+
+        // 서버가 `hasMore` 를 계속 주면서 커서를 안 밀면 같은 페이지를 영원히 받는다
+        if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
+            return Ok(true);
+        }
+        if sh.scanned.load(Ordering::Relaxed) >= MAX_SCAN_ROWS {
+            return Ok(false);
+        }
+        cursor = next;
+    }
+    // 빗장에 걸렸다 — 끝까지 받았다고 할 수 없다
+    Ok(false)
 }
 
 /// 후보들의 프로파일을 열어 글자를 찾는다. 화면의 «프로파일 검색» 과 같은 길이다 —
