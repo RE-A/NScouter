@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchShortcut, isEditableTarget, SHORTCUT_HELP, type KeyEventLike } from './shortcuts';
+import { matchShortcut, isEditableTarget, isPageReloadKey, SHORTCUT_HELP, type KeyEventLike } from './shortcuts';
 
 const key = (over: Partial<KeyEventLike>): KeyEventLike => ({
   key: 'a',
@@ -57,12 +57,21 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key({ key: 'W', ctrlKey: true }))).toBe('close-detail-tab');
   });
 
-  it('**입력칸 안에서는 Esc 만 산다**', () => {
+  it('**입력칸 안에서는 Esc 와 F5 만 산다**', () => {
     // 서비스 이름에 1 을 치는데 탭이 바뀌면 안 된다
     expect(matchShortcut(key({ key: '1', ctrlKey: true, inEditable: true }))).toBeNull();
     expect(matchShortcut(key({ key: 'f', ctrlKey: true, inEditable: true }))).toBeNull();
-    expect(matchShortcut(key({ key: 'F5', inEditable: true }))).toBeNull();
     expect(matchShortcut(key({ key: 'Escape', inEditable: true }))).toBe('close-detail');
+    // F5 는 칸의 글자를 안 바꾼다 — 여기서 죽이면 웹뷰가 화면을 통째로 다시 읽었다
+    expect(matchShortcut(key({ key: 'F5', inEditable: true }))).toBe('reload');
+  });
+
+  it('웹뷰의 «다시 읽기» 키를 가려낸다 — 늘 막는다', () => {
+    expect(isPageReloadKey(key({ key: 'F5' }))).toBe(true);
+    expect(isPageReloadKey(key({ key: 'F5', ctrlKey: true }))).toBe(true);
+    expect(isPageReloadKey(key({ key: 'r', ctrlKey: true }))).toBe(true);
+    expect(isPageReloadKey(key({ key: 'R', metaKey: true }))).toBe(true);
+    expect(isPageReloadKey(key({ key: 'r' }))).toBe(false);
   });
 
   it('수식키 없는 글자는 단축키가 아니다', () => {

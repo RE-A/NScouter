@@ -5395,12 +5395,12 @@ fn live_search_parallel_matches_sequential() {
 
     // 순차 (워커 1개 = 예전 동작)
     let t = Instant::now();
-    let seq = fetch_profiles_parallel(HOST, PORT, session, &targets, 1);
+    let seq = fetch_profiles_parallel(HOST, PORT, session, &targets, 1, None);
     let seq_ms = t.elapsed();
 
     // 병렬
     let t = Instant::now();
-    let par = fetch_profiles_parallel(HOST, PORT, session, &targets, 8);
+    let par = fetch_profiles_parallel(HOST, PORT, session, &targets, 8, None);
     let par_ms = t.elapsed();
 
     assert_eq!(seq.len(), targets.len(), "순차 결과 수가 대상 수와 다르다");

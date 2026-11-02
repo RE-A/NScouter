@@ -4,15 +4,16 @@
 // 잘림이 없고 오브젝트를 여럿 다룬다. 이 창은 «오늘 오전 내내 중 이 서비스만» 처럼
 // 드래그로는 여러 번 나눠 받아야 하는 것을 한 번에 찾기 위한 입구다 (F-54).
 //
-// **상한을 숨기지 않는다.** 서버는 `req_search_xlog_max_count`(기본 500)에서 그냥 끊고
-// «잘렸다» 는 신호를 아무것도 주지 않는다. 그래서 상한에 닿으면 구간을 잘게 나눠 이어 찾는다
-// (`wideSearchAll.ts`) — 창에는 한 번에 오는 양과 모두 모으는 양을 적어 두고, 찾는 동안 진행을 보인다.
+// **대소문자를 가리지 않는다.** 화면의 다른 필터와 같다. 예전에는 콜렉터 검색에 조건을 넘겨
+// 대소문자를 가렸다(`order` 로 `/Order/…` 를 못 찾음) — 지금은 구간을 받아 앱이 거른다
+// (`wideSearchAll.ts`). 창에는 모두 모으는 양을 적어 두고, 찾는 동안 진행을 보인다.
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useState } from 'react';
 import type { AgentObject } from '../types/xlog';
-import { getSearchMax } from '../api/scouterApi';
 import type { WideProgress } from '../hooks/wideSearchAll';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
+import { Dialog } from '../../../components/Dialog';
 
 export interface WideSearchValues {
   stime: number;
@@ -30,7 +31,7 @@ export interface WideSearchValues {
 }
 
 interface WideSearchDialogProps {
-  /** 고를 수 있는 오브젝트. 서버가 **하나만** 받는다 */
+  /** 고를 수 있는 오브젝트 */
   agents: AgentObject[];
   running: boolean;
   /** 찾는 중의 진행. 안 찾고 있으면 null */
@@ -64,21 +65,6 @@ export const WideSearchDialog = memo(function WideSearchDialog({
   onSearch,
   onClose,
 }: WideSearchDialogProps) {
-  /**
-   * 상한을 **물어보고 나서** 적는다.
-   *
-   * 안 물어보고 기본값(500)을 단정하면, 서버가 상한을 올려 뒀을 때 화면이 거짓말을 한다.
-   * 못 물어봤으면 «모른다» 고 두고, 그때만 기본값을 «추측» 이라고 밝힌다.
-   */
-  const [limit, setLimit] = useState<{ max: number; known: boolean } | null>(null);
-  useEffect(() => {
-    let alive = true;
-    getSearchMax()
-      .then(m => { if (alive) setLimit(m); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
-
   const now = Date.now();
   const [stime, setStime] = useState(toLocalInput(now - 60 * 60 * 1000));
   const [etime, setEtime] = useState(toLocalInput(now));
@@ -117,48 +103,45 @@ export const WideSearchDialog = memo(function WideSearchDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
+    <Dialog
+      title={t('넓은 구간에서 찾기')}
+      onClose={onClose}
+      widthClass="w-[34rem]"
+      footer={
+        <>
+          {/* 넓은 구간은 조각으로 나눠 여러 번 묻는다 — 몇 건 모았고 어디까지 왔는지 보여 줘야 기다릴지 정한다 */}
+          {progress && (
+            <span className="mr-auto text-micro text-fg-dim" role="status">
+              <span className="tnum font-mono text-fg-muted">{progress.found.toLocaleString()}</span>
+              {t('건')} · {Math.round(progress.done * 100)}% · {t('요청')} {progress.requests}
+            </span>
+          )}
+          {running ? (
+            <Button size="md" onClick={onCancel} title={t('그때까지 모은 것을 목록으로 보냅니다')}>
+              {t('멈추기')}
+            </Button>
+          ) : (
+            <Button size="md" onClick={onClose}>
+              {t('취소')}
+            </Button>
+          )}
+          <Button variant="primary" size="md" onClick={submit} disabled={badRange || running}>
+            {running ? t('찾는 중…') : t('찾기')}
+          </Button>
+        </>
+      }
     >
       <div
-        onClick={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === 'Enter') submit();
         }}
-        className="max-h-[90vh] w-[34rem] overflow-y-auto rounded border border-line-strong bg-surface p-4"
       >
-        <div className="mb-1 flex items-baseline justify-between">
-          <h2 className="text-body font-semibold text-fg">{t('넓은 구간에서 찾기')}</h2>
-          <button
-            onClick={onClose}
-            aria-label={t('닫기')}
-            className="rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-          >
-            ✕
-          </button>
-        </div>
 
         {/* **상한을 먼저 말한다.** 찾고 나서 알려주면 이미 «없다» 고 읽은 뒤다 */}
         <p className="mb-3 text-micro text-fg-dim">
-          {limit === null ? (
-            // 아직 안 물어봤다. 숫자를 지어내지 않는다.
-            t('서버가 걸러서 보내 줍니다. 상한을 확인하는 중입니다…')
-          ) : (
-            <>
-              {t('서버가 걸러서 보내 줍니다. 한 번에')}{' '}
-              <span className="tnum font-mono text-fg-muted">{limit.max.toLocaleString()}</span>
-              {t('건까지 오므로, 넘으면 구간을 잘게 나눠 이어 찾습니다. 모두')}{' '}
-              <span className="tnum font-mono text-fg-muted">{cap.toLocaleString()}</span>
-              {t('건까지 모읍니다.')} <span className="text-fg-faint">{t('(설정에서 바꿈)')}</span>
-              {!limit.known && (
-                <span className="text-fg-faint">
-                  {' '}
-                  {t('(서버 설정에 상한이 안 적혀 있어 기본값으로 봅니다)')}
-                </span>
-              )}
-            </>
-          )}
+          {t('구간을 받아 조건으로 거릅니다. 모두')}{' '}
+          <span className="tnum font-mono text-fg-muted">{cap.toLocaleString()}</span>
+          {t('건까지 모읍니다.')} <span className="text-fg-faint">{t('(설정에서 바꿈)')}</span>
         </p>
 
         <Row label={t('구간')}>
@@ -186,7 +169,6 @@ export const WideSearchDialog = memo(function WideSearchDialog({
             onChange={e => setObjHash(Number(e.target.value))}
             className="min-w-0 flex-1 rounded border border-line-control bg-input px-2 py-0.5 pr-[26px] text-body text-fg"
           >
-            {/* 서버가 **하나만** 받는다. 목록으로 좁힐 수 없다 */}
             <option value={0}>{t('전체')}</option>
             {agents.map(a => (
               <option key={a.obj_hash} value={a.obj_hash}>
@@ -209,18 +191,15 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           <Text value={desc} onChange={setDesc} placeholder="" />
         </Row>
 
-        {/* **글롭 규칙을 적어 둔다.** 서버는 `*` 가 없으면 완전 일치로 본다 */}
+        {/* **규칙을 적어 둔다.** `*` 를 쓰면 «포함» 이 아니라 그 모양 그대로 맞춘다 */}
         <p className="mb-3 mt-1 text-micro text-fg-faint">
-          {t('그냥 치면 «포함»으로 찾습니다. * 를 직접 쓰면 그 자리만 아무 글자로 봅니다.')}
+          {t('그냥 치면 «포함»으로 찾습니다. * 를 직접 쓰면 그 자리만 아무 글자로 봅니다.')}{' '}
+          {t('대소문자는 가리지 않습니다.')}
         </p>
 
-        <button
-          type="button"
-          onClick={() => setShowFree(v => !v)}
-          className="mb-2 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
-        >
+        <Button variant="ghost" size="xs" onClick={() => setShowFree(v => !v)} className="mb-2">
           {showFree ? t('앱 자유 필드 접기') : t('앱 자유 필드 (text1~5)')}
-        </button>
+        </Button>
         {showFree && (
           <>
             <Row label="text1">
@@ -241,40 +220,8 @@ export const WideSearchDialog = memo(function WideSearchDialog({
           </>
         )}
 
-        <div className="mt-3 flex items-center justify-end gap-2">
-          {/* 넓은 구간은 수십 번 나눠 묻는다 — 몇 건 모았고 어디까지 왔는지 보여 줘야 기다릴지 정한다 */}
-          {progress && (
-            <span className="mr-auto text-micro text-fg-dim" role="status">
-              <span className="tnum font-mono text-fg-muted">{progress.found.toLocaleString()}</span>
-              {t('건')} · {Math.round(progress.done * 100)}% · {t('요청')} {progress.requests}
-            </span>
-          )}
-          {running ? (
-            <button
-              onClick={onCancel}
-              title={t('그때까지 모은 것을 목록으로 보냅니다')}
-              className="rounded border border-line-strong px-3 py-1 text-small text-fg-muted hover:bg-hover"
-            >
-              {t('멈추기')}
-            </button>
-          ) : (
-            <button
-              onClick={onClose}
-              className="rounded border border-line-strong px-3 py-1 text-small text-fg-muted hover:bg-hover"
-            >
-              {t('취소')}
-            </button>
-          )}
-          <button
-            onClick={submit}
-            disabled={badRange || running}
-            className="btn border-accent-bright px-3 py-1 text-small text-accent-bright"
-          >
-            {running ? t('찾는 중…') : t('찾기')}
-          </button>
-        </div>
       </div>
-    </div>
+    </Dialog>
   );
 });
 

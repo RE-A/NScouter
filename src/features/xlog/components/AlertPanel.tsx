@@ -194,7 +194,7 @@ const emptyStyle: React.CSSProperties = {
 
 const rowStyle: React.CSSProperties = {
   padding: '6px 12px',
-  borderBottom: '1px solid #12121e',
+  borderBottom: `1px solid ${T.borderTable}`,
 };
 
 const rowTopStyle: React.CSSProperties = {

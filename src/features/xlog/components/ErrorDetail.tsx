@@ -12,6 +12,7 @@ import { summarizeError } from './errorText';
 import { FullTextButton } from './FullTextButton';
 import { previewLine } from './textFormat';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface ErrorDetailProps {
   text: string;
@@ -35,13 +36,13 @@ export function ErrorDetail({ text, compact }: ErrorDetailProps) {
         </p>
         {restLines > 0 && (
           <span className="flex shrink-0 items-baseline gap-1">
-            <button
+            <Button
+              size="xs"
               onClick={() => setOpen(o => !o)}
               aria-expanded={open}
-              className="rounded border border-line px-1.5 text-micro text-fg-dim hover:text-fg"
             >
               {open ? t('접기') : `${t('스택')} ${restLines}${t('줄')}`}
-            </button>
+            </Button>
             <FullTextButton kind="ERROR" title={previewLine(head, 60)} body={text} min={0} />
           </span>
         )}

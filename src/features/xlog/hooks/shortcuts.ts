@@ -58,11 +58,14 @@ export function matchShortcut(e: KeyEventLike): ShortcutAction | null {
   // Esc 는 입력칸 안에서도 산다. 다만 뜻이 다르다 — 부르는 쪽에서 가른다.
   if (e.key === 'Escape') return 'close-detail';
 
+  // **F5 는 입력칸 안에서도 산다.** 칸에서 F5 는 글자를 바꾸지 않는다 — 여기서 죽이면 웹뷰가
+  // 받아 **화면을 통째로 다시 읽었다**(접속·고른 서버·열어 둔 상세가 다 날아간다). 검색칸에
+  // 커서를 둔 채 F5 를 누르는 일이 흔하다.
+  if (e.key === 'F5' && !e.ctrlKey && !e.metaKey && !e.altKey) return 'reload';
+
   // **입력칸 안에서는 나머지를 전부 죽인다.** 값을 치다가 화면이 바뀌면
   // 무엇을 눌러 그렇게 됐는지 알 수 없다.
   if (e.inEditable) return null;
-
-  if (e.key === 'F5' && !e.ctrlKey && !e.metaKey && !e.altKey) return 'reload';
 
   const mod = e.ctrlKey || e.metaKey;
   if (!mod || e.altKey) return null;
@@ -96,6 +99,17 @@ export function matchShortcut(e: KeyEventLike): ShortcutAction | null {
     default:
       return null;
   }
+}
+
+/**
+ * 웹뷰가 **화면을 통째로 다시 읽는** 키인가 — F5 · Ctrl+F5 · Ctrl(+Shift)+R.
+ *
+ * 앱 안에서 이 키들은 화면을 다시 읽으면 안 된다(접속·고른 서버·탭이 다 날아간다). 단축키로 쓰든
+ * 안 쓰든, 입력칸 안이든 밖이든 **기본 동작은 늘 막는다**.
+ */
+export function isPageReloadKey(e: Pick<KeyEventLike, 'key' | 'ctrlKey' | 'metaKey'>): boolean {
+  if (e.key === 'F5') return true;
+  return (e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R');
 }
 
 /**

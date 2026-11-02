@@ -9,6 +9,7 @@ import { useViewOptions } from './useViewOptions';
 import { xlogColumnsToSXLogs } from '../types/xlog';
 import type { XLogChartConfig } from '../types/xlog';
 import { NOT_PAUSED, pruneRangeMs, type PauseState } from './pauseModel';
+import { serverNow } from '../utils/serverClock';
 
 interface UseXLogStreamResult {
   store: XLogDataStore;
@@ -95,7 +96,8 @@ export function useXLogStream(
 
     // 주기적으로 시간 윈도우 밖 데이터 정리
     const pruneInterval = setInterval(() => {
-      const now = Date.now();
+      // 콜렉터 시계로 자른다 — 그리는 창(useXLogCanvas)과 같은 «지금» 이어야 창 안의 점을 안 버린다
+      const now = serverNow();
       storeRef.current.prune(now, pruneRangeMs(pauseRef.current, config.timeRangeMs, now));
     }, 5000);
 

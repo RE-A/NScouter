@@ -21,6 +21,8 @@ export const T = {
   borderStrong: 'var(--border-strong)',
   /** 누를 수 있는 것의 경계. 구분선(`border`)과 **역할이 다르다** — tokens.css 참고 */
   borderControl: 'var(--border-control)',
+  /** 표의 칸·행 경계 — 패널 구분선보다 또렷하다 (tokens.css) */
+  borderTable: 'var(--border-table)',
 
   // 글자
   text: 'var(--text)',

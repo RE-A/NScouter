@@ -213,6 +213,30 @@ export const EN: Record<string, string> = {
   '출처': 'Source',
   '열기': 'Open',
   '닫기': 'Close',
+  '닫기 (Esc)': 'Close (Esc)',
+  '모두 지우기': 'Clear all',
+  // 판 머리 (XLogChart · XLogChartSettings)
+  'Y축·범위·Y최대·밀집 — 점을 거르지 않고 그리는 모양만 바꿉니다': 'Y axis · range · Y max · density — changes how dots are drawn, not which are shown',
+  '과거 — 툴바에서 구간을 고르고 «조회»': 'Past — pick a range in the toolbar and press «Query»',
+  '과거 구간을 보는 중입니다. 휠=확대 · Shift+휠=이동 · 툴바의 «실시간» 으로 돌아갑니다': 'Viewing a past range. Wheel = zoom · Shift+wheel = pan · «Live» in the toolbar returns',
+  '응답시간 (초)': 'Response time (sec)',
+  '차트 설정': 'Chart settings',
+  // 콜렉터 시계 · 다시 받기 (serverClock.ts · XLogChart)
+  '늦습니다': 'behind',
+  '빠릅니다': 'ahead',
+  '이 PC 시계가 콜렉터보다': 'This PC clock is',
+  '실시간 화면은 콜렉터 시각으로 그립니다': 'the live view is drawn on the collector clock',
+  '다시 받기': 'Reload',
+  '다시 받기 (F5) — 연결을 새로 맺고 이 화면을 처음부터 다시 받습니다. 서버를 골라도 XLog 가 안 뜰 때': 'Reload (F5) — reconnect and fetch this view again from scratch. Use it when XLog stays empty after picking servers',
+  '연결을 새로 맺지 못했습니다': 'Could not reconnect',
+  '데이터에 맞추기': 'Align to data',
+  '지금 들어오는 점의 시각에 차트 오른쪽 끝을 맞춥니다. 다시 받기(F5)를 하면 콜렉터 시계로 돌아갑니다': 'Aligns the right edge to the time of incoming dots. Reload (F5) returns to the collector clock',
+  // 서버 목록 머리 (AgentSelectorPanel)
+  '타입별': 'By type',
+  '그룹별': 'By group',
+  '목록을 무엇으로 묶을지 — 타입(tomcat · datasource · linux) · 그룹(이름의 부모 경로) · 서비스(같은 서비스의 ECS Task)':
+    'How to group the list — type (tomcat · datasource · linux) · group (parent path of the name) · service (ECS tasks of one service)',
+  '받아 둔 알림을 이 화면에서 지웁니다': 'Clears the received alerts from this view',
   '검색': 'Search',
   '취소': 'Cancel',
   '설정': 'Settings',
@@ -249,17 +273,12 @@ export const EN: Record<string, string> = {
   '트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수입니다. 넘으면 그 시각까지 찾은 것만 목록에 올리고 어디까지 찾았는지 알려 줍니다. 올릴수록 메모리를 쓰고 오래 걸립니다.': 'Maximum rows collected by Find transactions (wide range). Beyond it, only what was found up to that time is listed and the app tells you how far it got. Higher values use more memory and take longer.',
   '다 모았을 때의 대략적인 메모리:': 'Approximate memory when full:',
   '구간과 조건(서비스·IP·로그인 등)을 정해 서버에서 찾습니다. 드래그 없이 넓은 구간도 됩니다': 'Search on the server by range and conditions (service, IP, login…). Works for wide ranges without dragging',
-  '서버가 걸러서 보내 줍니다. 한 번에': 'The server filters for you. Up to',
-  '건까지 오므로, 넘으면 구간을 잘게 나눠 이어 찾습니다. 모두': 'rows come per request; beyond that the range is split and searched piece by piece, collecting up to',
   '건까지 모읍니다.': 'rows in total.',
   '(설정에서 바꿈)': '(change in Settings)',
   '요청': 'requests',
   '멈추기': 'Stop',
   '그때까지 모은 것을 목록으로 보냅니다': 'Send what was found so far to the list',
-  '1초 안에 서버 상한보다 많이 걸리는 구간이 있어, 그 1초는 상한만큼만 담았습니다. 조건을 좁히면 다 나옵니다.': 'Some second had more matches than the server limit; only the limit was kept for it. Narrow the conditions to get all.',
   '뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.': 'The rest was not searched. Search again starting after that time.',
-  '빽빽한 구간은 1초에': 'dense seconds capped at',
-  '건까지만': 'rows',
   '건에서 멈춤': ' rows — stopped',
   '찾다 멈춤': 'Stopped',
   '까지 찾음': ' searched up to here',
@@ -459,6 +478,8 @@ export const EN: Record<string, string> = {
 
   '언어': 'Language',
   '이름 · 타입 찾기': 'find by name or type',
+  // 좁은 칸용 — 묶기 고르기와 한 줄을 나눠 쓴다
+  '이름·타입 찾기': 'name or type',
   '검색어 지우기': 'clear search',
   '건 찾음': ' found',
   '건 중': ' of',
@@ -670,14 +691,9 @@ export const EN: Record<string, string> = {
     'Group by object kind (tomcat, datasource, linux)',
   '이름의 부모 경로로 묶습니다 (/CJFW/PRD-FSCP)': "Group by the name's parent path (/CJFW/PRD-FSCP)",
   '(그룹 없음)': '(no group)',
-  '서버가 걸러서 보내 줍니다. 상한을 확인하는 중입니다…':
-    'The collector filters and sends back the matches. Checking the limit…',
   '찾기': 'Search',
   '구간과 조건을 정해 서버에서 찾습니다': 'Pick a range and conditions; the collector does the filtering',
-  '서버가 걸러서 보내 줍니다. 최대': 'The collector filters and sends back at most ',
   '건까지만 오고, 그보다 많으면 잘립니다.': ' rows — anything beyond that is cut off.',
-  '(서버 설정에 상한이 안 적혀 있어 기본값으로 봅니다)':
-    '(the limit is not in the server config, so this is the default)',
   '그냥 치면 «포함»으로 찾습니다. * 를 직접 쓰면 그 자리만 아무 글자로 봅니다.':
     'Plain text matches anywhere in the value. Type * yourself to place your own wildcards.',
   '시작이 끝보다 앞서야 합니다': 'Start must come before end',
@@ -845,7 +861,7 @@ export const EN: Record<string, string> = {
   '기본값보다 큽니다': 'above the default',
 
   // ── 시계 어긋남 ───────────────────────────────────────
-  '데이터 시각이 이 PC 보다': 'Data timestamps are',
+  '데이터 시각이 지금보다': 'Data time is',
   '초 앞섭니다 — 최신 점이 창 밖에 있을 수 있습니다':
     's ahead of this PC — the newest dots may fall outside the window',
   '초 뒤처집니다 — 오른쪽이 비어 보일 수 있습니다':
@@ -959,4 +975,66 @@ export const EN: Record<string, string> = {
   '장애': 'Down',
   '살아 있는 Task 없음': 'No live task',
   '지금은 살아 있는 Task 가 있습니다': 'a task is live now',
+  // AI 연결 (McpSection.tsx)
+  'AI 연결 (MCP)': 'AI connection (MCP)',
+  'Claude Code · Cursor 가 이 앱을 거쳐 문제 있는 트랜잭션을 찾고 상세를 읽게 합니다. 앱이 켜져 있고 콜렉터에 접속해 있을 때만 붙습니다.':
+    'Lets Claude Code and Cursor find problem transactions and read their details through this app. Works only while the app is running and connected to a collector.',
+  '이 PC(127.0.0.1)에서만 열리고, 토큰이 있어야 읽습니다. 읽기만 합니다. 여기 값은 바로 적용됩니다.':
+    'Opens on this PC (127.0.0.1) only and requires the token. Read-only. Changes here apply immediately.',
+  '켜기': 'Enable',
+  '시작 못 함': 'Failed to start',
+  '1024~65535': '1024–65535',
+  'SQL 바인딩 값도 넘기기': 'Also send SQL bind values',
+  '상세 조회에 실제 값을 실을지입니다. 프로파일 본문 검색은 이 설정과 상관없이 값까지 찾습니다.':
+    'Whether details include actual values. Profile text search finds values regardless of this setting.',
+  '토큰': 'Token',
+  '새로 만들기': 'Regenerate',
+  '새 토큰을 만듭니다. 예전 토큰으로 등록한 클라이언트는 다시 등록해야 합니다':
+    'Creates a new token. Clients registered with the old token must be registered again',
+  'Claude Code — 터미널에서 한 번 실행': 'Claude Code — run once in a terminal',
+  'Cursor — ~/.cursor/mcp.json (프로젝트만이면 .cursor/mcp.json) 에 넣기':
+    'Cursor — put in ~/.cursor/mcp.json (or .cursor/mcp.json for one project)',
+  // 넓은 구간 찾기 — 대소문자 없이 (WideSearchDialog.tsx)
+  '구간을 받아 조건으로 거릅니다. 모두': 'Fetches the range and filters it by your conditions. Collects up to',
+  '대소문자는 가리지 않습니다.': 'Case is ignored.',
+  // 로컬 캐시 (SettingsDialog.tsx)
+  '로컬 캐시': 'Local cache',
+  '지난 XLog·프로파일·이름 사전을 이 PC 에 담아 두고, 같은 구간을 다시 볼 때 콜렉터에 묻지 않습니다. 에러·느린 트랜잭션의 프로파일은 미리 받아 둡니다. 상한을 넘으면 오래된 것부터 지웁니다.':
+    'Keeps past XLogs, profiles and the name dictionary on this PC so the same range is not fetched from the collector again. Profiles of error and slow transactions are fetched ahead. Oldest data is removed beyond the limit.',
+  '지금 사용:': 'In use:',
+  '비우기': 'Clear',
+  '비우는 중…': 'Clearing…',
+  '담아 둔 것을 다 지웁니다. 다음 조회부터 다시 콜렉터에서 받아 쌓습니다': 'Deletes everything cached. It fills up again from the collector on the next queries',
+  // 콜렉터 요청 · AI 조회 한도 (SettingsDialog.tsx · McpSection.tsx)
+  'SQL 문장·서비스 이름을 100개 묶음으로 몇 개씩 동시에 물을지': 'How many batches of 100 SQL statements/service names to look up at once',
+  'get_transaction_details 가 한 번에 받는 ref 수': 'How many refs get_transaction_details accepts per call',
+  'search_transactions 가 한 번에 돌려주는 최대 행 수': 'Maximum rows search_transactions returns per call',
+  '과거 구간을 몇 조각으로 나눠 동시에 받을지': 'How many pieces a past range is split into and fetched at once',
+  '과거 조회 — 동시 조각': 'Past view — parallel pieces',
+  '구간 페이지 크기': 'Range page size',
+  '넓은 구간 찾기와 AI 목록 조회가 구간을 몇 조각씩 동시에 받을지': 'How many pieces wide search and AI list queries fetch at once',
+  '넘으면 «다 못 훑었다» 고 알리고 멈춥니다': 'Beyond this it stops and reports that the scan was incomplete',
+  '넘으면 그때까지 연 것만으로 답합니다': 'Beyond this it answers with what it has opened so far',
+  '로컬 캐시에 없는 프로파일을 콜렉터에서 받는 최대 수. 캐시에 있는 것은 안 셉니다': 'Maximum profiles fetched from the collector when not in the local cache. Cached ones are not counted',
+  '목록 — 최대 건수': 'List — max rows',
+  '목록 — 최대 구간': 'List — max range',
+  '목록 — 훑을 최대 건수': 'List — max rows scanned',
+  '문제 트랜잭션의 프로파일 미리 받기': 'Prefetch profiles of problem transactions',
+  '미리 받기 — 응답시간 이상': 'Prefetch — elapsed at least',
+  '미리 받기 — 초당 최대': 'Prefetch — max per second',
+  '상세 — 한 번에 최대': 'Details — max per call',
+  '실시간으로 보는 중 이 응답시간 이상이거나 에러인 트랜잭션의 프로파일을 뒤에서 받아 둡니다': 'While watching live, profiles of transactions at least this slow or with errors are fetched in the background',
+  '이름 사전 — 동시 조회': 'Name dictionary — parallel lookups',
+  '조회 한도 (건수·시간)': 'Query limits (rows · time)',
+  '조회 한도 접기': 'Hide query limits',
+  '콜렉터 요청': 'Collector requests',
+  '콜렉터는 연결 하나에 요청 하나만 받아, 멀수록 요청마다 시간이 듭니다. 그래서 여러 개를 동시에 묻습니다. 기본값은 왕복 500ms 콜렉터를 기준으로 잰 값입니다 — 콜렉터가 가까우면 줄여도 되고, 콜렉터의 동시 연결이 빠듯하면 줄이세요.': 'The collector takes one request per connection, so each request costs more the farther away it is. That is why several are sent at once. Defaults were measured against a collector 500ms round trip away — lower them for a nearby collector or if the collector is short on connections.',
+  '트랜잭션 찾기·AI — 동시 조각': 'Wide search · AI — parallel pieces',
+  '트랜잭션 찾기·응답시간 분포·AI 목록 조회가 한 번에 받는 건수. 클수록 요청이 줄고 메모리를 조금 더 씁니다': 'Rows per request for wide search, elapsed distribution and AI list queries. Larger means fewer requests and slightly more memory',
+  '프로파일 — 동시 받기': 'Profiles — parallel fetches',
+  '프로파일 검색 — 동시 수': 'Profile search — concurrent searches',
+  '프로파일 검색 — 새로 받을 최대': 'Profile search — max new fetches',
+  '프로파일 검색 — 시간': 'Profile search — time',
+  '프로파일 검색(화면·AI)이 프로파일을 몇 개씩 동시에 받을지': 'How many profiles profile search (screen and AI) fetches at once',
+  '프로파일 검색을 한꺼번에 몇 개까지 돌릴지. 넘치면 앞의 것이 끝날 때까지 기다립니다': 'How many profile searches may run at once. Extra ones wait for earlier ones to finish',
 };

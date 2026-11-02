@@ -48,6 +48,13 @@ pub struct AppConfig {
     /// 화면 쪽에서 1만~100만으로 자른다.
     #[serde(default = "default_wide_search_max")]
     pub wide_search_max: u32,
+    /// 로컬 캐시(`{data_dir}/cache/`) 전체 상한(MB) — 콜렉터 여럿의 파일을 합친 것. 기본 2GB.
+    /// 넘으면 안 쓴 지 오래된 콜렉터의 파일부터, 그다음 지금 콜렉터의 오래된 XLog 부터 지운다
+    #[serde(default = "default_cache_max_mb")]
+    pub cache_max_mb: u32,
+    /// 콜렉터 동시 요청·페이지 크기·미리 받기 (`PerfPrefs`)
+    #[serde(default)]
+    pub perf: PerfPrefs,
     /// 화면 언어. `"ko"` 또는 `"en"`.
     ///
     /// Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같다.
@@ -111,6 +118,150 @@ pub struct AppConfig {
     /// 껐을 때 열려 있던 상세 탭들
     #[serde(default)]
     pub open_details: Vec<OpenDetailPrefs>,
+    /// 로컬 MCP 서버 (Claude Code · Cursor 가 붙는 자리). `src/mcp/`
+    #[serde(default)]
+    pub mcp: McpPrefs,
+}
+
+/// 로컬 MCP 서버 설정.
+///
+/// **기본은 끔이다.** 켜면 이 PC 의 다른 프로그램이 토큰만 있으면 트랜잭션을 읽어 간다.
+/// 설정 창이 «저장» 과 따로 바로 적용한다(`mcp_configure`) — 그래서 `save_config` 가
+/// 이 칸은 덮어쓰지 않는다(설정 창이 열 때 읽어 둔 옛 토큰이 새 토큰을 되돌리지 않게).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct McpPrefs {
+    pub enabled: bool,
+    /// 127.0.0.1 의 이 포트로 연다
+    pub port: u16,
+    /// `Authorization: Bearer …` 로 받을 값. 비어 있으면 켤 때 만든다
+    pub token: String,
+    /// 상세 조회에 SQL 바인딩 값(실제 데이터)을 실을지. **기본은 싣는다** — 값이 없으면
+    /// «어떤 값으로 느렸나» 를 재현할 수 없다. 비밀번호 같은 값은 앱 쪽에서 따로 암호화해 둔다고 했다
+    pub bind_values: bool,
+    /// AI 쪽 조회 한도 (건수·시간·동시 검색)
+    pub limits: McpLimits,
+}
+
+impl Default for McpPrefs {
+    fn default() -> Self {
+        Self { enabled: false, port: DEFAULT_MCP_PORT, token: String::new(), bind_values: true, limits: McpLimits::default() }
+    }
+}
+
+/// MCP 기본 포트. 콜렉터(6100)·웹앱(6180) 과 겹치지 않는 자리.
+/// IANA 에는 `doc-server`(Document WCF Server, 2008) 로 적혀 있는 잘 안 쓰이는 번호다 —
+/// 예전 기본값 7100 은 X 윈도 폰트 서버(`font-service`) 자리라 리눅스에서 겹칠 수 있었다
+pub const DEFAULT_MCP_PORT: u16 = 7165;
+
+/// MCP 조회 한도. 화면에서 바꾸고(`mcp_set_limits`) 읽을 때는 `clamped` 를 거친다 —
+/// 파일을 손으로 고쳐 0 이나 엄청 큰 값이 들어와도 앱이 이상하게 돌지 않게
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct McpLimits {
+    /// 목록(search_transactions) 한 번에 돌려줄 최대 건수
+    pub list_max: u32,
+    /// 상세(get_transaction_details) 한 번에 볼 최대 건수
+    pub detail_max: u32,
+    /// 목록 구간의 최대 길이(분)
+    pub max_minutes: u32,
+    /// 목록 한 번에 훑을 최대 트랜잭션 수
+    pub scan_max_rows: u32,
+    /// 프로파일 본문 검색에서 콜렉터에 새로 물을 최대 건수 (캐시에 있는 것은 안 센다)
+    pub profile_fetch_max: u32,
+    /// 프로파일 본문 검색에 쓸 시간(초)
+    pub profile_budget_sec: u32,
+    /// 프로파일 본문 검색을 한꺼번에 몇 개까지 돌릴지
+    pub profile_searches: u32,
+}
+
+impl Default for McpLimits {
+    fn default() -> Self {
+        Self {
+            list_max: 500,
+            detail_max: 5,
+            max_minutes: 360,
+            scan_max_rows: 200_000,
+            profile_fetch_max: 2_000,
+            profile_budget_sec: 15,
+            profile_searches: 2,
+        }
+    }
+}
+
+impl McpLimits {
+    /// 쓸 수 있는 범위로 자른다
+    pub fn clamped(&self) -> Self {
+        Self {
+            list_max: self.list_max.clamp(10, 5_000),
+            detail_max: self.detail_max.clamp(1, 20),
+            max_minutes: self.max_minutes.clamp(10, 1_440),
+            scan_max_rows: self.scan_max_rows.clamp(10_000, 2_000_000),
+            profile_fetch_max: self.profile_fetch_max.clamp(100, 20_000),
+            profile_budget_sec: self.profile_budget_sec.clamp(5, 120),
+            profile_searches: self.profile_searches.clamp(1, 8),
+        }
+    }
+}
+
+/// 콜렉터에 보내는 요청의 동시 수·크기, 프로파일 미리 받기.
+///
+/// **기본값은 콜렉터 왕복 500ms 를 기준으로 잰 값이다**(`tests/search_latency.rs`). 콜렉터는 연결 하나에 명령
+/// 하나라(F-1) 요청마다 왕복이 둘 이상 든다 — 그래서 동시에 보내고 페이지를 크게 받는다. 실측(왕복 500ms):
+///   · 프로파일 200건: 동시 8 → 18.8초, 16 → 9.8초, **32 → 5.3초**, 64 → 4.0초
+///   · 9분 1.2만 건: 페이지 500 → 18.3초, 5,000 → 1.6초, **20,000 → 0.9초**
+///   · 같은 것을 500건 페이지로 조각 4개 → 4.6초, **8개 → 3.1초**
+/// 콜렉터가 가까우면 줄여도 되고, 콜렉터의 동시 연결이 빠듯하면 줄여야 한다.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PerfPrefs {
+    /// 구간을 조각으로 나눠 동시에 받는 수 — MCP 목록 · 트랜잭션 찾기
+    pub scan_parallel: u32,
+    /// 화면 과거 조회를 조각으로 나눠 동시에 받는 수
+    pub past_parallel: u32,
+    /// 프로파일을 동시에 받는 수 — 프로파일 검색(화면·MCP)
+    pub profile_workers: u32,
+    /// 이름 사전(100개 묶음)을 동시에 묻는 수
+    pub text_workers: u32,
+    /// 구간 한 페이지의 건수 — MCP 목록 · 트랜잭션 찾기 · 응답시간 분포 (화면 과거 조회는 500 그대로)
+    pub page_rows: u32,
+    /// 에러·느린 트랜잭션의 프로파일을 미리 받아 둘지
+    pub prefetch_enabled: bool,
+    /// 이 응답시간(ms) 이상이면 미리 받는다 (에러는 늘)
+    pub prefetch_min_elapsed_ms: u32,
+    /// 미리 받기 초당 최대 건수
+    pub prefetch_per_sec: u32,
+}
+
+impl Default for PerfPrefs {
+    fn default() -> Self {
+        Self {
+            scan_parallel: 4,
+            past_parallel: 8,
+            profile_workers: 32,
+            text_workers: 8,
+            page_rows: 20_000,
+            prefetch_enabled: true,
+            prefetch_min_elapsed_ms: 3_000,
+            prefetch_per_sec: 20,
+        }
+    }
+}
+
+impl PerfPrefs {
+    /// 쓸 수 있는 범위로 자른다
+    pub fn clamped(&self) -> Self {
+        Self {
+            scan_parallel: self.scan_parallel.clamp(1, 16),
+            past_parallel: self.past_parallel.clamp(1, 16),
+            profile_workers: self.profile_workers.clamp(1, 64),
+            text_workers: self.text_workers.clamp(1, 16),
+            page_rows: self.page_rows.clamp(1_000, 50_000),
+            prefetch_enabled: self.prefetch_enabled,
+            prefetch_min_elapsed_ms: self.prefetch_min_elapsed_ms.clamp(500, 60_000),
+            prefetch_per_sec: self.prefetch_per_sec.clamp(1, 100),
+        }
+    }
 }
 
 /// 끌어서 정한 패널 크기. 픽셀이다.
@@ -393,6 +544,11 @@ fn default_font_scale() -> f32 {
 }
 
 /// 파생 기본값(0)이면 버퍼가 한 건도 못 담는다.
+/// 파생 기본값(0)이면 캐시가 한 건도 못 담는다
+pub fn default_cache_max_mb() -> u32 {
+    2048
+}
+
 fn default_wide_search_max() -> u32 {
     300_000
 }
@@ -428,6 +584,8 @@ impl Default for AppConfig {
             ui_font_scale: 1.0,
             xlog_buffer_max: default_buffer_max(),
             wide_search_max: default_wide_search_max(),
+            cache_max_mb: default_cache_max_mb(),
+            perf: PerfPrefs::default(),
             ui_language: "ko".to_string(),
             ui_theme: default_theme(),
             ui_layout: UiLayout::default(),
@@ -445,6 +603,7 @@ impl Default for AppConfig {
             kpi_thresholds: Vec::new(),
             saved_filters: Vec::new(),
             open_details: Vec::new(),
+            mcp: McpPrefs::default(),
         }
     }
 }
@@ -610,6 +769,55 @@ mod bind_default_tests {
         let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");
         assert_eq!(cfg.servers[0].pass, "");
         assert_eq!(cfg.servers[0].name, "");
+    }
+
+    #[test]
+    fn mcp_는_없으면_꺼져_있고_바인딩_값은_싣는다() {
+        let old = r#"{"auto_connect":false}"#;
+        let cfg: AppConfig = serde_json::from_str(old).expect("파싱 실패");
+        assert!(!cfg.mcp.enabled, "켜 두면 이 PC 의 다른 프로그램이 트랜잭션을 읽어 간다");
+        assert!(cfg.mcp.bind_values);
+        // 칸 일부만 있는 설정도 기본값을 따른다 (bool 파생 기본값 false 가 끼어들면 안 된다)
+        let part: AppConfig = serde_json::from_str(r#"{"mcp":{"enabled":true}}"#).expect("파싱 실패");
+        assert!(part.mcp.bind_values);
+        // 끈 사람은 끈 채로
+        let off: AppConfig = serde_json::from_str(r#"{"mcp":{"bind_values":false}}"#).expect("파싱 실패");
+        assert!(!off.mcp.bind_values);
+        assert_eq!(cfg.mcp.port, DEFAULT_MCP_PORT);
+        assert_eq!(cfg.mcp.port, 7165);
+        assert_eq!(cfg.mcp.limits, McpLimits::default());
+        assert_eq!(cfg.perf, PerfPrefs::default());
+        assert_eq!(cfg.mcp.token, "");
+    }
+
+    #[test]
+    fn 성능_설정은_빠진_칸만_기본값이고_범위를_넘으면_자른다() {
+        let saved = r#"{"perf":{"profile_workers":64},"mcp":{"limits":{"list_max":0}}}"#;
+        let cfg: AppConfig = serde_json::from_str(saved).expect("파싱 실패");
+        assert_eq!(cfg.perf.profile_workers, 64);
+        assert_eq!(cfg.perf.scan_parallel, 4, "빠진 칸은 기본값");
+        assert_eq!(cfg.mcp.limits.clamped().list_max, 10, "0 이 오면 최소값으로");
+        let wild = PerfPrefs { page_rows: 9_999_999, text_workers: 0, ..PerfPrefs::default() }.clamped();
+        assert_eq!((wild.page_rows, wild.text_workers), (50_000, 1));
+    }
+
+    #[test]
+    fn 화면의_성능_기본값은_여기와_같다() {
+        // 갈리면 설정 창이 «기본값으로» 를 눌렀을 때 실제 기본과 다른 값을 저장한다
+        let ts = include_str!("../../src/features/xlog/api/perfDefaults.ts").replace('_', "");
+        let d = PerfPrefs::default();
+        for (k, v) in [
+            ("scanparallel", d.scan_parallel),
+            ("pastparallel", d.past_parallel),
+            ("profileworkers", d.profile_workers),
+            ("textworkers", d.text_workers),
+            ("pagerows", d.page_rows),
+            ("prefetchminelapsedms", d.prefetch_min_elapsed_ms),
+            ("prefetchpersec", d.prefetch_per_sec),
+        ] {
+            assert!(ts.contains(&format!("{k}: {v},")), "perfDefaults.ts 의 {k} 가 {v} 가 아니다");
+        }
+        assert!(ts.contains(&format!("prefetchenabled: {},", d.prefetch_enabled)));
     }
 
     #[test]

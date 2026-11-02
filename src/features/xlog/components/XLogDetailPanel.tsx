@@ -19,6 +19,7 @@ import { findStepHits } from './stepSearch';
 import { yyyymmdd } from '../types/timeRange';
 import type { SXLog } from '../types/xlog';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 /** 같은 프로파일을 보는 두 가지 방법 */
 type ProfileMode = 'list' | 'summary';
@@ -363,25 +364,27 @@ export const XLogDetailPanel = memo(function XLogDetailPanel({
                   )}
                   {stepHits.length > 0 && (
                     <div className="flex items-center gap-1">
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         onClick={() => moveHit(-1)}
                         disabled={stepHits.length < 2}
                         title={t('이전 적중')}
-                        className="rounded px-1 text-micro text-fg-dim hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:text-fg-faint"
                       >
                         ‹
-                      </button>
+                      </Button>
                       <span className="tnum font-mono text-micro text-accent-bright">
                         {hitIdx + 1}/{stepHits.length}
                       </span>
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         onClick={() => moveHit(1)}
                         disabled={stepHits.length < 2}
                         title={t('다음 적중')}
-                        className="rounded px-1 text-micro text-fg-dim hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:text-fg-faint"
                       >
                         ›
-                      </button>
+                      </Button>
                     </div>
                   )}
                   <div className="flex overflow-hidden rounded border border-line-strong">

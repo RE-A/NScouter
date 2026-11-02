@@ -2,6 +2,7 @@
 // 시간 윈도우 기반 XLog 데이터 관리
 
 import type { SXLog } from '../types/xlog';
+import { serverNow } from '../utils/serverClock';
 
 /**
  * 버퍼 상한 **기본값**. 설정에서 바꾼다.
@@ -90,14 +91,20 @@ export class XLogDataStore {
     return this.skewMs;
   }
 
-  add(xlog: SXLog, receivedAt: number = Date.now()): void {
+  /** 시계 차를 잊는다 — 창 끝을 데이터에 맞춘 직후. 다음 묶음이 새 기준으로 다시 잰다 */
+  resetClockSkew(): void {
+    this.skewMs = null;
+  }
+
+  // 받은 시각은 **콜렉터 시계**다(serverNow) — 시계 차를 «PC 시계 탓» 이 아닌 것만 재려고
+  add(xlog: SXLog, receivedAt: number = serverNow()): void {
     this.items.push(xlog);
     this.dirty = true;
     this.lastReceived = receivedAt;
     this.skewMs = xlog.endTime - receivedAt;
   }
 
-  addBatch(xlogs: SXLog[], receivedAt: number = Date.now()): void {
+  addBatch(xlogs: SXLog[], receivedAt: number = serverNow()): void {
     let newest = 0;
     for (const x of xlogs) {
       this.items.push(x);

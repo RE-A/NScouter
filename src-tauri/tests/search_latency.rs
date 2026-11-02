@@ -88,6 +88,15 @@ fn pipe(mut from: TcpStream, mut to: TcpStream, one_way: Duration) {
     let _ = writer.join();
 }
 
+/// 잴 한쪽 지연(ms) 목록. `PROBE_ONE_WAY_MS=250` 처럼 바꿔 잰다 (왕복은 두 배)
+fn one_ways(default: &[u64]) -> Vec<u64> {
+    std::env::var("PROBE_ONE_WAY_MS")
+        .ok()
+        .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .filter(|v: &Vec<u64>| !v.is_empty())
+        .unwrap_or_else(|| default.to_vec())
+}
+
 fn yyyymmdd_local(ms: i64) -> String {
     use chrono::{Local, TimeZone};
     Local.timestamp_millis_opt(ms).unwrap().format("%Y%m%d").to_string()
@@ -145,10 +154,10 @@ fn probe_search_workers_under_latency() {
     println!("표본 {}건\n", targets.len());
 
     // 캐시를 고르게 해 둔다 — 뒤 회차가 공짜로 빨라지면 비교가 안 된다.
-    let _ = fetch_profiles_parallel(HOST, PORT, session, &targets, 8);
+    let _ = fetch_profiles_parallel(HOST, PORT, session, &targets, 8, None);
 
     let n = targets.len();
-    for one_way_ms in [0u64, 5, 20, 50] {
+    for one_way_ms in one_ways(&[0, 5, 20, 50]) {
         let port = start_delay_proxy(Duration::from_millis(one_way_ms));
         println!("── 왕복 {}ms (한쪽 {}ms) ──", one_way_ms * 2, one_way_ms);
         for workers in [1usize, 8, 16, 32, 64] {
@@ -157,7 +166,7 @@ fn probe_search_workers_under_latency() {
                 continue;
             }
             let t = Instant::now();
-            let got = fetch_profiles_parallel(HOST, port, session, &targets, workers);
+            let got = fetch_profiles_parallel(HOST, port, session, &targets, workers, None);
             let el = t.elapsed();
             let ok = got.iter().filter(|v| v.is_some()).count();
             println!(
@@ -168,5 +177,94 @@ fn probe_search_workers_under_latency() {
             );
         }
         println!();
+    }
+}
+
+/// 구간 하나를 페이지로 넘겨 가며 다 받는다. 받은 행 수
+fn fetch_range(port: u16, session: i64, hashes: &[i32], date: &str, s: i64, e: i64, page: i32) -> usize {
+    let mut conn = ScouterConnection::connect(HOST, port).expect("연결 실패");
+    conn.session = session;
+    let mut cursor = PastCursor::default();
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        let param = build_past_xlog_param(hashes, date, s, e, page, &cursor);
+        conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param).expect("요청 실패");
+        let mut next = PastCursor::default();
+        let mut rows = 0;
+        while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+            match p {
+                AnyPack::XLog(x) => {
+                    rows += 1;
+                    seen.insert(x.txid);
+                }
+                AnyPack::Map(m) => next = nscouter_lib::scouter::past::parse_past_cursor(&m),
+                _ => {}
+            }
+        }
+        if std::env::var("PROBE_VERBOSE").is_ok() {
+            println!("    페이지: {rows}건 hasMore={} last={} (이전 {})", next.has_more, next.last_xlog_time, cursor.last_xlog_time);
+        }
+        if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
+            return seen.len();
+        }
+        cursor = next;
+    }
+}
+
+/// MCP 목록 조회가 구간을 조각으로 나눠 **연결 여럿으로 동시에** 받는 것(`SCAN_PARALLEL`)이
+/// 왕복이 큰 콜렉터에서 얼마나 빨라지나.
+///
+/// ```
+/// cargo test --test search_latency probe_scan_parallel -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore]
+fn probe_scan_parallel_under_latency() {
+    let mut conn = ScouterConnection::connect(HOST, PORT).expect("콜렉터 연결 실패");
+    conn.login(USER, PASS).expect("로그인 실패");
+    let session = conn.session;
+    let mut hashes: Vec<i32> = Vec::new();
+    {
+        use nscouter_lib::scouter::pack::MapPack;
+        use nscouter_lib::scouter::protocol::CMD_OBJECT_LIST_REAL_TIME;
+        conn.send_request(CMD_OBJECT_LIST_REAL_TIME, session, &MapPack::new()).expect("오브젝트 목록 요청 실패");
+        while let Some(p) = conn.read_next_pack().expect("수신 실패") {
+            if let AnyPack::Object(o) = p {
+                hashes.push(o.obj_hash);
+            }
+        }
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    // 자정을 넘지 않게 — 날짜가 바뀌면 조회가 둘로 갈린다
+    let span = 9 * 60_000;
+    let (s, e) = (now - span, now);
+    let date = yyyymmdd_local(s);
+    for one_way_ms in one_ways(&[0, 10, 20]) {
+        let port = start_delay_proxy(Duration::from_millis(one_way_ms));
+        // 페이지가 클수록 왕복(연결 맺기 + 요청) 수가 준다. 조각이 많을수록 동시에 받는다
+        let pages: Vec<i32> = std::env::var("PROBE_PAGES")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+            .filter(|v: &Vec<i32>| !v.is_empty())
+            .unwrap_or_else(|| vec![500, 5000, 20000]);
+        for page in pages {
+            let t = Instant::now();
+            let n1 = fetch_range(port, session, &hashes, &date, s, e, page);
+            let seq = t.elapsed();
+            let mut line = format!("왕복 {:>3}ms · 페이지 {page:>5}: 순차 {:>6.2}s ({n1}건)", one_way_ms * 2, seq.as_secs_f64());
+            for k in [4i64, 8] {
+                let slices: Vec<(i64, i64)> = (0..k).map(|i| (s + i * span / k, s + (i + 1) * span / k)).collect();
+                let t = Instant::now();
+                let n: usize = thread::scope(|sc| {
+                    let hs = &hashes;
+                    let d = &date;
+                    let h: Vec<_> = slices.iter().map(|&(a, b)| sc.spawn(move || fetch_range(port, session, hs, d, a, b, page))).collect();
+                    h.into_iter().map(|j| j.join().unwrap()).sum()
+                });
+                let par = t.elapsed();
+                line += &format!(" · 조각 {k}개 {:>6.2}s ({n}건, {:.1}배)", par.as_secs_f64(), seq.as_secs_f64() / par.as_secs_f64().max(0.001));
+            }
+            println!("{line}");
+        }
     }
 }

@@ -22,6 +22,8 @@ import type {
   TypeActiveServices,
 } from '../types/object';
 
+import type { PastCursor } from './pastXLog';
+
 export interface ConnectParams {
   host: string;
   port: number;
@@ -50,10 +52,20 @@ export async function disconnectScouter(): Promise<void> {
 export interface ConnectionInfo {
   connected: boolean;
   server_id: string;
+  /** 콜렉터 시계 − PC 시계 (ms). 로그인 응답의 `time` 으로 잰다. 모르면 null (`serverClock.ts`) */
+  clock_offset_ms: number | null;
 }
 
 export async function getConnectionInfo(): Promise<ConnectionInfo> {
   return invoke<ConnectionInfo>('get_connection_info');
+}
+
+/**
+ * 연결 새로고침 — 주 연결을 새로 맺고 시계 차를 다시 재고 XLog 스트림을 다시 연다.
+ * 고른 서버·탭·상세는 그대로다(`scouter-connected` 를 내지 않는다).
+ */
+export async function refreshConnection(): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>('refresh_connection');
 }
 
 export async function startXLogStream(objHashes: number[]): Promise<void> {
@@ -715,6 +727,10 @@ export interface AppConfig {
   xlog_buffer_max?: number;
   /** 트랜잭션 찾기로 모두 모을 최대 건수. 없으면 300,000 */
   wide_search_max?: number;
+  /** 로컬 캐시 전체 상한(MB) — 콜렉터 여럿을 합친 것. 없으면 2048 */
+  cache_max_mb?: number;
+  /** 콜렉터 동시 요청·페이지 크기·미리 받기. Rust `PerfPrefs` 와 짝이다 */
+  perf?: Partial<PerfPrefs>;
   /** 끌어서 정한 패널 크기와 마지막에 보던 탭 */
   ui_layout?: UiLayout;
   /** XLog 스캐터 차트 설정 */
@@ -731,7 +747,45 @@ export interface AppConfig {
   saved_filters?: SavedFilterPrefs[];
   /** 껐을 때 열려 있던 상세 탭들 */
   open_details?: OpenDetailPrefs[];
+  /**
+   * 로컬 MCP 서버. **설정 창의 «저장» 으로는 안 바뀐다** — `mcpConfigure` 로 바로 적용하고,
+   * `save_config` 는 이 칸을 덮어쓰지 않는다(열 때 읽은 옛 토큰이 새 토큰을 되돌리지 않게).
+   */
+  mcp?: McpPrefs;
 }
+
+/** Rust `McpPrefs` 와 짝이다 */
+export interface McpPrefs {
+  enabled: boolean;
+  port: number;
+  token: string;
+  bind_values: boolean;
+  limits?: McpLimits;
+}
+
+/** MCP 조회 한도. Rust `McpLimits` 와 짝이다 (범위는 Rust 가 자른다) */
+export interface McpLimits {
+  list_max: number;
+  detail_max: number;
+  max_minutes: number;
+  scan_max_rows: number;
+  profile_fetch_max: number;
+  profile_budget_sec: number;
+  profile_searches: number;
+}
+
+/** 콜렉터 동시 요청·페이지 크기·미리 받기. Rust `PerfPrefs` 와 짝이다 */
+export interface PerfPrefs {
+  scan_parallel: number;
+  past_parallel: number;
+  profile_workers: number;
+  text_workers: number;
+  page_rows: number;
+  prefetch_enabled: boolean;
+  prefetch_min_elapsed_ms: number;
+  prefetch_per_sec: number;
+}
+
 
 /** 픽셀. 실제 배치는 화면에서 다시 가둔다(`clampPane`) — 여기 값은 어제 것일 수 있다 */
 export interface UiLayout {
@@ -864,22 +918,14 @@ export interface KpiThresholdPrefs {
   enabled: boolean;
 }
 
-/** 서버가 한 번에 돌려주는 상한. **찾기 전에 물어본다** — 안 물어보고 단정하면 화면이 거짓말한다 */
-export interface SearchMax {
-  max: number;
-  /** 서버 설정에서 실제로 읽었는가. 아니면 기본값이다 */
-  known: boolean;
-}
-
-export async function getSearchMax(): Promise<SearchMax> {
-  return invoke<SearchMax>('get_search_max');
-}
-
-/** 넓은 구간 검색 조건. 빈 항목은 Rust 가 요청에서 뺀다(= 안 가린다) */
+/**
+ * 넓은 구간 찾기 조건. 빈 칸은 조건이 아니다. **대소문자를 가리지 않는다** — 그냥 치면 «포함»,
+ * `*` 를 직접 쓰면 그 자리만 아무 글자다 (Rust `WideMatcher`).
+ */
 export interface SearchXLogFilter {
   stime: number;
   etime: number;
-  /** 0 이면 안 가린다. **리스트가 아니다** — 서버가 하나만 받는다 */
+  /** 0 이면 전체 오브젝트 */
   objHash: number;
   service: string;
   ip: string;
@@ -892,28 +938,31 @@ export interface SearchXLogFilter {
   text5: string;
 }
 
-export interface SearchXLogResult {
+/** 넓은 구간 찾기의 한 페이지 (Rust `WidePage`) */
+export interface WidePage {
+  /** 조건에 걸린 것만 */
   xlogs: XLogPack[];
-  /** 서버 상한 */
-  max: number;
-  /** 상한을 서버 설정에서 실제로 읽었는가. 아니면 `max` 는 추측이다 */
-  max_known: boolean;
-  /** 상한에 닿았다 — **더 있었을 수 있다** */
-  truncated: boolean;
+  /** 다음 페이지 자리 */
+  cursor: PastCursor;
+  /** 이 조각을 끝까지 받았다 */
+  done: boolean;
+  /** 이 페이지에서 콜렉터가 준 건수 (거르기 전) */
+  scanned: number;
 }
 
 /**
- * 넓은 구간에서 조건으로 XLog 찾기.
+ * 넓은 구간 찾기 — 조각 하나의 한 페이지.
  *
- * **`truncated` 를 반드시 화면에 보여야 한다.** 서버는 상한에서 그냥 끊고
- * «잘렸다» 는 신호를 아무것도 주지 않는다 (F-54).
+ * 콜렉터에 구간을 묻고 조건은 Rust 가 대소문자 없이 맞춘다. 콜렉터 검색(SEARCH_XLOG_LIST)은
+ * 대소문자를 가려 `order` 로 `/Order/…` 를 못 찾았다. 조각은 **하루 안**이어야 한다(날짜 디렉토리, F-18).
  */
-export async function searchXLogList(
+export async function searchXLogPage(
   filter: SearchXLogFilter,
-  /** 이미 아는 상한. 주면 서버 설정을 다시 읽지 않는다 (조각을 이어 찾을 때) */
-  maxHint?: SearchMax,
-): Promise<SearchXLogResult> {
-  return invoke<SearchXLogResult>('search_xlog_list', { filter, maxHint: maxHint ?? null });
+  date: string,
+  objHashes: number[],
+  cursor: PastCursor | null,
+): Promise<WidePage> {
+  return invoke<WidePage>('search_xlog_page', { filter, date, objHashes, cursor });
 }
 
 export async function getConfig(): Promise<AppConfig> {
@@ -922,6 +971,66 @@ export async function getConfig(): Promise<AppConfig> {
 
 export async function saveConfig(newConfig: AppConfig): Promise<void> {
   return invoke<void>('save_config', { newConfig });
+}
+
+// ─── 로컬 캐시 ────────────────────────────────────────────────
+
+/** 로컬 캐시가 얼마나 쓰고 있나 (Rust `CacheInfo`) */
+export interface CacheInfo {
+  dir: string;
+  /** 캐시 폴더 전체 (모든 콜렉터) */
+  total_bytes: number;
+  /** 콜렉터 파일 수 */
+  files: number;
+  /** 지금 붙어 있는 콜렉터의 파일이 쓰는 것 */
+  current_bytes: number;
+}
+
+export async function getCacheInfo(): Promise<CacheInfo> {
+  return invoke<CacheInfo>('get_cache_info');
+}
+
+/** 다 비운다. 다음 조회부터 다시 콜렉터에서 받아 쌓는다 */
+export async function clearCache(): Promise<CacheInfo> {
+  return invoke<CacheInfo>('clear_cache');
+}
+
+// ─── 로컬 MCP 서버 (Claude Code · Cursor) ─────────────────────
+
+/** MCP 서버 상태. `error` 는 켜려다 실패한 까닭(포트를 이미 쓰는 중 등) */
+export interface McpStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  token: string;
+  bind_values: boolean;
+  limits: McpLimits;
+  error: string | null;
+}
+
+/** 이 PC 시간대(ms). 콜렉터의 날짜 디렉토리(F-18)를 정하는 데 쓴다 */
+function tzOffsetMs(): number {
+  return -new Date().getTimezoneOffset() * 60_000;
+}
+
+/** 시간대를 알려 주고 설정대로 켜거나 끈다. 메인 창이 뜰 때 부른다 */
+export async function mcpSync(): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_sync', { tzOffsetMs: tzOffsetMs() });
+}
+
+/** 켜기·포트·바인딩 값 허용을 바로 적용한다 */
+export async function mcpConfigure(enabled: boolean, port: number, bindValues: boolean): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_configure', { enabled, port, bindValues });
+}
+
+/** 조회 한도를 바로 적용한다 (범위를 넘으면 Rust 가 자른다) */
+export async function mcpSetLimits(limits: McpLimits): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_set_limits', { limits });
+}
+
+/** 토큰을 새로 만든다. 예전 토큰을 든 클라이언트는 끊긴다 */
+export async function mcpRegenerateToken(): Promise<McpStatus> {
+  return invoke<McpStatus>('mcp_regenerate_token');
 }
 
 /**

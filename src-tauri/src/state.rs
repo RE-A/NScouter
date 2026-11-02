@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::cache::CacheDb;
 use crate::config::{resolve_data_dir, AppConfig};
 use crate::scouter::connection::ScouterConnection;
 use crate::scouter::dictionary::TextCache;
@@ -113,6 +114,10 @@ pub struct AppState {
     pub xlog_subs: Mutex<HashMap<String, Vec<i32>>>,
     /// 붙어 있는 서버 이름. 미연결이면 None. 나중에 뜬 창이 접속 상태를 물을 때 쓴다
     pub server_id: Mutex<Option<String>>,
+    /// 콜렉터 시계 − PC 시계 (ms). 접속·새로고침 때 잰다. 화면의 실시간 «지금» 이 쓴다
+    pub clock_offset_ms: Mutex<Option<i64>>,
+    /// 접속한 콜렉터의 로컬 캐시 (`crate::cache`). 접속 전·데모·캐시를 못 열면 None
+    pub cache: Mutex<Option<Arc<CacheDb>>>,
 }
 
 /// 액티브 목록에서 **사라졌다 돌아온** 트랜잭션을 찾기 위한 자취.
@@ -138,6 +143,7 @@ impl AppState {
         #[cfg(not(debug_assertions))]
         let default_level = 0u8;
 
+        crate::tuning::apply(&config);
         Self {
             connection: Mutex::new(None),
             query_pool: Mutex::new(Vec::new()),
@@ -153,6 +159,8 @@ impl AppState {
             active_trace: Mutex::new(HashMap::new()),
             xlog_subs: Mutex::new(HashMap::new()),
             server_id: Mutex::new(None),
+            clock_offset_ms: Mutex::new(None),
+            cache: Mutex::new(None),
         }
     }
 
@@ -220,6 +228,66 @@ impl AppState {
     /// 내보내기 폴더. `{data_dir}/exports/`
     pub async fn export_dir(&self) -> PathBuf {
         self.data_sub_dir(crate::export_store::DIR_NAME).await
+    }
+
+    /// 로컬 캐시 폴더. `{data_dir}/cache/`
+    pub async fn cache_dir(&self) -> PathBuf {
+        self.data_sub_dir(crate::cache::DIR_NAME).await
+    }
+
+    /// 콜렉터 하나의 캐시를 열어 붙인다 (사전도 같이). 못 열면 캐시 없이 간다 — 조회는 그대로 된다
+    pub async fn attach_cache(&self, host: &str, port: u16) {
+        let dir = self.cache_dir().await;
+        let key = crate::cache::collector_key(host, port);
+        let db = match CacheDb::open(&dir, &key) {
+            Ok(db) => Some(Arc::new(db)),
+            Err(e) => {
+                log::warn!("로컬 캐시 없이 갑니다: {e}");
+                None
+            }
+        };
+        if let Some(db) = &db {
+            log::info!("로컬 캐시: {}", db.path().display());
+            self.apply_cache_limit(db).await;
+        }
+        self.text_cache.lock().await.attach(db.clone());
+        *self.cache.lock().await = db;
+    }
+
+    /// 설정 «로컬 캐시 상한» 을 적용한다 — 다른 콜렉터의 파일을 먼저 줄이고, 남은 몫을 지금 파일의 상한으로
+    pub async fn apply_cache_limit(&self, db: &CacheDb) {
+        let budget = self.config.lock().await.cache_max_mb as u64 * 1024 * 1024;
+        let dir = self.cache_dir().await;
+        let mine = crate::cache::prune_others(&dir, db.path(), budget);
+        db.set_max_bytes(mine);
+    }
+
+    /// 지금 붙어 있는 캐시
+    pub async fn cache_handle(&self) -> Option<Arc<CacheDb>> {
+        self.cache.lock().await.clone()
+    }
+
+    /// `cache_handle` — 막히는 일꾼 스레드에서 (`spawn_blocking` 안)
+    pub fn cache_handle_blocking(&self) -> Option<Arc<CacheDb>> {
+        self.cache.blocking_lock().clone()
+    }
+
+    /// 콜렉터 시계로 «지금 − 5분». 이보다 뒤의 XLog 는 «다 받았다» 고 적지 않는다 (`cache::xlog`)
+    pub async fn seal_before(&self) -> i64 {
+        let offset = self.clock_offset_ms.lock().await.unwrap_or(0);
+        crate::scouter::connection::local_now_ms() + offset - crate::cache::xlog::SEAL_MS
+    }
+
+    /// `seal_before` — 막히는 일꾼 스레드에서
+    pub fn seal_before_blocking(&self) -> i64 {
+        let offset = self.clock_offset_ms.blocking_lock().unwrap_or(0);
+        crate::scouter::connection::local_now_ms() + offset - crate::cache::xlog::SEAL_MS
+    }
+
+    /// 캐시를 뗀다 (접속을 끊거나 데모로 갈 때)
+    pub async fn detach_cache(&self) {
+        self.text_cache.lock().await.attach(None);
+        *self.cache.lock().await = None;
     }
 
     /// 오브젝트 기록 폴더. `{data_dir}/object-history/`

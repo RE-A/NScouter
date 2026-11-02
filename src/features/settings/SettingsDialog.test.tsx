@@ -24,6 +24,15 @@ vi.mock('../xlog/api/scouterApi', () => ({
     api.saved.push(c);
     return Promise.resolve();
   },
+  // 로컬 캐시 칸이 열 때 쓰는 양을 한 번 묻는다
+  getCacheInfo: () => Promise.resolve({ dir: '/c', total_bytes: 0, files: 0, current_bytes: 0 }),
+  clearCache: () => Promise.reject(new Error('not used')),
+  // AI 연결 칸이 열 때 상태를 한 번 묻는다
+  mcpSync: () =>
+    Promise.resolve({ enabled: false, running: false, port: 7165, token: '', bind_values: false, error: null, limits: {} }),
+  mcpConfigure: () => Promise.reject(new Error('not used')),
+  mcpRegenerateToken: () => Promise.reject(new Error('not used')),
+  mcpSetLimits: () => Promise.reject(new Error('not used')),
 }));
 
 function theme(): string | null {

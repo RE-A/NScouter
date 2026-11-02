@@ -2,7 +2,9 @@
 
 import { clampWideMax, WIDE_MAX_CHOICES, WIDE_TOTAL_CAP } from '../xlog/hooks/wideSearchAll';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getConfig, saveConfig, type AppConfig } from '../xlog/api/scouterApi';
+import { clearCache, getCacheInfo, getConfig, saveConfig, type AppConfig, type CacheInfo, type PerfPrefs } from '../xlog/api/scouterApi';
+import { DEFAULT_PERF } from '../xlog/api/perfDefaults';
+import { NumberField } from './NumberField';
 import {
   applyConfigToViewOptions,
   clampFontScale,
@@ -19,6 +21,9 @@ import { THEMES, toTheme, applyTheme, currentTheme, type ThemeId } from '../../s
 import { DEFAULT_GROUP_RULE, groupByService, type GroupRule } from '../xlog/components/instanceGroup';
 import { getObjectList } from '../xlog/api/scouterApi';
 import type { AgentObject } from '../xlog/types/xlog';
+import { Button } from '../../components/Button';
+import { Dialog } from '../../components/Dialog';
+import { McpSection } from './McpSection';
 
 /**
  * 단축키가 무엇을 하는지.
@@ -52,6 +57,17 @@ interface SettingsDialogProps {
  */
 const BUFFER_CHOICES = [100_000, 300_000, 500_000, 1_000_000] as const;
 
+/** 로컬 캐시 상한으로 고를 수 있는 값(MB). 기본 2GB */
+const CACHE_CHOICES = [1024, 2048, 3072, 5120] as const;
+const DEFAULT_CACHE_MB = 2048;
+
+/** 바이트 → 사람이 읽는 크기 */
+function humanBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)}GB`;
+  if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2)}MB`;
+  return `${Math.round(n / 1024)}KB`;
+}
+
 /**
  * 대략적인 메모리(MB).
  *
@@ -72,14 +88,16 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   /** 화면 언어 */
   const [lang, setLangValue] = useState<Lang>('ko');
   /** 색 벌 */
-  const [theme, setTheme] = useState<ThemeId>('dark');
+  const [theme, setTheme] = useState<ThemeId>(currentTheme);
   /**
    * 마지막으로 **저장된** 테마.
    *
    * 고르는 즉시 화면에 걸지만(색 조합은 봐야 고를 수 있다), 저장 없이 닫으면
    * 되돌려야 한다 — «구경만 했는데 바뀜어 있다» 가 되면 어디서 바뎀지 모른다.
    */
-  const savedTheme = useRef<ThemeId>('dark');
+  // **지금 걸린 테마에서 시작한다.** 'dark' 로 두면 설정을 읽기 전에 닫힐 때(StrictMode 가 effect 를
+  // 한 번 걷었다 다시 거는 것도 그렇다) 라이트를 쓰던 화면이 어두운 색으로 바뀌었다
+  const savedTheme = useRef<ThemeId>(currentTheme());
   /** 논리 서비스 묶기 규칙 */
   const [groupRule, setGroupRule] = useState<GroupRule>(DEFAULT_GROUP_RULE);
   /**
@@ -110,6 +128,14 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
   const [bufferMax, setBufferMax] = useState(DEFAULT_MAX_ITEMS);
   /** 트랜잭션 찾기로 모두 모을 최대 건수 */
   const [wideMax, setWideMax] = useState<number>(WIDE_TOTAL_CAP);
+  /** 로컬 캐시 상한(MB) */
+  const [cacheMb, setCacheMb] = useState<number>(DEFAULT_CACHE_MB);
+  /** 로컬 캐시가 지금 쓰는 양 */
+  const [cacheInfo, setCacheInfo] = useState<CacheInfo | null>(null);
+  const [clearing, setClearing] = useState(false);
+  /** 콜렉터 동시 요청·페이지 크기·미리 받기 */
+  const [perf, setPerf] = useState<PerfPrefs>(DEFAULT_PERF);
+  const setPerfField = <K extends keyof PerfPrefs>(k: K, v: PerfPrefs[K]) => setPerf(p => ({ ...p, [k]: v }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -131,7 +157,10 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
       savedTheme.current = th;
       setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
       setWideMax(clampWideMax(cfg.wide_search_max ?? WIDE_TOTAL_CAP));
+      setCacheMb(cfg.cache_max_mb ?? DEFAULT_CACHE_MB);
+      setPerf({ ...DEFAULT_PERF, ...cfg.perf });
     }).catch(() => {});
+    getCacheInfo().then(setCacheInfo).catch(() => {});
     // 미리보기는 지금 붙어 있을 때만 된다. 안 붙어 있으면 조용히 비워 둔다.
     getObjectList().then(setSample).catch(() => {});
   }, []);
@@ -157,6 +186,8 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         auto_remove_inactive_min: cleanupMin,
         xlog_buffer_max: bufferMax,
         wide_search_max: wideMax,
+        cache_max_mb: cacheMb,
+        perf,
       };
       await saveConfig(next);
       setConfig(next);
@@ -173,443 +204,416 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
     }
     // **여기 빠뜨리면 조용히 옛 값이 저장된다.** `theme` 이 빠져 있어서, 테마를 고르고
     // 저장하면 처음 값(dark)이 그대로 쓰였다 — 화면에서는 「바꿔도 안 먹는다」로 보인다.
-  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, wideMax, theme, groupRule, cleanupMin]);
-
-  // ESC 닫기
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [config, dataDir, bindInline, fontScale, lang, bufferMax, wideMax, cacheMb, perf, theme, groupRule, cleanupMin]);
 
   return (
-    <div style={backdropStyle} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={modalStyle}>
-        {/* 헤더 */}
-        <div style={modalHeaderStyle}>
-          <span style={modalTitleStyle}>{t('설정')}</span>
-          <button onClick={onClose} style={closeBtnStyle}>✕</button>
+    <Dialog
+      title={t('설정')}
+      onClose={onClose}
+      widthClass="w-[500px]"
+      bodyClassName="flex flex-col gap-5 overflow-y-auto px-[18px] py-4"
+      footer={
+        <>
+          {saved && <span className="mr-auto text-body text-ok">{t('저장 완료')}</span>}
+          <Button size="md" onClick={onClose}>{t('취소')}</Button>
+          <Button variant="primary" size="md" onClick={handleSave} disabled={saving}>
+            {saving ? t('저장 중…') : t('저장')}
+          </Button>
+        </>
+      }
+    >
+      {/* 데이터 디렉토리 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('데이터 디렉토리')}</div>
+        <div style={sectionDescStyle}>
+          {t('로그 파일과 설정 파일이 저장될 경로입니다.')}<br />
+          {t('비워두면')} <code style={codeStyle}>{t('실행파일 경로/')}</code>{' '}
+          {t('가 사용됩니다.')}
         </div>
+        <input
+          style={inputStyle}
+          value={dataDir}
+          onChange={e => setDataDir(e.target.value)}
+          placeholder={t('비워두면 실행파일 경로 사용')}
+          spellCheck={false}
+        />
+      </div>
 
-        {/* 본문 */}
-        <div style={modalBodyStyle}>
-          {/* 데이터 디렉토리 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('데이터 디렉토리')}</div>
-            <div style={sectionDescStyle}>
-              {t('로그 파일과 설정 파일이 저장될 경로입니다.')}<br />
-              {t('비워두면')} <code style={codeStyle}>{t('실행파일 경로/')}</code>{' '}
-              {t('가 사용됩니다.')}
-            </div>
-            <input
-              style={inputStyle}
-              value={dataDir}
-              onChange={e => setDataDir(e.target.value)}
-              placeholder={t('비워두면 실행파일 경로 사용')}
-              spellCheck={false}
-            />
-          </div>
-
-          {/* 언어 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('언어')}</div>
-            <div style={sectionDescStyle}>
-              {t(
-                t('Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같습니다. 바뀌는 것은 설명과 레이블입니다.'),
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {(['ko', 'en'] as Lang[]).map(v => {
-                const on = v === lang;
-                return (
-                  <button
-                    key={v}
-                    onClick={() => setLangValue(v)}
-                    aria-pressed={on}
-                    style={{
-                      ...scaleBtnStyle,
-                      fontSize: F.base,
-                      borderColor: on ? T.accent : T.border,
-                      color: on ? T.text : T.textDim,
-                      background: on ? T.bgHover : 'transparent',
-                    }}
-                  >
-                    {v === 'ko' ? '한국어' : 'English'}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 테마 — **고르기 전에 보여준다.**
-              이름만 적어 두면 «슬레이트» 가 무슨 색인지 눌러 봐야 안다. 조각마다
-              `data-theme` 를 걸어 그 테마의 진짜 변수로 그린다 (tokens.css 참고). */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('테마')}</div>
-            <div style={sectionDescStyle}>
-              {t('화면 전체와 차트에 함께 적용됩니다.')}
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-              {THEMES.map(th => {
-                const on = th.id === theme;
-                return (
-                  <button
-                    key={th.id}
-                    onClick={() => { setTheme(th.id); applyTheme(th.id); }}
-                    aria-pressed={on}
-                    title={t(th.hint)}
-                    style={{
-                      ...themeBtnStyle,
-                      borderColor: on ? T.accent : T.borderControl,
-                      background: on ? T.bgHover : 'transparent',
-                    }}
-                  >
-                    {/* 미리보기 — 바탕·강조·글자 세 가지면 성격이 드러난다 */}
-                    <span data-theme={th.id} style={swatchStyle}>
-                      <span style={{ ...swatchCell, background: 'var(--bg-surface)' }} />
-                      <span style={{ ...swatchCell, background: 'var(--accent)' }} />
-                      <span style={{ ...swatchCell, background: 'var(--text)' }} />
-                    </span>
-                    <span style={{ color: on ? T.text : T.textDim }}>{t(th.label)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 서비스 묶기 — ECS 처럼 한 서비스가 Task 여러 개로 뜨는 곳용 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('서비스 묶기')}</div>
-            <div style={sectionDescStyle}>
-              {t('한 서비스가 여러 대로 뜨는 곳(ECS · 쿠버네티스)에서, 어느 Task 가 어느 서비스인지를 정합니다.')}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
-              <label style={pathRowStyle}>
-                <span style={pathLabelStyle}>{t('태그 키')}</span>
-                <input
-                  value={groupRule.tagKey}
-                  onChange={e => setGroupRule(r => ({ ...r, tagKey: e.target.value }))}
-                  spellCheck={false}
-                  title={t('에이전트가 이 키로 태그를 보내면 그 값이 곧 서비스 이름입니다')}
-                  style={ruleInputStyle}
-                />
-              </label>
-              <label style={pathRowStyle}>
-                <span style={pathLabelStyle}>{t('이름 규칙')}</span>
-                <input
-                  value={groupRule.pattern}
-                  onChange={e => setGroupRule(r => ({ ...r, pattern: e.target.value }))}
-                  spellCheck={false}
-                  title={t('태그가 없을 때 쓰는 정규식. 첫 캐처 괄호 안이 서비스 이름이 됩니다')}
-                  style={{ ...ruleInputStyle, fontFamily: FONT_MONO }}
-                />
-              </label>
-            </div>
-            {/* **정규식은 눈으로만 보고 맞추기 어렵다.** 지금 붙어 있는 서버로
-                몇 개로 묶이는지를 바로 보여 준다 — 0 이면 규칙이 안 맞는 것이다. */}
-            <div style={{ ...sectionDescStyle, marginTop: 6 }}>{rulePreview}</div>
-
-            {/* 비활성 정리 — 서비스 묶기 옆에 둔다. Task 가 갈리면서 쌓이는 것이라
-                같은 이야기의 뒷면이다. */}
-            <div style={{ ...sectionTitleStyle, marginTop: 14 }}>{t('비활성 자동 정리')}</div>
-            <div style={sectionDescStyle}>
-              {t('콜렉터는 내려간 서버를 스스로 지우지 않습니다. Task 가 자주 갈리는 곳에서는 목록이 계속 늘어납니다.')}
-              <br />
-              <span style={{ color: T.warn }}>
-                {t('※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 «안 함» 입니다.')}
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {CLEANUP_MINUTES.map(m => (
-                <button
-                  key={m}
-                  onClick={() => setCleanupMin(m)}
-                  aria-pressed={cleanupMin === m}
-                  style={{
-                    ...scaleBtnStyle,
-                    fontSize: F.small,
-                    borderColor: cleanupMin === m ? T.accent : T.borderControl,
-                    color: cleanupMin === m ? T.text : T.textDim,
-                    background: cleanupMin === m ? T.bgHover : 'transparent',
-                  }}
-                >
-                  {m === 0 ? t('안 함') : m < 60 ? `${m}${t('분')}` : `${m / 60}${t('시간')}`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 글자 크기 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('글자 크기')}</div>
-            <div style={sectionDescStyle}>
-              {t('화면 전체에 적용됩니다. 표·차트 눈금·프로파일 본문이 같은 비율로 커집니다.')}
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {FONT_SCALES.map(v => {
-                const on = Math.abs(v - fontScale) < 0.001;
-                return (
-                  <button
-                    key={v}
-                    onClick={() => setFontScale(v)}
-                    aria-pressed={on}
-                    style={{
-                      ...scaleBtnStyle,
-                      // 고른 배율이 어떤 크기인지 **버튼 글자 자체로** 보여준다
-                      fontSize: Math.round(13 * v),
-                      borderColor: on ? T.accent : T.border,
-                      color: on ? T.text : T.textDim,
-                      background: on ? T.bgHover : 'transparent',
-                    }}
-                  >
-                    {v === 1 ? t('보통') : `×${v}`}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 버퍼 상한 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('XLog 버퍼 상한')}</div>
-            <div style={sectionDescStyle}>
-              {t('차트가 들고 있을 최대 건수입니다. 넘으면 오래된 점부터 버립니다 — 창(범위)은 30분인데 화면에는 그보다 짧은 구간만 남는다면 이 값이 먼저 걸린 것입니다. 올릴수록 메모리를 씁니다.')}
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {BUFFER_CHOICES.map(v => {
-                const on = v === bufferMax;
-                return (
-                  <button
-                    key={v}
-                    onClick={() => setBufferMax(v)}
-                    aria-pressed={on}
-                    title={`${estimatedMb(v)}MB`}
-                    style={{
-                      ...scaleBtnStyle,
-                      borderColor: on ? T.accent : T.border,
-                      color: on ? T.text : T.textDim,
-                      background: on ? T.bgHover : 'transparent',
-                    }}
-                  >
-                    {/* «30만» 같은 말은 언어마다 자릿수 감각이 다르다. 숫자를 그대로 적는다 */}
-                    {v.toLocaleString()}
-                  </button>
-                );
-              })}
-            </div>
-            {/* **메모리를 숨기지 않는다.** 고르는 값이 곧 이 앱이 지고 갈 무게다 */}
-            <div style={{ ...sectionDescStyle, marginTop: 6 }}>
-              {t('선택한 값의 대략적인 메모리:')} {estimatedMb(bufferMax)}MB
-              {bufferMax > DEFAULT_MAX_ITEMS ? ` · ${t('기본값보다 큽니다')}` : ''}
-            </div>
-          </div>
-
-          {/* 트랜잭션 찾기 상한 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('트랜잭션 찾기 상한')}</div>
-            <div style={sectionDescStyle}>
-              {t('트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수입니다. 넘으면 그 시각까지 찾은 것만 목록에 올리고 어디까지 찾았는지 알려 줍니다. 올릴수록 메모리를 쓰고 오래 걸립니다.')}
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {WIDE_MAX_CHOICES.map(v => {
-                const on = v === wideMax;
-                return (
-                  <button
-                    key={v}
-                    onClick={() => setWideMax(v)}
-                    aria-pressed={on}
-                    title={`${estimatedMb(v)}MB`}
-                    style={{
-                      ...scaleBtnStyle,
-                      borderColor: on ? T.accent : T.border,
-                      color: on ? T.text : T.textDim,
-                      background: on ? T.bgHover : 'transparent',
-                    }}
-                  >
-                    {v.toLocaleString()}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ ...sectionDescStyle, marginTop: 6 }}>
-              {t('다 모았을 때의 대략적인 메모리:')} {estimatedMb(wideMax)}MB
-            </div>
-          </div>
-
-          {/* SQL 표시 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('SQL 바인딩 파라미터')}</div>
-            <div style={sectionDescStyle}>
-              {t('프로파일의 SQL 은 값 대신')} <code style={codeStyle}>?</code>{' '}
-              {t('로 옵니다. 값을 문장에 채워 넣으면 그대로 복사해 DB 에 붙일 수 있습니다.')}
-            </div>
-            {([
-              ['inline', t('문장에 채워서 보기'), t('예) where id=126')],
-              ['separate', t('값을 따로 보기'), t('예) where id=? · 바인딩 126')],
-            ] as const).map(([mode, label, hint]) => {
-              const on = mode === 'inline' ? bindInline : !bindInline;
-              return (
-                <label key={mode} style={radioRowStyle}>
-                  <input
-                    type="radio"
-                    name="sql-bind"
-                    checked={on}
-                    onChange={() => setBindInline(mode === 'inline')}
-                  />
-                  <span style={{ color: on ? T.text : T.textDim }}>{label}</span>
-                  <span style={{ color: T.textFaint, fontSize: F.micro }}>{hint}</span>
-                </label>
-              );
-            })}
-          </div>
-
-          {/* 단축키 — **적어 두지 않으면 없는 기능이다.** 목록은 판정 코드가 그대로 준다 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('단축키')}</div>
-            <div style={sectionDescStyle}>
-              {t('입력칸에 글자를 치는 중에는 동작하지 않습니다. Esc 는 그 칸에서 빠져나옵니다.')}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              {SHORTCUT_HELP.map(row => (
-                <div key={row.keys} style={pathRowStyle}>
-                  <span style={{ ...pathLabelStyle, fontFamily: FONT_MONO }}>{row.keys}</span>
-                  <span style={pathValueStyle}>{t(SHORTCUT_LABEL[row.action])}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 현재 경로 정보 */}
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>{t('현재 저장 경로')}</div>
-            <div style={pathRowStyle}>
-              <span style={pathLabelStyle}>{t('설정 파일')}</span>
-              <span style={pathValueStyle}>
-                {dataDir.trim()
-                  ? `${dataDir.trim()}\\config.json`
-                  : `${t('(실행파일 경로)')}\\config.json`}
-              </span>
-            </div>
-            <div style={pathRowStyle}>
-              <span style={pathLabelStyle}>{t('로그 파일')}</span>
-              <span style={pathValueStyle}>
-                {dataDir.trim()
-                  ? `${dataDir.trim()}\\logs\\nscouter.log`
-                  : `${t('(실행파일 경로)')}\\logs\\nscouter.log`}
-              </span>
-            </div>
-            {/* **레벨을 경로 옆에 둔다.** 헤더에도 같은 선택기가 있지만 라벨이 없어서,
-                «로그 좀 받아 주세요» 를 받은 사람이 설정 창을 뒤지다 못 찾았다.
-                로그 이야기를 하러 오는 자리는 여기다 — 파일이 어디 있는지 바로 위에 적혀 있다. */}
-            <div style={pathRowStyle}>
-              <span style={pathLabelStyle}>{t('기록 수준')}</span>
-              <LogLevelSelector />
-            </div>
-            <div style={sectionDescStyle}>
-              {t('평소에는 ERROR 로 둡니다. 문제를 재현해 보여 줄 때만 DEBUG 로 올리고, 끝나면 되돌리세요 — 파일이 빠르게 커집니다.')}
-            </div>
-            <div style={{ ...sectionDescStyle, marginTop: 8, color: T.warn }}>
-              {t('※ 경로 변경은 앱 재시작 후 적용됩니다.')}
-            </div>
-          </div>
-
-          {/* 마지막 접속 정보 (읽기 전용) */}
-          {(config.last_host || config.last_port || config.last_user) && (
-            <div style={sectionStyle}>
-              <div style={sectionTitleStyle}>{t('마지막 접속 정보')}</div>
-              <div style={pathRowStyle}>
-                <span style={pathLabelStyle}>{t('호스트')}</span>
-                <span style={pathValueStyle}>{config.last_host ?? '-'}</span>
-              </div>
-              <div style={pathRowStyle}>
-                <span style={pathLabelStyle}>{t('포트')}</span>
-                <span style={pathValueStyle}>{config.last_port ?? '-'}</span>
-              </div>
-              <div style={pathRowStyle}>
-                <span style={pathLabelStyle}>{t('사용자')}</span>
-                <span style={pathValueStyle}>{config.last_user ?? '-'}</span>
-              </div>
-            </div>
+      {/* 언어 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('언어')}</div>
+        <div style={sectionDescStyle}>
+          {t(
+            t('Scouter 용어(TPS·XLog·Elapsed)는 원래 영어라 두 언어에서 같습니다. 바뀌는 것은 설명과 레이블입니다.'),
           )}
-
-          {error && <div style={errorStyle}>{error}</div>}
         </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {(['ko', 'en'] as Lang[]).map(v => {
+            const on = v === lang;
+            return (
+              <Button
+                key={v}
+                onClick={() => setLangValue(v)}
+                aria-pressed={on}
+                size="md"
+                style={{ fontSize: F.base }}
+              >
+                {v === 'ko' ? '한국어' : 'English'}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
 
-        {/* 푸터 */}
-        <div style={modalFooterStyle}>
-          {saved && <span style={{ color: T.success, fontSize: F.body }}>{t('저장 완료')}</span>}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={onClose} style={cancelBtnStyle}>{t('취소')}</button>
-            <button onClick={handleSave} disabled={saving} style={saveBtnStyle}>
-              {saving ? t('저장 중…') : t('저장')}
-            </button>
+      {/* 테마 — **고르기 전에 보여준다.**
+          이름만 적어 두면 «슬레이트» 가 무슨 색인지 눌러 봐야 안다. 조각마다
+          `data-theme` 를 걸어 그 테마의 진짜 변수로 그린다 (tokens.css 참고). */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('테마')}</div>
+        <div style={sectionDescStyle}>
+          {t('화면 전체와 차트에 함께 적용됩니다.')}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+          {THEMES.map(th => {
+            const on = th.id === theme;
+            return (
+              <Button
+                key={th.id}
+                onClick={() => { setTheme(th.id); applyTheme(th.id); }}
+                aria-pressed={on}
+                title={t(th.hint)}
+                size="md"
+                className="gap-1.5 pl-1"
+              >
+                {/* 미리보기 — 바탕·강조·글자 세 가지면 성격이 드러난다 */}
+                <span data-theme={th.id} style={swatchStyle}>
+                  <span style={{ ...swatchCell, background: 'var(--bg-surface)' }} />
+                  <span style={{ ...swatchCell, background: 'var(--accent)' }} />
+                  <span style={{ ...swatchCell, background: 'var(--text)' }} />
+                </span>
+                <span style={{ color: on ? T.text : T.textDim }}>{t(th.label)}</span>
+              </Button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 서비스 묶기 — ECS 처럼 한 서비스가 Task 여러 개로 뜨는 곳용 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('서비스 묶기')}</div>
+        <div style={sectionDescStyle}>
+          {t('한 서비스가 여러 대로 뜨는 곳(ECS · 쿠버네티스)에서, 어느 Task 가 어느 서비스인지를 정합니다.')}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+          <label style={pathRowStyle}>
+            <span style={pathLabelStyle}>{t('태그 키')}</span>
+            <input
+              value={groupRule.tagKey}
+              onChange={e => setGroupRule(r => ({ ...r, tagKey: e.target.value }))}
+              spellCheck={false}
+              title={t('에이전트가 이 키로 태그를 보내면 그 값이 곧 서비스 이름입니다')}
+              style={ruleInputStyle}
+            />
+          </label>
+          <label style={pathRowStyle}>
+            <span style={pathLabelStyle}>{t('이름 규칙')}</span>
+            <input
+              value={groupRule.pattern}
+              onChange={e => setGroupRule(r => ({ ...r, pattern: e.target.value }))}
+              spellCheck={false}
+              title={t('태그가 없을 때 쓰는 정규식. 첫 캐처 괄호 안이 서비스 이름이 됩니다')}
+              style={{ ...ruleInputStyle, fontFamily: FONT_MONO }}
+            />
+          </label>
+        </div>
+        {/* **정규식은 눈으로만 보고 맞추기 어렵다.** 지금 붙어 있는 서버로
+            몇 개로 묶이는지를 바로 보여 준다 — 0 이면 규칙이 안 맞는 것이다. */}
+        <div style={{ ...sectionDescStyle, marginTop: 6 }}>{rulePreview}</div>
+
+        {/* 비활성 정리 — 서비스 묶기 옆에 둔다. Task 가 갈리면서 쌓이는 것이라
+            같은 이야기의 뒷면이다. */}
+        <div style={{ ...sectionTitleStyle, marginTop: 14 }}>{t('비활성 자동 정리')}</div>
+        <div style={sectionDescStyle}>
+          {t('콜렉터는 내려간 서버를 스스로 지우지 않습니다. Task 가 자주 갈리는 곳에서는 목록이 계속 늘어납니다.')}
+          <br />
+          <span style={{ color: T.warn }}>
+            {t('※ 정리는 콜렉터 전체에 미칩니다 — 같은 서버를 보는 다른 사람 화면에서도 사라집니다. 그래서 기본은 «안 함» 입니다.')}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {CLEANUP_MINUTES.map(m => (
+            <Button
+              key={m}
+              onClick={() => setCleanupMin(m)}
+              aria-pressed={cleanupMin === m}
+              size="md"
+              style={{ fontSize: F.small }}
+            >
+              {m === 0 ? t('안 함') : m < 60 ? `${m}${t('분')}` : `${m / 60}${t('시간')}`}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {/* 글자 크기 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('글자 크기')}</div>
+        <div style={sectionDescStyle}>
+          {t('화면 전체에 적용됩니다. 표·차트 눈금·프로파일 본문이 같은 비율로 커집니다.')}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {FONT_SCALES.map(v => {
+            const on = Math.abs(v - fontScale) < 0.001;
+            return (
+              <Button
+                key={v}
+                onClick={() => setFontScale(v)}
+                aria-pressed={on}
+                size="md"
+                // 고른 배율이 어떤 크기인지 **버튼 글자 자체로** 보여준다
+                style={{ fontSize: Math.round(13 * v) }}
+              >
+                {v === 1 ? t('보통') : `×${v}`}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 버퍼 상한 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('XLog 버퍼 상한')}</div>
+        <div style={sectionDescStyle}>
+          {t('차트가 들고 있을 최대 건수입니다. 넘으면 오래된 점부터 버립니다 — 창(범위)은 30분인데 화면에는 그보다 짧은 구간만 남는다면 이 값이 먼저 걸린 것입니다. 올릴수록 메모리를 씁니다.')}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {BUFFER_CHOICES.map(v => {
+            const on = v === bufferMax;
+            return (
+              <Button
+                key={v}
+                onClick={() => setBufferMax(v)}
+                aria-pressed={on}
+                title={`${estimatedMb(v)}MB`}
+                size="md"
+              >
+                {/* «30만» 같은 말은 언어마다 자릿수 감각이 다르다. 숫자를 그대로 적는다 */}
+                {v.toLocaleString()}
+              </Button>
+            );
+          })}
+        </div>
+        {/* **메모리를 숨기지 않는다.** 고르는 값이 곧 이 앱이 지고 갈 무게다 */}
+        <div style={{ ...sectionDescStyle, marginTop: 6 }}>
+          {t('선택한 값의 대략적인 메모리:')} {estimatedMb(bufferMax)}MB
+          {bufferMax > DEFAULT_MAX_ITEMS ? ` · ${t('기본값보다 큽니다')}` : ''}
+        </div>
+      </div>
+
+      {/* 트랜잭션 찾기 상한 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('트랜잭션 찾기 상한')}</div>
+        <div style={sectionDescStyle}>
+          {t('트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수입니다. 넘으면 그 시각까지 찾은 것만 목록에 올리고 어디까지 찾았는지 알려 줍니다. 올릴수록 메모리를 쓰고 오래 걸립니다.')}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {WIDE_MAX_CHOICES.map(v => {
+            const on = v === wideMax;
+            return (
+              <Button
+                key={v}
+                onClick={() => setWideMax(v)}
+                aria-pressed={on}
+                title={`${estimatedMb(v)}MB`}
+                size="md"
+              >
+                {v.toLocaleString()}
+              </Button>
+            );
+          })}
+        </div>
+        <div style={{ ...sectionDescStyle, marginTop: 6 }}>
+          {t('다 모았을 때의 대략적인 메모리:')} {estimatedMb(wideMax)}MB
+        </div>
+      </div>
+
+      {/* 로컬 캐시 — **한 번 받은 것은 다시 받지 않는다** (Rust `cache` 머리말) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('로컬 캐시')}</div>
+        <div style={sectionDescStyle}>
+          {t('지난 XLog·프로파일·이름 사전을 이 PC 에 담아 두고, 같은 구간을 다시 볼 때 콜렉터에 묻지 않습니다. 에러·느린 트랜잭션의 프로파일은 미리 받아 둡니다. 상한을 넘으면 오래된 것부터 지웁니다.')}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {CACHE_CHOICES.map(v => (
+            <Button key={v} onClick={() => setCacheMb(v)} aria-pressed={v === cacheMb} size="md">
+              {v / 1024}GB
+            </Button>
+          ))}
+        </div>
+        <div style={{ ...sectionDescStyle, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>
+            {t('지금 사용:')} {cacheInfo ? humanBytes(cacheInfo.total_bytes) : '-'}
+            {cacheInfo && cacheInfo.files > 1 ? ` · ${t('콜렉터')} ${cacheInfo.files}${t('개')}` : ''}
+          </span>
+          <Button
+            size="xs"
+            disabled={clearing}
+            onClick={() => {
+              setClearing(true);
+              clearCache().then(setCacheInfo).catch(e => setError(String(e))).finally(() => setClearing(false));
+            }}
+            title={t('담아 둔 것을 다 지웁니다. 다음 조회부터 다시 콜렉터에서 받아 쌓습니다')}
+          >
+            {clearing ? t('비우는 중…') : t('비우기')}
+          </Button>
+        </div>
+      </div>
+
+      {/* 콜렉터 요청 — **기본값은 왕복 500ms 를 기준으로 잰 값이다** (Rust `PerfPrefs` 머리말) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('콜렉터 요청')}</div>
+        <div style={sectionDescStyle}>
+          {t('콜렉터는 연결 하나에 요청 하나만 받아, 멀수록 요청마다 시간이 듭니다. 그래서 여러 개를 동시에 묻습니다. 기본값은 왕복 500ms 콜렉터를 기준으로 잰 값입니다 — 콜렉터가 가까우면 줄여도 되고, 콜렉터의 동시 연결이 빠듯하면 줄이세요.')}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+          <NumberField label={t('과거 조회 — 동시 조각')} value={perf.past_parallel} min={1} max={16} onChange={v => setPerfField('past_parallel', v)}
+            hint={t('과거 구간을 몇 조각으로 나눠 동시에 받을지')} />
+          <NumberField label={t('트랜잭션 찾기·AI — 동시 조각')} value={perf.scan_parallel} min={1} max={16} onChange={v => setPerfField('scan_parallel', v)}
+            hint={t('넓은 구간 찾기와 AI 목록 조회가 구간을 몇 조각씩 동시에 받을지')} />
+          <NumberField label={t('프로파일 — 동시 받기')} value={perf.profile_workers} min={1} max={64} onChange={v => setPerfField('profile_workers', v)}
+            hint={t('프로파일 검색(화면·AI)이 프로파일을 몇 개씩 동시에 받을지')} />
+          <NumberField label={t('이름 사전 — 동시 조회')} value={perf.text_workers} min={1} max={16} onChange={v => setPerfField('text_workers', v)}
+            hint={t('SQL 문장·서비스 이름을 100개 묶음으로 몇 개씩 동시에 물을지')} />
+          <NumberField label={t('구간 페이지 크기')} value={perf.page_rows} min={1000} max={50000} unit={t('건')} onChange={v => setPerfField('page_rows', v)}
+            hint={t('트랜잭션 찾기·응답시간 분포·AI 목록 조회가 한 번에 받는 건수. 클수록 요청이 줄고 메모리를 조금 더 씁니다')} />
+          <label style={radioRowStyle}>
+            <input type="checkbox" checked={perf.prefetch_enabled} onChange={e => setPerfField('prefetch_enabled', e.target.checked)} />
+            <span style={{ color: T.textMuted }}>{t('문제 트랜잭션의 프로파일 미리 받기')}</span>
+          </label>
+          <NumberField label={t('미리 받기 — 응답시간 이상')} value={perf.prefetch_min_elapsed_ms} min={500} max={60000} unit="ms"
+            disabled={!perf.prefetch_enabled} onChange={v => setPerfField('prefetch_min_elapsed_ms', v)}
+            hint={t('실시간으로 보는 중 이 응답시간 이상이거나 에러인 트랜잭션의 프로파일을 뒤에서 받아 둡니다')} />
+          <NumberField label={t('미리 받기 — 초당 최대')} value={perf.prefetch_per_sec} min={1} max={100} unit={t('건')}
+            disabled={!perf.prefetch_enabled} onChange={v => setPerfField('prefetch_per_sec', v)} />
+          <div>
+            <Button size="xs" onClick={() => setPerf(DEFAULT_PERF)}>{t('기본값으로')}</Button>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* SQL 표시 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('SQL 바인딩 파라미터')}</div>
+        <div style={sectionDescStyle}>
+          {t('프로파일의 SQL 은 값 대신')} <code style={codeStyle}>?</code>{' '}
+          {t('로 옵니다. 값을 문장에 채워 넣으면 그대로 복사해 DB 에 붙일 수 있습니다.')}
+        </div>
+        {([
+          ['inline', t('문장에 채워서 보기'), t('예) where id=126')],
+          ['separate', t('값을 따로 보기'), t('예) where id=? · 바인딩 126')],
+        ] as const).map(([mode, label, hint]) => {
+          const on = mode === 'inline' ? bindInline : !bindInline;
+          return (
+            <label key={mode} style={radioRowStyle}>
+              <input
+                type="radio"
+                name="sql-bind"
+                checked={on}
+                onChange={() => setBindInline(mode === 'inline')}
+              />
+              <span style={{ color: on ? T.text : T.textDim }}>{label}</span>
+              <span style={{ color: T.textFaint, fontSize: F.micro }}>{hint}</span>
+            </label>
+          );
+        })}
+      </div>
+
+      {/* AI 연결 — **저장 단추와 따로 바로 적용된다** (McpSection 머리말) */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('AI 연결 (MCP)')}</div>
+        <div style={sectionDescStyle}>
+          {t('Claude Code · Cursor 가 이 앱을 거쳐 문제 있는 트랜잭션을 찾고 상세를 읽게 합니다. 앱이 켜져 있고 콜렉터에 접속해 있을 때만 붙습니다.')}
+          <br />
+          {t('이 PC(127.0.0.1)에서만 열리고, 토큰이 있어야 읽습니다. 읽기만 합니다. 여기 값은 바로 적용됩니다.')}
+        </div>
+        <McpSection />
+      </div>
+
+      {/* 단축키 — **적어 두지 않으면 없는 기능이다.** 목록은 판정 코드가 그대로 준다 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('단축키')}</div>
+        <div style={sectionDescStyle}>
+          {t('입력칸에 글자를 치는 중에는 동작하지 않습니다. Esc 는 그 칸에서 빠져나옵니다.')}
+        </div>
+        <div style={{ marginTop: 8 }}>
+          {SHORTCUT_HELP.map(row => (
+            <div key={row.keys} style={pathRowStyle}>
+              <span style={{ ...pathLabelStyle, fontFamily: FONT_MONO }}>{row.keys}</span>
+              <span style={pathValueStyle}>{t(SHORTCUT_LABEL[row.action])}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 현재 경로 정보 */}
+      <div style={sectionStyle}>
+        <div style={sectionTitleStyle}>{t('현재 저장 경로')}</div>
+        <div style={pathRowStyle}>
+          <span style={pathLabelStyle}>{t('설정 파일')}</span>
+          <span style={pathValueStyle}>
+            {dataDir.trim()
+              ? `${dataDir.trim()}\\config.json`
+              : `${t('(실행파일 경로)')}\\config.json`}
+          </span>
+        </div>
+        <div style={pathRowStyle}>
+          <span style={pathLabelStyle}>{t('로그 파일')}</span>
+          <span style={pathValueStyle}>
+            {dataDir.trim()
+              ? `${dataDir.trim()}\\logs\\nscouter.log`
+              : `${t('(실행파일 경로)')}\\logs\\nscouter.log`}
+          </span>
+        </div>
+        {/* **레벨을 경로 옆에 둔다.** 헤더에도 같은 선택기가 있지만 라벨이 없어서,
+            «로그 좀 받아 주세요» 를 받은 사람이 설정 창을 뒤지다 못 찾았다.
+            로그 이야기를 하러 오는 자리는 여기다 — 파일이 어디 있는지 바로 위에 적혀 있다. */}
+        <div style={pathRowStyle}>
+          <span style={pathLabelStyle}>{t('기록 수준')}</span>
+          <LogLevelSelector />
+        </div>
+        <div style={sectionDescStyle}>
+          {t('평소에는 ERROR 로 둡니다. 문제를 재현해 보여 줄 때만 DEBUG 로 올리고, 끝나면 되돌리세요 — 파일이 빠르게 커집니다.')}
+        </div>
+        <div style={{ ...sectionDescStyle, marginTop: 8, color: T.warn }}>
+          {t('※ 경로 변경은 앱 재시작 후 적용됩니다.')}
+        </div>
+      </div>
+
+      {/* 마지막 접속 정보 (읽기 전용) */}
+      {(config.last_host || config.last_port || config.last_user) && (
+        <div style={sectionStyle}>
+          <div style={sectionTitleStyle}>{t('마지막 접속 정보')}</div>
+          <div style={pathRowStyle}>
+            <span style={pathLabelStyle}>{t('호스트')}</span>
+            <span style={pathValueStyle}>{config.last_host ?? '-'}</span>
+          </div>
+          <div style={pathRowStyle}>
+            <span style={pathLabelStyle}>{t('포트')}</span>
+            <span style={pathValueStyle}>{config.last_port ?? '-'}</span>
+          </div>
+          <div style={pathRowStyle}>
+            <span style={pathLabelStyle}>{t('사용자')}</span>
+            <span style={pathValueStyle}>{config.last_user ?? '-'}</span>
+          </div>
+        </div>
+      )}
+
+      {error && <div style={errorStyle}>{error}</div>}
+    </Dialog>
   );
 });
 
 // ─── 스타일 ────────────────────────────────────────────────────
-
-const backdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'rgba(0,0,0,0.7)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 9000,
-};
-
-const modalStyle: React.CSSProperties = {
-  background: T.bgRaised,
-  border: '1px solid #1e1e3a',
-  borderRadius: 8,
-  width: 500,
-  maxWidth: '90vw',
-  // **높이를 창 안에 가둔다.** 글자 크기를 키우면 내용이 길어져 저장 버튼이
-  // 창 밖으로 밀려났다 — 설정을 바꾸고도 저장할 수가 없었다.
-  maxHeight: '90vh',
-  display: 'flex',
-  flexDirection: 'column',
-  boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
-};
-
-const modalHeaderStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '14px 18px',
-  borderBottom: '1px solid #1e1e3a',
-};
-
-const modalTitleStyle: React.CSSProperties = {
-  fontSize: F.base,
-  fontWeight: 700,
-  color: T.text,
-  letterSpacing: 0.3,
-};
-
-const closeBtnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: T.textFaint,
-  fontSize: F.base,
-  cursor: 'pointer',
-  padding: '2px 6px',
-  borderRadius: 4,
-  lineHeight: 1,
-};
-
-const modalBodyStyle: React.CSSProperties = {
-  // 넘치는 건 본문이 스크롤한다. 머리말과 버튼 줄은 늘 보인다.
-  overflowY: 'auto',
-  padding: '16px 18px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 20,
-};
 
 const sectionStyle: React.CSSProperties = {
   display: 'flex',
@@ -652,7 +656,7 @@ const codeStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   background: T.bgSurface,
-  border: '1px solid #252542',
+  border: `1px solid ${T.borderStrong}`,
   borderRadius: 4,
   color: T.text,
   padding: '7px 10px',
@@ -684,33 +688,6 @@ const pathValueStyle: React.CSSProperties = {
   wordBreak: 'break-all',
 };
 
-const modalFooterStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  padding: '12px 18px',
-  borderTop: '1px solid #1e1e3a',
-  gap: 8,
-};
-
-const cancelBtnStyle: React.CSSProperties = {
-  background: T.bgHover,
-  border: '1px solid #252542',
-  borderRadius: 4,
-  color: T.textMuted,
-  fontSize: F.body,
-  padding: '5px 16px',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-};
-
-const scaleBtnStyle: React.CSSProperties = {
-  padding: '4px 12px',
-  borderRadius: 4,
-  border: `1px solid ${T.border}`,
-  cursor: 'pointer',
-  lineHeight: 1.2,
-};
-
 /** 규칙 입력칸 — 길어서 한 줄을 다 쓴다 */
 const ruleInputStyle: React.CSSProperties = {
   flex: 1,
@@ -721,18 +698,6 @@ const ruleInputStyle: React.CSSProperties = {
   color: T.text,
   padding: '3px 6px',
   fontSize: F.small,
-};
-
-const themeBtnStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '4px 10px 4px 5px',
-  borderRadius: 4,
-  border: '1px solid',
-  cursor: 'pointer',
-  fontSize: F.small,
-  lineHeight: 1.2,
 };
 
 /** 세 칸짜리 색 조각. 테두리는 그 테마의 구분선이라 조각 자체가 밝기 차를 보여준다 */
@@ -747,18 +712,6 @@ const swatchCell: React.CSSProperties = {
   display: 'block',
   width: 9,
   height: 16,
-};
-
-const saveBtnStyle: React.CSSProperties = {
-  background: T.accent,
-  border: '1px solid #4f72ff',
-  borderRadius: 4,
-  color: T.text,
-  fontSize: F.body,
-  padding: '5px 20px',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  fontWeight: 600,
 };
 
 const errorStyle: React.CSSProperties = {

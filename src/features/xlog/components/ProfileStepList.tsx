@@ -22,6 +22,7 @@ import { StepDetailDialog } from './StepDetailDialog';
 import { previewLine } from './textFormat';
 import { useViewOptions } from '../hooks/useViewOptions';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface ProfileStepListProps {
   steps: ProfileStep[];
@@ -449,7 +450,9 @@ function SqlBody({
   };
 
   const toggleButton = (where: 'top' | 'bottom') => (
-    <button
+    <Button
+      variant="ghost"
+      size="xs"
       type="button"
       // 행 클릭(상세 열기)까지 번지면 접으려다 다른 창이 뜬다.
       onClick={e => {
@@ -459,10 +462,10 @@ function SqlBody({
       }}
       aria-expanded={expanded}
       data-where={where}
-      className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+      className="mt-0.5"
     >
       {expanded ? t('접기') : `${t('펼치기')} (${filled.length.toLocaleString()}${t('자')})`}
-    </button>
+    </Button>
   );
 
   return (
@@ -487,16 +490,18 @@ function SqlBody({
 
       <div className="flex items-baseline">
         {overflows && toggleButton('bottom')}
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
           type="button"
           onClick={e => {
             e.stopPropagation();
             setFull(true);
           }}
-          className="mt-0.5 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+          className="mt-0.5"
         >
           {t('전문 보기')}
-        </button>
+        </Button>
         {/* **채운 문장을 복사한다.** 이 화면을 여는 이유의 절반은 «이 쿼리를 DB 에 붙여
             돌려 보는 것» 이다. 값이 들어간 문장이라 그대로 실행된다.
             펼침 여부와 무관하게 **전문**을 복사한다 — 접혀 있다고 세 줄만 주면 안 된다. */}

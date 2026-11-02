@@ -15,6 +15,7 @@ import { memo } from 'react';
 import type { DetailTab } from '../hooks/useXLogDetailTabs';
 import { formatTime, formatTimeMs } from '../utils/colorPalette';
 import { t } from '../../../i18n';
+import { Button } from '../../../components/Button';
 
 interface DetailTabBarProps {
   tabs: DetailTab[];
@@ -68,14 +69,16 @@ export const DetailTabBar = memo(function DetailTabBar({
                   </span>
                 )}
               </button>
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 onClick={() => onClose(tab.key)}
                 title={t('이 탭 닫기')}
                 aria-label={`${t('이 탭 닫기')} — ${tab.title}`}
-                className="shrink-0 rounded px-1 text-micro text-fg-faint hover:bg-hover hover:text-fg"
+                className="shrink-0"
               >
                 ✕
-              </button>
+              </Button>
             </div>
           );
         })}

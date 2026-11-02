@@ -9,6 +9,8 @@
 import { clampWideMax, WIDE_TOTAL_CAP } from './wideSearchAll';
 import { useEffect, useState } from 'react';
 import { getConfig, saveConfig, type AppConfig } from '../api/scouterApi';
+import { DEFAULT_PERF } from '../api/perfDefaults';
+import { setPastParallel } from '../api/pastXLog';
 import { setLang, toLang, type Lang } from '../../../i18n';
 import { applyTheme, toTheme, DEFAULT_THEME, type ThemeId } from '../../../styles/theme';
 import { DEFAULT_GROUP_RULE, type GroupRule } from '../components/instanceGroup';
@@ -31,6 +33,10 @@ export interface ViewOptions {
   groupRule: GroupRule;
   /** 비활성 자동 정리 주기(분). **0 이면 끕** — 전역이라 기본값이다 */
   autoRemoveInactiveMin: number;
+  /** 트랜잭션 찾기 — 구간 조각을 동시에 받는 수 (설정 `perf.scan_parallel`) */
+  scanParallel: number;
+  /** 과거 조회 — 구간 조각을 동시에 받는 수 (설정 `perf.past_parallel`) */
+  pastParallel: number;
 }
 
 /** 화면에서 고를 수 있는 배율. 사이 값이 오면 가장 가까운 것으로 붙인다 */
@@ -76,6 +82,8 @@ const DEFAULTS: ViewOptions = {
   theme: DEFAULT_THEME,
   groupRule: DEFAULT_GROUP_RULE,
   autoRemoveInactiveMin: 0,
+  scanParallel: DEFAULT_PERF.scan_parallel,
+  pastParallel: DEFAULT_PERF.past_parallel,
 };
 
 let current: ViewOptions = DEFAULTS;
@@ -88,6 +96,8 @@ function emit(): void {
   applyTheme(current.theme);
   // t() 는 모듈 함수라 여기서 언어를 심어 둔다. 컴포넌트마다 넘기면 빠뜨리는 자리가 생긴다.
   setLang(current.lang);
+  // 과거 조회는 훅 밖(모듈 함수)에서 돌아 여기서 조각 수를 심는다
+  setPastParallel(current.pastParallel);
   for (const fn of listeners) fn(current);
 }
 
@@ -104,7 +114,15 @@ function fromConfig(cfg: AppConfig): ViewOptions {
       pattern: cfg.group_rule?.pattern ?? DEFAULT_GROUP_RULE.pattern,
     },
     autoRemoveInactiveMin: clampCleanupMin(cfg.auto_remove_inactive_min),
+    scanParallel: clampParallel(cfg.perf?.scan_parallel, DEFAULTS.scanParallel),
+    pastParallel: clampParallel(cfg.perf?.past_parallel, DEFAULTS.pastParallel),
   };
+}
+
+/** 동시 수 — 1~16 (Rust `PerfPrefs::clamped` 와 같은 범위) */
+function clampParallel(v: unknown, dflt: number): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n >= 1 ? Math.min(16, Math.round(n)) : dflt;
 }
 
 /**

@@ -131,6 +131,58 @@ impl XLogPack {
         Self::read_inner(&mut d)
     }
 
+    /// `read_from_blob` 의 거꾸로 — 콜렉터가 보내는 것과 같은 모양(선택 필드까지 다 채운 것)으로 쓴다.
+    ///
+    /// **로컬 캐시에 담으려고 있다**(`crate::cache`). JSON 으로 담으면 한 건이 600바이트 남짓인데
+    /// 이 모양은 100~150바이트다 — 시간당 50만 건 서비스면 그 차이가 그대로 캐시 크기다.
+    pub fn to_blob(&self) -> Vec<u8> {
+        let mut w = super::codec::ScouterWriter::new();
+        w.write_decimal(self.end_time);
+        w.write_decimal(self.obj_hash as i64);
+        w.write_decimal(self.service as i64);
+        w.write_long(self.txid);
+        w.write_long(self.caller);
+        w.write_long(self.gxid);
+        w.write_decimal(self.elapsed as i64);
+        w.write_decimal(self.error as i64);
+        w.write_decimal(self.cpu as i64);
+        w.write_decimal(self.sql_count as i64);
+        w.write_decimal(self.sql_time as i64);
+        w.write_blob(&ip_to_bytes(&self.ipaddr));
+        w.write_decimal(self.kbytes as i64);
+        w.write_decimal(self.status as i64);
+        w.write_decimal(self.userid);
+        w.write_decimal(self.user_agent as i64);
+        w.write_decimal(self.referer as i64);
+        w.write_decimal(self.group as i64);
+        w.write_decimal(self.apicall_count as i64);
+        w.write_decimal(self.apicall_time as i64);
+        w.write_text(&self.country_code);
+        w.write_decimal(self.city as i64);
+        w.write_unsigned_byte(self.x_type);
+        w.write_decimal(self.login as i64);
+        w.write_decimal(self.desc as i64);
+        w.write_decimal(self.web_hash as i64);
+        w.write_decimal(self.web_time as i64);
+        w.write_unsigned_byte(self.has_dump);
+        w.write_decimal(self.thread_name_hash as i64);
+        w.write_text(&self.text1);
+        w.write_text(&self.text2);
+        w.write_decimal(self.queuing_host_hash as i64);
+        w.write_decimal(self.queuing_time as i64);
+        w.write_decimal(self.queuing2nd_host_hash as i64);
+        w.write_decimal(self.queuing2nd_time as i64);
+        w.write_text(&self.text3);
+        w.write_text(&self.text4);
+        w.write_text(&self.text5);
+        w.write_decimal(self.profile_count as i64);
+        w.write_boolean(self.b3_mode);
+        w.write_decimal(self.profile_size as i64);
+        w.write_unsigned_byte(self.discard_type);
+        w.write_boolean(self.ignore_global_consequent_sampling);
+        w.into_bytes()
+    }
+
     fn read_inner(d: &mut ScouterReader) -> io::Result<Self> {
         let end_time = d.read_decimal()?;
         let obj_hash = d.read_decimal()? as i32;
@@ -391,6 +443,12 @@ pub enum AnyPack {
 
 // ─── 헬퍼 ────────────────────────────────────────────────────
 
+/// `bytes_to_ip` 의 거꾸로. 못 읽는 글이면 빈 바이트 (읽으면 빈 문자열로 돌아온다)
+pub fn ip_to_bytes(ip: &str) -> Vec<u8> {
+    let parts: Vec<u8> = ip.split('.').filter_map(|p| p.parse::<u8>().ok()).collect();
+    if parts.len() == 4 && ip.split('.').count() == 4 { parts } else { Vec::new() }
+}
+
 pub fn bytes_to_ip(bytes: &[u8]) -> String {
     if bytes.len() == 4 {
         format!("{}.{}.{}.{}", bytes[0], bytes[1], bytes[2], bytes[3])
@@ -424,4 +482,79 @@ where
     use serde::Deserialize;
     let s = String::deserialize(d)?;
     s.parse::<i64>().map_err(serde::de::Error::custom)
+}
+
+#[cfg(test)]
+mod blob_tests {
+    use super::*;
+
+    /// 캐시에 넣었다 꺼낸 것이 콜렉터에서 받은 것과 **칸 하나까지** 같아야 한다 —
+    /// 하나라도 어긋나면 캐시에서 연 화면이 콜렉터에서 연 화면과 달라진다
+    #[test]
+    fn 쓴_것을_읽으면_그대로다() {
+        let x = XLogPack {
+            end_time: 1_793_528_820_123,
+            obj_hash: -1_585_387_669,
+            service: 12345,
+            txid: -8_773_066_139_519_071_540,
+            caller: 1_138_513_244_748_652_012,
+            gxid: i64::MIN + 7,
+            elapsed: 4051,
+            error: -60_106_528,
+            cpu: 12,
+            sql_count: 120,
+            sql_time: 337,
+            ipaddr: "10.89.2.17".into(),
+            kbytes: 3,
+            status: 200,
+            userid: -42,
+            user_agent: 9,
+            referer: 8,
+            group: 7,
+            apicall_count: 1,
+            apicall_time: 1104,
+            country_code: "KR".into(),
+            city: 5,
+            x_type: 3,
+            login: 77,
+            desc: 78,
+            web_hash: 79,
+            web_time: 80,
+            has_dump: 1,
+            thread_name_hash: 81,
+            text1: "가나다".into(),
+            text2: String::new(),
+            queuing_host_hash: 82,
+            queuing_time: 83,
+            queuing2nd_host_hash: 84,
+            queuing2nd_time: 85,
+            text3: "t3".into(),
+            text4: "x".repeat(300),
+            text5: "t5".into(),
+            profile_count: 202,
+            b3_mode: true,
+            profile_size: 4096,
+            discard_type: 2,
+            ignore_global_consequent_sampling: true,
+        };
+        let blob = x.to_blob();
+        assert!(blob.len() < 600, "{} 바이트", blob.len());
+        let back = XLogPack::read_from_blob(blob).unwrap();
+        assert_eq!(serde_json::to_value(&back).unwrap(), serde_json::to_value(&x).unwrap());
+    }
+
+    #[test]
+    fn 평범한_한_건은_작다() {
+        let x = XLogPack { end_time: 1_793_528_820_123, txid: 123_456_789_012, ipaddr: "127.0.0.1".into(), elapsed: 15, ..XLogPack::default() };
+        let n = x.to_blob().len();
+        assert!(n <= 100, "{n} 바이트 — 캐시 크기가 곧 이 값 × 건수다");
+    }
+
+    #[test]
+    fn ip_는_네_칸일_때만_바이트가_된다() {
+        assert_eq!(ip_to_bytes("10.0.0.1"), vec![10, 0, 0, 1]);
+        assert!(ip_to_bytes("").is_empty());
+        assert!(ip_to_bytes("1.2.3").is_empty());
+        assert!(ip_to_bytes("1.2.3.999").is_empty());
+    }
 }

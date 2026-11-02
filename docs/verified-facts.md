@@ -1882,3 +1882,23 @@ objHash 유무:
 - `profile_thread_memory_usage_enabled`, `profile_thread_cputime_enabled` 둘 다 기본 false 다(`Configure` 생성자·`apply` 의 `getBoolean(…, false)`).
   뒤의 것은 **프로파일 스텝의** cputime 용이라 XLog 의 `cpu` 와는 무관하다.
 - 그래서 화면은 CPU 0 을 «1ms 미만», Heap 0 을 «수집 안 함» 으로 적는다 (`XLogDetailPanel`).
+
+### F-65. 알림 레벨은 **0 부터 INFO** 다 (DEBUG 없음)
+
+콜렉터 2.21.3 의 `scouter.lang.AlertLevel`(`scouter-server-2.21.3.jar`)을 `javap -constants` 로 열었다.
+
+```
+INFO = 0   WARN = 1   ERROR = 2   FATAL = 3
+```
+
+- 실제 알림도 맞는다: 호스트 에이전트의 `WARNING_CPU_HIGH` 는 level 1, `FATAL_CPU_HIGH` 는 level 3 으로 왔다.
+- 앱은 0.7.0 까지 0=DEBUG 로 한 칸 밀려 읽어 **모든 알림이 한 단계 가볍게** 보였다(경고가 INFO, FATAL 이 ERROR).
+
+### F-66. `SEARCH_XLOG_LIST` 의 조건(`StrMatch`)은 **대소문자를 가린다**
+
+| 항목 | 내용 |
+|---|---|
+| 확인 | scouter-server 2.21.3 `scouter.util.StrMatch` 바이트코드(`javap -c`) — `equals`·`indexOf`·`startsWith`·`endsWith` 만 쓰고 소문자로 바꾸지 않는다. `XLogService` 도 넘겨받은 값을 그대로 `StrMatch` 로 만든다 |
+| 글롭 | `*` 하나뿐. 모양은 `COMP` 열거 9가지(EQU·STR·STR_MID·STR_END·MID·MID_MID·MID_END·END·ANY) — 앞·끝·가운데 두 조각까지 |
+| 결과 | `order` 로 찾으면 `/Order/…` 가 **조용히 빠진다.** 문자 클래스가 없어 대소문자 무시로 우회할 길이 없다 |
+| 대응 | 화면 «트랜잭션 찾기»·MCP 목록 조회는 조건을 콜렉터에 넘기지 않는다 — 과거 조회(`TRANX_LOAD_TIME_GROUP_V2`)로 구간을 받아 앱이 대소문자 없이 거른다(`scouter::search::WideMatcher`) |

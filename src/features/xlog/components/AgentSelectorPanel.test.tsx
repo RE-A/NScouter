@@ -25,14 +25,14 @@ vi.mock('../api/scouterApi', () => ({
 
 afterEach(() => vi.clearAllMocks());
 
-function draw(selected: number[] = []) {
+function draw(selected: number[] = [], groupBy: 'type' | 'group' = 'type') {
   const onSelectionChange = vi.fn();
   render(
     <AgentSelectorPanel
       isConnected
       selectedHashes={new Set(selected)}
       onSelectionChange={onSelectionChange}
-      groupBy="type"
+      groupBy={groupBy}
       onGroupByChange={() => {}}
     />,
   );
@@ -129,27 +129,43 @@ describe('AgentSelectorPanel — 종류 식별', () => {
     expect(screen.queryByTitle(/오브젝트 종류 —/)).toBeNull();
   });
 
-  it('종류 칩으로 목록을 줄인다', async () => {
+  // 칩 줄은 **그룹·서비스로 묶었을 때만** 있다 — 타입으로 묶으면 목록의 마디가 곧 종류다
+  it('타입으로 묶었으면 칩 줄이 없다 — 마디와 같은 말이다', async () => {
     draw();
     await waitFor(() => expect(groupBox('linux')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /^tomcat/ })).toBeNull();
+  });
+
+  it('종류 칩으로 목록을 줄인다', async () => {
+    draw([], 'group');
+    await waitFor(() => expect(screen.getByText('test-host')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /^tomcat/ }));
 
-    await waitFor(() => expect(screen.queryByLabelText('linux')).toBeNull());
-    expect(groupBox('tomcat')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('test-host')).toBeNull());
+    expect(screen.getByText('shop-app')).toBeTruthy();
   });
 
   it('칩을 도로 끄면 전부 돌아온다', async () => {
-    draw();
-    await waitFor(() => expect(groupBox('linux')).toBeTruthy());
+    draw([], 'group');
+    await waitFor(() => expect(screen.getByText('test-host')).toBeTruthy());
 
     const chip = screen.getByRole('button', { name: /^tomcat/ });
     fireEvent.click(chip);
-    await waitFor(() => expect(screen.queryByLabelText('linux')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('test-host')).toBeNull());
     fireEvent.click(chip);
 
     // 다 끈 상태는 «아무것도 안 봄» 이 아니라 «거를 것이 없다» 다.
+    await waitFor(() => expect(screen.getByText('test-host')).toBeTruthy());
+  });
+
+  it('XLog 를 안 만드는 종류(호스트)는 접힌 채로 시작한다 — 고르기는 그대로', async () => {
+    const { onSelectionChange } = draw();
     await waitFor(() => expect(groupBox('linux')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByText('test-host')).toBeNull());
+    expect(screen.queryByText('HikariPool-1')).toBeNull();
+    expect(screen.getByText('shop-app')).toBeTruthy();
+    expect(onSelectionChange).not.toHaveBeenCalled();
   });
 });
 
@@ -191,6 +207,8 @@ describe('AgentSelectorPanel — 설정 메뉴', () => {
     // datasource 는 설정 파일이 없어 항상 0개가 온다(실측). 누를 수 있게 두면
     // «못 받았다» 가 떠서 고장으로 읽힌다.
     draw();
+    // 커넥션 풀 묶음은 접힌 채로 시작한다 — 펼치고 연다
+    fireEvent.click(await screen.findByRole('button', { name: /datasource/ }));
     const item = await openMenu('HikariPool-1');
     expect(item.disabled).toBe(true);
     expect(item.title).toBe('커넥션 풀은 설정 파일이 없습니다');
@@ -203,6 +221,8 @@ describe('AgentSelectorPanel — 설정 메뉴', () => {
 
   it('호스트도 연다 — JVM 전용으로 막지 않는다', async () => {
     draw();
+    // 호스트 묶음은 접힌 채로 시작한다 — 펼치고 연다
+    fireEvent.click(await screen.findByRole('button', { name: /linux/ }));
     expect((await openMenu('test-host')).disabled).toBe(false);
   });
 });

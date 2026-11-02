@@ -6,7 +6,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::connection::ScouterConnection;
 use super::pack::{AnyPack, MapPack, XLogPack};
@@ -44,16 +44,30 @@ pub struct XLogErrorPayload {
 
 // ─── 스트리밍 루프 ────────────────────────────────────────────
 
+/// 스트림 루프가 끝난 까닭
+#[derive(Debug, PartialEq, Eq)]
+pub enum StreamEnd {
+    /// 멈추라고 했다 (새 스트림이 섰거나 고르기를 다 풀었다)
+    Stopped,
+    /// 연결이 망가졌다 — 새 연결로 다시 열어야 한다
+    Broken,
+}
+
 /// XLog 실시간 스트리밍 루프
 /// - 최초: TRANX_REAL_TIME_GROUP_LATEST (loop=0, index=0)
 /// - 이후: TRANX_REAL_TIME_GROUP (커서 업데이트)
 /// - 수신된 XLogPack은 "xlog-data" Tauri 이벤트로 emit
+///
+/// **오류가 나면 이 연결로는 더 묻지 않는다.** 예전에는 1초 쉬고 같은 연결로 다시 물었는데,
+/// 콜렉터가 다시 뜨거나 네트워크가 한 번 끊기면 그 소켓은 영영 죽어 있어 오류만 계속 났다 —
+/// 서버를 골라도 XLog 가 안 뜨는 상태가 앱을 다시 켤 때까지 갔다. 끝난 까닭을 돌려주고,
+/// 다시 여는 것은 부르는 쪽(`restart_xlog_stream`)이 새 연결로 한다.
 pub async fn run_xlog_stream(
     conn: &mut ScouterConnection,
     obj_hashes: Vec<i32>,
     app: AppHandle,
     stop_flag: Arc<AtomicBool>,
-) {
+) -> StreamEnd {
     log::info!("XLog 스트리밍 시작: {} 오브젝트", obj_hashes.len());
     let mut cursor = StreamCursor::default();
     let mut first = true;
@@ -64,26 +78,17 @@ pub async fn run_xlog_stream(
 
         match result {
             Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-                // INVALID_SESSION: 재로그인 필요, 루프 종료
-                log::error!("세션 만료로 스트리밍 중단: {e}");
-                let _ = app.emit(
-                    "xlog-error",
-                    XLogErrorPayload {
-                        message: format!("세션 만료: {e}"),
-                    },
-                );
-                break;
-            }
             Err(e) => {
-                log::warn!("스트리밍 일시 오류, 1초 후 재시도: {e}");
+                // 세션 만료(INVALID_SESSION)도 소켓 오류도 같다 — 새로 붙어 다시 로그인한다
+                let why = if e.kind() == io::ErrorKind::PermissionDenied { "세션 만료" } else { "스트리밍 오류" };
+                log::warn!("{why} — 새 연결로 다시 엽니다: {e}");
                 let _ = app.emit(
                     "xlog-error",
                     XLogErrorPayload {
-                        message: format!("스트리밍 오류: {e}"),
+                        message: format!("{why}: {e} — 다시 연결하는 중"),
                     },
                 );
-                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                return StreamEnd::Broken;
             }
         }
 
@@ -92,6 +97,7 @@ pub async fn run_xlog_stream(
     }
 
     log::info!("XLog 스트리밍 종료");
+    StreamEnd::Stopped
 }
 
 
@@ -126,6 +132,10 @@ fn poll_once(
             }
             Some(AnyPack::XLog(xlog)) => {
                 n_xlog += 1;
+                // 에러·느린 것은 프로파일을 미리 받아 둔다 (`cache::prefetch`) — 막히지 않는다
+                if let Some(p) = app.try_state::<crate::cache::prefetch::Prefetcher>() {
+                    p.offer(&xlog);
+                }
                 batch.push(xlog);
                 if batch.len() >= EMIT_CHUNK {
                     let _ = app.emit("xlog-data", XLogColumns::from(std::mem::take(&mut batch)));

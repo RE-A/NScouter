@@ -20,6 +20,7 @@ import type { ConfigScope } from './catalog/types';
 import { SettingsForm } from './SettingsForm';
 import { scopeOfObjType } from './settingsModel';
 import { t } from '../../i18n';
+import { Dialog } from '../../components/Dialog';
 
 export type ConfigTarget =
   | { kind: 'agent'; objHash: number; objName: string; objType: string }
@@ -64,43 +65,31 @@ export const ConfigSettingsDialog = memo(function ConfigSettingsDialog({
   );
 
   // Esc 로 닫는다. 고친 것이 있을 때 실수로 닫히는 것은 저장 줄이 막지 못하므로,
-  // **입력 칸 안에서는 닫지 않는다** — 값을 지우려고 Esc 를 누르는 사람이 있다.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const title = target.kind === 'collector' ? t('콜렉터 설정') : t('에이전트 설정');
   const scopeName =
     scope === 'server' ? t('콜렉터') : scope === 'host' ? t('호스트 에이전트') : t('자바 에이전트');
 
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6"
-      onMouseDown={e => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-label={`${title} — ${targetName}`}
-        className="flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl"
-      >
-        <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line bg-overlay px-4 py-2.5">
-          <div className="min-w-0">
-            <h2 className="text-title font-semibold text-fg">{title}</h2>
-            <p className="truncate text-micro text-fg-dim">
+    <Dialog
+      onClose={onClose}
+      widthClass="h-[88vh] w-full max-w-6xl"
+      bodyClassName="flex flex-col"
+      zClass="z-40"
+      escInInputs={false}
+      ariaLabel={`${title} — ${targetName}`}
+      title={
+        <>
+          <span className="flex min-w-0 flex-col">
+            <span className="text-title font-semibold text-fg">{title}</span>
+            <span className="truncate text-micro font-normal text-fg-dim">
               <span className="font-mono">{targetName}</span> · {scopeName}
-            </p>
-          </div>
-          <div className="flex-1" />
-
+            </span>
+          </span>
+        </>
+      }
+      headerExtra={
+        <>
           {mode === 'form' && (
             <>
               <input
@@ -123,7 +112,6 @@ export const ConfigSettingsDialog = memo(function ConfigSettingsDialog({
               </label>
             </>
           )}
-
           {!editingText && (
             <div className="flex items-center gap-0.5 rounded border border-line-control p-0.5">
               {(['form', 'text'] as const).map(m => (
@@ -140,76 +128,68 @@ export const ConfigSettingsDialog = memo(function ConfigSettingsDialog({
               ))}
             </div>
           )}
+        </>
+      }
+    >
+      {loading && <Note>{t('조회 중…')}</Note>}
+      {!loading && error && <Note tone="danger">{error}</Note>}
+      {!loading && !error && data && data.entries.length === 0 && mode === 'form' && (
+        // **빈 목록을 «설정 없음» 으로 읽으면 안 된다.** 콜렉터가 에이전트에 되물어 오는 것이라
+        // 에이전트가 답하지 않으면 오류가 아니라 빈 응답이 온다 (F-37).
+        <Note>{t('설정 항목을 받지 못했습니다. 에이전트가 응답하지 않았을 수 있습니다.')}</Note>
+      )}
 
-          <button
-            onClick={onClose}
-            aria-label={t('닫기')}
-            className="rounded px-2 py-1 text-fg-dim hover:bg-hover hover:text-fg"
-          >
-            ✕
-          </button>
-        </header>
+      {!loading && !error && data && mode === 'form' && data.entries.length > 0 && (
+        <SettingsForm
+          scope={scope}
+          data={data}
+          targetName={targetName}
+          save={save}
+          onSaved={load}
+          query={query}
+          changedOnly={changedOnly}
+          showInternal={showInternal}
+        />
+      )}
 
-        {loading && <Note>{t('조회 중…')}</Note>}
-        {!loading && error && <Note tone="danger">{error}</Note>}
-        {!loading && !error && data && data.entries.length === 0 && mode === 'form' && (
-          // **빈 목록을 «설정 없음» 으로 읽으면 안 된다.** 콜렉터가 에이전트에 되물어 오는 것이라
-          // 에이전트가 답하지 않으면 오류가 아니라 빈 응답이 온다 (F-37).
-          <Note>{t('설정 항목을 받지 못했습니다. 에이전트가 응답하지 않았을 수 있습니다.')}</Note>
-        )}
-
-        {!loading && !error && data && mode === 'form' && data.entries.length > 0 && (
-          <SettingsForm
-            scope={scope}
-            data={data}
+      {!loading && !error && data && mode === 'text' && (
+        editingText ? (
+          <ConfigEditor
             targetName={targetName}
+            text={data.text}
             save={save}
-            onSaved={load}
-            query={query}
-            changedOnly={changedOnly}
-            showInternal={showInternal}
+            onSaved={() => {
+              setEditingText(false);
+              load();
+            }}
+            onCancel={() => setEditingText(false)}
           />
-        )}
-
-        {!loading && !error && data && mode === 'text' && (
-          editingText ? (
-            <ConfigEditor
-              targetName={targetName}
-              text={data.text}
-              save={save}
-              onSaved={() => {
-                setEditingText(false);
-                load();
-              }}
-              onCancel={() => setEditingText(false)}
-            />
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-1.5">
-                <span className="text-micro text-fg-faint">
-                  {t('설정 파일 그대로입니다. 줄 이음·주석을 손으로 다듬을 때 씁니다.')}
-                </span>
-                <div className="flex-1" />
-                <button
-                  onClick={() => setEditingText(true)}
-                  title={t('설정 파일을 통째로 바꿉니다')}
-                  className="btn px-2 py-0.5 text-small"
-                >
-                  {t('원문 편집')}
-                </button>
-              </div>
-              {data.text ? (
-                <pre className="min-h-0 flex-1 overflow-auto px-4 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-fg">
-                  {data.text}
-                </pre>
-              ) : (
-                <Note>{t('설정 파일이 없습니다. 기본값으로 동작 중입니다.')}</Note>
-              )}
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-1.5">
+              <span className="text-micro text-fg-faint">
+                {t('설정 파일 그대로입니다. 줄 이음·주석을 손으로 다듬을 때 씁니다.')}
+              </span>
+              <div className="flex-1" />
+              <button
+                onClick={() => setEditingText(true)}
+                title={t('설정 파일을 통째로 바꿉니다')}
+                className="btn px-2 py-0.5 text-small"
+              >
+                {t('원문 편집')}
+              </button>
             </div>
-          )
-        )}
-      </div>
-    </div>
+            {data.text ? (
+              <pre className="min-h-0 flex-1 overflow-auto px-4 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-fg">
+                {data.text}
+              </pre>
+            ) : (
+              <Note>{t('설정 파일이 없습니다. 기본값으로 동작 중입니다.')}</Note>
+            )}
+          </div>
+        )
+      )}
+    </Dialog>
   );
 });
 

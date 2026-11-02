@@ -65,7 +65,7 @@ describe('AlertPanel — 목록', () => {
     panel();
     fireEvent.click(screen.getByTitle('알림'));
 
-    expect(screen.getByText('ERROR')).toBeTruthy();
+    expect(screen.getByText('FATAL')).toBeTruthy();
     expect(screen.getByText('14:03:07')).toBeTruthy();
     expect(screen.getByText('INACTIVE_OBJECT')).toBeTruthy();
     expect(screen.getByText(/응답하지 않습니다/)).toBeTruthy();

@@ -7,6 +7,8 @@ use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::cache::profile::full_profile_steps;
+use crate::cache::xlog::past_page;
 use crate::config::AppConfig;
 use crate::scouter::configure::{
     attach_meta, escape_config_text, parse_config_desc, parse_config_entries, parse_config_text,
@@ -33,14 +35,12 @@ use crate::scouter::objtype::{
     TypeActiveServices,
 };
 use crate::scouter::pack::{AnyPack, InteractionCounterPack, MapPack, ObjectPack, XLogPack};
-use crate::scouter::past::{build_past_xlog_param, parse_past_cursor, PastCursor};
-use crate::scouter::search::{
-    build_search_xlog_param, parse_search_max, SearchXLogFilter, DEFAULT_SEARCH_MAX,
-};
-use crate::scouter::profile::{build_full_profile_param, parse_profile_steps, XLogProfilePack};
+use crate::scouter::past::PastCursor;
+use crate::scouter::search::{SearchXLogFilter, WideMatcher};
+use crate::scouter::profile::XLogProfilePack;
 use crate::scouter::protocol::*;
 use crate::scouter::alert::build_alert_param;
-use crate::scouter::streaming::{run_xlog_stream, StreamCursor};
+use crate::scouter::streaming::{run_xlog_stream, StreamCursor, StreamEnd};
 use crate::scouter::summary::{
     build_summary_param, merge_error_summary, merge_summary, parse_error_summary, parse_summary,
     ErrorSummaryRow, SummaryRow,
@@ -70,6 +70,7 @@ pub async fn connect_scouter(
         .map_err(|e| format!("로그인 실패: {e}"))?;
 
     let server_id = conn.server_id.clone();
+    *state.clock_offset_ms.lock().await = conn.clock_offset_ms;
     *state.connection.lock().await = Some(conn);
     // **서버를 갈아탈 때 옛 연결을 버린다.** 남겨 두면 새 서버를 보는 중에
     // 이전 서버로 붙은 연결이 풀에서 나와 남의 답을 준다.
@@ -94,6 +95,10 @@ pub async fn connect_scouter(
         let _ = cfg.save(&config_path);
     }
 
+    // 이 콜렉터의 로컬 캐시를 붙인다 — 이름 사전 등을 다시 받지 않게
+    let (h, p) = (state.conn_host.lock().await.clone(), *state.conn_port.lock().await);
+    state.attach_cache(&h, p).await;
+
     log::info!("Collector 연결 완료: server_id={server_id}");
     *state.server_id.lock().await = Some(server_id.clone());
     let _ = app.emit("scouter-connected", server_id);
@@ -109,6 +114,8 @@ pub async fn disconnect_scouter(app: AppHandle, state: State<'_, AppState>) -> R
     state.streams.stop_all().await;
     *state.connection.lock().await = None;
     *state.server_id.lock().await = None;
+    *state.clock_offset_ms.lock().await = None;
+    state.detach_cache().await;
     // 창마다 받던 것도 비운다 — 다른 서버에 붙으면 창들이 새로 알려 온다
     state.xlog_subs.lock().await.clear();
     // **조회용 연결도 버린다.** 안 버리면 이전 서버로 붙은 연결이 풀에 남아,
@@ -137,6 +144,14 @@ pub async fn start_xlog_stream(
     restart_xlog_stream(&app, &state).await
 }
 
+/// 스트림을 다시 붙일 때 기다리는 시간 — 처음 1초, 실패할 때마다 두 배, 10초까지
+const STREAM_RETRY_MIN_MS: u64 = 1_000;
+const STREAM_RETRY_MAX_MS: u64 = 10_000;
+
+fn next_backoff(ms: u64) -> u64 {
+    (ms * 2).min(STREAM_RETRY_MAX_MS)
+}
+
 /// 창들이 알린 오브젝트를 합쳐 스트림을 다시 연다. 합친 것이 비면 멈춘다.
 ///
 /// **데모 모드에서는 건드리지 않는다** — 합성 스트림이 같은 자리(XLog)를 쓰고 있다.
@@ -160,20 +175,39 @@ pub async fn restart_xlog_stream(app: &AppHandle, state: &AppState) -> Result<()
     let pass = state.conn_pass.lock().await.clone();
     let app = app.clone();
 
+    // **끊기면 스스로 다시 붙는다.** 연결·로그인이 안 되면 1초에서 10초까지 늘려 가며 다시 시도한다.
+    // 예전에는 한 번 실패하면 조용히 끝나(로그인 실패는 화면에 알리지도 않았다) 앱을 다시 켜야 했다.
     tokio::spawn(async move {
-        let mut stream_conn = match ScouterConnection::connect(&host, port) {
-            Ok(c) => c,
-            Err(e) => {
-                log::error!("XLog 스트림 연결 실패: {e}");
-                let _ = app.emit("xlog-error", serde_json::json!({ "message": format!("스트림 연결 실패: {e}") }));
-                return;
+        let mut backoff_ms: u64 = STREAM_RETRY_MIN_MS;
+        while !stop_flag.load(Ordering::Relaxed) {
+            let opened = ScouterConnection::connect(&host, port).and_then(|mut c| {
+                c.login(&user, &pass)?;
+                Ok(c)
+            });
+            match opened {
+                Ok(mut stream_conn) => {
+                    backoff_ms = STREAM_RETRY_MIN_MS;
+                    if run_xlog_stream(&mut stream_conn, union.clone(), app.clone(), stop_flag.clone()).await
+                        == StreamEnd::Stopped
+                    {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    log::error!("XLog 스트림 연결 실패, {}초 뒤 다시: {e}", backoff_ms / 1000);
+                    let _ = app.emit(
+                        "xlog-error",
+                        serde_json::json!({ "message": format!("스트림 연결 실패: {e} — {}초 뒤 다시 시도", backoff_ms / 1000) }),
+                    );
+                }
             }
-        };
-        if let Err(e) = stream_conn.login(&user, &pass) {
-            log::error!("XLog 스트림 로그인 실패: {e}");
-            return;
+            // 멈추라는 말을 기다리는 동안에도 듣는다 — 10초 자고 나서야 멈추면 새 스트림과 겹친다
+            let until = tokio::time::Instant::now() + tokio::time::Duration::from_millis(backoff_ms);
+            while tokio::time::Instant::now() < until && !stop_flag.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            }
+            backoff_ms = next_backoff(backoff_ms);
         }
-        run_xlog_stream(&mut stream_conn, union, app, stop_flag).await;
     });
 
     Ok(())
@@ -205,12 +239,49 @@ pub async fn forget_xlog_window(app: &AppHandle, state: &AppState, label: &str) 
 pub struct ConnectionInfo {
     pub connected: bool,
     pub server_id: String,
+    /// 콜렉터 시계 − PC 시계 (ms). 모르면 null
+    pub clock_offset_ms: Option<i64>,
 }
 
 #[tauri::command]
 pub async fn get_connection_info(state: State<'_, AppState>) -> Result<ConnectionInfo, String> {
     let sid = state.server_id.lock().await.clone();
-    Ok(ConnectionInfo { connected: sid.is_some(), server_id: sid.unwrap_or_default() })
+    Ok(ConnectionInfo {
+        connected: sid.is_some(),
+        server_id: sid.unwrap_or_default(),
+        clock_offset_ms: *state.clock_offset_ms.lock().await,
+    })
+}
+
+/// 연결 새로고침 (F5 · 판 머리 ⟳).
+///
+/// **«서버를 골라도 XLog 가 안 뜬다» 를 사람이 풀 수단이다.** 콜렉터가 다시 뜨거나 네트워크가
+/// 한 번 끊기면 주 연결·조회 연결·스트림 연결이 죽은 소켓을 쥔 채 남는다. 접속 창으로 끊고
+/// 다시 붙으면 고른 서버·탭·상세가 다 비워지므로, 그것들은 두고 **연결만** 새로 맺는다:
+///   · 주 연결을 새로 맺고 로그인 — 시계 차도 이때 다시 잰다
+///   · 조회용 연결 풀을 비운다 (죽은 연결이 풀에서 나오지 않게)
+///   · XLog 스트림을 새 연결로 다시 연다
+/// `scouter-connected` 는 내지 않는다 — 내면 화면이 «다른 서버로 갈아탔다» 로 읽고 다 비운다.
+#[tauri::command]
+pub async fn refresh_connection(app: AppHandle, state: State<'_, AppState>) -> Result<ConnectionInfo, String> {
+    let sid = state.server_id.lock().await.clone().ok_or("연결되지 않음")?;
+    if sid == DEMO_SERVER_ID {
+        return Ok(ConnectionInfo { connected: true, server_id: sid, clock_offset_ms: None });
+    }
+    let host = state.conn_host.lock().await.clone();
+    let port = *state.conn_port.lock().await;
+    let user = state.conn_user.lock().await.clone();
+    let pass = state.conn_pass.lock().await.clone();
+
+    let mut conn = ScouterConnection::connect(&host, port).map_err(|e| format!("연결 실패: {e}"))?;
+    conn.login(&user, &pass).map_err(|e| format!("로그인 실패: {e}"))?;
+    let offset = conn.clock_offset_ms;
+    *state.connection.lock().await = Some(conn);
+    state.clear_query_pool().await;
+    *state.clock_offset_ms.lock().await = offset;
+    restart_xlog_stream(&app, &state).await?;
+    log::info!("연결 새로고침: server_id={sid}, 시계 차={offset:?}ms");
+    Ok(ConnectionInfo { connected: true, server_id: sid, clock_offset_ms: offset })
 }
 
 // ─── stop_counter_stream ─────────────────────────────────────
@@ -711,42 +782,40 @@ pub async fn load_past_xlog(
     page_count: i32,
     cursor: Option<PastCursor>,
 ) -> Result<PastXLogPage, String> {
-    let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
+    let cache = state.cache_handle().await;
+    let seal = state.seal_before().await;
+    // **조회용 연결을 빌려 쓴다.** 화면이 구간을 조각으로 나눠 **동시에** 묻는다(`pastXLog.ts`) —
+    // 공용 연결 하나를 잠그면 조각이 줄을 서고, 그동안 상세·사전 조회까지 멈춘다
+    if state.connection.lock().await.is_none() {
+        return Err("연결되지 않음".to_string());
+    }
+    let mut conn = state.acquire_query_conn().await?;
 
     let cur = cursor.unwrap_or_default();
-    let param = build_past_xlog_param(&obj_hashes, &date, stime, etime, page_count, &cur);
-    let session = conn.session;
-    conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param)
-        .map_err(|e| format!("과거 XLog 요청 실패: {e}"))?;
-
-    let mut xlogs = Vec::new();
-    let mut next = PastCursor::default();
-    loop {
-        match conn.read_next_pack().map_err(|e| format!("과거 XLog 수신 실패: {e}"))? {
-            Some(AnyPack::XLog(x)) => xlogs.push(x),
-            Some(AnyPack::Map(m)) => next = parse_past_cursor(&m),
-            Some(_) => {}
-            None => break,
-        }
-    }
+    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
+    // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
+    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, stime, etime, page_count, &cur, seal)?;
+    state.release_query_conn(conn).await;
+    let (xlogs, next) = (page.rows, page.next);
 
     log::debug!(
-        "load_past_xlog: {}건, hasMore={}, nextTime={}",
+        "load_past_xlog: {}건, hasMore={}, nextTime={}{}",
         xlogs.len(),
         next.has_more,
-        next.last_xlog_time
+        next.last_xlog_time,
+        if page.from_cache { " (캐시)" } else { "" }
     );
     Ok(PastXLogPage { xlogs, cursor: next })
 }
 
-/// 분포를 셀 때 한 번에 받아 오는 페이지 크기.
+/// 분포를 셀 때 한 번에 받아 오는 페이지 크기 — 설정 `perf.page_rows` (기본 20,000, 근거는 `PerfPrefs`).
 ///
 /// 화면이 쓰는 500(`pastXLog.PAGE_COUNT`)보다 크게 잡는다. 저쪽은 페이지마다 점을
 /// 그려 줘야 해서 첫 응답이 빠른 편이 낫지만, 여기서는 **다 세기 전에는 보여줄 것이
-/// 없다** — 왕복 수를 줄이는 편이 낫다. 연결당 명령이 하나라(F-1) 왕복 하나가 곧
-/// TCP 연결 하나다.
-const DISTRIBUTION_PAGE_COUNT: i32 = 5_000;
+/// 없다** — 왕복 수를 줄이는 편이 낫다.
+fn distribution_page_count() -> i32 {
+    crate::tuning::perf().page_rows as i32
+}
 
 /// 분포를 세는 데 쓰는 트랜잭션 수의 상한.
 ///
@@ -774,6 +843,8 @@ pub async fn get_xlog_distribution(
     etime: i64,
     tz_offset_ms: i64,
 ) -> Result<ElapsedDistribution, String> {
+    let cache = state.cache_handle().await;
+    let seal = state.seal_before().await;
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
@@ -788,43 +859,22 @@ pub async fn get_xlog_distribution(
         let mut cursor = PastCursor::default();
 
         for _ in 0..DISTRIBUTION_MAX_PAGES {
-            let param = build_past_xlog_param(
-                &obj_hashes,
-                &date,
-                day_start,
-                day_end,
-                DISTRIBUTION_PAGE_COUNT,
-                &cursor,
-            );
-            let session = conn.session;
-            conn.send_request(CMD_TRANX_LOAD_TIME_GROUP_V2, session, &param)
-                .map_err(|e| format!("분포 조회 요청 실패: {e}"))?;
-
-            let mut next = PastCursor::default();
-            let mut rows = 0u32;
-            loop {
-                match conn.read_next_pack().map_err(|e| format!("분포 조회 수신 실패: {e}"))? {
-                    Some(AnyPack::XLog(x)) => {
-                        rows += 1;
-                        if seen.insert(x.txid) {
-                            acc.add(x.elapsed, x.error != 0);
-                        }
-                    }
-                    Some(AnyPack::Map(m)) => next = parse_past_cursor(&m),
-                    Some(_) => {}
-                    None => break,
+            // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
+            let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, day_start, day_end, distribution_page_count(), &cursor, seal)
+                .map_err(|e| format!("분포 조회: {e}"))?;
+            for x in &page.rows {
+                if seen.insert(x.txid) {
+                    acc.add(x.elapsed, x.error != 0);
                 }
             }
-
             if acc.count() >= DISTRIBUTION_MAX_ROWS {
                 truncated = true;
                 break 'days;
             }
-            // 서버가 `hasMore` 를 계속 주면서 커서를 안 밀면 같은 페이지를 영원히 받는다.
-            if !next.has_more || rows == 0 || next.last_xlog_time <= cursor.last_xlog_time {
+            if page.done {
                 break;
             }
-            cursor = next;
+            cursor = page.next;
         }
     }
 
@@ -840,114 +890,87 @@ pub async fn get_xlog_distribution(
     Ok(out)
 }
 
-/// 넓은 구간 검색 결과.
-///
-/// **`truncated` 를 반드시 화면에 보여야 한다.** 서버는 상한에서 그냥 끊고
-/// «잘렸다» 는 신호를 아무것도 주지 않는다 — 그대로 두면 «없다» 로 읽힌다 (F-54).
+/// 넓은 구간 찾기의 한 페이지.
 #[derive(serde::Serialize)]
-pub struct SearchXLogResult {
+pub struct WidePage {
+    /// 조건에 걸린 것만
     pub xlogs: Vec<XLogPack>,
-    /// 서버 상한. 못 읽었으면 기본값을 쓴다
-    pub max: i32,
-    /// 상한을 서버 설정에서 실제로 읽었는가. 아니면 `max` 는 추측이다
-    pub max_known: bool,
-    /// 상한에 닿았다 — **더 있었을 수 있다**
-    pub truncated: bool,
+    /// 다음 페이지 자리. `done` 이면 쓸 일이 없다
+    pub cursor: PastCursor,
+    /// 이 조각을 끝까지 받았다
+    pub done: bool,
+    /// 이 페이지에서 콜렉터가 준 건수 (거르기 전)
+    pub scanned: usize,
 }
 
-/// 서버가 한 번에 돌려주는 검색 결과의 상한.
+/// 넓은 구간 찾기 한 페이지에서 받는 건수 — 설정 `perf.page_rows`. MCP 목록 조회·분포와 같은 값이다 —
+/// 거르기 전 건수라 화면으로 가는 양은 조건에 걸린 것뿐이다
+fn wide_page_count() -> i32 {
+    crate::tuning::perf().page_rows as i32
+}
+
+/// 넓은 구간에서 조건으로 XLog 찾기 — **한 조각의 한 페이지.**
 ///
-/// **찾기 전에 물어본다.** 창을 열자마자 «최대 500건» 이라고 적어 두려면 그 500 이
-/// 어디서 온 값인지 알아야 한다 — 안 물어보고 기본값을 단정하면, 서버가 상한을
-/// 올려 뒀을 때 화면이 거짓말을 한다.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
-pub struct SearchMax {
-    pub max: i32,
-    /// 서버 설정에서 실제로 읽었는가. 아니면 기본값을 쓴 것이다
-    pub known: bool,
-}
-
+/// 콜렉터에 구간(과거 조회)을 묻고 조건은 **여기서 대소문자 없이** 맞춘다(`WideMatcher`).
+/// 콜렉터 검색(SEARCH_XLOG_LIST)은 대소문자를 가려 `order` 로 `/Order/…` 를 못 찾았다
+/// (`scouter::search` 머리말). 화면(`wideSearchAll.ts`)이 구간을 날짜·5분 조각으로 나눠
+/// 조각마다 `done` 이 될 때까지 부르고, 조각 넷을 한꺼번에 돌린다.
+///
+/// `obj_hashes` 는 그날 붙었던 오브젝트들이다 — 비어 있으면 찾을 데가 없다.
 #[tauri::command]
-pub async fn get_search_max(state: State<'_, AppState>) -> Result<SearchMax, String> {
-    let found = request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
-        .await
-        .ok()
-        .flatten()
-        .map(|m| parse_config_text(&m))
-        .as_deref()
-        .and_then(parse_search_max);
-    Ok(SearchMax { max: found.unwrap_or(DEFAULT_SEARCH_MAX), known: found.is_some() })
-}
-
-/// 넓은 구간에서 조건으로 XLog 찾기 (SEARCH_XLOG_LIST).
-///
-/// 스캐터 드래그를 대체하지 않는다. 좁은 구간은 다 받는 편이 낫다 —
-/// 잘림이 없고 오브젝트를 여럿 다룬다. 이건 «넓은 구간에서 몇 건» 을 위한 입구다.
-///
-/// 상한은 서버 설정에서 읽어 온다. `req_search_xlog_max_count` 를 못 찾으면
-/// 기본값(500)을 쓰되 `max_known=false` 로 «추측» 임을 알린다.
-///
-/// `max_hint` 가 있으면 **설정을 다시 읽지 않는다.** 화면이 상한에 닿은 구간을 잘게 나눠
-/// 이어 찾을 때(`wideSearchAll.ts`) 조각마다 설정을 읽으면 왕복이 두 배가 된다 —
-/// 첫 조각에서 받은 상한을 그대로 넘겨 온다.
-#[tauri::command]
-pub async fn search_xlog_list(
+pub async fn search_xlog_page(
     state: State<'_, AppState>,
     filter: SearchXLogFilter,
-    max_hint: Option<SearchMax>,
-) -> Result<SearchXLogResult, String> {
-    // 상한을 먼저 읽는다. 실패해도 검색은 한다 — 상한을 모른다고 못 찾을 이유는 없다.
-    let max_from_server = match max_hint {
-        Some(h) if h.known => Some(h.max),
-        Some(_) => None,
-        None => request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
-            .await
-            .ok()
-            .flatten()
-            .map(|m| parse_config_text(&m))
-            .as_deref()
-            .and_then(parse_search_max),
-    };
-
-    // **조회용 연결을 빌려 쓴다.** 화면이 상한에 닿은 구간을 나눠 여러 조각을 **한꺼번에** 묻는다
-    // (`wideSearchAll.ts`) — 공용 연결 하나를 잠그면 조각이 줄을 서서 넓은 구간이 몇 분씩 걸리고,
-    // 그동안 상세·사전 조회까지 멈춘다.
+    date: String,
+    obj_hashes: Vec<i32>,
+    cursor: Option<PastCursor>,
+) -> Result<WidePage, String> {
+    let cur = cursor.unwrap_or_default();
+    if obj_hashes.is_empty() {
+        return Ok(WidePage { xlogs: Vec::new(), cursor: cur, done: true, scanned: 0 });
+    }
+    // **조회용 연결을 빌려 쓴다.** 화면이 조각 넷을 한꺼번에 묻는다 — 공용 연결 하나를 잠그면
+    // 조각이 줄을 서고, 그동안 상세·사전 조회까지 멈춘다.
     if state.connection.lock().await.is_none() {
         return Err("연결되지 않음".to_string());
     }
+    let cache = state.cache_handle().await;
+    let seal = state.seal_before().await;
     let mut conn = state.acquire_query_conn().await?;
-    let param = build_search_xlog_param(&filter);
-    let session = conn.session;
-    let result = (|| -> Result<Vec<XLogPack>, String> {
-        conn.send_request(CMD_SEARCH_XLOG_LIST, session, &param)
-            .map_err(|e| format!("XLog 검색 요청 실패: {e}"))?;
-        let mut xlogs = Vec::new();
-        loop {
-            match conn.read_next_pack().map_err(|e| format!("XLog 검색 수신 실패: {e}"))? {
-                Some(AnyPack::XLog(x)) => xlogs.push(x),
-                Some(_) => {}
-                None => break,
+    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
+    // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
+    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, filter.stime, filter.etime, wide_page_count(), &cur, seal)
+        .map_err(|e| format!("트랜잭션 찾기: {e}"))?;
+    let (rows, next, done) = (page.rows, page.next, page.done);
+    let scanned = rows.len();
+
+    let m = WideMatcher::new(&filter);
+    let mut hits: Vec<XLogPack> = rows.into_iter().filter(|x| m.passes_cheap(x)).collect();
+    let wants: Vec<(&'static str, i32)> = hits.iter().flat_map(|x| m.name_hashes(x)).collect();
+    if !wants.is_empty() {
+        let mut cache = state.text_cache.lock().await;
+        let mut by_kind: HashMap<&str, Vec<i32>> = HashMap::new();
+        for (k, h) in &wants {
+            by_kind.entry(k).or_default().push(*h);
+        }
+        for (kind, mut hashes) in by_kind {
+            hashes.sort_unstable();
+            hashes.dedup();
+            let missing = cache.missing(kind, &hashes);
+            if !missing.is_empty() {
+                if let Err(e) = fetch_texts(&mut conn, &mut cache, kind, &missing) {
+                    // 사전을 못 받은 연결은 버린다. 못 푼 이름은 «안 걸림» 이다
+                    return Err(format!("이름 조회 실패: {e}"));
+                }
             }
         }
-        Ok(xlogs)
-    })();
-    // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
-    let xlogs = match result {
-        Ok(x) => {
-            state.release_query_conn(conn).await;
-            x
-        }
-        Err(e) => return Err(e),
-    };
+        let name = |k: &str, h: i32| cache.get(k, h).map(str::to_string);
+        hits.retain(|x| m.passes_names(x, &name));
+    }
+    state.release_query_conn(conn).await;
 
-    let max = max_from_server.unwrap_or(DEFAULT_SEARCH_MAX);
-    let truncated = xlogs.len() as i32 >= max;
-    log::debug!(
-        "search_xlog_list: {}건 (상한 {max}{}) truncated={truncated}",
-        xlogs.len(),
-        if max_from_server.is_some() { "" } else { ", 추측" }
-    );
-    Ok(SearchXLogResult { xlogs, max, max_known: max_from_server.is_some(), truncated })
+    log::debug!("search_xlog_page: {date} {}~{} → {scanned}건 중 {}건, done={done}", filter.stime, filter.etime, hits.len());
+    Ok(WidePage { xlogs: hits, cursor: next, done, scanned })
 }
 
 /// 힙 히스토그램 — 클래스별 인스턴스 수와 점유 바이트.
@@ -1392,8 +1415,9 @@ pub async fn search_profiles(
 
     // 1) 프로파일은 워커 여러 개로 나눠 받는다. 여기가 검색 시간의 거의 전부다.
     let fetch_targets = targets.clone();
+    let cache = state.cache_handle().await;
     let fetched = tokio::task::spawn_blocking(move || {
-        fetch_profiles_parallel(&host, port, session, &fetch_targets, SEARCH_WORKERS)
+        fetch_profiles_parallel(&host, port, session, &fetch_targets, search_workers(), cache.as_deref())
     })
     .await
     .map_err(|e| format!("검색 작업 실패: {e}"))?;
@@ -1473,18 +1497,13 @@ pub async fn search_profiles(
     Ok(SearchBatch { hits, failed })
 }
 
-/// 검색이 동시에 여는 커넥션 수.
+/// 프로파일 검색이 동시에 여는 커넥션 수 — 설정 `perf.profile_workers` (기본 32).
 ///
-/// 요청마다 소켓을 새로 여는 구조(F-1)라 **동시에 보내면 그만큼 빨라진다.**
-/// 실측(`probe_search_throughput`): 순차 4.0ms/건, 워커 8에서 1.0ms/건(3.9배),
-/// 워커 16에서 0.8ms/건(5.3배). 16이 조금 더 빠르지만 그만큼 콜렉터의
-/// 동시 연결을 쓴다 — 운영 서버를 생각해 8로 둔다.
-///
-/// **이 값은 콜렉터가 가까울 때의 값이다.** 왕복을 늘려 가며 다시 재 보니
-/// (`tests/search_latency.rs`) 한 건에 왕복이 두 번 드는 구조라 먼 콜렉터에서는
-/// 워커 수가 그대로 배수가 된다 — 왕복 40ms 에서 워커 8 은 8.5ms/건, 32 는 2.5ms/건.
-/// 운영 콜렉터의 왕복과 동시 연결 상한을 알면 이 값을 올릴 근거가 된다(백로그 B-3).
-pub const SEARCH_WORKERS: usize = 8;
+/// 요청마다 소켓을 새로 여는 구조(F-1)라 **동시에 보내면 그만큼 빨라진다.** 왕복별 실측과 기본값의
+/// 근거는 `config::PerfPrefs` 에 있다.
+pub fn search_workers() -> usize {
+    crate::tuning::perf().profile_workers as usize
+}
 
 /// 프로파일을 워커 여러 개로 나눠 받는다. **결과는 `targets` 순서 그대로**다.
 ///
@@ -1499,6 +1518,7 @@ pub fn fetch_profiles_parallel(
     session: i64,
     targets: &[SearchTarget],
     workers: usize,
+    cache: Option<&crate::cache::CacheDb>,
 ) -> Vec<Option<Vec<crate::scouter::profile::ProfileStep>>> {
     let mut out: Vec<Option<Vec<crate::scouter::profile::ProfileStep>>> =
         targets.iter().map(|_| None).collect();
@@ -1526,8 +1546,9 @@ pub fn fetch_profiles_parallel(
                         conn.session = session;
                         part.into_iter()
                             .map(|(i, t)| {
+                                // 담아 둔 것은 캐시에서, 아니면 콜렉터에서 받아 담는다 (`cache::profile`)
                                 let steps = t.txid.parse::<i64>().ok().and_then(|txid| {
-                                    fetch_profile_steps(&mut conn, txid, &t.date, t.obj_hash).ok()
+                                    full_profile_steps(&mut conn, cache, txid, &t.date).ok()
                                 });
                                 (i, steps)
                             })
@@ -1542,37 +1563,6 @@ pub fn fetch_profiles_parallel(
         out[i] = steps;
     }
     out
-}
-
-/// 프로파일 스텝만 꺼낸다 (검색용).
-///
-/// `get_xlog_profile` 과 같은 요청이지만 **커넥션을 이미 쥔 채** 부른다 —
-/// 검색은 수백 번 반복하므로 매번 락을 잡았다 놓으면 그 사이 다른 요청이 끼어든다.
-fn fetch_profile_steps(
-    conn: &mut crate::scouter::connection::ScouterConnection,
-    txid: i64,
-    date: &str,
-    obj_hash: i32,
-) -> Result<Vec<crate::scouter::profile::ProfileStep>, String> {
-    let mut param = MapPack::new();
-    param.put("txid", ScouterValue::Decimal(txid));
-    param.put("date", ScouterValue::Text(date.to_string()));
-    param.put("objHash", ScouterValue::Decimal(obj_hash as i64));
-
-    let session = conn.session;
-    conn.send_request(CMD_TRANX_PROFILE, session, &param)
-        .map_err(|e| format!("프로파일 요청 실패: {e}"))?;
-
-    let mut steps = Vec::new();
-    loop {
-        match conn.read_next_pack().map_err(|e| format!("프로파일 응답 수신 실패: {e}"))? {
-            // 분할 전송이면 이어 붙인다.
-            Some(AnyPack::Profile(p)) => steps.extend(p.steps),
-            Some(_) => {}
-            None => break,
-        }
-    }
-    Ok(steps)
 }
 
 /// 상한 없는 프로파일.
@@ -1591,18 +1581,12 @@ pub async fn get_xlog_full_profile(
 ) -> Result<XLogProfilePack, String> {
     let txid_i64: i64 = txid.parse().map_err(|_| format!("잘못된 txid: {txid}"))?;
 
+    let cache = state.cache_handle().await;
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
-    let param = build_full_profile_param(&date, txid_i64);
-    let session = conn.session;
-    conn.send_request(CMD_TRANX_PROFILE_FULL, session, &param)
-        .map_err(|e| format!("전체 프로파일 요청 실패: {e}"))?;
-
-    let blob = conn
-        .read_blob_stream()
-        .map_err(|e| format!("전체 프로파일 수신 실패: {e}"))?;
-    let steps = parse_profile_steps(blob);
+    // 한 번 받은 프로파일은 캐시에서 준다 (`cache::profile`)
+    let steps = full_profile_steps(conn, cache.as_deref(), txid_i64, &date)?;
 
     log::debug!("get_xlog_full_profile: txid={txid_i64} → 스텝 {}개", steps.len());
     // 응답에 헤더가 없다. 요청 값으로 채운다 (N-16 과 같은 이유).
@@ -2215,6 +2199,10 @@ pub async fn start_mock_stream(
     // 만든 버튼이 정작 아무것도 보여주지 못한다. 화면의 연결 상태는 Rust 가 쥐고 있으므로
     // 여기서 알려야 한다.
     *state.server_id.lock().await = Some(DEMO_SERVER_ID.to_string());
+    // 합성 데이터는 이 PC 시계로 만든다 — 맞출 시계가 없다
+    *state.clock_offset_ms.lock().await = None;
+    // 합성 데이터를 진짜 콜렉터의 캐시에 섞지 않는다
+    state.detach_cache().await;
     let _ = app.emit("scouter-connected", DEMO_SERVER_ID);
 
     tokio::spawn(async move {
@@ -2346,12 +2334,75 @@ pub async fn save_config(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = state.config_path.clone();
+    let mut cfg = state.config.lock().await;
+    // **MCP 칸은 덮어쓰지 않는다.** 설정 창은 열 때 읽은 사본 전체를 보내는데, MCP 는 그 창 안에서
+    // 바로 적용된다(`mcp_configure`·토큰 재발급). 사본을 그대로 쓰면 방금 바꾼 토큰이 되돌아간다.
+    let mut new_config = new_config;
+    new_config.mcp = cfg.mcp.clone();
     new_config.save(&path)?;
-    *state.config.lock().await = new_config;
+    let cache_changed = cfg.cache_max_mb != new_config.cache_max_mb;
+    *cfg = new_config;
+    // 동시 요청·페이지 크기 같은 조정값은 바로 쓴다 (`tuning`)
+    crate::tuning::apply(&cfg);
+    drop(cfg);
     log::info!("config.json 저장 완료: {}", path.display());
+    // 캐시 상한을 바꿨으면 바로 적용한다 (줄였으면 지금 지운다)
+    if cache_changed {
+        if let Some(db) = state.cache_handle().await {
+            state.apply_cache_limit(&db).await;
+        }
+    }
     Ok(())
 }
 
+
+// ─── 로컬 캐시 ──────────────────────────────────────────────
+
+/// 로컬 캐시가 얼마나 쓰고 있나 (설정 창)
+#[derive(serde::Serialize)]
+pub struct CacheInfo {
+    pub dir: String,
+    /// 캐시 폴더 전체 (모든 콜렉터)
+    pub total_bytes: u64,
+    /// 콜렉터 파일 수
+    pub files: usize,
+    /// 지금 붙어 있는 콜렉터의 파일이 쓰는 것. 붙어 있지 않으면 0
+    pub current_bytes: u64,
+}
+
+#[tauri::command]
+pub async fn get_cache_info(state: State<'_, AppState>) -> Result<CacheInfo, String> {
+    let dir = state.cache_dir().await;
+    let files = crate::cache::files(&dir);
+    let current_bytes = state.cache_handle().await.map(|db| db.used_bytes()).unwrap_or(0);
+    Ok(CacheInfo {
+        dir: dir.display().to_string(),
+        total_bytes: files.iter().map(|(_, n, _)| n).sum(),
+        files: files.len(),
+        current_bytes,
+    })
+}
+
+/// 로컬 캐시를 다 비운다 — 지금 콜렉터의 파일은 속을 비우고, 다른 콜렉터의 파일은 지운다.
+/// 다음 조회부터 다시 콜렉터에서 받아 쌓는다
+#[tauri::command]
+pub async fn clear_cache(state: State<'_, AppState>) -> Result<CacheInfo, String> {
+    let dir = state.cache_dir().await;
+    let current = state.cache_handle().await;
+    if let Some(db) = &current {
+        db.clear();
+    }
+    for (p, _, _) in crate::cache::files(&dir) {
+        if current.as_ref().is_some_and(|db| db.path() == p) {
+            continue;
+        }
+        for ext in ["db", "db-wal", "db-shm"] {
+            let _ = std::fs::remove_file(p.with_extension(ext));
+        }
+    }
+    log::info!("로컬 캐시를 비웠다: {}", dir.display());
+    get_cache_info(state).await
+}
 
 // ─── 프로파일 저장본 ──────────────────────────────────────────
 //
@@ -2454,4 +2505,20 @@ pub async fn save_csv_export(
 #[tauri::command]
 pub async fn get_export_dir(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.export_dir().await.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod stream_retry_tests {
+    use super::*;
+
+    #[test]
+    fn 다시_붙는_간격은_두_배씩_늘고_10초에서_멈춘다() {
+        let mut ms = STREAM_RETRY_MIN_MS;
+        let mut seen = vec![ms];
+        for _ in 0..5 {
+            ms = next_backoff(ms);
+            seen.push(ms);
+        }
+        assert_eq!(seen, vec![1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);
+    }
 }

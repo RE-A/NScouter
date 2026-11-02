@@ -160,7 +160,7 @@ pub fn date_key(ms: i64, tz_offset_ms: i64) -> String {
 ///
 /// Howard Hinnant 의 `civil_from_days`. **chrono 를 끌어오지 않으려고** 직접 센다 —
 /// 이 앱이 날짜에 대해 알아야 할 것은 이 한 줄뿐이다.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     // 3월을 해의 시작으로 옮기면 윤일이 해의 끝에 와서 분기가 사라진다.
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;

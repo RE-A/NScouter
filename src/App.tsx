@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pane } from './components/Pane';
+import { TooltipLayer } from './components/TooltipLayer';
+import { setServerClockOffset } from './features/xlog/utils/serverClock';
 import { Divider } from './components/Divider';
 import { clampPane, isMeasured, sideRoom, tableRoom, PANE } from './components/paneSizing';
 import { ConnectionDialog } from './features/xlog/components/ConnectionDialog';
@@ -73,6 +75,7 @@ import { prunePicked } from './features/xlog/components/agentFilter';
 import {
   onConnected,
   onDisconnected,
+  refreshConnection,
   getObjectList,
   loadObjectHistory,
   saveObjectHistory,
@@ -84,8 +87,10 @@ import {
   startAlertStream,
   getConfig,
   getConnectionInfo,
+  mcpSync,
   saveUiState,
-  searchXLogList,
+  searchXLogPage,
+  getObjectListByDate,
   saveXLogProfile,
   saveConfig,
   saveServers,
@@ -220,6 +225,7 @@ import { T, F, FONT_UI } from './styles/tokens';
 import { SectionHeader } from './components/SectionHeader';
 import { t, useT } from './i18n';
 import { useViewOptions } from './features/xlog/hooks/useViewOptions';
+import { Button } from './components/Button';
 
 /** 기존 지역 팔레트 `C` 를 토큰으로 대체. 값은 styles/tokens.css 하나에만 있다. */
 const C = {
@@ -290,7 +296,7 @@ export default function App({ windowLabel }: {
   // **여기서 한 번은 불러야 한다.** 표시 설정(언어·글자 크기)은 이걸 처음 쓰는
   // 컴포넌트가 마운트될 때 config.json 을 읽는데, 그게 상세 패널이라
   // 앱을 켜고 아무것도 안 열면 저장해 둔 설정이 적용되지 않았다.
-  const { groupRule, autoRemoveInactiveMin, wideSearchMax } = useViewOptions();
+  const { groupRule, autoRemoveInactiveMin, wideSearchMax, scanParallel } = useViewOptions();
   const [activeTab, setActiveTab] = useState<TabId>('xlog');
   const [isConnected, setIsConnected] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -333,15 +339,6 @@ export default function App({ windowLabel }: {
   const xlogMode = curTab.mode;
   const pastRange = curTab.pastRange;
 
-  const setConfig = useCallback(
-    (v: XLogChartConfig | ((p: XLogChartConfig) => XLogChartConfig)) =>
-      setXLogTabs(s =>
-        patchActiveTab(s, {
-          config: typeof v === 'function' ? v(activeXLogTab(s).config) : v,
-        }),
-      ),
-    [],
-  );
   const setFilter = useCallback(
     (v: XLogFilterState | ((p: XLogFilterState) => XLogFilterState)) =>
       setXLogTabs(s =>
@@ -579,6 +576,16 @@ export default function App({ windowLabel }: {
   }, [isMain]);
 
   /**
+   * 로컬 MCP 서버를 설정대로 켠다(꺼져 있으면 아무것도 안 한다). **메인 창만** —
+   * 서버는 앱에 하나다. 시간대를 함께 알려 준다(콜렉터 날짜 디렉토리, F-18).
+   * 실패는 설정 창이 보여 준다(`McpStatus.error`). 여기서는 조용히 둔다.
+   */
+  useEffect(() => {
+    if (!isMain) return;
+    mcpSync().catch(() => {});
+  }, [isMain]);
+
+  /**
    * (뗀 창) 띄울 탭을 메인 창에서 받는다. 메인 창이 아직 안 듣고 있을 수 있어 받을 때까지 되묻는다.
    * 받은 뒤에야 «다 읽었다» 로 친다 — 그 전에 snapshot 을 보내면 빈 탭으로 메인 창의 기록을 덮는다.
    */
@@ -606,6 +613,7 @@ export default function App({ windowLabel }: {
     getConnectionInfo()
       .then(info => {
         if (!info.connected) return;
+        setServerClockOffset(info.clock_offset_ms);
         setIsConnected(true);
         setServerId(info.server_id);
         setConnectionEpoch(n => n + 1);
@@ -716,9 +724,14 @@ export default function App({ windowLabel }: {
 
   useEffect(() => {
     return subscribe(
-      onConnected(id => { setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1); }),
+      onConnected(id => {
+        setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1);
+        // 콜렉터 시계 차는 접속 때 Rust 가 쟀다 — 실시간 «지금» 을 그 시계로 잡는다 (serverClock.ts)
+        getConnectionInfo().then(info => setServerClockOffset(info.clock_offset_ms)).catch(() => {});
+      }),
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
+        setServerClockOffset(null);
         // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
         setSelectedXLogs([]); clearNames(); clearObjectHistory(); setAgentMap(new Map());
         objectsRef.current = [];
@@ -823,7 +836,6 @@ export default function App({ windowLabel }: {
     startAlertStream().catch(() => {});
   }, [isConnected, isMain]);
 
-  const handleConfigChange = useCallback((p: Partial<XLogChartConfig>) => setConfig(prev => ({ ...prev, ...p })), []);
   const handleFilterChange = useCallback((p: Partial<XLogFilterState>) => setFilter(prev => ({ ...prev, ...p })), []);
   /**
    * 접속 창이 «붙었다» 고 알릴 때.
@@ -1342,7 +1354,7 @@ export default function App({ windowLabel }: {
   const handleAlertBadgeClick = useCallback(() => setActiveTab('alert'), []);
 
   /**
-   * 넓은 구간에서 찾기 (SEARCH_XLOG_LIST).
+   * 넓은 구간에서 찾기 — 구간을 받아 Rust 가 **대소문자 없이** 거른다 (`wideSearchAll.ts`).
    *
    * 결과는 **기존 트랜잭션 목록으로 흘려보낸다** — 그래야 행을 눌러 상세를 열고
    * 프로파일 검색을 거는 지금 흐름이 그대로 쓰인다. 새 목록을 따로 만들면
@@ -1352,13 +1364,10 @@ export default function App({ windowLabel }: {
   const [wideRunning, setWideRunning] = useState(false);
   /**
    * 다 못 찾았다 — 그 까닭과 어디까지 찾았나. null 이면 다 찾았거나 검색 결과가 아니다.
-   *
-   * 상한(기본 500)에 닿으면 구간을 나눠 이어 찾으므로(`wideSearchAll.ts`) 이제 «500 에서 잘림» 은
-   * 없다. 남는 것은 1초에 상한을 넘는 빽빽한 구간, 모은 것이 너무 많아 멈춘 것, 멈춤을 누른 것이다.
+   * 모은 것이 너무 많아 멈췄거나(`cap`), 멈춤을 눌렀다(`cancelled`).
    */
   const [wideTruncated, setWideTruncated] = useState<{
-    kind: 'dense' | 'cap' | 'cancelled';
-    max: number;
+    kind: 'cap' | 'cancelled';
     stoppedAt: number | null;
   } | null>(null);
   const [wideProgress, setWideProgress] = useState<WideProgress | null>(null);
@@ -1369,8 +1378,15 @@ export default function App({ windowLabel }: {
       setWideRunning(true);
       wideCancelRef.current = false;
       setWideProgress({ found: 0, done: 0, requests: 0 });
-      searchAll(v, searchXLogList, {
+      // 그날 붙었던 오브젝트 + 지금 붙어 있는 것. 지난 Task(ECS)는 지금 목록에 없다
+      const live = [...agentMap.keys()];
+      const objectsOf = async (date: string) => {
+        const daily = await getObjectListByDate(date).catch(() => []);
+        return [...new Set([...daily.map(o => o.obj_hash), ...live])];
+      };
+      searchAll(v, searchXLogPage, objectsOf, {
         cap: wideSearchMax,
+        parallel: scanParallel,
         // 조각마다 바로 화면 모양으로 — 수십만 건을 날것과 바꾼 것 두 벌로 들지 않는다
         map: xlogPackToSXLog,
         onProgress: setWideProgress,
@@ -1384,7 +1400,7 @@ export default function App({ windowLabel }: {
           setClearSignal(n => n + 1);
           resetSearch();
           setWideTruncated(
-            res.cut === 'none' ? null : { kind: res.cut, max: res.limit.max, stoppedAt: res.stoppedAt },
+            res.cut === 'none' ? null : { kind: res.cut, stoppedAt: res.stoppedAt },
           );
         })
         .catch(() => {})
@@ -1393,7 +1409,7 @@ export default function App({ windowLabel }: {
           setWideProgress(null);
         });
     },
-    [resetSearch, wideSearchMax],
+    [resetSearch, wideSearchMax, scanParallel, agentMap],
   );
 
   const [showSettings, setShowSettings] = useState(false);
@@ -1749,8 +1765,41 @@ export default function App({ windowLabel }: {
     if (!a) { a = [...set]; hashArraysRef.current.set(set, a); }
     return a;
   };
+  /**
+   * 다시 받기 — F5 와 판 머리 «⟳».
+   *
+   * **연결부터 새로 맺는다.** «서버를 골라도 XLog 가 안 뜬다» 는 대개 콜렉터 재기동·네트워크
+   * 끊김 뒤 죽은 소켓을 쥔 채 남은 것이라, 화면만 다시 받으면 똑같이 비어 있었다.
+   * 연결을 새로 맺으며 시계 차도 다시 잰다. 그 뒤 지금 보는 화면의 데이터를 다시 받는다:
+   *   XLog 과거  구간을 다시 조회
+   *   XLog 실시간 받아 둔 것을 비우고 스트림을 다시 열어 창을 처음부터 채운다
+   *   Active     지금 한 번 더 묻는다
+   *   Counter·Visualize  패널들을 다시 세워 받는다
+   * 연결을 못 맺어도 화면은 다시 받는다 — 무엇이 안 되는지는 그쪽 오류가 말한다.
+   */
+  const [refreshing, setRefreshing] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const handleReload = useCallback(() => {
+    if (!isConnected) {
+      setRefreshSignal(n => n + 1);
+      return;
+    }
+    setRefreshing({ busy: true, error: null });
+    refreshConnection()
+      .then(info => {
+        setServerClockOffset(info.clock_offset_ms);
+        setRefreshing({ busy: false, error: null });
+      })
+      .catch((e: unknown) => setRefreshing({ busy: false, error: String(e) }))
+      .finally(() => setRefreshSignal(n => n + 1));
+  }, [isConnected]);
+
+  /**
+   * 탭 줄 오른쪽 빈자리 — 판이 하나일 때 그 판의 머리(모드·멈춤·차트 설정)가 얹힌다.
+   * 차트 위에 머리줄을 따로 쌓지 않으려는 것이다 (XLogChart `headerSlot`).
+   */
+  const [tabRowSlot, setTabRowSlot] = useState<HTMLDivElement | null>(null);
   const renderXLogTab = useCallback(
-    (tab: XLogTab, visible: boolean) => {
+    (tab: XLogTab, visible: boolean, paneSlot: HTMLElement | null) => {
       // **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
       // 트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다.
       // 지금 판이 아니면 그 판의 고르기 사정을 따로 풀지 않는다 — 고르라는 말만 한다.
@@ -1775,12 +1824,17 @@ export default function App({ windowLabel }: {
           onConfigChange={paneHandlers(tab.key).config}
           onPastRangeChange={paneHandlers(tab.key).range}
           active={visible}
+          // 나눴으면 그 판의 머리, 하나면 탭 줄 오른쪽
+          headerSlot={paneSlot ?? (visible && xlogTabs.panes.length === 1 ? tabRowSlot : null)}
+          onRefresh={handleReload}
+          refreshBusy={refreshing.busy}
+          refreshError={refreshing.error}
         />
       );
     },
     // paneHandlers·hashArray 는 ref 위의 캐시라 deps 가 아니다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal],
+    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, tabRowSlot, xlogTabs.panes.length, handleReload, refreshing],
   );
 
   /**
@@ -1872,7 +1926,7 @@ export default function App({ windowLabel }: {
      *   Active     지금 한 번 더 묻는다
      *   Counter·Visualize  패널들을 다시 세워 받는다
      */
-    reload: () => setRefreshSignal(n => n + 1),
+    reload: handleReload,
   });
 
   const isStreaming = isConnected;
@@ -1893,6 +1947,8 @@ export default function App({ windowLabel }: {
     // key 로 갈아끼우는 이유: memo 로 막아 둔 자식(차트 등)까지 확실히 새 언어로 그린다.
     // 언어 바꾸기는 드문 일이라 이 정도 비용은 값이 싸다.
     <div style={appStyle} key={lang}>
+      {/* 기본 툴팁(title)을 대신 그린다 — 메뉴를 덮지 않고 테마를 따른다 (TooltipLayer.tsx) */}
+      <TooltipLayer />
       {/* ── 헤더 ── */}
       {/* 헤더 3구역: 정체(로고+서버) | 탐색(탭) | 상태·설정
           이전에는 9개 요소가 같은 무게로 나열돼 눈이 갈 곳을 못 정했다. */}
@@ -2055,7 +2111,7 @@ export default function App({ windowLabel }: {
           지우지 않고 숨긴다 — 펼쳐 둔 묶음·스크롤이 돌아왔을 때 그대로여야 한다. */}
       <div ref={xlogWsRef} className="flex min-h-0 flex-1 overflow-hidden bg-base p-1">
         <Pane
-          title="Services"
+          title={t('서버')}
           className="shrink-0"
           // 클래스(hidden)로 숨기면 Pane 의 flex 와 부딪쳐 어느 쪽이 이길지 순서에 달린다
           style={activeTab === 'alert' ? { width: servicesW, display: 'none' } : { width: servicesW }}
@@ -2106,21 +2162,19 @@ export default function App({ windowLabel }: {
             onClose={handleXLogTabClose}
             onAdd={handleXLogTabAdd}
             onRename={handleXLogTabRename}
+            slotRef={setTabRowSlot}
           />
           {/* 탭마다 따로 세운다 — 툴바가 쥔 입력 중인 과거 구간이 탭을 옮겨도 남아,
               다른 탭의 날짜가 칸에 떠 있었다 */}
           <XLogToolbar
             key={xlogTabs.activeKey}
-            config={config}
             filter={filter}
-            onConfigChange={handleConfigChange}
             onFilterChange={handleFilterChange}
             mode={xlogMode}
             onModeChange={setXLogMode}
             pastRange={pastRange}
             onPastRangeChange={handlePastRangeChange}
             onWideSearch={() => setShowWideSearch(true)}
-            onOpenSaved={() => setShowSaved(true)}
             onOpenFilters={() => setShowFilters(true)}
           />
           {/* 분할 배치.
@@ -2130,7 +2184,8 @@ export default function App({ windowLabel }: {
               wsSize 는 이제 배치가 아니라 **끌기 한계 계산에만** 쓴다. */}
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <Pane title="XLog" className="min-h-0 flex-1">
+              {/* 제목 줄은 없다 — 탭 줄이 이 판의 머리다(«XLOG» 가 탭 줄 바로 밑에 한 줄 더 있었다) */}
+              <Pane className="min-h-0 flex-1">
                 {/* 탭을 전부 띄워 두고 판에 놓인 것만 보인다 (XLogSplit).
                     받고 그리는 것은 **보이는 판만** 한다(`active`) — 안 그러면 탭 수만큼
                     같은 스트림이 쌓이고 숨겨둔 판에 매 프레임 헛돈을 쓴다. */}
@@ -2167,7 +2222,8 @@ export default function App({ windowLabel }: {
                 className="shrink-0"
                 style={{ height: tableH }}
                 aside={
-                  hasSelected ? (
+                  <span className="flex min-w-0 items-center gap-2">
+                  {hasSelected && (
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="shrink-0 whitespace-nowrap text-micro normal-case text-fg-dim">
                         <span className="tnum font-mono text-fg-muted">
@@ -2181,34 +2237,42 @@ export default function App({ windowLabel }: {
                       {/* 끌고 나면 다음 질문은 늘 같다 — «얼마나 느렸고 몇 개가 터졌나».
                           건수만 적혀 있으면 그 답을 목록을 훑어 눈으로 세야 한다. */}
                       <SelectionSummary stats={selection} />
-                      {/* **서버는 잘렸다는 신호를 주지 않는다.** 여기서 말하지 않으면
-                          없는 트랜잭션을 없다고 믿게 된다 (F-54). */}
+                      {/* **다 못 찾았으면 여기서 말한다.** 말하지 않으면
+                          안 찾은 뒤쪽의 트랜잭션을 없다고 믿게 된다. */}
                       {wideTruncated && (
                         <span
                           className="shrink-0 whitespace-nowrap rounded border border-warn/50 px-1 text-micro normal-case text-warn"
-                          title={
-                            wideTruncated.kind === 'dense'
-                              ? t('1초 안에 서버 상한보다 많이 걸리는 구간이 있어, 그 1초는 상한만큼만 담았습니다. 조건을 좁히면 다 나옵니다.')
-                              : t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')
-                          }
+                          title={t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')}
                         >
-                          {wideTruncated.kind === 'dense'
-                            ? `${t('빽빽한 구간은 1초에')} ${wideTruncated.max.toLocaleString()}${t('건까지만')}`
-                            : `${wideTruncated.kind === 'cap'
-                                ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')}`
-                                : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
+                          {`${wideTruncated.kind === 'cap'
+                            ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')}`
+                            : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
                         </span>
                       )}
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         onClick={handleClearSelection}
                         title={t('선택 해제')}
                         aria-label={t('선택 해제')}
-                        className="shrink-0 rounded px-1 text-micro text-fg-faint hover:text-fg"
+                        className="shrink-0"
                       >
                         ✕
-                      </button>
+                      </Button>
                     </span>
-                  ) : null
+                  )}
+                  {/* 저장본(파일로 남긴 프로파일)은 **트랜잭션을 보는 자리**에서 연다 — 툴바 두 줄째의
+                      조건들 사이에 끼어 있어 거르는 것의 하나로 읽혔다. 접속과 무관하게 늘 눌린다 */}
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setShowSaved(true)}
+                    title={t('파일로 남겨 둔 프로파일을 엽니다')}
+                    className="shrink-0 normal-case"
+                  >
+                    {t('저장본')}
+                  </Button>
+                  </span>
                 }
               >
                 <div className="flex h-full flex-col">
@@ -2991,7 +3055,10 @@ function AlertFullView({
       <div style={tabPageHeaderStyle}>
         <span>{t('알림')}</span>
         {alerts.length > 0 && (
-          <button onClick={onClear} style={{ ...closeBtnStyle, marginLeft: 8, fontSize: F.small, color: T.textFaint }}>Clear</button>
+          // 화면 말은 한국어로 — 영어로 «Clear» 만 떠 있었다
+          <Button variant="ghost" size="xs" onClick={onClear} className="ml-2" title={t('받아 둔 알림을 이 화면에서 지웁니다')}>
+            {t('모두 지우기')}
+          </Button>
         )}
       </div>
       <div style={{ ...colHeaderStyle, flexShrink: 0 }}>
@@ -3029,8 +3096,9 @@ function AlertFullView({
 }
 
 const alertRowStyle = (stripe: boolean): React.CSSProperties => ({
-  display: 'flex', alignItems: 'flex-start', padding: '5px 14px', borderBottom: '1px solid #12122a',
-  fontSize: F.body, gap: 8, background: stripe ? 'rgba(255,255,255,0.01)' : 'transparent',
+  // 색은 토큰으로 — 어두운 색을 박아 두었을 때 라이트 테마에서 행마다 검은 줄이 그어졌다
+  display: 'flex', alignItems: 'flex-start', padding: '5px 14px', borderBottom: `1px solid ${T.borderTable}`,
+  fontSize: F.body, gap: 8, background: stripe ? T.bgRaised : 'transparent',
 });
 const alertChipStyle = (color: string): React.CSSProperties => ({
   background: color, color: T.text, fontSize: F.micro, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: 0.5,
@@ -3225,16 +3293,5 @@ const colHeaderStyle: React.CSSProperties = {
   borderBottom: `1px solid ${C.border}`,
   gap: 8,
   flexShrink: 0,
-};
-
-const closeBtnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: C.textDim,
-  cursor: 'pointer',
-  fontSize: F.base,
-  padding: '2px 4px',
-  lineHeight: 1,
-  borderRadius: 3,
 };
 
