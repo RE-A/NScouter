@@ -17,10 +17,13 @@
 // 그래서 이 함수는 연결까지만 책임진다 — 오브젝트 목록도 App 이 따로 받는다.
 
 import {
+  connectCollectors,
   connectScouter,
   disconnectScouter,
   stopXLogStream,
+  type ConnectionInfo,
   type ConnectParams,
+  type ServerProfile,
 } from './scouterApi';
 
 /** 붙는다. 스트림·오브젝트 목록은 부르는 쪽(App)이 이어서 한다 */
@@ -49,4 +52,22 @@ export async function switchToServer(params: ConnectParams): Promise<void> {
     // 연결이 이미 끊겨 있을 수 있다
   }
   return connectToServer(params);
+}
+
+/**
+ * 여러 콜렉터로 **함께** 갈아탄다. 끊는 쪽 실패를 삼키는 까닭은 `switchToServer` 와 같다.
+ * 앞의 것이 주 콜렉터다. 일부만 붙어도 성공이다 — 못 붙은 것은 돌려준 `collectors` 에 있다.
+ */
+export async function switchToCollectors(profiles: readonly ServerProfile[]): Promise<ConnectionInfo> {
+  try {
+    await stopXLogStream();
+  } catch {
+    // 스트림이 이미 죽어 있을 수 있다
+  }
+  try {
+    await disconnectScouter();
+  } catch {
+    // 연결이 이미 끊겨 있을 수 있다
+  }
+  return connectCollectors(profiles);
 }

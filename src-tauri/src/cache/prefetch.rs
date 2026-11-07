@@ -27,9 +27,12 @@ const QUEUE: usize = 1_000;
 /// 끝난 뒤 이만큼 지나서 묻는다
 const SETTLE_MS: i64 = 10_000;
 
+/// 미리 받을 것 한 건 — (콜렉터 번호 `CollectorLink::idx`, txid, 끝난 시각)
+type Job = (usize, i64, i64);
+
 /// 미리 받을 것을 넣는 입구 (`app.manage` 로 둔다)
 pub struct Prefetcher {
-    tx: mpsc::Sender<(i64, i64)>,
+    tx: mpsc::Sender<Job>,
 }
 
 /// 미리 받을 만한가 — 에러이거나 `min_elapsed_ms` 이상
@@ -38,11 +41,11 @@ pub fn worth(x: &XLogPack, min_elapsed_ms: u32) -> bool {
 }
 
 impl Prefetcher {
-    /// 스트림에서 부른다. 막히지 않는다 — 차 있으면 버린다
-    pub fn offer(&self, x: &XLogPack) {
+    /// 스트림에서 부른다. 막히지 않는다 — 차 있으면 버린다. `link` 는 그 XLog 를 준 콜렉터의 번호다
+    pub fn offer(&self, link: usize, x: &XLogPack) {
         let p = crate::tuning::perf();
         if p.prefetch_enabled && worth(x, p.prefetch_min_elapsed_ms) {
-            let _ = self.tx.try_send((x.txid, x.end_time));
+            let _ = self.tx.try_send((link, x.txid, x.end_time));
         }
     }
 }
@@ -55,9 +58,9 @@ const WORKERS: usize = 8;
 
 /// 뒤에서 도는 일꾼을 띄우고 입구를 돌려준다
 pub fn start(app: AppHandle) -> Prefetcher {
-    let (tx, mut rx) = mpsc::channel::<(i64, i64)>(QUEUE);
+    let (tx, mut rx) = mpsc::channel::<Job>(QUEUE);
     tauri::async_runtime::spawn(async move {
-        let mut buf: std::collections::VecDeque<(i64, i64)> = std::collections::VecDeque::new();
+        let mut buf: std::collections::VecDeque<Job> = std::collections::VecDeque::new();
         loop {
             if buf.is_empty() {
                 match rx.recv().await {
@@ -72,43 +75,54 @@ pub fn start(app: AppHandle) -> Prefetcher {
                 buf.push_back(j);
             }
             // 가장 먼저 온 것이 아직 덜 익었으면(프로파일이 콜렉터에 덜 닿음) 기다렸다 다시 모은다
-            let wait = buf[0].1 + SETTLE_MS - local_now_ms();
+            let wait = buf[0].2 + SETTLE_MS - local_now_ms();
             if wait > 0 {
                 tokio::time::sleep(Duration::from_millis(wait.min(SETTLE_MS) as u64)).await;
                 continue;
             }
             let now = local_now_ms();
             let mut batch = Vec::new();
-            while batch.len() < BATCH && buf.front().is_some_and(|&(_, e)| e + SETTLE_MS <= now) {
+            while batch.len() < BATCH && buf.front().is_some_and(|&(_, _, e)| e + SETTLE_MS <= now) {
                 batch.extend(buf.pop_front());
             }
 
+            // **그 XLog 를 준 콜렉터에 묻는다** — 프로파일과 캐시는 콜렉터마다 따로다 (`crate::hub`)
             let state = app.state::<AppState>();
-            let Some(db) = state.cache_handle().await else { continue };
-            let have = db.profile_has(&batch.iter().map(|(t, _)| *t).collect::<Vec<_>>());
             let tz = app.state::<crate::mcp::McpState>().tz_offset_ms();
-            let targets: Vec<SearchTarget> = batch
-                .iter()
-                .filter(|(t, _)| !have.contains(t))
-                .map(|&(txid, end)| SearchTarget { txid: txid.to_string(), obj_hash: 0, date: date_key(end, tz) })
-                .collect();
-            if targets.is_empty() {
+            let mut n = 0;
+            for link in state.links() {
+                let jobs: Vec<(i64, i64)> = batch.iter().filter(|j| j.0 == link.idx).map(|&(_, t, e)| (t, e)).collect();
+                if jobs.is_empty() {
+                    continue;
+                }
+                let Some(db) = link.cache_handle().await else { continue };
+                let have = db.profile_has(&jobs.iter().map(|(t, _)| *t).collect::<Vec<_>>());
+                let targets: Vec<SearchTarget> = jobs
+                    .iter()
+                    .filter(|(t, _)| !have.contains(t))
+                    .map(|&(txid, end)| SearchTarget { txid: txid.to_string(), obj_hash: 0, date: date_key(end, tz) })
+                    .collect();
+                if targets.is_empty() {
+                    continue;
+                }
+                // 세션은 조회용 연결에서 빌린다 — 세션은 소켓과 무관하게 쓸 수 있다 (F-1)
+                let Ok(conn) = link.acquire_query_conn().await else { continue };
+                let session = conn.session;
+                link.release_query_conn(conn).await;
+                let (host, port) = (link.host.clone(), link.port);
+                let k = targets.len();
+                n += k;
+                // 받은 것은 `full_profile_steps` 가 캐시에 담는다
+                let got = tokio::task::spawn_blocking(move || {
+                    fetch_profiles_parallel(&host, port, session, &targets, WORKERS.min(crate::commands::search_workers()), Some(&db)).iter().filter(|r| r.is_some()).count()
+                })
+                .await
+                .unwrap_or(0);
+                log::debug!("프로파일 미리 받기({}): {k}건 중 {got}건", link.name);
+            }
+            if n == 0 {
                 continue;
             }
-            // 세션은 조회용 연결에서 빌린다 — 세션은 소켓과 무관하게 쓸 수 있다 (F-1)
-            let Ok(conn) = state.acquire_query_conn().await else { continue };
-            let session = conn.session;
-            state.release_query_conn(conn).await;
-            let host = state.conn_host.lock().await.clone();
-            let port = *state.conn_port.lock().await;
-            let n = targets.len();
-            // 받은 것은 `full_profile_steps` 가 캐시에 담는다
-            let got = tokio::task::spawn_blocking(move || {
-                fetch_profiles_parallel(&host, port, session, &targets, WORKERS.min(crate::commands::search_workers()), Some(&db)).iter().filter(|r| r.is_some()).count()
-            })
-            .await
-            .unwrap_or(0);
-            log::debug!("프로파일 미리 받기: {n}건 중 {got}건");
             // 설정한 초당 건수를 넘지 않게
             let rate = crate::tuning::perf().prefetch_per_sec.max(1) as u64;
             tokio::time::sleep(Duration::from_millis(n as u64 * 1000 / rate)).await;

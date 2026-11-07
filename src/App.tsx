@@ -42,8 +42,8 @@ import {
   sameTarget,
   upsert,
 } from './features/xlog/components/serverProfiles';
-import type { ServerProfile } from './features/xlog/api/scouterApi';
-import { switchToServer } from './features/xlog/api/connectFlow';
+import type { CollectorStatus, ServerProfile } from './features/xlog/api/scouterApi';
+import { switchToCollectors, switchToServer } from './features/xlog/api/connectFlow';
 import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
@@ -307,6 +307,11 @@ export default function App({ windowLabel }: {
    * XLog 저장소가 이 번호로 이전 서버의 점을 버린다 (`useConnectionReset`).
    */
   const [connectionEpoch, setConnectionEpoch] = useState(0);
+  /**
+   * 함께 붙은 콜렉터들 (주 콜렉터가 맨 앞). 둘 이상일 때만 헤더가 콜렉터마다 상태를 보인다 —
+   * 하나라도 못 붙으면 그 콜렉터의 서버는 목록에 안 나오는데, 그걸 «서버가 죽었다» 로 읽으면 안 된다.
+   */
+  const [collectors, setCollectors] = useState<CollectorStatus[]>([]);
   /**
    * 데모(합성 데이터)로 붙었는가. 그때는 콜렉터가 없어 콜렉터 설정을 물을 곳이 없다.
    * 이름은 Rust `DEMO_SERVER_ID` 와 같아야 한다.
@@ -614,6 +619,7 @@ export default function App({ windowLabel }: {
       .then(info => {
         if (!info.connected) return;
         setServerClockOffset(info.clock_offset_ms);
+        setCollectors(info.collectors ?? []);
         setIsConnected(true);
         setServerId(info.server_id);
         setConnectionEpoch(n => n + 1);
@@ -727,11 +733,17 @@ export default function App({ windowLabel }: {
       onConnected(id => {
         setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1);
         // 콜렉터 시계 차는 접속 때 Rust 가 쟀다 — 실시간 «지금» 을 그 시계로 잡는다 (serverClock.ts)
-        getConnectionInfo().then(info => setServerClockOffset(info.clock_offset_ms)).catch(() => {});
+        getConnectionInfo()
+          .then(info => {
+            setServerClockOffset(info.clock_offset_ms);
+            setCollectors(info.collectors ?? []);
+          })
+          .catch(() => {});
       }),
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
         setServerClockOffset(null);
+        setCollectors([]);
         // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
         setSelectedXLogs([]); clearNames(); clearObjectHistory(); setAgentMap(new Map());
         objectsRef.current = [];
@@ -850,8 +862,8 @@ export default function App({ windowLabel }: {
   /**
    * 갈아 가며 볼 서버들.
    *
-   * **한 번에 한 서버다.** 두 콜렉터를 나란히 보는 것이 아니라, 매번 호스트·계정을
-   * 다시 치지 않고 옮겨 가기 위한 목록이다.
+   * 매번 호스트·계정을 다시 치지 않고 옮겨 가기 위한 목록이다. 여럿을 골라 **함께** 붙을 수도 있다
+   * (`switchServers`) — 그때도 화면은 서버 하나에 붙은 것처럼 보인다.
    */
   const [servers, setServers] = useState<ServerProfile[]>([]);
   /** 지금 붙어 있는 서버 이름. 미연결이면 null */
@@ -892,6 +904,9 @@ export default function App({ windowLabel }: {
     [persistServers],
   );
 
+  /** 함께 붙으려다 실패한 까닭 — 헤더에 짧게 보인다 */
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
   /**
    * 다른 서버로 갈아탄다.
    *
@@ -901,6 +916,7 @@ export default function App({ windowLabel }: {
   const switchServer = useCallback(
     (profile: ServerProfile) => {
       const label = displayName(profile);
+      setSwitchError(null);
       if (profile.pass === '') {
         // 저장 안 한 비밀번호는 물어야 한다. 끊고 접속 폼에 값을 채워 둔다.
         setPrefill(profile);
@@ -925,6 +941,38 @@ export default function App({ windowLabel }: {
           // 실패하면 끊긴 채로 남는다. 접속 폼이 다시 나오므로 손으로 붙을 수 있다.
           setCurrentServer(null);
           setPrefill(profile);
+        })
+        .finally(() => setSwitching(false));
+    },
+    [persistServers, handleConnected],
+  );
+
+  /**
+   * 여러 서버로 **함께** 갈아탄다 — 서버 하나에 붙은 것처럼 보인다(Rust `crate::hub`).
+   *
+   * 앞의 것이 주 콜렉터다. 일부만 붙어도 성공이다 — 못 붙은 콜렉터는 헤더에 빨갛게 남고,
+   * 새로고침(F5)이 다시 붙어 본다. 비밀번호를 기억한 서버만 온다(고르는 쪽이 막는다).
+   */
+  const switchServers = useCallback(
+    (profiles: ServerProfile[]) => {
+      if (profiles.length === 0) return;
+      const label = profiles.map(displayName).join(' + ');
+      setSwitching(true);
+      setSwitchError(null);
+      switchToCollectors(profiles)
+        .then(info => {
+          setCurrentServer(label);
+          setCollectors(info.collectors ?? []);
+          // 최신 목록을 setState 안에서 집는다 — `switchServer` 와 같은 이유
+          setServers(prev => {
+            void persistServers(prev, label);
+            return prev;
+          });
+          handleConnected('scouter');
+        })
+        .catch((e: unknown) => {
+          setCurrentServer(null);
+          setSwitchError(String(e));
         })
         .finally(() => setSwitching(false));
     },
@@ -1787,6 +1835,8 @@ export default function App({ windowLabel }: {
     refreshConnection()
       .then(info => {
         setServerClockOffset(info.clock_offset_ms);
+        // 처음에 못 붙었던 콜렉터가 이번에 붙었을 수 있다
+        setCollectors(info.collectors ?? []);
         setRefreshing({ busy: false, error: null });
       })
       .catch((e: unknown) => setRefreshing({ busy: false, error: String(e) }))
@@ -1965,7 +2015,22 @@ export default function App({ windowLabel }: {
               />
               {/* 데모 서버 이름은 백엔드가 준 한국어 문구다. 진짜 서버 이름은 사전에 없어
                   그대로 나온다 — t() 를 통과시켜도 안전하다. */}
-              {t(serverId)}
+              {collectors.length > 1 ? (
+                // 함께 붙어 있으면 콜렉터마다 붙었는지를 보인다 — 못 붙은 콜렉터의 서버는 목록에 없다
+                collectors.map((c, i) => (
+                  <span
+                    key={c.name}
+                    className="flex items-center gap-1"
+                    title={c.connected ? `${c.host}:${c.port} · ${c.server_id}` : `${c.host}:${c.port} · ${t('붙지 못함')}${c.error ? ` — ${c.error}` : ''}`}
+                  >
+                    {i > 0 && <span className="text-fg-faint">+</span>}
+                    <span className={`size-1.5 rounded-full ${c.connected ? 'bg-ok' : 'bg-danger'}`} aria-hidden />
+                    <span className={c.connected ? '' : 'text-danger'}>{c.name}</span>
+                  </span>
+                ))
+              ) : (
+                t(serverId)
+              )}
             </span>
           )}
         </div>
@@ -2006,11 +2071,18 @@ export default function App({ windowLabel }: {
         )}
         {/* 상태·설정 — 평소엔 조용히 물러나 있어야 한다 */}
         {isMain && <div className="flex items-center gap-2">
+          {switchError && (
+            <span className="max-w-[16rem] truncate text-micro text-danger" title={switchError}>
+              {t('함께 연결하지 못했습니다')}: {switchError}
+            </span>
+          )}
           <ServerSwitcher
             profiles={servers}
             current={isConnected ? currentServer : null}
+            currentSet={isConnected ? collectors.map(c => c.name) : []}
             busy={switching}
             onSwitch={switchServer}
+            onSwitchMany={switchServers}
             onRemove={removeServer}
             onRename={renameServer}
           />

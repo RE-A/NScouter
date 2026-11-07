@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { T, F } from '../../../styles/tokens';
 import {
+  connectCollectors,
   startMockStream,
   stopXLogStream,
   disconnectScouter,
@@ -11,6 +12,7 @@ import {
   type ServerProfile,
 } from '../api/scouterApi';
 import { connectToServer } from '../api/connectFlow';
+import { displayName, normalize } from './serverProfiles';
 import { t } from '../../../i18n';
 import { Button } from '../../../components/Button';
 
@@ -57,6 +59,12 @@ export function ConnectionDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoTried = useRef(false);
+  /**
+   * 묶음 자동 연결이 부를 콜백. effect 의존성에 넣으면 부모가 새 함수를 줄 때마다 effect 가 다시 돌며
+   * 치던 접속 폼을 설정 파일 값으로 덮는다 — 그래서 ref 로 든다
+   */
+  const onConnectedRef = useRef(onConnected);
+  onConnectedRef.current = onConnected;
 
   /**
    * 접속 + 오브젝트 조회 + XLog 스트림 시작. 수동/자동 공용.
@@ -122,6 +130,27 @@ export function ConnectionDialog({
 
       // StrictMode 가 effect 를 두 번 실행하므로 한 번만 시도한다.
       if (!cfg.auto_connect || autoTried.current) return;
+
+      // **지난번에 여럿을 함께 봤으면 그 묶음으로 붙는다.** 묶음의 서버가 목록에서 지워졌거나
+      // 비밀번호를 안 남긴 것이 섞여 있으면 묶음으로는 못 붙는다 — 아래의 마지막 서버 하나로 간다.
+      const group = cfg.last_servers ?? [];
+      if (group.length > 1) {
+        const list = normalize(cfg.servers);
+        const picked = group
+          .map(n => list.find(p => displayName(p) === n))
+          .filter((p): p is ServerProfile => p !== undefined && p.pass !== '');
+        if (picked.length === group.length) {
+          autoTried.current = true;
+          setLoading(true);
+          setError(null);
+          connectCollectors(picked)
+            .then(() => onConnectedRef.current('scouter'))
+            .catch(err => setError(String(err)))
+            .finally(() => setLoading(false));
+          return;
+        }
+      }
+
       if (!cfg.last_host || !cfg.last_user) return;
       autoTried.current = true;
       doConnect(

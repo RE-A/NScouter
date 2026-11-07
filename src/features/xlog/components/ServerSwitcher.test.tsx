@@ -170,4 +170,42 @@ describe('ServerSwitcher — 이름 붙이기', () => {
     expect(screen.getByLabelText('10.0.0.2:6200 이름 바꾸기')).toBeTruthy();
     expect(screen.queryByLabelText('10.0.0.2:6200 이름')).toBeNull();
   });
+
+  describe('함께 연결', () => {
+    const qa2: ServerProfile = { name: 'QA', host: '10.0.0.3', port: 6100, user: 'qa', pass: 'y' };
+
+    it('onSwitchMany 가 없으면 체크를 안 보인다', () => {
+      open([prod, qa2]);
+      fireEvent.click(screen.getByRole('button', { name: /운영/ }));
+      expect(screen.queryByLabelText('운영 함께 연결')).toBeNull();
+    });
+
+    it('둘 이상 체크해야 누를 수 있고, 목록 순서대로 넘긴다', () => {
+      const onSwitchMany = vi.fn();
+      open([prod, qa2], { onSwitchMany, current: null });
+      fireEvent.click(screen.getByRole('button', { name: /서버 고르기/ }));
+      const go = screen.getByRole('button', { name: '함께 연결' }) as HTMLButtonElement;
+      expect(go.disabled).toBe(true);
+
+      // 뒤의 것을 먼저 체크해도 넘길 때는 목록 순서다 — 앞의 것이 주 콜렉터다
+      fireEvent.click(screen.getByLabelText('QA 함께 연결'));
+      fireEvent.click(screen.getByLabelText('운영 함께 연결'));
+      expect(go.disabled).toBe(false);
+      fireEvent.click(go);
+      expect(onSwitchMany).toHaveBeenCalledWith([prod, qa2]);
+    });
+
+    it('비밀번호를 기억 안 한 서버는 고를 수 없다', () => {
+      open([prod, qa], { onSwitchMany: vi.fn() });
+      fireEvent.click(screen.getByRole('button', { name: /운영/ }));
+      expect((screen.getByLabelText('10.0.0.2:6200 함께 연결') as HTMLInputElement).disabled).toBe(true);
+    });
+
+    it('함께 붙어 있으면 열 때 그 서버들이 체크돼 있다', () => {
+      open([prod, qa2], { onSwitchMany: vi.fn(), current: '운영 + QA', currentSet: ['운영', 'QA'] });
+      fireEvent.click(screen.getByRole('button', { name: /운영 \+ QA/ }));
+      expect((screen.getByLabelText('운영 함께 연결') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText('QA 함께 연결') as HTMLInputElement).checked).toBe(true);
+    });
+  });
 });

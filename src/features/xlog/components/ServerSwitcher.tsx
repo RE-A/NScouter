@@ -1,7 +1,11 @@
 // 서버 갈아타기 — 헤더의 드롭다운
 //
-// **한 번에 한 서버다.** 두 콜렉터를 나란히 보는 것이 아니라, 매번 호스트·계정을
-// 다시 치지 않고 빠르게 옮겨 가는 것이 목적이다.
+// 줄을 누르면 그 서버 하나로 갈아탄다. 매번 호스트·계정을 다시 치지 않고 빠르게 옮겨 가는 것이 목적이다.
+//
+// **여러 서버를 함께 볼 수도 있다.** 시스템별로 콜렉터가 나뉜 곳에서는 서버 목록·XLog 를 한 화면에서
+// 섞어 봐야 한다. 줄 앞의 체크로 둘 이상 고르고 `함께 연결` 을 누르면, 서버 하나에 붙은 것처럼 보인다
+// (Rust `crate::hub`). 맨 위에 고른 것이 주 콜렉터다. 비밀번호를 기억한 서버만 고를 수 있다 —
+// 여럿을 붙이는 중에 하나씩 물을 수가 없다.
 //
 // 갈아타면 화면이 통째로 바뀐다 — 오브젝트 해시가 서버마다 다르므로 필터도 상세 탭도
 // 그대로 둘 수 없다. 그래서 «지금 어느 서버를 보고 있나» 를 늘 띄워 둔다.
@@ -15,11 +19,15 @@ import { Button } from '../../../components/Button';
 
 interface ServerSwitcherProps {
   profiles: readonly ServerProfile[];
-  /** 지금 붙어 있는 서버 이름. 미연결이면 null */
+  /** 지금 붙어 있는 서버 이름(여럿이면 ` + ` 로 이은 것). 미연결이면 null */
   current: string | null;
+  /** 함께 붙어 있는 서버 이름들. 하나만 붙어 있으면 비우거나 그 하나 */
+  currentSet?: readonly string[];
   busy: boolean;
   /** 고른 서버로 갈아탄다. 비밀번호가 없으면 부르는 쪽이 물어본다 */
   onSwitch: (profile: ServerProfile) => void;
+  /** 고른 서버들에 함께 붙는다 (목록 순서대로 — 앞의 것이 주 콜렉터). 없으면 체크를 안 보인다 */
+  onSwitchMany?: (profiles: ServerProfile[]) => void;
   /** 목록에서 지운다 */
   onRemove: (profile: ServerProfile) => void;
   /**
@@ -34,12 +42,16 @@ interface ServerSwitcherProps {
 export const ServerSwitcher = memo(function ServerSwitcher({
   profiles,
   current,
+  currentSet = [],
   busy,
   onSwitch,
+  onSwitchMany,
   onRemove,
   onRename,
 }: ServerSwitcherProps) {
   const [open, setOpen] = useState(false);
+  /** 함께 붙으려고 체크한 서버 이름들 */
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   /**
    * 지금 이름을 고치고 있는 서버와 입력 중인 글자.
    *
@@ -61,9 +73,22 @@ export const ServerSwitcher = memo(function ServerSwitcher({
 
   // 목록을 닫으면 고치던 것도 버린다. 다시 열었을 때 남아 있으면
   // «언제 적 입력이 왜 여기 있나» 가 된다.
+  // 열 때는 지금 함께 붙어 있는 것을 체크해 둔다 — 하나 더 붙이거나 빼기 쉽게
   useEffect(() => {
     if (!open) setEditing(null);
+    else setPicked(new Set(currentSet.length > 1 ? currentSet : []));
+    // currentSet 은 열 때의 것만 쓴다 — 열린 동안 체크를 덮지 않는다
   }, [open]);
+
+  const multi = onSwitchMany !== undefined && profiles.length > 1;
+  const togglePick = (label: string) =>
+    setPicked(prev => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  const pickedProfiles = profiles.filter(p => picked.has(displayName(p)));
 
   const commit = () => {
     if (!editing) return;
@@ -90,13 +115,24 @@ export const ServerSwitcher = memo(function ServerSwitcher({
         <div className="absolute right-0 z-30 mt-1 max-h-72 w-64 overflow-y-auto rounded border border-line-strong bg-surface p-1 shadow">
           {profiles.map(p => {
             const label = displayName(p);
-            const on = label === current;
+            const on = label === current || currentSet.includes(label);
             const editingThis = editing !== null && sameTarget(editing.target, p);
             return (
               <div
                 key={label}
                 className={`flex items-center gap-1 rounded px-1 ${on ? 'bg-hover' : 'hover:bg-hover'}`}
               >
+                {multi && (
+                  <input
+                    type="checkbox"
+                    checked={picked.has(label)}
+                    disabled={p.pass === ''}
+                    onChange={() => togglePick(label)}
+                    aria-label={`${label} ${t('함께 연결')}`}
+                    title={p.pass === '' ? t('비밀번호를 기억한 서버만 함께 연결할 수 있습니다') : t('함께 연결할 서버로 고릅니다')}
+                    className="shrink-0"
+                  />
+                )}
                 {editingThis ? (
                   <input
                     autoFocus
@@ -160,6 +196,25 @@ export const ServerSwitcher = memo(function ServerSwitcher({
               </div>
             );
           })}
+          {multi && (
+            <div className="mt-1 flex items-center gap-2 border-t border-line px-1 pt-1">
+              <span className="min-w-0 flex-1 truncate text-micro text-fg-faint">
+                {picked.size < 2 ? t('둘 이상 체크하면 함께 연결합니다') : pickedProfiles.map(displayName).join(' + ')}
+              </span>
+              <Button
+                size="xs"
+                variant="primary"
+                disabled={picked.size < 2}
+                onClick={() => {
+                  setOpen(false);
+                  onSwitchMany?.(pickedProfiles);
+                }}
+                title={t('체크한 서버들에 함께 붙습니다 — 서버 하나에 붙은 것처럼 보입니다')}
+              >
+                {t('함께 연결')}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -81,6 +81,10 @@ pub struct AppConfig {
     /// 마지막으로 고른 서버 이름
     #[serde(default)]
     pub last_server: String,
+    /// 마지막으로 **함께** 붙었던 서버 이름들 (`servers` 의 이름, 앞의 것이 주 콜렉터).
+    /// 둘 이상이면 자동 연결이 이 묶음으로 붙는다. 혼자 붙으면 비운다
+    #[serde(default)]
+    pub last_servers: Vec<String>,
     /// 마지막으로 걸어 두었던 조회 조건
     #[serde(default)]
     pub xlog_filter: XLogFilterPrefs,
@@ -592,6 +596,7 @@ impl Default for AppConfig {
             xlog_chart: XLogChartPrefs::default(),
             servers: Vec::new(),
             last_server: String::new(),
+            last_servers: Vec::new(),
             xlog_filter: XLogFilterPrefs::default(),
             xlog_tabs: Vec::new(),
             xlog_split: XLogSplitPrefs::default(),

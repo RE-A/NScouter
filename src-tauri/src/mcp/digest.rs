@@ -194,16 +194,30 @@ pub fn make_ref(txid: i64, end_time: i64, tz_offset_ms: i64) -> String {
     format!("{txid}:{}", date_key(end_time, tz_offset_ms))
 }
 
-/// `txid:yyyymmdd` → (txid, 날짜)
-pub fn parse_ref(r: &str) -> Result<(i64, String), String> {
-    let bad = || format!("ref 형식이 아닙니다: «{r}» (search_transactions 가 준 `txid:yyyymmdd` 를 그대로 넘겨 주세요)");
-    let (txid, date) = r.trim().split_once(':').ok_or_else(bad)?;
+/// 콜렉터 여럿을 함께 볼 때의 참조 — `txid:yyyymmdd@콜렉터`. 상세가 그 콜렉터에만 묻는다
+pub fn tag_ref(r: String, collector: Option<&str>) -> String {
+    match collector {
+        Some(c) => format!("{r}@{c}"),
+        None => r,
+    }
+}
+
+/// `txid:yyyymmdd[@콜렉터]` → (txid, 날짜, 콜렉터). 콜렉터가 없으면 None — 상세가 붙은 콜렉터를 차례로 묻는다
+pub fn parse_ref(r: &str) -> Result<(i64, String, Option<String>), String> {
+    let bad = || format!("ref 형식이 아닙니다: «{r}» (search_transactions 가 준 `txid:yyyymmdd` 또는 `txid:yyyymmdd@콜렉터` 를 그대로 넘겨 주세요)");
+    let r = r.trim();
+    // 날짜까지에는 `@` 가 없다 — 첫 `@` 뒤가 콜렉터 이름이다(이름에 `@` 가 있어도 된다)
+    let (head, collector) = match r.split_once('@') {
+        Some((h, c)) => (h, Some(c.trim()).filter(|c| !c.is_empty()).map(str::to_string)),
+        None => (r, None),
+    };
+    let (txid, date) = head.split_once(':').ok_or_else(bad)?;
     let txid: i64 = txid.trim().parse().map_err(|_| bad())?;
     let date = date.trim();
     if date.len() != 8 || !date.bytes().all(|b| b.is_ascii_digit()) {
         return Err(bad());
     }
-    Ok((txid, date.to_string()))
+    Ok((txid, date.to_string(), collector))
 }
 
 // ─── 목록 ────────────────────────────────────────────────────
@@ -541,6 +555,10 @@ pub struct ScanFacts {
     pub profile: Option<ProfileFacts>,
     /// 상세를 한 번에 볼 수 있는 수 (설정) — note 에 적는다
     pub detail_max: usize,
+    /// 훑은 콜렉터 이름들
+    pub collectors: Vec<String>,
+    /// 콜렉터가 둘 이상 붙어 있다 — 행에 `collector` 열을 싣고 `ref` 에 콜렉터를 붙인다
+    pub multi_collector: bool,
 }
 
 /// 프로파일 본문 검색
@@ -582,10 +600,12 @@ impl<F: Fn(&str, i32) -> Option<String>> Texts for F {
 }
 
 /// 목록 결과 → JSON. 행은 배열로 싣고 열 이름은 한 번만 적는다 (500행이면 꽤 차이가 난다)
+/// `collector_of`: 행의 objHash → 콜렉터 이름. 콜렉터가 여럿일 때만 Some — `ref` 와 `collector` 열에 쓴다
 pub fn search_result_json(
     res: &CollectorResult,
     facts: &ScanFacts,
     server_name: &dyn Fn(i32) -> String,
+    collector_of: &dyn Fn(i32) -> Option<String>,
     texts: &dyn Texts,
     hits: &HashMap<i64, ProfileHitView>,
 ) -> Value {
@@ -598,8 +618,9 @@ pub fn search_result_json(
             let err = (x.error != 0).then(|| {
                 clip(&texts.text(text_type::ERROR, x.error).unwrap_or_else(|| format!("#{}", x.error)), 120)
             });
+            let coll = collector_of(x.obj_hash);
             let mut row = json!([
-                make_ref(x.txid, x.end_time, tz),
+                tag_ref(make_ref(x.txid, x.end_time, tz), coll.as_deref()),
                 fmt_local(x.end_time, tz),
                 server_name(x.obj_hash),
                 clip(&service(x.service), 200),
@@ -612,6 +633,11 @@ pub fn search_result_json(
                 x.apicall_time,
                 x.ipaddr,
             ]);
+            if facts.multi_collector {
+                if let Value::Array(a) = &mut row {
+                    a.push(json!(coll));
+                }
+            }
             if facts.profile.is_some() {
                 let hit = hits.get(&x.txid).map(|h| {
                     let more = if h.count > 1 { format!(" (+{})", h.count - 1) } else { String::new() };
@@ -668,6 +694,9 @@ pub fn search_result_json(
     let note = note.trim_end().to_string();
     let mut columns = vec!["ref", "time", "server", "service", "elapsed_ms", "error", "cpu_ms",
                            "sql_count", "sql_ms", "api_count", "api_ms", "ip"];
+    if facts.multi_collector {
+        columns.push("collector");
+    }
     if facts.profile.is_some() {
         columns.push("profile_hit");
     }
@@ -678,6 +707,7 @@ pub fn search_result_json(
             "tz": fmt_tz(tz),
         },
         "servers_scanned": facts.servers,
+        "collectors_scanned": facts.collectors,
         "scanned": facts.scanned,
         "matched": res.matched,
         "matched_errors": res.matched_errors,
@@ -1139,7 +1169,12 @@ mod tests {
         let end = parse_local_time("2026-11-01 00:10", KST).unwrap();
         let r = make_ref(-123456789, end, KST);
         assert_eq!(r, "-123456789:20261101");
-        assert_eq!(parse_ref(&r).unwrap(), (-123456789, "20261101".to_string()));
+        assert_eq!(parse_ref(&r).unwrap(), (-123456789, "20261101".to_string(), None));
+        assert_eq!(
+            parse_ref(&tag_ref(r.clone(), Some("운영 A"))).unwrap(),
+            (-123456789, "20261101".to_string(), Some("운영 A".to_string()))
+        );
+        assert!(parse_ref("123@QA").is_err());
         assert!(parse_ref("123").is_err());
         assert!(parse_ref("123:2026-11-01").is_err());
     }
@@ -1293,8 +1328,10 @@ mod tests {
             servers: 2,
             profile: None,
             detail_max: 5,
+            collectors: vec!["c".into()],
+            multi_collector: false,
         };
-        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &texts(), &HashMap::new());
+        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &|_| None, &texts(), &HashMap::new());
         assert_eq!(v["columns"][0], "ref");
         assert_eq!(v["rows"][0][0], "42:20261101");
         assert_eq!(v["rows"][0][2], "srv1");
@@ -1303,6 +1340,31 @@ mod tests {
         assert_eq!(v["truncated"], false);
         assert_eq!(v["note"], "");
         assert_eq!(v["columns"].as_array().unwrap().len(), 12, "프로파일 검색을 안 했으면 열이 늘지 않는다");
+    }
+
+    #[test]
+    fn 콜렉터가_여럿이면_collector_열과_ref_의_콜렉터가_붙는다() {
+        let mut c = Collector::new(SortBy::Slowest, 50);
+        c.add(xlog(42, parse_local_time("2026-11-01 10:00", KST).unwrap(), 3000, 5));
+        let res = c.finish();
+        let facts = ScanFacts {
+            window: Window { stime: 0, etime: 1 },
+            tz_offset_ms: KST,
+            scanned: 10,
+            unscanned: None,
+            servers: 2,
+            profile: None,
+            detail_max: 5,
+            collectors: vec!["운영A".into(), "운영B".into()],
+            multi_collector: true,
+        };
+        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &|_| Some("운영B".into()), &texts(), &HashMap::new());
+        assert_eq!(v["rows"][0][0], "42:20261101@운영B");
+        assert_eq!(v["columns"][12], "collector");
+        assert_eq!(v["rows"][0][12], "운영B");
+        assert_eq!(v["collectors_scanned"][1], "운영B");
+        let (txid, date, coll) = parse_ref(v["rows"][0][0].as_str().unwrap()).unwrap();
+        assert_eq!((txid, date.as_str(), coll.as_deref()), (42, "20261101", Some("운영B")));
     }
 
     #[test]
@@ -1318,11 +1380,13 @@ mod tests {
             unscanned: None,
             servers: 1,
             detail_max: 5,
+            collectors: vec!["c".into()],
+            multi_collector: false,
             profile: Some(ProfileFacts { needle: "ord-77".into(), candidates: 5000, searched: 2000, failed: 3, fetch_max: 2000, budget_sec: 15 }),
         };
         let mut hits = HashMap::new();
         hits.insert(42, ProfileHitView { count: 3, kind: "sql-param".into(), snippet: "ORD-77, 1".into() });
-        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &texts(), &hits);
+        let v = search_result_json(&res, &facts, &|h| format!("srv{h}"), &|_| None, &texts(), &hits);
         assert_eq!(v["columns"][12], "profile_hit");
         assert_eq!(v["rows"][0][12], "sql-param: ORD-77, 1 (+2)");
         assert_eq!(v["rows"][1][12], Value::Null);

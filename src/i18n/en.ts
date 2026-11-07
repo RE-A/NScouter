@@ -849,6 +849,13 @@ export const EN: Record<string, string> = {
   '비밀번호 물음': 'asks for password',
   '지우기': 'remove',
   '목록에서 지웁니다': 'Remove from the list',
+  '함께 연결': 'Connect together',
+  '함께 연결할 서버로 고릅니다': 'Pick this server to connect together',
+  '비밀번호를 기억한 서버만 함께 연결할 수 있습니다': 'Only servers with a remembered password can be connected together',
+  '둘 이상 체크하면 함께 연결합니다': 'Check two or more to connect them together',
+  '체크한 서버들에 함께 붙습니다 — 서버 하나에 붙은 것처럼 보입니다': 'Connect to the checked servers together — they appear as one server',
+  '붙지 못함': 'not connected',
+  '함께 연결하지 못했습니다': 'Could not connect together',
 
   // ── 버퍼 상한 ─────────────────────────────────────────
   '버퍼 상한': 'Buffer limit',
