@@ -1005,11 +1005,105 @@ pub async fn save_server_config(state: State<'_, AppState>, text: String) -> Res
     Ok(())
 }
 
+/// 페이지 자리 — 콜렉터 하나면 예전 그대로(`PastCursor`), 고른 서버가 콜렉터 여럿에 걸치면
+/// **콜렉터마다의 자리(`parts`)** 를 함께 싣는다. 화면은 받은 것을 그대로 되돌려 주기만 한다.
+///
+/// 여럿일 때 겉의 `has_more` 는 «아직 안 끝난 콜렉터가 있다», `last_xlog_time` 은 콜렉터들 자리의 **합**이다 —
+/// 화면은 이 값이 그대로면 «커서가 안 밀렸다» 로 보고 멈추는데(`pastXLog.ts`), 콜렉터 하나라도 밀리면 합이 바뀐다.
+/// 콜렉터 하나가 제자리에 서면 그 콜렉터는 여기서 끝난 것으로 친다(`past_page` 의 `done`).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HubCursor {
+    #[serde(flatten)]
+    pub base: PastCursor,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<PartCursor>,
+}
+
+/// 콜렉터 하나의 페이지 자리
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PartCursor {
+    /// `CollectorLink::idx`
+    pub link: usize,
+    pub cursor: PastCursor,
+    /// 이 콜렉터는 끝까지 받았다 (또는 못 붙어 건너뛴다)
+    pub done: bool,
+}
+
+/// 콜렉터들의 자리를 겉 자리 하나로 묶는다
+fn combine_parts(mut parts: Vec<PartCursor>) -> HubCursor {
+    parts.sort_by_key(|p| p.link);
+    let has_more = parts.iter().any(|p| !p.done);
+    let last_xlog_time = parts.iter().fold(0i64, |a, p| a.wrapping_add(p.cursor.last_xlog_time));
+    HubCursor { base: PastCursor { has_more, last_txid: 0, last_xlog_time }, parts }
+}
+
+/// 콜렉터마다 한 페이지씩 받는다 — 고른 서버(화면용 해시)를 콜렉터별로 갈라, 아직 안 끝난 콜렉터에 **동시에** 묻는다.
+///
+/// 고른 서버가 콜렉터 하나에만 있고 앞 자리에 `parts` 가 없으면 예전과 똑같이 그 콜렉터에만 묻고
+/// 콜렉터의 자리를 그대로 돌려준다. 못 붙은 콜렉터는 건너뛴다(헤더가 빨갛게 보인다). 붙어 있는 콜렉터가
+/// 실패하면 실패다 — 조용히 빼면 «그 구간에 그것뿐» 이 된다.
+///
+/// 돌려주는 것: 콜렉터마다 받은 것, 다음 자리, 다 끝났나
+async fn hub_page<T, F, Fut>(
+    state: &AppState,
+    obj_hashes: &[i32],
+    cursor: Option<HubCursor>,
+    page: F,
+) -> Result<(Vec<(Arc<CollectorLink>, T)>, HubCursor, bool), String>
+where
+    T: Send + 'static,
+    F: Fn(Arc<CollectorLink>, Vec<i32>, PastCursor) -> Fut,
+    Fut: std::future::Future<Output = Result<(T, PastCursor, bool), String>> + Send + 'static,
+{
+    let parts = state.split_hashes(obj_hashes);
+    let prev = cursor.unwrap_or_default();
+
+    if prev.parts.is_empty() && parts.len() <= 1 {
+        // 받을 것이 없다 — 빈 목록을 그대로 보내면 콜렉터가 무엇을 줄지 모른다
+        let Some((link, reals)) = parts.into_iter().next() else {
+            return Ok((Vec::new(), HubCursor { base: PastCursor { has_more: false, ..prev.base }, parts: Vec::new() }, true));
+        };
+        if !link.is_connected().await {
+            return Err("연결되지 않음".to_string());
+        }
+        let (v, next, done) = page(link.clone(), reals, prev.base).await?;
+        return Ok((vec![(link, v)], HubCursor { base: next, parts: Vec::new() }, done));
+    }
+
+    let mut next_parts: Vec<PartCursor> = Vec::new();
+    let mut tasks = Vec::new();
+    for (link, reals) in parts {
+        let before = prev.parts.iter().find(|p| p.link == link.idx).cloned();
+        if let Some(b) = before.as_ref().filter(|b| b.done) {
+            next_parts.push(b.clone());
+            continue;
+        }
+        let cur = before.map(|b| b.cursor).unwrap_or_default();
+        if !link.is_connected().await {
+            next_parts.push(PartCursor { link: link.idx, cursor: cur, done: true });
+            continue;
+        }
+        tasks.push((link.clone(), tokio::spawn(page(link, reals, cur))));
+    }
+    let mut out = Vec::with_capacity(tasks.len());
+    for (link, task) in tasks {
+        let (v, next, done) = task
+            .await
+            .map_err(|e| format!("조회 작업 실패 ({}): {e}", link.name))?
+            .map_err(|e| format!("{e} ({})", link.name))?;
+        next_parts.push(PartCursor { link: link.idx, cursor: next, done });
+        out.push((link, v));
+    }
+    let c = combine_parts(next_parts);
+    let done = !c.base.has_more;
+    Ok((out, c, done))
+}
+
 /// 과거 XLog 한 페이지 조회 결과
 #[derive(serde::Serialize)]
 pub struct PastXLogPage {
     pub xlogs: Vec<XLogPack>,
-    pub cursor: PastCursor,
+    pub cursor: HubCursor,
 }
 
 /// 과거 XLog 시간 범위 조회 (한 페이지).
@@ -1019,6 +1113,8 @@ pub struct PastXLogPage {
 ///
 /// 호출부가 `cursor.has_more` 를 보고 이어서 부른다. 페이지 경계에서
 /// 같은 시각의 트랜잭션이 다시 오므로 **txid 로 걸러야 한다** (F-28).
+///
+/// 고른 서버가 콜렉터 여럿에 걸치면 콜렉터마다 한 페이지씩 받아 합친다 (`hub_page`).
 #[tauri::command]
 pub async fn load_past_xlog(
     state: State<'_, AppState>,
@@ -1027,39 +1123,71 @@ pub async fn load_past_xlog(
     stime: i64,
     etime: i64,
     page_count: i32,
-    cursor: Option<PastCursor>,
+    cursor: Option<HubCursor>,
 ) -> Result<PastXLogPage, String> {
-    // 아직 주 콜렉터만 본다 (여러 콜렉터 합치기 2단계)
-    let (link, obj_hashes) = primary_part(&state, &obj_hashes)?;
-    // 빈 목록을 그대로 보내지 않는다 — 고른 것이 전부 다른 콜렉터의 오브젝트면 받을 것이 없다
-    if obj_hashes.is_empty() {
-        return Ok(PastXLogPage { xlogs: Vec::new(), cursor: PastCursor { has_more: false, ..cursor.unwrap_or_default() } });
-    }
-    let cache = link.cache_handle().await;
-    let seal = link.seal_before().await;
-    // **조회용 연결을 빌려 쓴다.** 화면이 구간을 조각으로 나눠 **동시에** 묻는다(`pastXLog.ts`) —
-    // 공용 연결 하나를 잠그면 조각이 줄을 서고, 그동안 상세·사전 조회까지 멈춘다
-    if !link.is_connected().await {
-        return Err("연결되지 않음".to_string());
-    }
-    let mut conn = link.acquire_query_conn().await?;
+    past_page_all(&state, obj_hashes, date, stime, etime, page_count, cursor).await
+}
 
-    let cur = cursor.unwrap_or_default();
-    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
-    // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
-    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, stime, etime, page_count, &cur, seal)?;
-    link.release_query_conn(conn).await;
-    let (mut xlogs, next) = (page.rows, page.next);
-    state.virtualize_xlogs(&link, &mut xlogs);
+/// `load_past_xlog` 의 몸통
+pub async fn past_page_all(
+    state: &AppState,
+    obj_hashes: Vec<i32>,
+    date: String,
+    stime: i64,
+    etime: i64,
+    page_count: i32,
+    cursor: Option<HubCursor>,
+) -> Result<PastXLogPage, String> {
+    let (got, next, _) = hub_page(state, &obj_hashes, cursor, |link, hashes, cur| {
+        let date = date.clone();
+        past_page_on(link, hashes, date, stime, etime, page_count, cur)
+    })
+    .await?;
+    let mut xlogs = Vec::new();
+    let mut cached = 0;
+    for (link, (mut rows, from_cache)) in got {
+        state.virtualize_xlogs(&link, &mut rows);
+        cached += from_cache as usize;
+        xlogs.extend(rows);
+    }
 
     log::debug!(
         "load_past_xlog: {}건, hasMore={}, nextTime={}{}",
         xlogs.len(),
-        next.has_more,
-        next.last_xlog_time,
-        if page.from_cache { " (캐시)" } else { "" }
+        next.base.has_more,
+        next.base.last_xlog_time,
+        if cached > 0 { " (캐시)" } else { "" }
     );
     Ok(PastXLogPage { xlogs, cursor: next })
+}
+
+/// 콜렉터 하나에서 과거 XLog 한 페이지 (원래 해시). (받은 것, 캐시에서 왔나), 다음 자리, 끝났나
+async fn past_page_on(
+    link: Arc<CollectorLink>,
+    hashes: Vec<i32>,
+    date: String,
+    stime: i64,
+    etime: i64,
+    page_count: i32,
+    cur: PastCursor,
+) -> Result<((Vec<XLogPack>, bool), PastCursor, bool), String> {
+    let cache = link.cache_handle().await;
+    let seal = link.seal_before().await;
+    // **조회용 연결을 빌려 쓴다.** 화면이 구간을 조각으로 나눠 **동시에** 묻는다(`pastXLog.ts`) —
+    // 공용 연결 하나를 잠그면 조각이 줄을 서고, 그동안 상세·사전 조회까지 멈춘다
+    let conn = link.acquire_query_conn().await?;
+    // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
+    let (conn, page) = tokio::task::spawn_blocking(move || {
+        let mut conn = conn;
+        let r = past_page(&mut conn, cache.as_deref(), &hashes, &date, stime, etime, page_count, &cur, seal);
+        (conn, r)
+    })
+    .await
+    .map_err(|e| format!("조회 작업 실패: {e}"))?;
+    // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
+    let page = page?;
+    link.release_query_conn(conn).await;
+    Ok(((page.rows, page.from_cache), page.next, page.done))
 }
 
 /// 분포를 셀 때 한 번에 받아 오는 페이지 크기 — 설정 `perf.page_rows` (기본 20,000, 근거는 `PerfPrefs`).
@@ -1097,43 +1225,56 @@ pub async fn get_xlog_distribution(
     etime: i64,
     tz_offset_ms: i64,
 ) -> Result<ElapsedDistribution, String> {
-    // 아직 주 콜렉터만 본다 (여러 콜렉터 합치기 2단계)
-    let (link, obj_hashes) = primary_part(&state, &obj_hashes)?;
-    if obj_hashes.is_empty() {
-        return Ok(Accumulator::new().finish(false));
-    }
-    let cache = link.cache_handle().await;
-    let seal = link.seal_before().await;
-    let mut conn_guard = link.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
+    distribution_all(&state, obj_hashes, stime, etime, tz_offset_ms).await
+}
 
+/// `get_xlog_distribution` 의 몸통
+pub async fn distribution_all(
+    state: &AppState,
+    obj_hashes: Vec<i32>,
+    stime: i64,
+    etime: i64,
+    tz_offset_ms: i64,
+) -> Result<ElapsedDistribution, String> {
     let mut acc = Accumulator::new();
     // 페이지 경계에서 같은 시각의 트랜잭션이 다시 온다 (F-28).
-    // **거르지 않으면 그 건들이 분포에서 두 번 세어진다.**
-    let mut seen: HashSet<i64> = HashSet::new();
+    // **거르지 않으면 그 건들이 분포에서 두 번 세어진다.** (콜렉터 번호, txid)
+    let mut seen: HashSet<(usize, i64)> = HashSet::new();
     let mut truncated = false;
 
-    'days: for (day_start, day_end) in split_by_day(stime, etime, tz_offset_ms) {
-        let date = date_key(day_start, tz_offset_ms);
-        let mut cursor = PastCursor::default();
+    // **고른 서버가 걸친 콜렉터를 차례로 센다.** 상한(`DISTRIBUTION_MAX_ROWS`)은 콜렉터를 합친 수다.
+    // 못 붙은 콜렉터는 건너뛴다(헤더가 빨갛게 보인다)
+    'links: for (link, obj_hashes) in state.split_hashes(&obj_hashes) {
+        if !link.is_connected().await {
+            continue;
+        }
+        let cache = link.cache_handle().await;
+        let seal = link.seal_before().await;
+        let mut conn_guard = link.connection.lock().await;
+        let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
-        for _ in 0..DISTRIBUTION_MAX_PAGES {
-            // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
-            let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, day_start, day_end, distribution_page_count(), &cursor, seal)
-                .map_err(|e| format!("분포 조회: {e}"))?;
-            for x in &page.rows {
-                if seen.insert(x.txid) {
-                    acc.add(x.elapsed, x.error != 0);
+        for (day_start, day_end) in split_by_day(stime, etime, tz_offset_ms) {
+            let date = date_key(day_start, tz_offset_ms);
+            let mut cursor = PastCursor::default();
+
+            for _ in 0..DISTRIBUTION_MAX_PAGES {
+                // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`)
+                let page = past_page(conn, cache.as_deref(), &obj_hashes, &date, day_start, day_end, distribution_page_count(), &cursor, seal)
+                    .map_err(|e| format!("분포 조회 ({}): {e}", link.name))?;
+                for x in &page.rows {
+                    if seen.insert((link.idx, x.txid)) {
+                        acc.add(x.elapsed, x.error != 0);
+                    }
                 }
+                if acc.count() >= DISTRIBUTION_MAX_ROWS {
+                    truncated = true;
+                    break 'links;
+                }
+                if page.done {
+                    break;
+                }
+                cursor = page.next;
             }
-            if acc.count() >= DISTRIBUTION_MAX_ROWS {
-                truncated = true;
-                break 'days;
-            }
-            if page.done {
-                break;
-            }
-            cursor = page.next;
         }
     }
 
@@ -1155,7 +1296,7 @@ pub struct WidePage {
     /// 조건에 걸린 것만
     pub xlogs: Vec<XLogPack>,
     /// 다음 페이지 자리. `done` 이면 쓸 일이 없다
-    pub cursor: PastCursor,
+    pub cursor: HubCursor,
     /// 이 조각을 끝까지 받았다
     pub done: bool,
     /// 이 페이지에서 콜렉터가 준 건수 (거르기 전)
@@ -1176,34 +1317,62 @@ fn wide_page_count() -> i32 {
 /// 조각마다 `done` 이 될 때까지 부르고, 조각 넷을 한꺼번에 돌린다.
 ///
 /// `obj_hashes` 는 그날 붙었던 오브젝트들이다 — 비어 있으면 찾을 데가 없다.
+/// 콜렉터 여럿에 걸치면 콜렉터마다 한 페이지씩 받아 합친다 (`hub_page`).
 #[tauri::command]
 pub async fn search_xlog_page(
     state: State<'_, AppState>,
     filter: SearchXLogFilter,
     date: String,
     obj_hashes: Vec<i32>,
-    cursor: Option<PastCursor>,
+    cursor: Option<HubCursor>,
 ) -> Result<WidePage, String> {
-    let cur = cursor.unwrap_or_default();
+    wide_page_all(&state, filter, date, obj_hashes, cursor).await
+}
+
+/// `search_xlog_page` 의 몸통
+pub async fn wide_page_all(
+    state: &AppState,
+    filter: SearchXLogFilter,
+    date: String,
+    obj_hashes: Vec<i32>,
+    cursor: Option<HubCursor>,
+) -> Result<WidePage, String> {
     if obj_hashes.is_empty() {
-        return Ok(WidePage { xlogs: Vec::new(), cursor: cur, done: true, scanned: 0 });
+        return Ok(WidePage { xlogs: Vec::new(), cursor: cursor.unwrap_or_default(), done: true, scanned: 0 });
     }
-    // 아직 주 콜렉터만 본다 (여러 콜렉터 합치기 2단계)
-    let (link, obj_hashes) = primary_part(&state, &obj_hashes)?;
-    if obj_hashes.is_empty() {
-        return Ok(WidePage { xlogs: Vec::new(), cursor: PastCursor { has_more: false, ..cur }, done: true, scanned: 0 });
+    let filter = Arc::new(filter);
+    let (got, next, done) = hub_page(state, &obj_hashes, cursor, |link, hashes, cur| {
+        wide_page_on(link, filter.clone(), date.clone(), hashes, cur)
+    })
+    .await?;
+    let mut hits = Vec::new();
+    let mut scanned = 0;
+    for (link, (mut rows, n)) in got {
+        state.virtualize_xlogs(&link, &mut rows);
+        scanned += n;
+        hits.extend(rows);
     }
+
+    log::debug!("search_xlog_page: {date} {}~{} → {scanned}건 중 {}건, done={done}", filter.stime, filter.etime, hits.len());
+    Ok(WidePage { xlogs: hits, cursor: next, done, scanned })
+}
+
+/// 콜렉터 하나에서 찾기 한 페이지 (원래 해시). (걸린 것, 거르기 전 건수), 다음 자리, 끝났나
+async fn wide_page_on(
+    link: Arc<CollectorLink>,
+    filter: Arc<SearchXLogFilter>,
+    date: String,
+    hashes: Vec<i32>,
+    cur: PastCursor,
+) -> Result<((Vec<XLogPack>, usize), PastCursor, bool), String> {
     // **조회용 연결을 빌려 쓴다.** 화면이 조각 넷을 한꺼번에 묻는다 — 공용 연결 하나를 잠그면
     // 조각이 줄을 서고, 그동안 상세·사전 조회까지 멈춘다.
-    if !link.is_connected().await {
-        return Err("연결되지 않음".to_string());
-    }
     let cache = link.cache_handle().await;
     let seal = link.seal_before().await;
     let mut conn = link.acquire_query_conn().await?;
     // 한 번 끝까지 받은 구간은 로컬 캐시에서 준다 (`cache::xlog`).
     // 응답을 끝까지 못 읽은 연결은 돌려주지 않는다 — 다음 조회가 남은 조각을 읽는다
-    let page = past_page(&mut conn, cache.as_deref(), &obj_hashes, &date, filter.stime, filter.etime, wide_page_count(), &cur, seal)
+    let page = past_page(&mut conn, cache.as_deref(), &hashes, &date, filter.stime, filter.etime, wide_page_count(), &cur, seal)
         .map_err(|e| format!("트랜잭션 찾기: {e}"))?;
     let (rows, next, done) = (page.rows, page.next, page.done);
     let scanned = rows.len();
@@ -1232,10 +1401,7 @@ pub async fn search_xlog_page(
         hits.retain(|x| m.passes_names(x, &name));
     }
     link.release_query_conn(conn).await;
-    state.virtualize_xlogs(&link, &mut hits);
-
-    log::debug!("search_xlog_page: {date} {}~{} → {scanned}건 중 {}건, done={done}", filter.stime, filter.etime, hits.len());
-    Ok(WidePage { xlogs: hits, cursor: next, done, scanned })
+    Ok(((hits, scanned), next, done))
 }
 
 /// 힙 히스토그램 — 클래스별 인스턴스 수와 점유 바이트.
@@ -2904,5 +3070,43 @@ mod stream_retry_tests {
             seen.push(ms);
         }
         assert_eq!(seen, vec![1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);
+    }
+}
+
+#[cfg(test)]
+mod hub_cursor_tests {
+    use super::*;
+
+    fn part(link: usize, t: i64, done: bool) -> PartCursor {
+        PartCursor { link, cursor: PastCursor { has_more: !done, last_txid: 1, last_xlog_time: t }, done }
+    }
+
+    #[test]
+    fn 콜렉터_하나면_예전_모양_그대로다() {
+        let c = HubCursor { base: PastCursor { has_more: true, last_txid: 7, last_xlog_time: 100 }, parts: Vec::new() };
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v, serde_json::json!({ "has_more": true, "last_txid": 7, "last_xlog_time": 100 }));
+        // 화면이 예전 모양으로 돌려줘도 읽는다
+        let back: HubCursor = serde_json::from_value(v).unwrap();
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn 콜렉터_여럿이면_자리를_실어_보내고_그대로_돌려받는다() {
+        let c = combine_parts(vec![part(1, 200, false), part(0, 100, true)]);
+        let back: HubCursor = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back, c);
+        assert_eq!(back.parts[0].link, 0, "콜렉터 번호 순");
+    }
+
+    #[test]
+    fn 하나라도_안_끝났으면_더_있고_자리는_합이라_하나만_밀려도_바뀐다() {
+        let a = combine_parts(vec![part(0, 100, true), part(1, 200, false)]);
+        assert!(a.base.has_more);
+        assert_eq!(a.base.last_xlog_time, 300);
+        let b = combine_parts(vec![part(0, 100, true), part(1, 250, false)]);
+        assert_ne!(a.base.last_xlog_time, b.base.last_xlog_time, "화면의 «안 밀렸다» 판정에 안 걸린다");
+        let done = combine_parts(vec![part(0, 100, true), part(1, 250, true)]);
+        assert!(!done.base.has_more);
     }
 }

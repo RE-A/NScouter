@@ -107,3 +107,148 @@ async fn 콜렉터_하나만_붙으면_해시와_이름이_그대로다() {
         assert!(!o.obj_name.contains(" @"));
     }
 }
+
+// ─── 과거 조회·찾기·분포 (2단계) ─────────────────────────────
+//
+// 이 환경의 에이전트(host agent)는 XLog 를 안 만든다. **에이전트가 보내는 길(UDP `CAFE` + 팩) 그대로**
+// 합성 XLog 를 콜렉터에 넣고 받아 본다. txid 는 시험마다 새로 잡는다(다시 돌려도 안 섞이게).
+
+use nscouter_lib::commands::{distribution_all, past_page_all, wide_page_all, HubCursor};
+use nscouter_lib::scouter::codec::ScouterWriter;
+use nscouter_lib::scouter::objtype::date_key;
+use nscouter_lib::scouter::pack::XLogPack;
+use nscouter_lib::scouter::protocol::PACK_XLOG;
+use nscouter_lib::scouter::search::SearchXLogFilter;
+
+/// 콜렉터 시간대(Test/collector: Asia/Seoul)
+const KST: i64 = 9 * 3600 * 1000;
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64
+}
+
+/// 에이전트처럼 XLog 를 UDP 로 보낸다 — `CAFE` + 팩 종류 + 블롭(`XLogPack.write`)
+fn send_xlogs(port: u16, xs: &[XLogPack]) {
+    let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    for x in xs {
+        let mut w = ScouterWriter::new();
+        w.write_blob(&x.to_blob());
+        let mut pkt = b"CAFE".to_vec();
+        pkt.push(PACK_XLOG);
+        pkt.extend(w.into_bytes());
+        sock.send_to(&pkt, ("127.0.0.1", port)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+fn xlog(obj_hash: i32, txid: i64, end_time: i64, elapsed: i32, ip: &str) -> XLogPack {
+    // 콜렉터(2.21.3 `XLogPreCore`)가 버리지 않게 — 바이트코드로 확인한 조건:
+    //   · `service == 0` 이면 «버려진 XLog»(`XLogPack.isDropped`)로 보고 저장하지 않는다
+    //   · `ignore_global_consequent_sampling` 이 켜져 있으면 `discard_type` 이 1·3·5(살아 있는 것)여야 한다
+    XLogPack {
+        service: 0x5eed,
+        obj_hash,
+        txid,
+        gxid: txid,
+        end_time,
+        elapsed,
+        ipaddr: ip.into(),
+        discard_type: 1,
+        ignore_global_consequent_sampling: true,
+        ..XLogPack::default()
+    }
+}
+
+/// 과거 조회를 끝까지 넘긴다 (화면 `pastXLog.ts` 와 같은 규칙)
+async fn past_all(st: &AppState, hashes: &[i32], date: &str, s: i64, e: i64) -> (Vec<XLogPack>, Vec<HubCursor>) {
+    let mut out = Vec::new();
+    let mut cursors = Vec::new();
+    let mut cursor: Option<HubCursor> = None;
+    for _ in 0..50 {
+        let page = past_page_all(st, hashes.to_vec(), date.into(), s, e, 7, cursor.clone()).await.expect("과거 조회 실패");
+        out.extend(page.xlogs);
+        cursors.push(page.cursor.clone());
+        let stuck = cursor.as_ref().is_some_and(|c| c.base.last_xlog_time == page.cursor.base.last_xlog_time);
+        if !page.cursor.base.has_more || stuck {
+            break;
+        }
+        cursor = Some(page.cursor);
+    }
+    (out, cursors)
+}
+
+#[tokio::test]
+#[ignore]
+async fn 과거_조회_찾기_분포가_두_콜렉터를_합친다() {
+    let (pa, pb) = (port("NSC_PORT_A", 16100), port("NSC_PORT_B", 16200));
+    let st = state();
+    connect_links(&st, vec![target("A", pa), target("B", pb)]).await.unwrap();
+    let list = object_list_all(&st).await.unwrap();
+    let vh = |n: &str| list.iter().find(|o| o.obj_name == n).unwrap_or_else(|| panic!("{n} 없음")).obj_hash;
+    let (va, vb, vonly) = (vh("/web01"), vh("/web01 @B"), vh("/only-b"));
+    let real = st.route(vb).unwrap().1; // 두 콜렉터의 web01 원래 해시 (같다)
+    let real_only = st.route(vonly).unwrap().1;
+
+    // 구간: 지금부터 90초 전 ~ 지금. txid 는 시각에서 따 다시 돌려도 안 겹치게
+    let t0 = now_ms() - 60_000;
+    let base = now_ms() * 1000;
+    let a: Vec<XLogPack> = (0..30).map(|i| xlog(real, base + i, t0 + i * 1000, 100, "10.1.1.1")).collect();
+    let b: Vec<XLogPack> = (0..20).map(|i| xlog(real, base + 100 + i, t0 + i * 1500, 2000, "10.9.9.1")).collect();
+    let only: Vec<XLogPack> = (0..10).map(|i| xlog(real_only, base + 200 + i, t0 + i * 2000, 3000, "10.9.9.2")).collect();
+    send_xlogs(pa, &a);
+    let mut to_b = b.clone();
+    to_b.extend(only.clone());
+    send_xlogs(pb, &to_b);
+    // 콜렉터가 파일에 쓰기를 기다린다
+    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+
+    let date = date_key(t0, KST);
+    let (s, e) = (t0 - 30_000, now_ms() + 5_000);
+    // 이 시험이 넣은 것만, txid 로 한 번씩 — 페이지 경계의 같은 시각은 다시 온다(F-28, 화면도 txid 로 거른다)
+    let mine = |xs: &[XLogPack]| -> Vec<XLogPack> {
+        let mut seen = std::collections::HashSet::new();
+        xs.iter().filter(|x| x.txid >= base && x.txid < base + 1000 && seen.insert(x.txid)).cloned().collect()
+    };
+
+    // ① 과거 조회 — 세 서버(콜렉터 둘) 다 온다. B 의 web01 은 화면용 해시로
+    let (rows, cursors) = past_all(&st, &[va, vb, vonly], &date, s, e).await;
+    let rows = mine(&rows);
+    let mut txids: Vec<i64> = rows.iter().map(|x| x.txid).collect();
+    txids.sort();
+    txids.dedup();
+    println!("과거 조회: {}건 ({}페이지), 마지막 자리 parts={}", txids.len(), cursors.len(), cursors.last().unwrap().parts.len());
+    assert_eq!(txids.len(), 60, "A 30 + B 20 + only-b 10");
+    assert_eq!(rows.iter().filter(|x| x.obj_hash == va).count(), 30);
+    assert_eq!(rows.iter().filter(|x| x.obj_hash == vb).count(), 20, "B 의 web01 은 화면용 해시로 온다");
+    assert_eq!(rows.iter().filter(|x| x.obj_hash == vonly).count(), 10);
+    assert!(cursors.iter().all(|c| c.parts.len() == 2), "콜렉터 둘이면 자리를 콜렉터마다 든다");
+    assert!(cursors.len() > 1, "페이지 7건이라 여러 번 넘긴다");
+
+    // ② 한 콜렉터만 고르면 예전 그대로 — parts 가 없다
+    let (rows_a, cur_a) = past_all(&st, &[va], &date, s, e).await;
+    assert_eq!(mine(&rows_a).len(), 30);
+    assert!(cur_a.iter().all(|c| c.parts.is_empty()));
+
+    // ③ 찾기 — IP 로 거르면 B 쪽만 (콜렉터를 넘어 합친다)
+    let filter = SearchXLogFilter { stime: s, etime: e, ip: "10.9.9".into(), ..SearchXLogFilter::default() };
+    let mut found = Vec::new();
+    let mut cursor: Option<HubCursor> = None;
+    for _ in 0..20 {
+        let p = wide_page_all(&st, filter.clone(), date.clone(), vec![va, vb, vonly], cursor.clone()).await.expect("찾기 실패");
+        found.extend(p.xlogs);
+        if p.done {
+            break;
+        }
+        cursor = Some(p.cursor);
+    }
+    let found = mine(&found);
+    println!("찾기: {}건", found.len());
+    assert_eq!(found.len(), 30, "10.9.9.* 는 B 의 web01 20 + only-b 10");
+    assert!(found.iter().all(|x| x.obj_hash == vb || x.obj_hash == vonly));
+
+    // ④ 분포 — 콜렉터를 합쳐 센다 (이 시험 것만 있는 구간이 아니므로 «적어도» 로 본다)
+    let d = distribution_all(&st, vec![va, vb, vonly], s, e, KST).await.expect("분포 실패");
+    println!("분포: total={} max={}ms", d.total, d.max_ms);
+    assert!(d.total >= 60);
+    assert!(d.max_ms >= 3000, "only-b(B 콜렉터)의 3초짜리가 세어졌다");
+}
