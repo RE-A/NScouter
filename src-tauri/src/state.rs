@@ -201,6 +201,12 @@ impl AppState {
         self.objmap.lock().unwrap_or_else(|p| p.into_inner()).virt(link.idx, real, &link.name)
     }
 
+    /// 이 콜렉터의 해시가 **이미 아는 오브젝트**면 화면용 해시로, 모르면 그대로 — 외부 대상(DB·API) 해시처럼
+    /// 오브젝트가 아닌 것을 표에 올리지 않는다 (토폴로지)
+    pub fn virt_known(&self, link: &CollectorLink, real: i32) -> i32 {
+        self.objmap.lock().unwrap_or_else(|p| p.into_inner()).peek(link.idx, real).unwrap_or(real)
+    }
+
     /// 해시가 겹쳐 다른 값을 받았나 — 그런 오브젝트는 이름에 콜렉터를 붙인다
     pub fn is_tagged(&self, link: &CollectorLink, real: i32) -> bool {
         self.objmap.lock().unwrap_or_else(|p| p.into_inner()).peek(link.idx, real).is_some_and(|v| v != real)

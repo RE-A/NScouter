@@ -334,12 +334,29 @@ pub struct ConnectionInfo {
     pub clock_offset_ms: Option<i64>,
     /// 함께 붙은 콜렉터들 (주 콜렉터가 맨 앞). 데모·미연결이면 빈다
     pub collectors: Vec<CollectorStatus>,
+    /// 붙은 콜렉터끼리 시계가 가장 많이 어긋난 폭(ms). 둘 이상 붙어 시계를 잰 때만 —
+    /// 실시간 «지금» 은 주 콜렉터의 시계라, 이게 크면 다른 콜렉터의 점이 그만큼 밀려 보인다
+    pub clock_skew_ms: Option<i64>,
+}
+
+/// 시계 차들 중 가장 큰 것 − 가장 작은 것. 둘 미만이면 잴 것이 없다
+fn clock_skew(offsets: &[i64]) -> Option<i64> {
+    if offsets.len() < 2 {
+        return None;
+    }
+    Some(offsets.iter().max()? - offsets.iter().min()?)
 }
 
 async fn connection_info(state: &AppState) -> Result<ConnectionInfo, String> {
     let sid = state.server_id.lock().await.clone();
     let mut collectors = Vec::new();
+    let mut offsets: Vec<i64> = Vec::new();
     for l in state.links() {
+        if l.is_connected().await {
+            if let Some(o) = *l.clock_offset_ms.lock().await {
+                offsets.push(o);
+            }
+        }
         collectors.push(CollectorStatus {
             name: l.name.clone(),
             host: l.host.clone(),
@@ -354,6 +371,7 @@ async fn connection_info(state: &AppState) -> Result<ConnectionInfo, String> {
         server_id: sid.unwrap_or_default(),
         clock_offset_ms: state.clock_offset_ms().await,
         collectors,
+        clock_skew_ms: clock_skew(&offsets),
     })
 }
 
@@ -375,7 +393,7 @@ pub async fn get_connection_info(state: State<'_, AppState>) -> Result<Connectio
 pub async fn refresh_connection(app: AppHandle, state: State<'_, AppState>) -> Result<ConnectionInfo, String> {
     let sid = state.server_id.lock().await.clone().ok_or("연결되지 않음")?;
     if sid == DEMO_SERVER_ID {
-        return Ok(ConnectionInfo { connected: true, server_id: sid, clock_offset_ms: None, collectors: Vec::new() });
+        return Ok(ConnectionInfo { connected: true, server_id: sid, clock_offset_ms: None, collectors: Vec::new(), clock_skew_ms: None });
     }
     let links = state.links();
     let tasks: Vec<_> = links.iter().map(|l| {
@@ -656,19 +674,6 @@ async fn request_map_on(
     Ok(found)
 }
 
-/// 화면용 해시들 중 **주 콜렉터의 것만** 원래 해시로 — 아직 여러 콜렉터를 합치지 못하는 조회
-/// (과거 XLog·분포·트랜잭션 찾기·카운터)가 쓴다. 다른 콜렉터의 오브젝트는 빠진다
-fn primary_part(state: &AppState, vhashes: &[i32]) -> Result<(Arc<CollectorLink>, Vec<i32>), String> {
-    let primary = state.primary()?;
-    let reals = state
-        .split_hashes(vhashes)
-        .into_iter()
-        .find(|(l, _)| l.idx == primary.idx)
-        .map(|(_, r)| r)
-        .unwrap_or_default();
-    Ok((primary, reals))
-}
-
 /// 비활성 오브젝트를 콜렉터에서 지운다.
 ///
 /// **전역이다.** 같은 콜렉터에 붙은 다른 사람 화면에서도 사라진다.
@@ -680,7 +685,12 @@ fn primary_part(state: &AppState, vhashes: &[i32]) -> Result<(Arc<CollectorLink>
 /// 실패가 아니다 (F-35 의 «응답 없음» 부류와 같다).
 #[tauri::command]
 pub async fn remove_inactive_objects(state: State<'_, AppState>) -> Result<(), String> {
-    request_map(&state, CMD_OBJECT_REMOVE_INACTIVE, MapPack::new()).await?;
+    // 붙은 콜렉터 전부에서 정리한다 — 화면의 목록이 콜렉터들을 합친 것이다
+    for link in state.links() {
+        if link.is_connected().await {
+            request_map_on(&link, CMD_OBJECT_REMOVE_INACTIVE, MapPack::new()).await?;
+        }
+    }
     log::info!("remove_inactive_objects: 비활성 정리 요청");
     Ok(())
 }
@@ -824,6 +834,24 @@ impl SummaryKind {
     }
 }
 
+/// 요약을 물을 곳 — `obj_hash` 가 0(타입 전체)이면 붙은 콜렉터 전부에 0 으로, 아니면 그 오브젝트의 콜렉터에
+/// 원래 해시로
+async fn summary_targets(state: &AppState, obj_hash: i32) -> Result<Vec<(Arc<CollectorLink>, i32)>, String> {
+    if obj_hash != 0 {
+        return Ok(vec![state.route(obj_hash)?]);
+    }
+    let mut out = Vec::new();
+    for l in state.links() {
+        if l.is_connected().await {
+            out.push((l, 0));
+        }
+    }
+    if out.is_empty() {
+        return Err("연결되지 않음".into());
+    }
+    Ok(out)
+}
+
 /// 구간 요약 — 서비스 / SQL / API / IP / UA.
 ///
 /// `obj_hash` 가 0 이면 타입 전체다. `id` 는 해시이므로 화면에서 사전으로 풀어야 한다.
@@ -839,16 +867,19 @@ pub async fn get_summary(
 ) -> Result<Vec<SummaryRow>, String> {
     // **종류마다 묻고 id 로 더한다** (`merge_summary`). 첫 종류만 물으면
     // 커스텀 종류(`monitoring_group_type`)를 쓰는 곳에서 나머지 시스템이 통째로 빠진다.
+    // 콜렉터 여럿이면 콜렉터마다도 묻고 같은 id(글의 해시)로 더한다
     let mut parts = Vec::with_capacity(obj_types.len());
-    for obj_type in &obj_types {
-        let param = build_summary_param(&date, stime, etime, obj_type, obj_hash);
-        parts.push(
-            request_map(&state, kind.cmd(), param)
-                .await?
-                .as_ref()
-                .map(parse_summary)
-                .unwrap_or_default(),
-        );
+    for (link, hash) in summary_targets(&state, obj_hash).await? {
+        for obj_type in &obj_types {
+            let param = build_summary_param(&date, stime, etime, obj_type, hash);
+            parts.push(
+                request_map_on(&link, kind.cmd(), param)
+                    .await?
+                    .as_ref()
+                    .map(parse_summary)
+                    .unwrap_or_default(),
+            );
+        }
     }
     let rows = merge_summary(parts);
     log::debug!("get_summary: {} × {:?} → {}행", kind.cmd(), obj_types, rows.len());
@@ -866,15 +897,17 @@ pub async fn get_error_summary(
     obj_hash: i32,
 ) -> Result<Vec<ErrorSummaryRow>, String> {
     let mut parts = Vec::with_capacity(obj_types.len());
-    for obj_type in &obj_types {
-        let param = build_summary_param(&date, stime, etime, obj_type, obj_hash);
-        parts.push(
-            request_map(&state, CMD_LOAD_SERVICE_ERROR_SUMMARY, param)
-                .await?
-                .as_ref()
-                .map(parse_error_summary)
-                .unwrap_or_default(),
-        );
+    for (link, hash) in summary_targets(&state, obj_hash).await? {
+        for obj_type in &obj_types {
+            let param = build_summary_param(&date, stime, etime, obj_type, hash);
+            parts.push(
+                request_map_on(&link, CMD_LOAD_SERVICE_ERROR_SUMMARY, param)
+                    .await?
+                    .as_ref()
+                    .map(parse_error_summary)
+                    .unwrap_or_default(),
+            );
+        }
     }
     let rows = merge_error_summary(parts);
     log::debug!("get_error_summary: {:?} → {}행", obj_types, rows.len());
@@ -890,14 +923,42 @@ pub async fn get_interaction(
     state: State<'_, AppState>,
     obj_types: Vec<String>,
 ) -> Result<Vec<InteractionCounterPack>, String> {
-    let primary = state.primary()?;
-    let mut conn_guard = primary.connection.lock().await;
+    // 콜렉터마다 묻고 이어 붙인다. 호출 한 줄의 양끝 중 **그 콜렉터가 아는 오브젝트**만 화면용 해시로
+    // 바꾼다 — 외부 대상(DB·API) 해시를 오브젝트로 등록하면 안 된다. 콜렉터를 넘는 호출은 이어지지 않는다
+    // (콜렉터는 제 에이전트가 보낸 것만 안다)
+    let mut rows = Vec::new();
+    let mut any = false;
+    for link in state.links() {
+        if !link.is_connected().await {
+            continue;
+        }
+        any = true;
+        for mut r in interaction_on(&link, &obj_types).await? {
+            // 보낸 오브젝트의 이름도 서버 목록과 같게 (해시가 겹친 것은 ` @콜렉터`)
+            if state.is_tagged(&link, r.from_hash) {
+                r.obj_name = link.tagged_name(&r.obj_name);
+            }
+            r.from_hash = state.virt_known(&link, r.from_hash);
+            r.to_hash = state.virt_known(&link, r.to_hash);
+            rows.push(r);
+        }
+    }
+    if !any {
+        return Err("연결되지 않음".into());
+    }
+    log::debug!("get_interaction: {:?} → {}행", obj_types, rows.len());
+    Ok(rows)
+}
+
+/// 콜렉터 하나의 인터랙션 (원래 해시)
+async fn interaction_on(link: &CollectorLink, obj_types: &[String]) -> Result<Vec<InteractionCounterPack>, String> {
+    let mut conn_guard = link.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
     // 종류마다 묻고 이어 붙인다. 호출 한 줄은 그것을 **보낸 오브젝트**의 것이라
     // 종류가 다르면 겹치지 않는다. `send_request` 가 매번 소켓을 새로 연다 (F-1).
     let mut rows = Vec::new();
-    for obj_type in &obj_types {
+    for obj_type in obj_types {
         let mut param = MapPack::new();
         param.put("objType", ScouterValue::Text(obj_type.clone()));
         // 빈 리스트를 보내면 콜렉터가 살아 있는 오브젝트로 채운다 (F-40)
@@ -915,7 +976,6 @@ pub async fn get_interaction(
             }
         }
     }
-    log::debug!("get_interaction: {:?} → {}행", obj_types, rows.len());
     Ok(rows)
 }
 
@@ -928,11 +988,32 @@ pub async fn get_interaction(
 pub async fn get_object_type_families(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::scouter::family::ObjectTypeFamily>, String> {
-    let rows = request_map(&state, CMD_GET_XML_COUNTER, MapPack::new())
-        .await?
-        .as_ref()
-        .map(crate::scouter::family::parse_counter_xml_families)
-        .unwrap_or_default();
+    families_all(&state).await
+}
+
+/// `get_object_type_families` 의 몸통
+pub async fn families_all(state: &AppState) -> Result<Vec<crate::scouter::family::ObjectTypeFamily>, String> {
+    // 콜렉터마다 사이트 정의가 다를 수 있다 — 합집합으로, 같은 종류가 서로 다르면 **주 콜렉터**(앞) 것을 쓴다
+    let mut rows: Vec<crate::scouter::family::ObjectTypeFamily> = Vec::new();
+    for link in state.links() {
+        if !link.is_connected().await {
+            continue;
+        }
+        let got = request_map_on(&link, CMD_GET_XML_COUNTER, MapPack::new())
+            .await?
+            .as_ref()
+            .map(crate::scouter::family::parse_counter_xml_families)
+            .unwrap_or_default();
+        for f in got {
+            match rows.iter().find(|r| r.name == f.name) {
+                Some(r) if r.family != f.family => {
+                    log::warn!("오브젝트 종류 {} 의 Family 가 콜렉터마다 다르다: {} / {}({}) — 앞의 것을 쓴다", f.name, r.family, f.family, link.name)
+                }
+                Some(_) => {}
+                None => rows.push(f),
+            }
+        }
+    }
     log::debug!("get_object_type_families: 종류 {}개", rows.len());
     Ok(rows)
 }
@@ -2205,22 +2286,56 @@ async fn gxid_on(link: &CollectorLink, gxid: i64, date: &str) -> Result<Vec<XLog
 
 // ─── objType 단위 조회 ───────────────────────────────────────
 
-/// objType 요청 1회. 응답은 MapPack 여러 개다.
-async fn request_objtype_maps(
-    state: &State<'_, AppState>,
+/// objType 요청 1회를 **붙은 콜렉터 전부에** 보낸다 — 동시에. 콜렉터마다 받은 MapPack 들을 돌려준다.
+///
+/// 못 붙은 콜렉터는 건너뛴다(헤더가 빨갛게 보인다). 붙어 있는 콜렉터가 실패하면 실패다 — 합계에서
+/// 한 콜렉터가 조용히 빠지면 «그만큼뿐» 으로 읽힌다. 콜렉터가 하나면 예전과 같다.
+async fn request_objtype_maps_all(
+    state: &AppState,
+    cmd: &str,
+    param: &MapPack,
+) -> Result<Vec<(Arc<CollectorLink>, Vec<MapPack>)>, String> {
+    let links = state.links();
+    if links.is_empty() {
+        return Err("연결되지 않음".to_string());
+    }
+    let mut tasks = Vec::new();
+    for link in links {
+        if !link.is_connected().await {
+            continue;
+        }
+        let (l, cmd, param) = (link.clone(), cmd.to_string(), param.clone());
+        tasks.push((link, tokio::spawn(async move { request_objtype_maps_on(&l, &cmd, &param).await })));
+    }
+    if tasks.is_empty() {
+        return Err("연결되지 않음".to_string());
+    }
+    let multi = tasks.len() > 1;
+    let mut out = Vec::with_capacity(tasks.len());
+    for (link, t) in tasks {
+        let maps = t
+            .await
+            .map_err(|e| format!("조회 작업 실패: {e}"))?
+            .map_err(|e| if multi { format!("{e} ({})", link.name) } else { e })?;
+        out.push((link, maps));
+    }
+    Ok(out)
+}
+
+/// objType 요청 1회 — 콜렉터 하나. 응답은 MapPack 여러 개다.
+async fn request_objtype_maps_on(
+    link: &CollectorLink,
     cmd: &str,
     param: &MapPack,
 ) -> Result<Vec<MapPack>, String> {
     // **공용 연결을 잠그지 않는다.** 6시간짜리 카운터 조회가 몇 초씩 걸리는 동안
-    // 액티브 서비스 2초 폴링이 통째로 멈추던 자리다 (`AppState::query_pool`).
+    // 액티브 서비스 2초 폴링이 통째로 멈추던 자리다 (`CollectorLink::query_pool`).
     // 접속 여부만 확인하고 요청은 빌린 연결로 보낸다.
-    // 아직 주 콜렉터만 본다 (여러 콜렉터 합치기 3단계)
-    let primary = state.primary()?;
-    if !primary.is_connected().await {
+    if !link.is_connected().await {
         return Err("연결되지 않음".to_string());
     }
 
-    let mut conn = primary.acquire_query_conn().await?;
+    let mut conn = link.acquire_query_conn().await?;
     let session = conn.session;
 
     let result = (|| -> Result<Vec<MapPack>, String> {
@@ -2240,13 +2355,31 @@ async fn request_objtype_maps(
 
     match result {
         Ok(out) => {
-            state.release_query_conn(conn).await;
+            link.release_query_conn(conn).await;
             Ok(out)
         }
         // **돌려주지 않는다.** 응답을 끝까지 못 읽은 소켓에는 남은 조각이 있어,
         // 다음 조회가 남의 답을 자기 것으로 읽는다.
         Err(e) => Err(e),
     }
+}
+
+/// 같은 이름의 서비스 그룹을 하나로 — 콜렉터 여럿에 같은 그룹이 있으면 건수·에러는 더하고
+/// 평균 응답시간은 **건수로 가중해** 낸다(그냥 평균하면 한가한 쪽이 바쁜 쪽만큼 무게를 갖는다)
+fn merge_service_groups(rows: Vec<ServiceGroupRow>) -> Vec<ServiceGroupRow> {
+    let mut out: Vec<ServiceGroupRow> = Vec::new();
+    for r in rows {
+        match out.iter_mut().find(|o| o.name == r.name) {
+            Some(o) => {
+                let n = o.count + r.count;
+                o.elapsed = if n > 0 { (o.elapsed * o.count as f64 + r.elapsed * r.count as f64) / n as f64 } else { 0.0 };
+                o.count = n;
+                o.error += r.error;
+            }
+            None => out.push(r),
+        }
+    }
+    out
 }
 
 /// 타입 전체의 액티브 서비스 합계와 TPS.
@@ -2260,20 +2393,17 @@ pub async fn get_active_speed(
 ) -> Result<ActiveSpeed, String> {
     // 종류마다 합계를 받아 **더한다.** 단계별 건수와 TPS 는 오브젝트들을 더한 값이라
     // 종류를 넘어 더해도 뜻이 같다 — 콜렉터의 GROUP 도 그 종류의 오브젝트들을 더한 것이다.
+    // 콜렉터 여럿이면 콜렉터의 합계도 더한다 — 같은 이유로 뜻이 같다
     let mut total = ActiveSpeed { obj_hash: 0, act1: 0, act2: 0, act3: 0, tps: 0.0 };
     for obj_type in &obj_types {
-        let maps = request_objtype_maps(
-            &state,
-            CMD_ACTIVESPEED_REAL_TIME_GROUP,
-            &build_objtype_param(obj_type),
-        )
-        .await?;
-        // 응답이 없으면 그 종류의 에이전트가 없는 것이다. 0으로 더한다.
-        if let Some(a) = maps.first().map(parse_active_speed) {
-            total.act1 += a.act1;
-            total.act2 += a.act2;
-            total.act3 += a.act3;
-            total.tps += a.tps;
+        for (_, maps) in request_objtype_maps_all(&state, CMD_ACTIVESPEED_REAL_TIME_GROUP, &build_objtype_param(obj_type)).await? {
+            // 응답이 없으면 그 종류의 에이전트가 없는 것이다. 0으로 더한다.
+            if let Some(a) = maps.first().map(parse_active_speed) {
+                total.act1 += a.act1;
+                total.act2 += a.act2;
+                total.act3 += a.act3;
+                total.tps += a.tps;
+            }
         }
     }
     Ok(total)
@@ -2288,20 +2418,17 @@ pub async fn get_service_group(
     state: State<'_, AppState>,
     obj_hashes: Vec<i32>,
 ) -> Result<Vec<ServiceGroupRow>, String> {
-    // 아직 주 콜렉터만 본다 (여러 콜렉터 합치기 3단계)
-    let (_, obj_hashes) = primary_part(&state, &obj_hashes)?;
-    if obj_hashes.is_empty() {
-        return Ok(Vec::new());
+    // 고른 서버를 콜렉터별로 갈라 콜렉터마다 묻는다. 같은 그룹 이름은 하나로 합친다
+    let mut rows: Vec<ServiceGroupRow> = Vec::new();
+    for (link, reals) in state.split_hashes(&obj_hashes) {
+        if !link.is_connected().await {
+            continue;
+        }
+        let maps = request_objtype_maps_on(&link, CMD_REALTIME_SERVICE_GROUP, &build_service_group_param(&reals)).await?;
+        // 응답은 MapPack 하나에 네 병렬 리스트다. 여러 개가 와도 이어 붙인다.
+        rows.extend(maps.iter().flat_map(parse_service_group));
     }
-    let maps = request_objtype_maps(
-        &state,
-        CMD_REALTIME_SERVICE_GROUP,
-        &build_service_group_param(&obj_hashes),
-    )
-    .await?;
-
-    // 응답은 MapPack 하나에 네 병렬 리스트다. 여러 개가 와도 이어 붙인다.
-    let rows: Vec<ServiceGroupRow> = maps.iter().flat_map(parse_service_group).collect();
+    let rows = merge_service_groups(rows);
     log::debug!("get_service_group: 그룹 {}개", rows.len());
     Ok(rows)
 }
@@ -2313,15 +2440,15 @@ pub async fn get_active_speed_by_object(
     obj_types: Vec<String>,
 ) -> Result<Vec<ActiveSpeed>, String> {
     // 오브젝트별이라 종류를 넘어 이어 붙이면 된다 — 한 오브젝트는 한 종류에만 있다.
+    // 콜렉터를 넘어도 같다 — 해시는 화면용으로 바꾼다
     let mut out = Vec::new();
     for obj_type in &obj_types {
-        let maps = request_objtype_maps(
-            &state,
-            CMD_ACTIVESPEED_REAL_TIME,
-            &build_objtype_param(obj_type),
-        )
-        .await?;
-        out.extend(maps.iter().map(parse_active_speed));
+        for (link, maps) in request_objtype_maps_all(&state, CMD_ACTIVESPEED_REAL_TIME, &build_objtype_param(obj_type)).await? {
+            out.extend(maps.iter().map(parse_active_speed).map(|mut a| {
+                a.obj_hash = state.virt(&link, a.obj_hash);
+                a
+            }));
+        }
     }
     Ok(out)
 }
@@ -2330,6 +2457,16 @@ pub async fn get_active_speed_by_object(
 #[tauri::command]
 pub async fn get_today_counter(
     state: State<'_, AppState>,
+    counter: String,
+    obj_types: Vec<String>,
+    date: Option<String>,
+) -> Result<Vec<CounterSeries>, String> {
+    today_counter_all(&state, counter, obj_types, date).await
+}
+
+/// `get_today_counter` 의 몸통
+pub async fn today_counter_all(
+    state: &AppState,
     counter: String,
     obj_types: Vec<String>,
     date: Option<String>,
@@ -2347,8 +2484,12 @@ pub async fn get_today_counter(
                 build_today_counter_param(&counter, obj_type),
             ),
         };
-        let maps = request_objtype_maps(&state, cmd, &param).await?;
-        series.extend(maps.iter().map(parse_counter_series));
+        for (link, maps) in request_objtype_maps_all(state, cmd, &param).await? {
+            series.extend(maps.iter().map(parse_counter_series).map(|mut c| {
+                c.obj_hash = state.virt(&link, c.obj_hash);
+                c
+            }));
+        }
     }
     log::debug!(
         "get_today_counter: {counter}/{:?} → 오브젝트 {}개",
@@ -2388,13 +2529,18 @@ pub async fn get_past_counter(
     let mut parts = Vec::new();
     for obj_type in &obj_types {
         for (s, e) in split_by_day(stime, etime, tz_offset_ms) {
-            let maps = request_objtype_maps(
-                &state,
-                CMD_COUNTER_PAST_TIME_ALL,
-                &build_past_time_counter_param(&counter, obj_type, s, e),
-            )
-            .await?;
-            parts.push(maps.iter().map(parse_counter_series).collect::<Vec<_>>());
+            // 화면용 해시로 바꾼 뒤에 잇는다 — 콜렉터 둘의 같은 원래 해시가 한 줄로 섞이지 않게
+            for (link, maps) in request_objtype_maps_all(&state, CMD_COUNTER_PAST_TIME_ALL, &build_past_time_counter_param(&counter, obj_type, s, e)).await? {
+                parts.push(
+                    maps.iter()
+                        .map(parse_counter_series)
+                        .map(|mut c| {
+                            c.obj_hash = state.virt(&link, c.obj_hash);
+                            c
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
         }
     }
 
@@ -2423,12 +2569,11 @@ pub async fn get_type_active_services(
     state: State<'_, AppState>,
     obj_type: String,
 ) -> Result<TypeActiveServices, String> {
-    let maps = request_objtype_maps(
-        &state,
-        CMD_OBJECT_ACTIVE_SERVICE_LIST,
-        &build_active_service_param(&obj_type, None),
-    )
-    .await?;
+    // 콜렉터마다 묻고 이어 붙인다. 오브젝트 해시는 화면용으로 바꾼다
+    let mut maps: Vec<(Arc<CollectorLink>, MapPack)> = Vec::new();
+    for (link, ms) in request_objtype_maps_all(&state, CMD_OBJECT_ACTIVE_SERVICE_LIST, &build_active_service_param(&obj_type, None)).await? {
+        maps.extend(ms.into_iter().map(|m| (link.clone(), m)));
+    }
 
     let mut rows = Vec::new();
     let mut incomplete = Vec::new();
@@ -2437,16 +2582,19 @@ pub async fn get_type_active_services(
     // **줄어든 자리가 어디인지** 가 드러난다 — 답을 안 한 것인지(오브젝트가 목록에서 빠짐),
     // 빈손인지(`!`), 답은 했는데 행이 없는 것인지(`=0`). 셋은 고치는 자리가 다르다.
     let mut per_object = Vec::with_capacity(maps.len());
-    for m in &maps {
+    for (link, m) in &maps {
         // **팩이 왔다는 것 자체가 신호다.** 행이 0건이어도 «물어봤고 한가하다» 는 뜻이라,
         // 팩이 아예 없는 오브젝트(콜렉터가 비활성으로 보고 건너뛴 것)와 구별해야 한다.
-        let hash = m.get_decimal("objHash").unwrap_or(0) as i32;
+        let hash = state.virt(link, m.get_decimal("objHash").unwrap_or(0) as i32);
         answered.push(hash);
         let complete = is_complete(m);
         if !complete {
             incomplete.push(hash);
         }
-        let got = parse_active_services(m);
+        let mut got = parse_active_services(m);
+        for r in &mut got {
+            r.obj_hash = state.virt(link, r.obj_hash);
+        }
         per_object.push(format!("{hash}={}{}", got.len(), if complete { "" } else { "!" }));
         rows.extend(got);
     }
@@ -2503,11 +2651,28 @@ pub async fn get_today_visitor(
     state: State<'_, AppState>,
     obj_type: String,
 ) -> Result<i64, String> {
-    let primary = state.primary()?;
-    let mut conn_guard = primary.connection.lock().await;
+    // **콜렉터 여럿이면 더한다 — 근사치다.** 방문자는 콜렉터마다 중복을 뺀 수라, 두 콜렉터에 걸쳐
+    // 들어온 사람은 두 번 세어진다. 콜렉터는 방문자 목록을 주지 않아 정확히 합칠 길이 없다
+    let mut total = 0;
+    let mut any = false;
+    for link in state.links() {
+        if !link.is_connected().await {
+            continue;
+        }
+        any = true;
+        total += visitor_on(&link, &obj_type).await?;
+    }
+    if !any {
+        return Err("연결되지 않음".into());
+    }
+    Ok(total)
+}
+
+async fn visitor_on(link: &CollectorLink, obj_type: &str) -> Result<i64, String> {
+    let mut conn_guard = link.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
-    let param = build_objtype_param(&obj_type);
+    let param = build_objtype_param(obj_type);
     let session = conn.session;
     conn.send_request(CMD_VISITOR_REALTIME_TOTAL, session, &param)
         .map_err(|e| format!("방문자 수 요청 실패: {e}"))?;
@@ -2537,21 +2702,34 @@ pub async fn start_counter_stream(
         counters.len()
     );
 
-    // 아직 주 콜렉터만 본다 (여러 콜렉터 합치기 3단계). 빈 목록으로 열면 아무것도 안 온다
-    let (link, obj_hashes) = primary_part(&state, &obj_hashes)?;
-    if obj_hashes.is_empty() {
+    // 고른 서버를 콜렉터별로 가른다. 빈 목록으로 열면 아무것도 안 온다
+    let mut parts = Vec::new();
+    for (link, reals) in state.split_hashes(&obj_hashes) {
+        if link.is_connected().await {
+            parts.push((link, reals));
+        }
+    }
+    if parts.is_empty() {
         state.streams.stop(StreamKind::Counter).await;
         return Ok(());
     }
     let stop_flag = state.streams.take_token(StreamKind::Counter).await;
+    let multi = state.links().len() > 1;
 
     tokio::spawn(async move {
-        let l = link.clone();
-        let mut conn = match tokio::task::spawn_blocking(move || l.open()).await.unwrap_or_else(|e| Err(e.to_string())) {
-            Ok(c) => c,
-            Err(e) => { log::error!("카운터 스트림 연결 실패: {e}"); return; }
-        };
-        run_counter_stream(&mut conn, link, obj_hashes, counters, app, stop_flag).await;
+        // 콜렉터마다 세션 하나 — 요청마다 소켓은 새로 연다(F-1)
+        let mut feeds = Vec::new();
+        for (link, reals) in parts {
+            let l = link.clone();
+            match tokio::task::spawn_blocking(move || l.open()).await.unwrap_or_else(|e| Err(e.to_string())) {
+                Ok(c) => feeds.push((link, c, reals)),
+                Err(e) => log::error!("카운터 스트림 연결 실패 ({}): {e}", link.name),
+            }
+        }
+        if feeds.is_empty() {
+            return;
+        }
+        run_counter_stream(feeds, counters, app, stop_flag, multi).await;
     });
 
     Ok(())
@@ -2561,35 +2739,47 @@ pub async fn start_counter_stream(
 ///
 /// 카운터당 요청 1회가 아니라 **MULTI 로 한 번에** 받는다.
 /// F-1(연결당 명령 1개) 때문에 요청 수가 곧 TCP 연결 수다.
+///
+/// **콜렉터가 여럿이면 한 틱에 전부 묻고 합쳐서 한 번에 낸다.** 콜렉터마다 따로 내면 화면은 카운터마다
+/// 반쪽짜리 값을 번갈아 받는다. 한 콜렉터가 실패해도 나머지 값은 낸다(그 콜렉터의 일은 `counter-error` 로)
 async fn run_counter_stream(
-    conn: &mut ScouterConnection,
-    link: Arc<CollectorLink>,
-    obj_hashes: Vec<i32>,
+    mut feeds: Vec<(Arc<CollectorLink>, ScouterConnection, Vec<i32>)>,
     counters: Vec<String>,
     app: AppHandle,
     stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    multi: bool,
 ) {
     let refs: Vec<&str> = counters.iter().map(|s| s.as_str()).collect();
     while !stop_flag.load(Ordering::Relaxed) {
-        if let Err(e) = poll_counter_once(conn, &link, &obj_hashes, &refs, &app) {
-            log::warn!("카운터 폴링 오류: {e}");
-            let _ = app.emit("counter-error", serde_json::json!({ "message": e.to_string() }));
+        let mut values: Vec<(String, CounterValue)> = Vec::new();
+        for (link, conn, hashes) in feeds.iter_mut() {
+            match poll_counter_once(conn, hashes, &refs) {
+                Ok(rows) => {
+                    let state = app.state::<AppState>();
+                    // 화면은 화면용 해시로 오브젝트를 가린다 (`crate::hub`)
+                    values.extend(rows.into_iter().map(|r| {
+                        (r.counter, CounterValue { obj_hash: state.virt(link, r.obj_hash), value: r.value, total: r.total })
+                    }));
+                }
+                Err(e) => {
+                    let who = if multi { format!(" ({})", link.name) } else { String::new() };
+                    log::warn!("카운터 폴링 오류{who}: {e}");
+                    let _ = app.emit("counter-error", serde_json::json!({ "message": format!("{e}{who}") }));
+                }
+            }
         }
+        emit_counters(&app, values);
         tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     }
     log::info!("카운터 스트리밍 종료");
 }
 
-/// MULTI 로 전체 카운터를 조회해 **카운터별로** `counter-data` 이벤트를 낸다.
-///
-/// 프론트의 차트가 카운터 단위라 페이로드도 카운터 단위로 쪼갠다.
+/// MULTI 로 전체 카운터를 조회한다 — 콜렉터 하나 (원래 해시)
 fn poll_counter_once(
     conn: &mut ScouterConnection,
-    link: &CollectorLink,
     obj_hashes: &[i32],
     counters: &[&str],
-    app: &AppHandle,
-) -> std::io::Result<()> {
+) -> std::io::Result<Vec<crate::scouter::counter::CounterRow>> {
     let param = build_counter_multi_param(obj_hashes, counters);
     let session = conn.session;
     conn.send_request(CMD_COUNTER_REAL_TIME_ALL_MULTI, session, &param)?;
@@ -2600,10 +2790,16 @@ fn poll_counter_once(
             rows = parse_counter_multi(&map);
         }
     }
+    Ok(rows)
+}
 
-    if rows.is_empty() {
+/// **카운터별로** `counter-data` 이벤트를 낸다.
+///
+/// 프론트의 차트가 카운터 단위라 페이로드도 카운터 단위로 쪼갠다.
+fn emit_counters(app: &AppHandle, values: Vec<(String, CounterValue)>) {
+    if values.is_empty() {
         log::debug!("카운터: 값 없음");
-        return Ok(());
+        return;
     }
 
     let time = std::time::SystemTime::now()
@@ -2613,19 +2809,14 @@ fn poll_counter_once(
 
     // 카운터별로 묶는다. 순서는 유지할 필요가 없다.
     let mut grouped: HashMap<String, Vec<CounterValue>> = HashMap::new();
-    for r in rows {
-        grouped
-            .entry(r.counter)
-            .or_default()
-            // 화면은 화면용 해시로 오브젝트를 가린다 (`crate::hub`)
-            .push(CounterValue { obj_hash: app.state::<AppState>().virt(link, r.obj_hash), value: r.value, total: r.total });
+    for (counter, v) in values {
+        grouped.entry(counter).or_default().push(v);
     }
 
     log::debug!("카운터 {}종 emit", grouped.len());
     for (counter, values) in grouped {
         let _ = app.emit("counter-data", CounterUpdate { time, counter, values });
     }
-    Ok(())
 }
 
 // ─── start_alert_stream ──────────────────────────────────────
@@ -2638,32 +2829,43 @@ pub async fn start_alert_stream(
 ) -> Result<(), String> {
     log::info!("start_alert_stream 시작");
 
-    // 아직 주 콜렉터만 본다 (여러 콜렉터 합치기 3단계)
-    let link = state.primary()?;
+    // 콜렉터마다 폴링 루프 하나 — 알림은 하나씩 오는 것이라 합칠 것이 없다. 중지 토큰은 나눠 쥔다
+    let links = state.links();
+    if links.is_empty() {
+        return Err("연결되지 않음".into());
+    }
     let stop_flag = state.streams.take_token(StreamKind::Alert).await;
 
-    tokio::spawn(async move {
-        let mut conn = match tokio::task::spawn_blocking(move || link.open()).await.unwrap_or_else(|e| Err(e.to_string())) {
-            Ok(c) => c,
-            Err(e) => { log::error!("알림 스트림 연결 실패: {e}"); return; }
-        };
-        run_alert_stream(&mut conn, app, stop_flag).await;
-    });
+    for link in links {
+        if !link.is_connected().await {
+            continue;
+        }
+        let (app, stop_flag) = (app.clone(), stop_flag.clone());
+        tokio::spawn(async move {
+            let l = link.clone();
+            let mut conn = match tokio::task::spawn_blocking(move || l.open()).await.unwrap_or_else(|e| Err(e.to_string())) {
+                Ok(c) => c,
+                Err(e) => { log::error!("알림 스트림 연결 실패 ({}): {e}", link.name); return; }
+            };
+            run_alert_stream(&mut conn, link, app, stop_flag).await;
+        });
+    }
 
     Ok(())
 }
 
 async fn run_alert_stream(
     conn: &mut ScouterConnection,
+    link: Arc<CollectorLink>,
     app: AppHandle,
     stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     // 커서를 안 들고 있으면 폴링마다 같은 알람이 다시 온다 (N-9).
     let mut cursor = StreamCursor::default();
     while !stop_flag.load(Ordering::Relaxed) {
-        let result = poll_alert_once(conn, &mut cursor, &app);
+        let result = poll_alert_once(conn, &link, &mut cursor, &app);
         if let Err(e) = result {
-            log::warn!("알림 폴링 오류: {e}");
+            log::warn!("알림 폴링 오류 ({}): {e}", link.name);
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     }
@@ -2672,6 +2874,7 @@ async fn run_alert_stream(
 
 fn poll_alert_once(
     conn: &mut ScouterConnection,
+    link: &CollectorLink,
     cursor: &mut StreamCursor,
     app: &AppHandle,
 ) -> std::io::Result<()> {
@@ -2681,8 +2884,10 @@ fn poll_alert_once(
 
     loop {
         match conn.read_next_pack()? {
-            Some(AnyPack::Alert(alert)) => {
-                log::debug!("알림 수신: level={}, title={}", alert.level, alert.title);
+            Some(AnyPack::Alert(mut alert)) => {
+                log::debug!("알림 수신 ({}): level={}, title={}", link.name, alert.level, alert.title);
+                // 화면은 화면용 해시로 오브젝트를 가린다 (`crate::hub`)
+                alert.obj_hash = app.state::<AppState>().virt(link, alert.obj_hash);
                 let _ = app.emit("alert-data", alert);
             }
             Some(AnyPack::Map(map)) => cursor.update_from(&map),
@@ -3070,6 +3275,29 @@ mod stream_retry_tests {
             seen.push(ms);
         }
         assert_eq!(seen, vec![1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);
+    }
+}
+
+#[cfg(test)]
+mod hub_merge_tests {
+    use super::*;
+
+    #[test]
+    fn 같은_서비스_그룹은_하나로_건수로_가중한_평균을_낸다() {
+        let r = |name: &str, count, elapsed, error| ServiceGroupRow { name: name.into(), count, elapsed, error };
+        let m = merge_service_groups(vec![r("order", 100, 10.0, 1), r("pay", 5, 50.0, 0), r("order", 300, 30.0, 2)]);
+        assert_eq!(m.len(), 2);
+        assert_eq!((m[0].count, m[0].error), (400, 3));
+        assert!((m[0].elapsed - 25.0).abs() < 1e-9, "(100×10 + 300×30) / 400 = 25");
+        let z = merge_service_groups(vec![r("x", 0, 0.0, 0), r("x", 0, 0.0, 0)]);
+        assert_eq!(z[0].elapsed, 0.0, "건수가 0 이면 0 으로 나누지 않는다");
+    }
+
+    #[test]
+    fn 시계_차는_둘_이상일_때만_가장_큰_폭을_준다() {
+        assert_eq!(clock_skew(&[]), None);
+        assert_eq!(clock_skew(&[300]), None);
+        assert_eq!(clock_skew(&[300, -2_000, 100]), Some(2_300));
     }
 }
 

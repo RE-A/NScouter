@@ -79,6 +79,8 @@ export interface ConnectionInfo {
   clock_offset_ms: number | null;
   /** 함께 붙은 콜렉터들 (주 콜렉터가 맨 앞). 데모·미연결이면 빈다 */
   collectors?: CollectorStatus[];
+  /** 붙은 콜렉터끼리 시계가 가장 많이 어긋난 폭(ms). 둘 이상 붙어 잰 때만 */
+  clock_skew_ms?: number | null;
 }
 
 export async function getConnectionInfo(): Promise<ConnectionInfo> {

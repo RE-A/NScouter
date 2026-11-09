@@ -252,3 +252,34 @@ async fn 과거_조회_찾기_분포가_두_콜렉터를_합친다() {
     assert!(d.total >= 60);
     assert!(d.max_ms >= 3000, "only-b(B 콜렉터)의 3초짜리가 세어졌다");
 }
+
+// ─── 카운터·종류 표 (3단계) ──────────────────────────────────
+//
+// host agent 가 실제로 내는 카운터(linux 종류의 Cpu)로 본다.
+
+use nscouter_lib::commands::{families_all, today_counter_all};
+
+#[tokio::test]
+#[ignore]
+async fn 카운터와_종류_표가_두_콜렉터를_합친다() {
+    let (pa, pb) = (port("NSC_PORT_A", 16100), port("NSC_PORT_B", 16200));
+    let st = state();
+    connect_links(&st, vec![target("A", pa), target("B", pb)]).await.unwrap();
+    let list = object_list_all(&st).await.unwrap();
+    let vh = |n: &str| list.iter().find(|o| o.obj_name == n).unwrap_or_else(|| panic!("{n} 없음")).obj_hash;
+
+    // 오늘 누적 카운터 — 오브젝트별 시계열이 콜렉터 둘에서 다 오고, B 의 web01 은 화면용 해시다
+    let series = today_counter_all(&st, "Cpu".into(), vec!["linux".into()], None).await.expect("카운터 실패");
+    let hashes: Vec<i32> = series.iter().map(|c| c.obj_hash).collect();
+    println!("Cpu 오늘 누적: 오브젝트 {:?}", hashes);
+    for n in ["/web01", "/web01 @B", "/only-a", "/only-b"] {
+        assert!(hashes.contains(&vh(n)), "{n} 의 시계열이 없다: {hashes:?}");
+    }
+    assert_eq!(hashes.len(), 4, "콜렉터 둘의 같은 원래 해시가 한 줄로 섞이지 않는다");
+
+    // 종류 표 — 두 콜렉터의 합집합, 같은 종류는 한 번만
+    let fams = families_all(&st).await.expect("종류 표 실패");
+    let linux: Vec<_> = fams.iter().filter(|f| f.name == "linux").collect();
+    println!("종류 {}개, linux → {:?}", fams.len(), linux.iter().map(|f| &f.family).collect::<Vec<_>>());
+    assert_eq!(linux.len(), 1);
+}

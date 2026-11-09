@@ -280,6 +280,9 @@ const ALL_CHART_COUNTERS: CounterName[] = [
   ...DATASOURCE_CHART_COUNTERS,
 ];
 
+/** 함께 붙은 콜렉터끼리 시계가 이보다 많이 어긋나면 헤더에 알린다 (ms) */
+const CLOCK_SKEW_WARN_MS = 2_000;
+
 export default function App({ windowLabel }: {
   /**
    * 떼어 낸 XLog 창이면 그 창 이름(`xlogwin-N`), 메인 창이면 없다.
@@ -312,6 +315,11 @@ export default function App({ windowLabel }: {
    * 하나라도 못 붙으면 그 콜렉터의 서버는 목록에 안 나오는데, 그걸 «서버가 죽었다» 로 읽으면 안 된다.
    */
   const [collectors, setCollectors] = useState<CollectorStatus[]>([]);
+  /**
+   * 함께 붙은 콜렉터끼리 시계가 어긋난 폭(ms). 실시간 «지금» 은 주 콜렉터의 시계라 이게 크면
+   * 다른 콜렉터의 점이 그만큼 앞뒤로 밀려 보인다 — 화면이 틀린 것이 아니라 콜렉터 시계가 다른 것이라고 알린다
+   */
+  const [clockSkew, setClockSkew] = useState<number | null>(null);
   /**
    * 데모(합성 데이터)로 붙었는가. 그때는 콜렉터가 없어 콜렉터 설정을 물을 곳이 없다.
    * 이름은 Rust `DEMO_SERVER_ID` 와 같아야 한다.
@@ -620,6 +628,7 @@ export default function App({ windowLabel }: {
         if (!info.connected) return;
         setServerClockOffset(info.clock_offset_ms);
         setCollectors(info.collectors ?? []);
+        setClockSkew(info.clock_skew_ms ?? null);
         setIsConnected(true);
         setServerId(info.server_id);
         setConnectionEpoch(n => n + 1);
@@ -737,6 +746,7 @@ export default function App({ windowLabel }: {
           .then(info => {
             setServerClockOffset(info.clock_offset_ms);
             setCollectors(info.collectors ?? []);
+            setClockSkew(info.clock_skew_ms ?? null);
           })
           .catch(() => {});
       }),
@@ -744,6 +754,7 @@ export default function App({ windowLabel }: {
         setIsConnected(false); setServerId('');
         setServerClockOffset(null);
         setCollectors([]);
+        setClockSkew(null);
         // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
         setSelectedXLogs([]); clearNames(); clearObjectHistory(); setAgentMap(new Map());
         objectsRef.current = [];
@@ -963,6 +974,7 @@ export default function App({ windowLabel }: {
         .then(info => {
           setCurrentServer(label);
           setCollectors(info.collectors ?? []);
+          setClockSkew(info.clock_skew_ms ?? null);
           // 최신 목록을 setState 안에서 집는다 — `switchServer` 와 같은 이유
           setServers(prev => {
             void persistServers(prev, label);
@@ -1837,6 +1849,7 @@ export default function App({ windowLabel }: {
         setServerClockOffset(info.clock_offset_ms);
         // 처음에 못 붙었던 콜렉터가 이번에 붙었을 수 있다
         setCollectors(info.collectors ?? []);
+        setClockSkew(info.clock_skew_ms ?? null);
         setRefreshing({ busy: false, error: null });
       })
       .catch((e: unknown) => setRefreshing({ busy: false, error: String(e) }))
@@ -2030,6 +2043,14 @@ export default function App({ windowLabel }: {
                 ))
               ) : (
                 t(serverId)
+              )}
+              {clockSkew !== null && clockSkew > CLOCK_SKEW_WARN_MS && (
+                <span
+                  className="text-warn"
+                  title={t('함께 붙은 콜렉터끼리 시계가 어긋나 있습니다 — 실시간 차트는 주 콜렉터(맨 앞)의 시계를 따르므로 다른 콜렉터의 점이 그만큼 밀려 보입니다')}
+                >
+                  ⚠ {t('시계 차')} {(clockSkew / 1000).toFixed(1)}s
+                </span>
               )}
             </span>
           )}

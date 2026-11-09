@@ -856,6 +856,9 @@ export const EN: Record<string, string> = {
   '체크한 서버들에 함께 붙습니다 — 서버 하나에 붙은 것처럼 보입니다': 'Connect to the checked servers together — they appear as one server',
   '붙지 못함': 'not connected',
   '함께 연결하지 못했습니다': 'Could not connect together',
+  '시계 차': 'clock skew',
+  '함께 붙은 콜렉터끼리 시계가 어긋나 있습니다 — 실시간 차트는 주 콜렉터(맨 앞)의 시계를 따르므로 다른 콜렉터의 점이 그만큼 밀려 보입니다':
+    'The connected collectors disagree on the time — the live chart follows the primary (first) collector, so dots from the others appear shifted by that much',
 
   // ── 버퍼 상한 ─────────────────────────────────────────
   '버퍼 상한': 'Buffer limit',
