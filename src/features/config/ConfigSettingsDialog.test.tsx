@@ -49,12 +49,23 @@ describe('ConfigSettingsDialog', () => {
   it('콜렉터 설정은 콜렉터에 묻고 콜렉터에 저장한다', async () => {
     render(<ConfigSettingsDialog target={{ kind: 'collector', name: '운영' }} onClose={() => {}} />);
     expect(await screen.findByText('TCP 수신 포트')).toBeTruthy();
-    expect(api.getServerConfig).toHaveBeenCalled();
+    // 콜렉터를 고르지 않았으면 주 콜렉터다 (이름 없이 묻는다)
+    expect(api.getServerConfig).toHaveBeenCalledWith(undefined);
     expect(api.getAgentConfig).not.toHaveBeenCalled();
 
     await saveOne('net_tcp_listen_port', '6200');
-    await waitFor(() => expect(api.saveServerConfig).toHaveBeenCalledWith('net_tcp_listen_port=6200\n'));
+    await waitFor(() => expect(api.saveServerConfig).toHaveBeenCalledWith('net_tcp_listen_port=6200\n', undefined));
     expect(api.saveAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('여러 콜렉터 중 고른 콜렉터에서 읽고 같은 콜렉터에 저장한다', async () => {
+    // 콜렉터 설정은 콜렉터마다 파일이 하나라 합칠 수 없다 — 읽은 곳과 쓰는 곳이 같아야 한다
+    render(<ConfigSettingsDialog target={{ kind: 'collector', name: 'QA', collector: 'QA' }} onClose={() => {}} />);
+    expect(await screen.findByText('TCP 수신 포트')).toBeTruthy();
+    expect(api.getServerConfig).toHaveBeenCalledWith('QA');
+
+    await saveOne('net_tcp_listen_port', '6200');
+    await waitFor(() => expect(api.saveServerConfig).toHaveBeenCalledWith('net_tcp_listen_port=6200\n', 'QA'));
   });
 
   it('에이전트 설정은 그 에이전트에 묻고 그 에이전트에 저장한다', async () => {

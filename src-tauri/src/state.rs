@@ -11,7 +11,6 @@ use tokio::sync::Mutex;
 use crate::cache::CacheDb;
 use crate::config::{resolve_data_dir, AppConfig};
 use crate::hub::{CollectorLink, ObjMap};
-use crate::scouter::connection::ScouterConnection;
 
 /// 스트림 종류. 각각 독립된 중지 토큰을 가진다.
 ///
@@ -143,7 +142,7 @@ impl AppState {
         self.objmap.lock().unwrap_or_else(|p| p.into_inner()).clear();
     }
 
-    /// 주 콜렉터 — 아직 여러 콜렉터를 합치지 못하는 조회가 여기에 묻는다
+    /// 주 콜렉터 — 실시간 «지금» 의 시계, 콜렉터를 고르지 않은 콜렉터 설정이 쓴다
     pub fn primary(&self) -> Result<Arc<CollectorLink>, String> {
         self.links.read().unwrap_or_else(|p| p.into_inner()).first().cloned().ok_or_else(|| "연결되지 않음".to_string())
     }
@@ -228,22 +227,6 @@ impl AppState {
         }
     }
 
-    // ── 주 콜렉터에 묻는 자리 (아직 여러 콜렉터를 합치지 못하는 조회) ──
-
-    /// 주 콜렉터의 조회용 연결을 빌린다
-    pub async fn acquire_query_conn(&self) -> Result<ScouterConnection, String> {
-        self.primary()?.acquire_query_conn().await
-    }
-
-    /// 빌린 연결을 **그 연결이 붙은 콜렉터의** 풀에 돌려준다. 붙은 콜렉터가 없으면 버린다
-    pub async fn release_query_conn(&self, conn: ScouterConnection) {
-        let (host, port) = conn.target();
-        let owner = self.links().into_iter().find(|l| l.host == host && l.port == port);
-        if let Some(l) = owner {
-            l.release_query_conn(conn).await;
-        }
-    }
-
     /// 데이터 폴더 아래의 한 자리.
     ///
     /// `config_path` 는 늘 `{exe_dir}/config.json` 이므로 그 부모가 실행파일 폴더다.
@@ -307,27 +290,6 @@ impl AppState {
         let each = mine / dbs.len() as u64;
         for db in &dbs {
             db.set_max_bytes(each);
-        }
-    }
-
-    /// 주 콜렉터의 캐시
-    pub async fn cache_handle(&self) -> Option<Arc<CacheDb>> {
-        match self.primary() {
-            Ok(l) => l.cache_handle().await,
-            Err(_) => None,
-        }
-    }
-
-    /// `cache_handle` — 막히는 일꾼 스레드에서 (`spawn_blocking` 안)
-    pub fn cache_handle_blocking(&self) -> Option<Arc<CacheDb>> {
-        self.primary().ok().and_then(|l| l.cache_handle_blocking())
-    }
-
-    /// 주 콜렉터 시계로 «지금 − 5분». 이보다 뒤의 XLog 는 «다 받았다» 고 적지 않는다 (`cache::xlog`)
-    pub async fn seal_before(&self) -> i64 {
-        match self.primary() {
-            Ok(l) => l.seal_before().await,
-            Err(_) => crate::scouter::connection::local_now_ms() - crate::cache::xlog::SEAL_MS,
         }
     }
 

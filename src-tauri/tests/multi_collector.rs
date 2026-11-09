@@ -283,3 +283,26 @@ async fn 카운터와_종류_표가_두_콜렉터를_합친다() {
     println!("종류 {}개, linux → {:?}", fams.len(), linux.iter().map(|f| &f.family).collect::<Vec<_>>());
     assert_eq!(linux.len(), 1);
 }
+
+// ─── 콜렉터 설정 (4단계) ─────────────────────────────────────
+
+use nscouter_lib::commands::server_config_of;
+
+#[tokio::test]
+#[ignore]
+async fn 콜렉터_설정은_고른_콜렉터의_것을_읽는다() {
+    let (pa, pb) = (port("NSC_PORT_A", 16100), port("NSC_PORT_B", 16200));
+    let st = state();
+    connect_links(&st, vec![target("A", pa), target("B", pb)]).await.unwrap();
+    let sid = |text: &str| text.lines().find(|l| l.starts_with("server_id=")).map(str::to_string);
+
+    let a = server_config_of(&st, Some("A")).await.unwrap();
+    let b = server_config_of(&st, Some("B")).await.unwrap();
+    let primary = server_config_of(&st, None).await.unwrap();
+    println!("A {:?} · B {:?} · 주 {:?}", sid(&a.text), sid(&b.text), sid(&primary.text));
+    assert_eq!(sid(&a.text).as_deref(), Some("server_id=COLL-A"));
+    assert_eq!(sid(&b.text).as_deref(), Some("server_id=COLL-B"));
+    assert_eq!(sid(&primary.text), sid(&a.text), "고르지 않으면 주 콜렉터(맨 앞)");
+    // 붙어 있지 않은 이름이면 엉뚱한 콜렉터에 묻지 않고 거절한다
+    assert!(server_config_of(&st, Some("없는것")).await.is_err());
+}

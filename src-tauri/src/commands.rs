@@ -636,16 +636,6 @@ async fn request_object_map(
     request_map_on(&link, cmd, build_object_param(real)).await
 }
 
-/// 파라미터를 직접 넘기는 버전. 파라미터가 아예 없는 커맨드에도 쓴다. **주 콜렉터**에 묻는다.
-async fn request_map(
-    state: &State<'_, AppState>,
-    cmd: &str,
-    param: MapPack,
-) -> Result<Option<MapPack>, String> {
-    let primary = state.primary()?;
-    request_map_on(&primary, cmd, param).await
-}
-
 /// 콜렉터 하나에 묻는다
 async fn request_map_on(
     link: &CollectorLink,
@@ -1018,15 +1008,37 @@ pub async fn families_all(state: &AppState) -> Result<Vec<crate::scouter::family
     Ok(rows)
 }
 
-/// 콜렉터 설정 — 파라미터가 없다.
+/// 설정을 읽고 쓸 콜렉터 — 이름을 주면 그 콜렉터, 안 주면 주 콜렉터.
+///
+/// **콜렉터 설정은 합칠 수 없다** — 콜렉터마다 파일이 하나씩이다. 여럿을 함께 볼 때는 화면이 어느 콜렉터인지
+/// 고르게 하고, 읽은 콜렉터와 같은 이름으로 저장한다. 그 사이에 접속이 바뀌어 이름이 없으면 엉뚱한 콜렉터에
+/// 쓰지 않고 거절한다
+async fn config_link(state: &AppState, collector: Option<&str>) -> Result<Arc<CollectorLink>, String> {
+    let link = match collector {
+        Some(name) => state.link_named(name).ok_or_else(|| format!("콜렉터 «{name}» 에 붙어 있지 않습니다"))?,
+        None => state.primary()?,
+    };
+    if !link.is_connected().await {
+        return Err(format!("콜렉터 «{}» 에 연결되어 있지 않습니다", link.name));
+    }
+    Ok(link)
+}
+
+/// 콜렉터 설정. `collector` 로 어느 콜렉터인지 고른다(없으면 주 콜렉터).
 #[tauri::command]
-pub async fn get_server_config(state: State<'_, AppState>) -> Result<ConfigView, String> {
-    let text = request_map(&state, CMD_GET_CONFIGURE_SERVER, MapPack::new())
+pub async fn get_server_config(state: State<'_, AppState>, collector: Option<String>) -> Result<ConfigView, String> {
+    server_config_of(&state, collector.as_deref()).await
+}
+
+/// `get_server_config` 의 몸통
+pub async fn server_config_of(state: &AppState, collector: Option<&str>) -> Result<ConfigView, String> {
+    let link = config_link(state, collector).await?;
+    let text = request_map_on(&link, CMD_GET_CONFIGURE_SERVER, MapPack::new())
         .await?
         .as_ref()
         .map(parse_config_text)
         .unwrap_or_default();
-    let mut entries = request_map(&state, CMD_LIST_CONFIGURE_SERVER, MapPack::new())
+    let mut entries = request_map_on(&link, CMD_LIST_CONFIGURE_SERVER, MapPack::new())
         .await?
         .as_ref()
         .map(parse_config_entries)
@@ -1035,13 +1047,13 @@ pub async fn get_server_config(state: State<'_, AppState>) -> Result<ConfigView,
     // 설명과 값 종류 — **`objHash` 를 안 넣는다.** 콜렉터는 `objHash` 가 0 이면 자기 설정의 것을,
     // 아니면 그 에이전트에 되물어 준다(바이트코드 `getConfigureDesc`). ASIS 도 빈 MapPack 을 보낸다.
     // 못 받아도 표는 보여준다 — 에이전트 쪽과 같은 이유다.
-    let desc = request_map(&state, CMD_CONFIGURE_DESC, MapPack::new())
+    let desc = request_map_on(&link, CMD_CONFIGURE_DESC, MapPack::new())
         .await
         .ok()
         .flatten()
         .map(|m| parse_config_desc(&m))
         .unwrap_or_default();
-    let types = request_map(&state, CMD_CONFIGURE_VALUE_TYPE, MapPack::new())
+    let types = request_map_on(&link, CMD_CONFIGURE_VALUE_TYPE, MapPack::new())
         .await
         .ok()
         .flatten()
@@ -1050,7 +1062,8 @@ pub async fn get_server_config(state: State<'_, AppState>) -> Result<ConfigView,
     attach_meta(&mut entries, &desc, &types);
 
     log::debug!(
-        "get_server_config: 원문 {}자, {}개 항목 (설명 {} · 종류 {})",
+        "get_server_config({}): 원문 {}자, {}개 항목 (설명 {} · 종류 {})",
+        link.name,
         text.len(),
         entries.len(),
         desc.len(),
@@ -1067,7 +1080,7 @@ pub async fn get_server_config(state: State<'_, AppState>) -> Result<ConfigView,
 ///
 /// 빈 텍스트는 거절한다 — 콜렉터 설정이 통째로 지워진다.
 #[tauri::command]
-pub async fn save_server_config(state: State<'_, AppState>, text: String) -> Result<(), String> {
+pub async fn save_server_config(state: State<'_, AppState>, text: String, collector: Option<String>) -> Result<(), String> {
     if text.trim().is_empty() {
         return Err("빈 설정은 저장하지 않습니다 — 콜렉터 설정이 통째로 지워집니다".into());
     }
@@ -1078,11 +1091,12 @@ pub async fn save_server_config(state: State<'_, AppState>, text: String) -> Res
         crate::scouter::value::ScouterValue::Text(escape_config_text(&text)),
     );
 
-    let map = request_map(&state, CMD_SET_CONFIGURE_SERVER, param).await?;
+    let link = config_link(&state, collector.as_deref()).await?;
+    let map = request_map_on(&link, CMD_SET_CONFIGURE_SERVER, param).await?;
     let map = map.ok_or("콜렉터가 저장 결과를 주지 않았습니다")?;
     parse_save_result(&map)?;
 
-    log::debug!("save_server_config: {}자 저장", text.len());
+    log::info!("save_server_config({}): {}자 저장", link.name, text.len());
     Ok(())
 }
 

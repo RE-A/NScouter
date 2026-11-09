@@ -34,6 +34,7 @@ import {
   type SavedFilter,
 } from './features/xlog/components/savedFilters';
 import { ServerSwitcher } from './features/xlog/components/ServerSwitcher';
+import { CollectorConfigButton } from './features/xlog/components/CollectorConfigButton';
 import {
   displayName,
   fromLegacy,
@@ -326,6 +327,8 @@ export default function App({ windowLabel }: {
    */
   const isDemo = serverId === 'DEMO (합성 데이터)';
   const [showCollectorConfig, setShowCollectorConfig] = useState(false);
+  /** 콜렉터 설정을 열 콜렉터 이름. 콜렉터가 하나면 undefined(주 콜렉터) */
+  const [configCollector, setConfigCollector] = useState<string | undefined>(undefined);
   /**
    * XLog 탭들.
    *
@@ -2125,14 +2128,15 @@ export default function App({ windowLabel }: {
               «로그 좀 받아 주세요» 를 받은 사람이 설정 창을 뒤지다 못 찾았다.
               두 군데 두면 각자 제 상태를 들고 있어 서로 다른 값을 보여준다. */}
           {/* 콜렉터 설정 — **붙어 있을 때만.** 데모는 콜렉터가 없어 물을 곳이 없다 */}
+          {/* 콜렉터가 여럿이면 어느 콜렉터를 고칠지 먼저 고른다 — 설정은 콜렉터마다 따로다 */}
           {isConnected && !isDemo && (
-            <button
-              onClick={() => setShowCollectorConfig(true)}
-              title={t('지금 붙은 콜렉터의 설정을 보고 고칩니다')}
-              className="btn px-2 py-0.5 text-micro"
-            >
-              {t('콜렉터 설정')}
-            </button>
+            <CollectorConfigButton
+              collectors={collectors}
+              onOpen={c => {
+                setConfigCollector(c);
+                setShowCollectorConfig(true);
+              }}
+            />
           )}
           <button
             onClick={() => setShowSettings(true)}
@@ -2150,7 +2154,7 @@ export default function App({ windowLabel }: {
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {showCollectorConfig && (
         <ConfigSettingsDialog
-          target={{ kind: 'collector', name: currentServer ?? serverId }}
+          target={{ kind: 'collector', name: configCollector ?? currentServer ?? serverId, collector: configCollector }}
           onClose={() => setShowCollectorConfig(false)}
         />
       )}

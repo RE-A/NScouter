@@ -857,6 +857,7 @@ export const EN: Record<string, string> = {
   '붙지 못함': 'not connected',
   '함께 연결하지 못했습니다': 'Could not connect together',
   '시계 차': 'clock skew',
+  '고칠 콜렉터를 고른 뒤 설정을 엽니다': 'Pick which collector to edit, then open its settings',
   '함께 붙은 콜렉터끼리 시계가 어긋나 있습니다 — 실시간 차트는 주 콜렉터(맨 앞)의 시계를 따르므로 다른 콜렉터의 점이 그만큼 밀려 보입니다':
     'The connected collectors disagree on the time — the live chart follows the primary (first) collector, so dots from the others appear shifted by that much',
 

@@ -313,9 +313,12 @@ export async function getInteraction(objTypes: readonly string[]): Promise<Inter
   return invoke<InteractionRow[]>('get_interaction', { objTypes });
 }
 
-/** 콜렉터 설정. 오브젝트와 무관하다 */
-export async function getServerConfig(): Promise<ConfigView> {
-  return invoke<ConfigView>('get_server_config');
+/**
+ * 콜렉터 설정. 오브젝트와 무관하다.
+ * 여러 콜렉터에 함께 붙어 있으면 `collector`(콜렉터 이름)로 고른다 — 없으면 주 콜렉터
+ */
+export async function getServerConfig(collector?: string): Promise<ConfigView> {
+  return invoke<ConfigView>('get_server_config', { collector: collector ?? null });
 }
 
 /**
@@ -552,8 +555,9 @@ export async function getObjectTypeFamilies(): Promise<{ name: string; family: s
   return invoke<{ name: string; family: string }[]>('get_object_type_families');
 }
 
-export async function saveServerConfig(text: string): Promise<void> {
-  return invoke<void>('save_server_config', { text });
+/** 콜렉터 설정 저장. **읽은 콜렉터와 같은 `collector` 로** 부른다 */
+export async function saveServerConfig(text: string, collector?: string): Promise<void> {
+  return invoke<void>('save_server_config', { text, collector: collector ?? null });
 }
 
 /**
