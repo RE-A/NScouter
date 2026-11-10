@@ -62,6 +62,24 @@ const MAX_SERVERS: usize = 500;
 
 const NOT_CONNECTED: &str = "NScouter 가 콜렉터에 연결되어 있지 않습니다. 앱에서 서버에 접속한 뒤 다시 시도하세요.";
 
+/// `AppState` 를 꺼내 쓸 손잡이 — 앱에서는 `AppHandle`, 시험에서는 `Arc<AppState>`.
+/// 도구의 몸통(`*_core`)이 창 없이도 돌게 하려고 둔다
+pub trait StateRef: Clone + Send + Sync + 'static {
+    fn get(&self) -> impl std::ops::Deref<Target = AppState> + Send + '_;
+}
+
+impl StateRef for AppHandle {
+    fn get(&self) -> impl std::ops::Deref<Target = AppState> + Send + '_ {
+        self.state::<AppState>()
+    }
+}
+
+impl StateRef for std::sync::Arc<AppState> {
+    fn get(&self) -> impl std::ops::Deref<Target = AppState> + Send + '_ {
+        self.as_ref()
+    }
+}
+
 #[derive(Clone)]
 pub struct NScouterMcp {
     app: AppHandle,
@@ -164,39 +182,7 @@ impl NScouterMcp {
         description = "NScouter 가 붙어 있는 Scouter 콜렉터들의 서버(에이전트) 목록 — 이름·종류·살아 있는지·service_group(앱의 «서비스로 묶기» 규칙으로 묶인 논리 서비스)·collector(어느 콜렉터). 콜렉터가 여럿이어도 한 목록이다. 같은 이름이 두 콜렉터에 있으면 뒤쪽 것의 이름에 ` @콜렉터` 가 붙는다. search_transactions 의 server·service_group·collector 조건에 넣을 이름을 찾을 때 쓴다."
     )]
     async fn list_servers(&self) -> Result<String, String> {
-        let rule = group_rule(&self.app.state::<AppState>()).await;
-        let objects = with_conns(&self.app, None, move |conns, state| {
-            let mut out = Vec::new();
-            for (link, conn) in conns.iter_mut() {
-                for mut o in realtime_objects(conn)? {
-                    let real = o.obj_hash;
-                    o.obj_hash = state.virt(link, real);
-                    if o.obj_hash != real {
-                        o.obj_name = link.tagged_name(&o.obj_name);
-                    }
-                    out.push((o, link.name.clone()));
-                }
-            }
-            Ok(out)
-        })
-        .await?;
-        let mut rows: Vec<_> = objects
-            .into_iter()
-            .map(|(o, collector)| {
-                let group = rule.service_of(&o.obj_name, &o.tags);
-                (o.obj_name, o.obj_type, o.alive, group, collector)
-            })
-            .collect();
-        rows.sort();
-        let total = rows.len();
-        rows.truncate(MAX_SERVERS);
-        let out = json!({
-            "total": total,
-            "returned": rows.len(),
-            "columns": ["name", "type", "alive", "service_group", "collector"],
-            "rows": rows.iter().map(|(n, t, a, g, c)| json!([n, t, a, g, c])).collect::<Vec<_>>(),
-        });
-        Ok(out.to_string())
+        list_servers_core(&self.app).await
     }
 
     #[tool(
@@ -204,56 +190,14 @@ impl NScouterMcp {
         description = "구간 안의 트랜잭션(XLog)을 훑어 조건에 맞는 것을 짧은 행으로 돌려준다 — 프로파일은 싣지 않는다. 콜렉터가 여럿 붙어 있으면 전부를 한꺼번에 훑어 한 목록으로 준다(collector 로 좁힐 수 있다, 행의 collector 열). 기본은 최근 30분·느린 순 50건, 상한은 앱 설정(기본 6시간·500건). 조건은 앱 XLog 화면과 같다: 서버·서비스 묶음, 서비스/IP 포함·제외(여러 개면 포함은 OR), 에러만, 응답시간 이상/미만, 로그인·설명·text1~5, 담아 둔 조건(saved_filter). profile_contains 를 주면 프로파일 본문(SQL·바인딩 값·API·에러·메시지)까지 찾고 걸린 자리를 profile_hit 열에 싣는다(느리다 — 다른 조건으로 먼저 좁힐 것). 행마다 `ref` 가 있으니 자세히 볼 것만 골라 그대로 get_transaction_details 에 넘긴다. top_services 는 걸린 것을 서비스별로 센 요약이다."
     )]
     async fn search_transactions(&self, Parameters(a): Parameters<SearchArgs>) -> Result<String, String> {
-        let state = self.app.state::<AppState>();
-        let tz = self.app.state::<McpState>().tz_offset_ms();
-        let offset = state.clock_offset_ms().await.unwrap_or(0);
-        let lim = crate::tuning::mcp();
-        let window = resolve_window(local_now_ms() + offset, tz, lim.max_minutes, a.minutes, a.from.as_deref(), a.to.as_deref())?;
-        let sort = SortBy::parse(a.sort.as_deref())?;
-        let max = lim.list_max as usize;
-        let limit = (a.limit.map(|v| v as usize).unwrap_or(digest::DEFAULT_LIMIT)).clamp(1, max);
-
-        let mut filter = RowFilter {
-            error_only: a.error_only.unwrap_or(false),
-            min_elapsed_ms: a.min_elapsed_ms.unwrap_or(0).max(0),
-            max_elapsed_ms: a.max_elapsed_ms.unwrap_or(0).max(0),
-            service: Patterns::new(&many(a.service), &many(a.service_exclude)),
-            ip: Patterns::new(&many(a.ip), &many(a.ip_exclude)),
-            login: contains_rule(a.login.as_deref()),
-            desc: contains_rule(a.desc.as_deref()),
-            text: [a.text1, a.text2, a.text3, a.text4, a.text5].map(|t| contains_rule(t.as_deref())),
-        };
-        if let Some(name) = a.saved_filter.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-            let cfg = state.config.lock().await;
-            let saved = cfg.saved_filters.iter().find(|f| f.name.trim().eq_ignore_ascii_case(name)).ok_or_else(|| {
-                let names: Vec<&str> = cfg.saved_filters.iter().map(|f| f.name.as_str()).collect();
-                format!("담아 둔 조건 «{name}» 이 없습니다. 있는 것: {names:?}")
-            })?;
-            filter.apply_saved(saved);
-        }
-        if filter.min_elapsed_ms > 0 && filter.max_elapsed_ms > 0 && filter.min_elapsed_ms >= filter.max_elapsed_ms {
-            return Err("min_elapsed_ms 가 max_elapsed_ms 보다 작아야 합니다 — 이대로면 한 건도 안 걸립니다".into());
-        }
-        let servers = ServerFilter {
-            names: Patterns::new(&many(a.server), &many(a.server_exclude)),
-            groups: many(a.service_group).into_iter().map(|g| g.trim().to_lowercase()).filter(|g| !g.is_empty()).collect(),
-        };
-        let collectors: Vec<String> = many(a.collector).into_iter().map(|c| c.trim().to_lowercase()).filter(|c| !c.is_empty()).collect();
-        let rule = group_rule(&state).await;
-        let profile = contains_rule(a.profile_contains.as_deref());
-
         // 프로파일 검색은 콜렉터에 연결을 여럿(`perf.profile_workers`) 연다 — 한꺼번에 `mcp.limits.profile_searches`
         // 개까지만 돈다(기본 2). 넘치는 것은 앞의 것이 끝날 때까지 기다린다
         let mcp = self.app.state::<McpState>();
-        let _slot = match &profile {
+        let _slot = match contains_rule(a.profile_contains.as_deref()) {
             Some(_) => Some(mcp.profile_slot().await?),
             None => None,
         };
-
-        let multi = state.links().len() > 1;
-        let q = ScanQuery { window, tz, servers, rule, filter, profile, sort, limit, multi };
-        let pick = (!collectors.is_empty()).then_some(collectors);
-        with_conns(&self.app, pick, move |conns, state| Ok(scan(conns, state, &q)?.to_string())).await
+        search_core(&self.app, mcp.tz_offset_ms(), a).await
     }
 
     #[tool(
@@ -261,6 +205,13 @@ impl NScouterMcp {
         description = "트랜잭션 몇 건(앱 설정, 기본 최대 5)의 상세 — 헤더(서비스·서버·응답시간·에러), 스텝에 붙은 에러, 느린 스텝, 같은 SQL/API 를 묶은 합계(되풀이 = N+1 의심), 앞부분 흐름. 한 건에 12KB 안쪽으로 줄여 준다. SQL 바인딩 값은 기본으로 싣는다(앱 설정에서 끌 수 있다). refs 는 search_transactions 가 준 ref 를 그대로 넘긴다 — 콜렉터가 붙은 ref(`…@콜렉터`)는 그 콜렉터에만 묻는다."
     )]
     async fn get_transaction_details(&self, Parameters(a): Parameters<DetailArgs>) -> Result<String, String> {
+        details_core(&self.app, self.app.state::<McpState>().tz_offset_ms(), a).await
+    }
+}
+
+/// `get_transaction_details` 의 몸통
+pub async fn details_core<H: StateRef>(h: &H, tz: i64, a: DetailArgs) -> Result<String, String> {
+    {
         if a.refs.is_empty() {
             return Err("refs 가 비었습니다. search_transactions 가 준 ref 를 넘겨 주세요".into());
         }
@@ -277,13 +228,12 @@ impl NScouterMcp {
             .iter()
             .map(|r| parse_ref(r).map(|(t, d, c)| (r.trim().to_string(), t, d, c)))
             .collect::<Result<_, _>>()?;
-        let tz = self.app.state::<McpState>().tz_offset_ms();
-        let bind_values = self.app.state::<AppState>().config.lock().await.mcp.bind_values;
+        let bind_values = h.get().config.lock().await.mcp.bind_values;
 
         // **한 건씩 차례로 묻지 않는다.** 한 건에 요청이 서넛(XLog·프로파일·사전)이고 요청마다 소켓을 새로 연다(F-1) —
         // 왕복 500ms 면 5건을 차례로 열 때 10초가 넘는다. 건마다 소켓을 따로 열어 동시에 연다.
         // 콜렉터가 적힌 ref 는 그 콜렉터에만, 안 적힌 것은 붙은 콜렉터를 차례로 묻는다(txid 는 콜렉터끼리 안 겹친다)
-        with_conns(&self.app, None, move |conns, state| {
+        with_conns(h, None, move |conns, state| {
             let conns: &[(std::sync::Arc<CollectorLink>, ScouterConnection)] = conns;
             let results: Vec<Result<serde_json::Value, String>> = std::thread::scope(|sc| {
                 let handles: Vec<_> = parsed
@@ -320,6 +270,88 @@ impl NScouterMcp {
     }
 }
 
+/// `list_servers` 의 몸통
+pub async fn list_servers_core<H: StateRef>(h: &H) -> Result<String, String> {
+    let rule = group_rule(&h.get()).await;
+    let objects = with_conns(h, None, move |conns, state| {
+        let mut out = Vec::new();
+        for (link, conn) in conns.iter_mut() {
+            for mut o in realtime_objects(conn)? {
+                let real = o.obj_hash;
+                o.obj_hash = state.virt(link, real);
+                if o.obj_hash != real {
+                    o.obj_name = link.tagged_name(&o.obj_name);
+                }
+                out.push((o, link.name.clone()));
+            }
+        }
+        Ok(out)
+    })
+    .await?;
+    let mut rows: Vec<_> = objects
+        .into_iter()
+        .map(|(o, collector)| {
+            let group = rule.service_of(&o.obj_name, &o.tags);
+            (o.obj_name, o.obj_type, o.alive, group, collector)
+        })
+        .collect();
+    rows.sort();
+    let total = rows.len();
+    rows.truncate(MAX_SERVERS);
+    let out = json!({
+        "total": total,
+        "returned": rows.len(),
+        "columns": ["name", "type", "alive", "service_group", "collector"],
+        "rows": rows.iter().map(|(n, t, a, g, c)| json!([n, t, a, g, c])).collect::<Vec<_>>(),
+    });
+    Ok(out.to_string())
+}
+
+/// `search_transactions` 의 몸통 (프로파일 검색 자리는 부르는 쪽이 잡는다)
+pub async fn search_core<H: StateRef>(h: &H, tz: i64, a: SearchArgs) -> Result<String, String> {
+    let state = h.get();
+    let offset = state.clock_offset_ms().await.unwrap_or(0);
+    let lim = crate::tuning::mcp();
+    let window = resolve_window(local_now_ms() + offset, tz, lim.max_minutes, a.minutes, a.from.as_deref(), a.to.as_deref())?;
+    let sort = SortBy::parse(a.sort.as_deref())?;
+    let max = lim.list_max as usize;
+    let limit = (a.limit.map(|v| v as usize).unwrap_or(digest::DEFAULT_LIMIT)).clamp(1, max);
+
+    let mut filter = RowFilter {
+        error_only: a.error_only.unwrap_or(false),
+        min_elapsed_ms: a.min_elapsed_ms.unwrap_or(0).max(0),
+        max_elapsed_ms: a.max_elapsed_ms.unwrap_or(0).max(0),
+        service: Patterns::new(&many(a.service), &many(a.service_exclude)),
+        ip: Patterns::new(&many(a.ip), &many(a.ip_exclude)),
+        login: contains_rule(a.login.as_deref()),
+        desc: contains_rule(a.desc.as_deref()),
+        text: [a.text1, a.text2, a.text3, a.text4, a.text5].map(|t| contains_rule(t.as_deref())),
+    };
+    if let Some(name) = a.saved_filter.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        let cfg = state.config.lock().await;
+        let saved = cfg.saved_filters.iter().find(|f| f.name.trim().eq_ignore_ascii_case(name)).ok_or_else(|| {
+            let names: Vec<&str> = cfg.saved_filters.iter().map(|f| f.name.as_str()).collect();
+            format!("담아 둔 조건 «{name}» 이 없습니다. 있는 것: {names:?}")
+        })?;
+        filter.apply_saved(saved);
+    }
+    if filter.min_elapsed_ms > 0 && filter.max_elapsed_ms > 0 && filter.min_elapsed_ms >= filter.max_elapsed_ms {
+        return Err("min_elapsed_ms 가 max_elapsed_ms 보다 작아야 합니다 — 이대로면 한 건도 안 걸립니다".into());
+    }
+    let servers = ServerFilter {
+        names: Patterns::new(&many(a.server), &many(a.server_exclude)),
+        groups: many(a.service_group).into_iter().map(|g| g.trim().to_lowercase()).filter(|g| !g.is_empty()).collect(),
+    };
+    let collectors: Vec<String> = many(a.collector).into_iter().map(|c| c.trim().to_lowercase()).filter(|c| !c.is_empty()).collect();
+    let rule = group_rule(&state).await;
+    let profile = contains_rule(a.profile_contains.as_deref());
+
+    let multi = state.links().len() > 1;
+    let q = ScanQuery { window, tz, servers, rule, filter, profile, sort, limit, multi };
+    let pick = (!collectors.is_empty()).then_some(collectors);
+    with_conns(h, pick, move |conns, state| Ok(scan(conns, state, &q)?.to_string())).await
+}
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for NScouterMcp {
     fn get_info(&self) -> ServerConfig {
@@ -344,12 +376,13 @@ impl ServerHandler for NScouterMcp {
 ///
 /// `pick` 이 있으면 이름에 그 글자가 든 콜렉터만 (소문자). 못 붙은 콜렉터는 빠진다 — 하나도 없으면 미연결이다.
 /// **끝까지 성공했을 때만 연결을 돌려준다** — 응답을 다 못 읽은 소켓에는 남은 조각이 있어 다음 조회가 남의 답을 읽는다.
-async fn with_conns<T, F>(app: &AppHandle, pick: Option<Vec<String>>, f: F) -> Result<T, String>
+async fn with_conns<H, T, F>(h: &H, pick: Option<Vec<String>>, f: F) -> Result<T, String>
 where
+    H: StateRef,
     T: Send + 'static,
     F: FnOnce(&mut [(std::sync::Arc<CollectorLink>, ScouterConnection)], &AppState) -> Result<T, String> + Send + 'static,
 {
-    let state = app.state::<AppState>();
+    let state = h.get();
     if state.server_id.lock().await.is_none() {
         return Err(NOT_CONNECTED.into());
     }
@@ -379,9 +412,9 @@ where
             None => NOT_CONNECTED.into(),
         });
     }
-    let app2 = app.clone();
+    let h2 = h.clone();
     let (conns, result) = tokio::task::spawn_blocking(move || {
-        let state = app2.state::<AppState>();
+        let state = h2.get();
         let r = f(&mut conns, &state);
         (conns, r)
     })

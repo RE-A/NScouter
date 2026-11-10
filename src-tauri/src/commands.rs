@@ -628,7 +628,7 @@ pub async fn get_object_list_by_date(
 ///
 /// `obj_hash` 는 화면용 해시다 — 그 오브젝트의 콜렉터에 원래 해시로 묻는다 (`crate::hub`).
 async fn request_object_map(
-    state: &State<'_, AppState>,
+    state: &AppState,
     cmd: &str,
     obj_hash: i32,
 ) -> Result<Option<MapPack>, String> {
@@ -855,6 +855,19 @@ pub async fn get_summary(
     obj_types: Vec<String>,
     obj_hash: i32,
 ) -> Result<Vec<SummaryRow>, String> {
+    get_summary_core(&state, kind, date, stime, etime, obj_types, obj_hash).await
+}
+
+/// `get_summary` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_summary_core(
+    state: &AppState,
+    kind: SummaryKind,
+    date: String,
+    stime: i64,
+    etime: i64,
+    obj_types: Vec<String>,
+    obj_hash: i32,
+) -> Result<Vec<SummaryRow>, String> {
     // **종류마다 묻고 id 로 더한다** (`merge_summary`). 첫 종류만 물으면
     // 커스텀 종류(`monitoring_group_type`)를 쓰는 곳에서 나머지 시스템이 통째로 빠진다.
     // 콜렉터 여럿이면 콜렉터마다도 묻고 같은 id(글의 해시)로 더한다
@@ -911,6 +924,14 @@ pub async fn get_error_summary(
 #[tauri::command]
 pub async fn get_interaction(
     state: State<'_, AppState>,
+    obj_types: Vec<String>,
+) -> Result<Vec<InteractionCounterPack>, String> {
+    get_interaction_core(&state, obj_types).await
+}
+
+/// `get_interaction` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_interaction_core(
+    state: &AppState,
     obj_types: Vec<String>,
 ) -> Result<Vec<InteractionCounterPack>, String> {
     // 콜렉터마다 묻고 이어 붙인다. 호출 한 줄의 양끝 중 **그 콜렉터가 아는 오브젝트**만 화면용 해시로
@@ -1786,6 +1807,14 @@ pub async fn get_object_active_services(
     state: State<'_, AppState>,
     obj_hash: i32,
 ) -> Result<Vec<ActiveService>, String> {
+    get_object_active_services_core(&state, obj_hash).await
+}
+
+/// `get_object_active_services` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_object_active_services_core(
+    state: &AppState,
+    obj_hash: i32,
+) -> Result<Vec<ActiveService>, String> {
     let map = request_object_map(&state, CMD_OBJECT_ACTIVE_SERVICE_LIST, obj_hash).await?;
     let list = map.as_ref().map(parse_active_services).unwrap_or_default();
     log::debug!("get_object_active_services: objHash={obj_hash} → {}건", list.len());
@@ -1848,6 +1877,16 @@ pub async fn get_xlog_profile(
     date: String,
     obj_hash: i32,
     state: State<'_, AppState>,
+) -> Result<XLogProfilePack, String> {
+    get_xlog_profile_core(&state, txid, date, obj_hash).await
+}
+
+/// `get_xlog_profile` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_xlog_profile_core(
+    state: &AppState,
+    txid: String,
+    date: String,
+    obj_hash: i32,
 ) -> Result<XLogProfilePack, String> {
     let txid_i64: i64 = txid.parse().map_err(|_| format!("잘못된 txid: {txid}"))?;
     log::debug!("get_xlog_profile: txid={txid_i64}, date={date}");
@@ -1932,6 +1971,15 @@ pub struct SearchBatch {
 #[tauri::command]
 pub async fn search_profiles(
     state: State<'_, AppState>,
+    targets: Vec<SearchTarget>,
+    query: String,
+) -> Result<SearchBatch, String> {
+    search_profiles_core(&state, targets, query).await
+}
+
+/// `search_profiles` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn search_profiles_core(
+    state: &AppState,
     targets: Vec<SearchTarget>,
     query: String,
 ) -> Result<SearchBatch, String> {
@@ -2149,6 +2197,16 @@ pub async fn get_xlog_full_profile(
     date: String,
     obj_hash: i32,
 ) -> Result<XLogProfilePack, String> {
+    get_xlog_full_profile_core(&state, txid, date, obj_hash).await
+}
+
+/// `get_xlog_full_profile` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_xlog_full_profile_core(
+    state: &AppState,
+    txid: String,
+    date: String,
+    obj_hash: i32,
+) -> Result<XLogProfilePack, String> {
     let txid_i64: i64 = txid.parse().map_err(|_| format!("잘못된 txid: {txid}"))?;
 
     let (link, _) = state.route(obj_hash)?;
@@ -2175,6 +2233,15 @@ pub async fn get_xlog_detail(
     txid: String,
     date: String,
     state: State<'_, AppState>,
+) -> Result<XLogPack, String> {
+    get_xlog_detail_core(&state, txid, date).await
+}
+
+/// `get_xlog_detail` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_xlog_detail_core(
+    state: &AppState,
+    txid: String,
+    date: String,
 ) -> Result<XLogPack, String> {
     let txid_i64: i64 = txid.parse().map_err(|_| format!("잘못된 txid: {txid}"))?;
     log::debug!("get_xlog_detail: txid={txid_i64}, date={date}");
@@ -2242,6 +2309,15 @@ async fn xlog_by_txid_on(link: &CollectorLink, txid: i64, date: &str) -> Result<
 #[tauri::command]
 pub async fn load_xlog_by_gxid(
     state: State<'_, AppState>,
+    gxid: String,
+    date: String,
+) -> Result<Vec<XLogPack>, String> {
+    load_xlog_by_gxid_core(&state, gxid, date).await
+}
+
+/// `load_xlog_by_gxid` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn load_xlog_by_gxid_core(
+    state: &AppState,
     gxid: String,
     date: String,
 ) -> Result<Vec<XLogPack>, String> {
@@ -2405,6 +2481,14 @@ pub async fn get_active_speed(
     state: State<'_, AppState>,
     obj_types: Vec<String>,
 ) -> Result<ActiveSpeed, String> {
+    get_active_speed_core(&state, obj_types).await
+}
+
+/// `get_active_speed` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_active_speed_core(
+    state: &AppState,
+    obj_types: Vec<String>,
+) -> Result<ActiveSpeed, String> {
     // 종류마다 합계를 받아 **더한다.** 단계별 건수와 TPS 는 오브젝트들을 더한 값이라
     // 종류를 넘어 더해도 뜻이 같다 — 콜렉터의 GROUP 도 그 종류의 오브젝트들을 더한 것이다.
     // 콜렉터 여럿이면 콜렉터의 합계도 더한다 — 같은 이유로 뜻이 같다
@@ -2432,6 +2516,14 @@ pub async fn get_service_group(
     state: State<'_, AppState>,
     obj_hashes: Vec<i32>,
 ) -> Result<Vec<ServiceGroupRow>, String> {
+    get_service_group_core(&state, obj_hashes).await
+}
+
+/// `get_service_group` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_service_group_core(
+    state: &AppState,
+    obj_hashes: Vec<i32>,
+) -> Result<Vec<ServiceGroupRow>, String> {
     // 고른 서버를 콜렉터별로 갈라 콜렉터마다 묻는다. 같은 그룹 이름은 하나로 합친다
     let mut rows: Vec<ServiceGroupRow> = Vec::new();
     for (link, reals) in state.split_hashes(&obj_hashes) {
@@ -2451,6 +2543,14 @@ pub async fn get_service_group(
 #[tauri::command]
 pub async fn get_active_speed_by_object(
     state: State<'_, AppState>,
+    obj_types: Vec<String>,
+) -> Result<Vec<ActiveSpeed>, String> {
+    get_active_speed_by_object_core(&state, obj_types).await
+}
+
+/// `get_active_speed_by_object` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_active_speed_by_object_core(
+    state: &AppState,
     obj_types: Vec<String>,
 ) -> Result<Vec<ActiveSpeed>, String> {
     // 오브젝트별이라 종류를 넘어 이어 붙이면 된다 — 한 오브젝트는 한 종류에만 있다.
@@ -2581,6 +2681,14 @@ pub async fn get_past_counter(
 #[tauri::command]
 pub async fn get_type_active_services(
     state: State<'_, AppState>,
+    obj_type: String,
+) -> Result<TypeActiveServices, String> {
+    get_type_active_services_core(&state, obj_type).await
+}
+
+/// `get_type_active_services` 의 몸통 — 창 없이도 부른다(시험)
+pub async fn get_type_active_services_core(
+    state: &AppState,
     obj_type: String,
 ) -> Result<TypeActiveServices, String> {
     // 콜렉터마다 묻고 이어 붙인다. 오브젝트 해시는 화면용으로 바꾼다
@@ -2892,17 +3000,30 @@ fn poll_alert_once(
     cursor: &mut StreamCursor,
     app: &AppHandle,
 ) -> std::io::Result<()> {
+    for alert in poll_alerts(conn, link, &app.state::<AppState>(), cursor)? {
+        let _ = app.emit("alert-data", alert);
+    }
+    Ok(())
+}
+
+/// 알림 폴링 한 번의 몸통 — 창 없이도 돈다(시험이 부른다). 오브젝트 해시는 **화면용**으로 바꿔 준다 (`crate::hub`)
+pub fn poll_alerts(
+    conn: &mut ScouterConnection,
+    link: &CollectorLink,
+    state: &AppState,
+    cursor: &mut StreamCursor,
+) -> std::io::Result<Vec<crate::scouter::pack::AlertPack>> {
     let param = build_alert_param(cursor);
     let session = conn.session;
     conn.send_request(CMD_ALERT_REAL_TIME, session, &param)?;
 
+    let mut out = Vec::new();
     loop {
         match conn.read_next_pack()? {
             Some(AnyPack::Alert(mut alert)) => {
                 log::debug!("알림 수신 ({}): level={}, title={}", link.name, alert.level, alert.title);
-                // 화면은 화면용 해시로 오브젝트를 가린다 (`crate::hub`)
-                alert.obj_hash = app.state::<AppState>().virt(link, alert.obj_hash);
-                let _ = app.emit("alert-data", alert);
+                alert.obj_hash = state.virt(link, alert.obj_hash);
+                out.push(alert);
             }
             Some(AnyPack::Map(map)) => cursor.update_from(&map),
             Some(_) => {}
@@ -2910,7 +3031,7 @@ fn poll_alert_once(
         }
     }
 
-    Ok(())
+    Ok(out)
 }
 
 // ─── set_log_level ────────────────────────────────────────────

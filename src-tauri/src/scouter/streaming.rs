@@ -115,6 +115,40 @@ fn poll_once(
     is_first: bool,
     app: &AppHandle,
 ) -> io::Result<()> {
+    let state = app.state::<AppState>();
+    poll_xlogs(
+        conn,
+        link,
+        &state,
+        obj_hashes,
+        cursor,
+        is_first,
+        // 에러·느린 것은 프로파일을 미리 받아 둔다 (`cache::prefetch`) — 막히지 않는다
+        &mut |xlog| {
+            if let Some(p) = app.try_state::<crate::cache::prefetch::Prefetcher>() {
+                p.offer(link.idx, xlog);
+            }
+        },
+        &mut |chunk| {
+            let _ = app.emit("xlog-data", XLogColumns::from(chunk));
+        },
+    )
+}
+
+/// 폴링 한 번의 몸통 — 화면(AppHandle) 없이도 돈다(시험이 부른다).
+///
+/// `seen` 은 받은 XLog 하나하나(원래 해시), `sink` 는 화면으로 보낼 묶음(**화면용 해시**로 바꾼 것)을 받는다.
+#[allow(clippy::too_many_arguments)]
+pub fn poll_xlogs(
+    conn: &mut ScouterConnection,
+    link: &CollectorLink,
+    state: &AppState,
+    obj_hashes: &[i32],
+    cursor: &mut StreamCursor,
+    is_first: bool,
+    seen: &mut dyn FnMut(&XLogPack),
+    sink: &mut dyn FnMut(Vec<XLogPack>),
+) -> io::Result<()> {
     let cmd = if is_first {
         CMD_TRANX_REAL_TIME_GROUP_LATEST
     } else {
@@ -138,15 +172,12 @@ fn poll_once(
             }
             Some(AnyPack::XLog(xlog)) => {
                 n_xlog += 1;
-                // 에러·느린 것은 프로파일을 미리 받아 둔다 (`cache::prefetch`) — 막히지 않는다
-                if let Some(p) = app.try_state::<crate::cache::prefetch::Prefetcher>() {
-                    p.offer(link.idx, &xlog);
-                }
+                seen(&xlog);
                 batch.push(xlog);
                 if batch.len() >= EMIT_CHUNK {
                     let mut chunk = std::mem::take(&mut batch);
-                    app.state::<AppState>().virtualize_xlogs(link, &mut chunk);
-                    let _ = app.emit("xlog-data", XLogColumns::from(chunk));
+                    state.virtualize_xlogs(link, &mut chunk);
+                    sink(chunk);
                 }
             }
             // 모르는 팩 타입은 여기까지 오지 않는다 — read_next_pack 이 에러를 낸다 (O-5).
@@ -156,8 +187,8 @@ fn poll_once(
     }
 
     if !batch.is_empty() {
-        app.state::<AppState>().virtualize_xlogs(link, &mut batch);
-        let _ = app.emit("xlog-data", XLogColumns::from(batch));
+        state.virtualize_xlogs(link, &mut batch);
+        sink(batch);
     }
     // 대량으로 올 때 어디에 시간이 갔는지 보려면 이 줄이 필요하다 (F-56).
     if n_xlog > 0 {
