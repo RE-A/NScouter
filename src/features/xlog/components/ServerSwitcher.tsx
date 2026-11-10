@@ -12,8 +12,9 @@
 // 이름만 보이고 어디에 붙었는지 모르면, 운영과 QA 를 헷갈린 채로 오래 볼 수 있다.
 
 import React, { memo, useEffect, useRef, useState } from 'react';
-import type { ServerProfile } from '../api/scouterApi';
+import type { ServerProfile, Workspace } from '../api/scouterApi';
 import { displayName, sameTarget } from './serverProfiles';
+import { isReady, resolveWorkspace } from './workspaces';
 import { t } from '../../../i18n';
 import { Button } from '../../../components/Button';
 
@@ -28,6 +29,15 @@ interface ServerSwitcherProps {
   onSwitch: (profile: ServerProfile) => void;
   /** 고른 서버들에 함께 붙는다 (목록 순서대로 — 앞의 것이 주 콜렉터). 없으면 체크를 안 보인다 */
   onSwitchMany?: (profiles: ServerProfile[]) => void;
+  /**
+   * 이름 붙여 둔 서버 묶음(작업 공간). 목록 맨 위에 보이고, 누르면 그 묶음으로 함께 붙는다.
+   * `onSwitchMany` 가 있을 때만 쓴다
+   */
+  workspaces?: readonly Workspace[];
+  /** 체크한 서버들을 이 이름의 묶음으로 남긴다 (같은 이름이 있으면 갈아 끼운다). 없으면 저장 칸을 안 보인다 */
+  onSaveWorkspace?: (name: string, servers: string[]) => void;
+  /** 묶음을 지운다 — 서버는 그대로다 */
+  onRemoveWorkspace?: (name: string) => void;
   /** 목록에서 지운다 */
   onRemove: (profile: ServerProfile) => void;
   /**
@@ -46,12 +56,17 @@ export const ServerSwitcher = memo(function ServerSwitcher({
   busy,
   onSwitch,
   onSwitchMany,
+  workspaces = [],
+  onSaveWorkspace,
+  onRemoveWorkspace,
   onRemove,
   onRename,
 }: ServerSwitcherProps) {
   const [open, setOpen] = useState(false);
   /** 함께 붙으려고 체크한 서버 이름들 */
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  /** 체크한 것을 묶음으로 남길 때 붙일 이름 */
+  const [wsName, setWsName] = useState('');
   /**
    * 지금 이름을 고치고 있는 서버와 입력 중인 글자.
    *
@@ -75,8 +90,10 @@ export const ServerSwitcher = memo(function ServerSwitcher({
   // «언제 적 입력이 왜 여기 있나» 가 된다.
   // 열 때는 지금 함께 붙어 있는 것을 체크해 둔다 — 하나 더 붙이거나 빼기 쉽게
   useEffect(() => {
-    if (!open) setEditing(null);
-    else setPicked(new Set(currentSet.length > 1 ? currentSet : []));
+    if (!open) {
+      setEditing(null);
+      setWsName('');
+    } else setPicked(new Set(currentSet.length > 1 ? currentSet : []));
     // currentSet 은 열 때의 것만 쓴다 — 열린 동안 체크를 덮지 않는다
   }, [open]);
 
@@ -89,6 +106,12 @@ export const ServerSwitcher = memo(function ServerSwitcher({
       return next;
     });
   const pickedProfiles = profiles.filter(p => picked.has(displayName(p)));
+  const saveWorkspace = () => {
+    const name = wsName.trim();
+    if (name === '' || pickedProfiles.length < 2) return;
+    onSaveWorkspace?.(name, pickedProfiles.map(displayName));
+    setWsName('');
+  };
 
   const commit = () => {
     if (!editing) return;
@@ -113,6 +136,48 @@ export const ServerSwitcher = memo(function ServerSwitcher({
 
       {open && (
         <div className="absolute right-0 z-30 mt-1 max-h-72 w-64 overflow-y-auto rounded border border-line-strong bg-surface p-1 shadow">
+          {multi && workspaces.length > 0 && (
+            <div className="mb-1 border-b border-line pb-1">
+              {workspaces.map(w => {
+                const r = resolveWorkspace(w, profiles);
+                const ready = isReady(r);
+                const why = r.missing.length > 0
+                  ? `${t('목록에 없는 서버')}: ${r.missing.join(', ')}`
+                  : r.noPass.length > 0
+                    ? `${t('비밀번호를 기억하지 않은 서버')}: ${r.noPass.join(', ')}`
+                    : t('이 묶음의 서버들에 함께 붙습니다');
+                return (
+                  <div key={w.name} className={`flex items-center gap-1 rounded px-1 ${w.name === current ? 'bg-hover' : 'hover:bg-hover'}`}>
+                    <button
+                      disabled={!ready}
+                      onClick={() => {
+                        setOpen(false);
+                        onSwitchMany?.(r.profiles);
+                      }}
+                      title={why}
+                      aria-label={`${t('작업 공간')} ${w.name}`}
+                      className="min-w-0 flex-1 px-1 py-1 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <div className="truncate text-micro text-fg">▣ {w.name}</div>
+                      <div className="truncate text-micro text-fg-faint">{w.servers.join(' + ')}</div>
+                    </button>
+                    {onRemoveWorkspace && (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => onRemoveWorkspace(w.name)}
+                        aria-label={`${t('작업 공간')} ${w.name} ${t('지우기')}`}
+                        title={t('이 묶음을 지웁니다 — 서버는 그대로입니다')}
+                        className="shrink-0 hover:text-danger"
+                      >
+                        ✕
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {profiles.map(p => {
             const label = displayName(p);
             const on = label === current || currentSet.includes(label);
@@ -212,6 +277,29 @@ export const ServerSwitcher = memo(function ServerSwitcher({
                 title={t('체크한 서버들에 함께 붙습니다 — 서버 하나에 붙은 것처럼 보입니다')}
               >
                 {t('함께 연결')}
+              </Button>
+            </div>
+          )}
+          {multi && onSaveWorkspace && picked.size >= 2 && (
+            // 늘 같은 몇 대를 함께 본다면 이름을 붙여 둔다 — 다음부터는 위의 묶음을 누르면 된다
+            <div className="mt-1 flex items-center gap-2 px-1">
+              <input
+                value={wsName}
+                onChange={e => setWsName(e.target.value)}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === 'Enter') saveWorkspace();
+                }}
+                placeholder={t('이 묶음의 이름')}
+                aria-label={t('작업 공간 이름')}
+                className="min-w-0 flex-1 rounded border border-line-control bg-input px-1.5 py-0.5 text-micro text-fg focus:outline-none"
+              />
+              <Button
+                size="xs"
+                disabled={wsName.trim() === ''}
+                onClick={saveWorkspace}
+                title={t('체크한 서버들을 이 이름의 묶음으로 남깁니다. 같은 이름이 있으면 갈아 끼웁니다')}
+              >
+                {t('묶음 저장')}
               </Button>
             </div>
           )}

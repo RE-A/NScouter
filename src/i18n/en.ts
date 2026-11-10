@@ -858,6 +858,16 @@ export const EN: Record<string, string> = {
   '함께 연결하지 못했습니다': 'Could not connect together',
   '시계 차': 'clock skew',
   '고칠 콜렉터를 고른 뒤 설정을 엽니다': 'Pick which collector to edit, then open its settings',
+  '작업 공간': 'Workspace',
+  '작업 공간 이름': 'Workspace name',
+  '이 묶음의 이름': 'Name for this set',
+  '묶음 저장': 'Save set',
+  '목록에 없는 서버': 'Servers missing from the list',
+  '비밀번호를 기억하지 않은 서버': 'Servers without a remembered password',
+  '이 묶음의 서버들에 함께 붙습니다': 'Connect to the servers in this set together',
+  '이 묶음을 지웁니다 — 서버는 그대로입니다': 'Remove this set — the servers stay',
+  '체크한 서버들을 이 이름의 묶음으로 남깁니다. 같은 이름이 있으면 갈아 끼웁니다':
+    'Save the checked servers as a set with this name. An existing set with the same name is replaced',
   '함께 붙은 콜렉터끼리 시계가 어긋나 있습니다 — 실시간 차트는 주 콜렉터(맨 앞)의 시계를 따르므로 다른 콜렉터의 점이 그만큼 밀려 보입니다':
     'The connected collectors disagree on the time — the live chart follows the primary (first) collector, so dots from the others appear shifted by that much',
 

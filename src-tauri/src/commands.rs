@@ -3084,6 +3084,18 @@ pub async fn save_servers(
     cfg.save(&path)
 }
 
+/// 서버 묶음(작업 공간) 목록만 갈아 끼운다 — `save_servers` 와 같은 이유로 따로 둔다
+#[tauri::command]
+pub async fn save_workspaces(
+    workspaces: Vec<crate::config::Workspace>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let path = state.config_path.clone();
+    let mut cfg = state.config.lock().await;
+    cfg.workspaces = workspaces;
+    cfg.save(&path)
+}
+
 /// 앱 설정 저장 (config.json에 기록)
 #[tauri::command]
 pub async fn save_config(

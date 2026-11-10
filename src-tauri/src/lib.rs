@@ -154,6 +154,7 @@ pub fn run() {
             save_config,
             save_ui_state,
             save_servers,
+            save_workspaces,
             save_xlog_profile,
             list_saved_profiles,
             open_saved_profile,

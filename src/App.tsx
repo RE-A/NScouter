@@ -43,7 +43,15 @@ import {
   sameTarget,
   upsert,
 } from './features/xlog/components/serverProfiles';
-import type { CollectorStatus, ServerProfile } from './features/xlog/api/scouterApi';
+import type { CollectorStatus, ServerProfile, Workspace } from './features/xlog/api/scouterApi';
+import {
+  dropMember,
+  matchWorkspace,
+  normalizeWorkspaces,
+  removeWorkspace,
+  renameMember,
+  upsertWorkspace,
+} from './features/xlog/components/workspaces';
 import { switchToCollectors, switchToServer } from './features/xlog/api/connectFlow';
 import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
@@ -95,6 +103,7 @@ import {
   saveXLogProfile,
   saveConfig,
   saveServers,
+  saveWorkspaces,
   startXLogStream,
   stopXLogStream,
 } from './features/xlog/api/scouterApi';
@@ -581,6 +590,7 @@ export default function App({ windowLabel }: {
         // «어제까지 붙던 서버» 를 다시 쳐야 하는 것은 퇴보다.
         const list = normalize(cfg.servers);
         setServers(list.length > 0 ? list : fromLegacy(cfg));
+        setWorkspaces(normalizeWorkspaces(cfg.workspaces));
         if (cfg.last_server) setCurrentServer(cfg.last_server);
         setPendingDetails(normalizeOpenDetails(cfg.open_details, MAX_DETAIL_TABS));
       })
@@ -882,6 +892,27 @@ export default function App({ windowLabel }: {
   const [servers, setServers] = useState<ServerProfile[]>([]);
   /** 지금 붙어 있는 서버 이름. 미연결이면 null */
   const [currentServer, setCurrentServer] = useState<string | null>(null);
+  /**
+   * 이름 붙여 둔 서버 묶음(작업 공간) — 늘 함께 보는 몇 대를 한 번에 붙는다 (`workspaces.ts`).
+   * 서버를 이름으로 가리키므로 서버 이름을 바꾸거나 지울 때 여기도 함께 고친다.
+   */
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  /** 묶음 목록을 바꾸고 config.json 에 남긴다. 저장 실패가 화면을 막을 이유는 없다 */
+  const changeWorkspaces = useCallback((f: (prev: Workspace[]) => Workspace[]) => {
+    setWorkspaces(prev => {
+      const next = f(prev);
+      void saveWorkspaces(next).catch(() => {});
+      return next;
+    });
+  }, []);
+  const saveWorkspace = useCallback(
+    (name: string, members: string[]) => changeWorkspaces(prev => upsertWorkspace(prev, name, members)),
+    [changeWorkspaces],
+  );
+  const deleteWorkspace = useCallback(
+    (name: string) => changeWorkspaces(prev => removeWorkspace(prev, name)),
+    [changeWorkspaces],
+  );
   const [switching, setSwitching] = useState(false);
   /** 비밀번호를 저장 안 한 서버를 골랐을 때, 접속 폼에 채워 줄 값 */
   const [prefill, setPrefill] = useState<ServerProfile | null>(null);
@@ -1010,10 +1041,12 @@ export default function App({ windowLabel }: {
         const after = displayName(next.find(x => sameTarget(x, profile)) ?? profile);
         setCurrentServer(cur => (cur === before ? after : cur));
         void persistServers(next, after);
+        // 묶음은 서버를 이름으로 가리킨다 — 함께 옮긴다
+        if (before !== after) changeWorkspaces(ws => renameMember(ws, before, after));
         return next;
       });
     },
-    [persistServers],
+    [persistServers, changeWorkspaces],
   );
 
   /**
@@ -1162,10 +1195,12 @@ export default function App({ windowLabel }: {
       setServers(prev => {
         const next = prev.filter(x => displayName(x) !== displayName(profile));
         void persistServers(next, currentServer ?? '');
+        // 지운 서버는 묶음에서도 뺀다 (하나 남은 묶음은 없어진다)
+        changeWorkspaces(ws => dropMember(ws, displayName(profile)));
         return next;
       });
     },
-    [persistServers, currentServer],
+    [persistServers, currentServer, changeWorkspaces],
   );
   // 지금 탭의 고르기만 바꾼다 — 다른 탭은 저마다 고른 것을 본다
   const handleAgentSelectionChange = useCallback((hashes: Set<number>) => {
@@ -2102,7 +2137,11 @@ export default function App({ windowLabel }: {
           )}
           <ServerSwitcher
             profiles={servers}
-            current={isConnected ? currentServer : null}
+            // 붙어 있는 서버들이 저장해 둔 묶음과 같으면 그 묶음 이름으로 보인다
+            current={isConnected ? (matchWorkspace(workspaces, collectors.map(c => c.name)) ?? currentServer) : null}
+            workspaces={workspaces}
+            onSaveWorkspace={saveWorkspace}
+            onRemoveWorkspace={deleteWorkspace}
             currentSet={isConnected ? collectors.map(c => c.name) : []}
             busy={switching}
             onSwitch={switchServer}

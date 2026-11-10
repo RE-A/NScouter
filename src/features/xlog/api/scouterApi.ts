@@ -776,6 +776,8 @@ export interface AppConfig {
   last_server?: string;
   /** 마지막으로 **함께** 붙었던 서버 이름들 (앞의 것이 주 콜렉터). 둘 이상이면 자동 연결이 이 묶음으로 붙는다 */
   last_servers?: string[];
+  /** 이름 붙여 둔 서버 묶음 — 골라서 한 번에 함께 붙는다 */
+  workspaces?: Workspace[];
   /** 이름 붙여 담아 둔 조회 조건들 */
   saved_filters?: SavedFilterPrefs[];
   /** 껐을 때 열려 있던 상세 탭들 */
@@ -890,6 +892,15 @@ export interface ServerProfile {
   port: number;
   user: string;
   pass: string;
+}
+
+/**
+ * 이름 붙여 둔 서버 묶음(작업 공간). Rust `Workspace` 와 짝이다.
+ * `servers` 는 서버 프로필의 이름들이다 — 앞의 것이 주 콜렉터 (`workspaces.ts`)
+ */
+export interface Workspace {
+  name: string;
+  servers: string[];
 }
 
 /**
@@ -1076,6 +1087,11 @@ export async function mcpRegenerateToken(): Promise<McpStatus> {
  */
 export async function saveServers(servers: ServerProfile[], lastServer: string): Promise<void> {
   return invoke<void>('save_servers', { servers, lastServer });
+}
+
+/** 서버 묶음(작업 공간) 목록만 갈아 끼운다. `saveServers` 와 같은 이유로 따로 둔다 */
+export async function saveWorkspaces(workspaces: Workspace[]): Promise<void> {
+  return invoke<void>('save_workspaces', { workspaces });
 }
 
 /**
