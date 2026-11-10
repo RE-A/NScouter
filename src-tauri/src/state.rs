@@ -10,8 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::cache::CacheDb;
 use crate::config::{resolve_data_dir, AppConfig};
-use crate::scouter::connection::ScouterConnection;
-use crate::scouter::dictionary::TextCache;
+use crate::hub::{CollectorLink, ObjMap};
 
 /// 스트림 종류. 각각 독립된 중지 토큰을 가진다.
 ///
@@ -70,39 +69,15 @@ impl StreamTokens {
     }
 }
 
-/// 놀고 있는 조회용 연결을 몇 개까지 들고 있을지.
-///
-/// 동시에 도는 주기 조회는 액티브 서비스(2초)·서비스 그룹(10초)·토폴로지(15초)·
-/// 타임라인(30초, 카운터 4개) 정도다. 겹쳐도 서넛이라 이만큼이면 기다릴 일이 없고,
-/// 더 들고 있어 봐야 콜렉터 쪽 소켓만 잡아 둔다.
-const MAX_IDLE_QUERY_CONNS: usize = 4;
-
 pub struct AppState {
-    /// TCP 연결 (None이면 미연결) - profile/dictionary 전용
-    pub connection: Mutex<Option<ScouterConnection>>,
-    /**
-     * 조회용 연결 풀.
-     *
-     * **긴 조회가 짧은 폴링을 막지 않게 한다.** 예전에는 objType 조회가 전부
-     * `connection` 하나를 나눠 써서, 6시간짜리 카운터 조회(오브젝트 2대에 856ms,
-     * 100대면 그 몇 배) 동안 액티브 서비스 2초 폴링과 토폴로지가 통째로 멈췄다.
-     * 화면에는 «지금 이 순간» 이 몇 초씩 얼어붙은 채로 남는다.
-     *
-     * ASIS 도 같은 이유로 `TcpProxy` 풀을 쓴다.
-     * 비어 있으면 새로 붙는다 — 연결 하나가 곧 명령 하나이므로(F-1) 빌려 쓰고 돌려준다.
-     */
-    query_pool: Mutex<Vec<ScouterConnection>>,
-    /// 텍스트 딕셔너리 캐시
-    pub text_cache: Mutex<TextCache>,
+    /// 붙어 있는 콜렉터들. 맨 앞이 주 콜렉터다 — 붙는 데 성공한 것이 앞에 온다 (`crate::hub`). 비어 있으면 미연결
+    links: std::sync::RwLock<Vec<Arc<CollectorLink>>>,
+    /// (콜렉터, 원래 objHash) ↔ 화면용 objHash
+    objmap: std::sync::Mutex<ObjMap>,
     /// 스트림별 중지 토큰
     pub streams: StreamTokens,
     /// 현재 로그 레벨 (0=Error, 1=Warn, 2=Info, 3=Debug, 4=Trace)
     pub log_level: Arc<AtomicU8>,
-    /// 재연결용 파라미터 (streaming 전용 connection 생성에 사용)
-    pub conn_host: Mutex<String>,
-    pub conn_port: Mutex<u16>,
-    pub conn_user: Mutex<String>,
-    pub conn_pass: Mutex<String>,
     /// 앱 설정 (config.json에서 로드)
     pub config: Mutex<AppConfig>,
     /// config.json 파일 경로
@@ -112,12 +87,9 @@ pub struct AppState {
     /// 창마다 XLog 스트림으로 받고 싶은 오브젝트. **스트림은 하나**라 이것들을 합쳐 연다
     /// (`restart_xlog_stream`). 창 이름 → 해시들
     pub xlog_subs: Mutex<HashMap<String, Vec<i32>>>,
-    /// 붙어 있는 서버 이름. 미연결이면 None. 나중에 뜬 창이 접속 상태를 물을 때 쓴다
+    /// 화면에 보일 접속 이름. 미연결이면 None. 나중에 뜬 창이 접속 상태를 물을 때 쓴다.
+    /// 콜렉터 하나면 그 콜렉터의 server_id, 여럿이면 이름을 ` + ` 로 이은 것, 데모면 `DEMO_SERVER_ID`
     pub server_id: Mutex<Option<String>>,
-    /// 콜렉터 시계 − PC 시계 (ms). 접속·새로고침 때 잰다. 화면의 실시간 «지금» 이 쓴다
-    pub clock_offset_ms: Mutex<Option<i64>>,
-    /// 접속한 콜렉터의 로컬 캐시 (`crate::cache`). 접속 전·데모·캐시를 못 열면 None
-    pub cache: Mutex<Option<Arc<CacheDb>>>,
 }
 
 /// 액티브 목록에서 **사라졌다 돌아온** 트랜잭션을 찾기 위한 자취.
@@ -145,66 +117,114 @@ impl AppState {
 
         crate::tuning::apply(&config);
         Self {
-            connection: Mutex::new(None),
-            query_pool: Mutex::new(Vec::new()),
-            text_cache: Mutex::new(TextCache::new()),
+            links: std::sync::RwLock::new(Vec::new()),
+            objmap: std::sync::Mutex::new(ObjMap::default()),
             streams: StreamTokens::default(),
             log_level: Arc::new(AtomicU8::new(default_level)),
-            conn_host: Mutex::new(String::new()),
-            conn_port: Mutex::new(0),
-            conn_user: Mutex::new(String::new()),
-            conn_pass: Mutex::new(String::new()),
             config: Mutex::new(config),
             config_path,
             active_trace: Mutex::new(HashMap::new()),
             xlog_subs: Mutex::new(HashMap::new()),
             server_id: Mutex::new(None),
-            clock_offset_ms: Mutex::new(None),
-            cache: Mutex::new(None),
         }
     }
 
-    /// 조회용 연결 하나를 빌린다. 놀고 있는 것이 없으면 새로 붙는다.
-    ///
-    /// **`connection` 을 잠그지 않는다** — 그게 이 풀을 두는 이유다.
-    /// 접속 여부만 그쪽에서 확인하고, 실제 요청은 빌린 연결로 보낸다.
-    pub async fn acquire_query_conn(&self) -> Result<ScouterConnection, String> {
-        if let Some(conn) = self.query_pool.lock().await.pop() {
-            return Ok(conn);
-        }
+    // ─── 콜렉터들 ─────────────────────────────────────────────
 
-        // 접속 정보는 스트림이 쓰는 것과 같다. 여기서 새로 붙는다.
-        let host = self.conn_host.lock().await.clone();
-        let port = *self.conn_port.lock().await;
-        let user = self.conn_user.lock().await.clone();
-        let pass = self.conn_pass.lock().await.clone();
-        if host.is_empty() {
-            return Err("연결되지 않음".to_string());
-        }
-
-        let mut conn = ScouterConnection::connect(&host, port)
-            .map_err(|e| format!("조회용 연결 실패: {e}"))?;
-        conn.login(&user, &pass)
-            .map_err(|e| format!("조회용 로그인 실패: {e}"))?;
-        Ok(conn)
+    /// 붙어 있는 콜렉터들 (붙은 순서)
+    pub fn links(&self) -> Vec<Arc<CollectorLink>> {
+        self.links.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
-    /// 다 쓴 연결을 돌려준다.
-    ///
-    /// **오류가 난 연결은 돌려주지 말 것.** 응답을 끝까지 못 읽은 소켓에는 다음 응답의
-    /// 앞부분이 남아 있어, 다음 조회가 남의 답을 자기 것으로 읽는다.
-    pub async fn release_query_conn(&self, conn: ScouterConnection) {
-        let mut pool = self.query_pool.lock().await;
-        if pool.len() < MAX_IDLE_QUERY_CONNS {
-            pool.push(conn);
+    /// 콜렉터들을 갈아 끼운다. 화면용 해시 표도 새로 시작한다
+    pub fn set_links(&self, links: Vec<Arc<CollectorLink>>) {
+        *self.links.write().unwrap_or_else(|p| p.into_inner()) = links;
+        self.objmap.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    }
+
+    /// 주 콜렉터 — 실시간 «지금» 의 시계, 콜렉터를 고르지 않은 콜렉터 설정이 쓴다
+    pub fn primary(&self) -> Result<Arc<CollectorLink>, String> {
+        self.links.read().unwrap_or_else(|p| p.into_inner()).first().cloned().ok_or_else(|| "연결되지 않음".to_string())
+    }
+
+    /// 이름으로 콜렉터를 찾는다
+    pub fn link_named(&self, name: &str) -> Option<Arc<CollectorLink>> {
+        self.links().into_iter().find(|l| l.name == name)
+    }
+
+    /// 화면용 해시 → (그 콜렉터, 원래 해시). 모르는 해시는 주 콜렉터의 것으로 본다 —
+    /// 콜렉터 하나만 볼 때는 화면용 해시가 곧 원래 해시다
+    pub fn route(&self, vhash: i32) -> Result<(Arc<CollectorLink>, i32), String> {
+        let found = self.objmap.lock().unwrap_or_else(|p| p.into_inner()).real(vhash);
+        let links = self.links();
+        if let Some((idx, real)) = found {
+            if let Some(l) = links.iter().find(|l| l.idx == idx) {
+                return Ok((l.clone(), real));
+            }
+        }
+        links.first().cloned().map(|l| (l, vhash)).ok_or_else(|| "연결되지 않음".to_string())
+    }
+
+    /// 오브젝트 이름 → (그 콜렉터, 원래 이름). 해시가 겹친 오브젝트는 이름 뒤에 ` @콜렉터` 가 붙어 있다
+    pub fn route_name(&self, name: &str) -> Result<(Arc<CollectorLink>, String), String> {
+        if let (base, Some(tag)) = crate::hub::split_tag(name) {
+            if let Some(l) = self.link_named(tag) {
+                return Ok((l, base.to_string()));
+            }
+        }
+        Ok((self.primary()?, name.to_string()))
+    }
+
+    /// 화면용 해시들을 콜렉터별 원래 해시로 가른다 (콜렉터 순서대로)
+    pub fn split_hashes(&self, vhashes: &[i32]) -> Vec<(Arc<CollectorLink>, Vec<i32>)> {
+        let links = self.links();
+        let mut parts: Vec<Vec<i32>> = vec![Vec::new(); links.len()];
+        {
+            let map = self.objmap.lock().unwrap_or_else(|p| p.into_inner());
+            for &v in vhashes {
+                // 모르는 해시는 주 콜렉터(맨 앞)의 것으로 본다
+                let (pos, real) = map
+                    .real(v)
+                    .and_then(|(idx, real)| links.iter().position(|l| l.idx == idx).map(|p| (p, real)))
+                    .unwrap_or((0, v));
+                if let Some(p) = parts.get_mut(pos) {
+                    p.push(real);
+                }
+            }
+        }
+        links.into_iter().zip(parts).filter(|(_, p)| !p.is_empty()).collect()
+    }
+
+    /// 이 콜렉터의 원래 해시 → 화면용 해시 (처음 보면 정한다)
+    pub fn virt(&self, link: &CollectorLink, real: i32) -> i32 {
+        self.objmap.lock().unwrap_or_else(|p| p.into_inner()).virt(link.idx, real, &link.name)
+    }
+
+    /// 이 콜렉터의 해시가 **이미 아는 오브젝트**면 화면용 해시로, 모르면 그대로 — 외부 대상(DB·API) 해시처럼
+    /// 오브젝트가 아닌 것을 표에 올리지 않는다 (토폴로지)
+    pub fn virt_known(&self, link: &CollectorLink, real: i32) -> i32 {
+        self.objmap.lock().unwrap_or_else(|p| p.into_inner()).peek(link.idx, real).unwrap_or(real)
+    }
+
+    /// 해시가 겹쳐 다른 값을 받았나 — 그런 오브젝트는 이름에 콜렉터를 붙인다
+    pub fn is_tagged(&self, link: &CollectorLink, real: i32) -> bool {
+        self.objmap.lock().unwrap_or_else(|p| p.into_inner()).peek(link.idx, real).is_some_and(|v| v != real)
+    }
+
+    /// 이 콜렉터에서 받은 XLog 의 objHash 를 화면용으로 바꾼다
+    pub fn virtualize_xlogs(&self, link: &CollectorLink, xs: &mut [crate::scouter::pack::XLogPack]) {
+        let mut map = self.objmap.lock().unwrap_or_else(|p| p.into_inner());
+        for x in xs {
+            x.obj_hash = map.virt(link.idx, x.obj_hash, &link.name);
         }
     }
 
-    /// 풀을 비운다. 접속을 끊거나 서버를 갈아탈 때.
-    ///
-    /// 안 비우면 이전 서버로 붙은 연결이 남아, 새 서버를 보는 중에 옛 서버의 답이 온다.
-    pub async fn clear_query_pool(&self) {
-        self.query_pool.lock().await.clear();
+    /// 주 콜렉터의 시계 차 (콜렉터 시계 − PC 시계, ms). 화면의 실시간 «지금» 이 쓴다
+    pub async fn clock_offset_ms(&self) -> Option<i64> {
+        match self.primary() {
+            Ok(l) => *l.clock_offset_ms.lock().await,
+            Err(_) => None,
+        }
     }
 
     /// 데이터 폴더 아래의 한 자리.
@@ -236,58 +256,49 @@ impl AppState {
     }
 
     /// 콜렉터 하나의 캐시를 열어 붙인다 (사전도 같이). 못 열면 캐시 없이 간다 — 조회는 그대로 된다
-    pub async fn attach_cache(&self, host: &str, port: u16) {
+    pub async fn attach_cache(&self, link: &CollectorLink) {
         let dir = self.cache_dir().await;
-        let key = crate::cache::collector_key(host, port);
+        let key = crate::cache::collector_key(&link.host, link.port);
         let db = match CacheDb::open(&dir, &key) {
             Ok(db) => Some(Arc::new(db)),
             Err(e) => {
-                log::warn!("로컬 캐시 없이 갑니다: {e}");
+                log::warn!("로컬 캐시 없이 갑니다 ({}): {e}", link.name);
                 None
             }
         };
         if let Some(db) = &db {
             log::info!("로컬 캐시: {}", db.path().display());
-            self.apply_cache_limit(db).await;
         }
-        self.text_cache.lock().await.attach(db.clone());
-        *self.cache.lock().await = db;
+        link.set_cache(db).await;
     }
 
-    /// 설정 «로컬 캐시 상한» 을 적용한다 — 다른 콜렉터의 파일을 먼저 줄이고, 남은 몫을 지금 파일의 상한으로
-    pub async fn apply_cache_limit(&self, db: &CacheDb) {
+    /// 설정 «로컬 캐시 상한» 을 적용한다 — 안 붙은 콜렉터의 파일을 먼저 줄이고, 남은 몫을 붙은 콜렉터들이 나눠 쓴다
+    pub async fn apply_cache_limit(&self) {
         let budget = self.config.lock().await.cache_max_mb as u64 * 1024 * 1024;
         let dir = self.cache_dir().await;
-        let mine = crate::cache::prune_others(&dir, db.path(), budget);
-        db.set_max_bytes(mine);
+        let mut dbs = Vec::new();
+        for l in self.links() {
+            if let Some(db) = l.cache_handle().await {
+                dbs.push(db);
+            }
+        }
+        if dbs.is_empty() {
+            return;
+        }
+        let paths: Vec<&std::path::Path> = dbs.iter().map(|d| d.path()).collect();
+        let mine = crate::cache::prune_others(&dir, &paths, budget);
+        let each = mine / dbs.len() as u64;
+        for db in &dbs {
+            db.set_max_bytes(each);
+        }
     }
 
-    /// 지금 붙어 있는 캐시
-    pub async fn cache_handle(&self) -> Option<Arc<CacheDb>> {
-        self.cache.lock().await.clone()
-    }
-
-    /// `cache_handle` — 막히는 일꾼 스레드에서 (`spawn_blocking` 안)
-    pub fn cache_handle_blocking(&self) -> Option<Arc<CacheDb>> {
-        self.cache.blocking_lock().clone()
-    }
-
-    /// 콜렉터 시계로 «지금 − 5분». 이보다 뒤의 XLog 는 «다 받았다» 고 적지 않는다 (`cache::xlog`)
-    pub async fn seal_before(&self) -> i64 {
-        let offset = self.clock_offset_ms.lock().await.unwrap_or(0);
-        crate::scouter::connection::local_now_ms() + offset - crate::cache::xlog::SEAL_MS
-    }
-
-    /// `seal_before` — 막히는 일꾼 스레드에서
-    pub fn seal_before_blocking(&self) -> i64 {
-        let offset = self.clock_offset_ms.blocking_lock().unwrap_or(0);
-        crate::scouter::connection::local_now_ms() + offset - crate::cache::xlog::SEAL_MS
-    }
-
-    /// 캐시를 뗀다 (접속을 끊거나 데모로 갈 때)
-    pub async fn detach_cache(&self) {
-        self.text_cache.lock().await.attach(None);
-        *self.cache.lock().await = None;
+    /// 콜렉터를 다 끊는다 — 연결·풀·캐시를 버리고 목록을 비운다
+    pub async fn close_all(&self) {
+        for l in self.links() {
+            l.close().await;
+        }
+        self.set_links(Vec::new());
     }
 
     /// 오브젝트 기록 폴더. `{data_dir}/object-history/`

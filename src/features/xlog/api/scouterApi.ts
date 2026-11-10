@@ -42,18 +42,45 @@ export async function connectScouter(params: ConnectParams): Promise<void> {
   });
 }
 
+/**
+ * 여러 콜렉터에 **함께** 붙는다 — 화면에는 서버 하나에 붙은 것처럼 보인다(Rust `crate::hub`).
+ * 앞의 것이 주 콜렉터다. 일부만 붙어도 성공이고, 못 붙은 것은 `collectors` 에 까닭과 함께 온다.
+ */
+export async function connectCollectors(profiles: readonly ServerProfile[]): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>('connect_collectors', {
+    targets: profiles.map(p => ({ name: p.name, host: p.host, port: p.port, user: p.user, pass: p.pass })),
+  });
+}
+
 export async function disconnectScouter(): Promise<void> {
   await invoke<void>('disconnect_scouter');
 }
 
 // ─── XLog 스트리밍 ────────────────────────────────────────────
 
+/** 함께 붙은 콜렉터 하나의 상태. Rust `CollectorStatus` 와 짝이다 */
+export interface CollectorStatus {
+  /** 서버 프로필 이름 (없으면 `host:port`) */
+  name: string;
+  host: string;
+  port: number;
+  /** 콜렉터가 알려 준 서버 이름. 못 붙었으면 빈 문자열 */
+  server_id: string;
+  connected: boolean;
+  /** 못 붙은 까닭 */
+  error: string | null;
+}
+
 /** 지금 접속 상태 — 나중에 뜬 창이 묻는다 */
 export interface ConnectionInfo {
   connected: boolean;
   server_id: string;
-  /** 콜렉터 시계 − PC 시계 (ms). 로그인 응답의 `time` 으로 잰다. 모르면 null (`serverClock.ts`) */
+  /** 주 콜렉터 시계 − PC 시계 (ms). 로그인 응답의 `time` 으로 잰다. 모르면 null (`serverClock.ts`) */
   clock_offset_ms: number | null;
+  /** 함께 붙은 콜렉터들 (주 콜렉터가 맨 앞). 데모·미연결이면 빈다 */
+  collectors?: CollectorStatus[];
+  /** 붙은 콜렉터끼리 시계가 가장 많이 어긋난 폭(ms). 둘 이상 붙어 잰 때만 */
+  clock_skew_ms?: number | null;
 }
 
 export async function getConnectionInfo(): Promise<ConnectionInfo> {
@@ -286,9 +313,12 @@ export async function getInteraction(objTypes: readonly string[]): Promise<Inter
   return invoke<InteractionRow[]>('get_interaction', { objTypes });
 }
 
-/** 콜렉터 설정. 오브젝트와 무관하다 */
-export async function getServerConfig(): Promise<ConfigView> {
-  return invoke<ConfigView>('get_server_config');
+/**
+ * 콜렉터 설정. 오브젝트와 무관하다.
+ * 여러 콜렉터에 함께 붙어 있으면 `collector`(콜렉터 이름)로 고른다 — 없으면 주 콜렉터
+ */
+export async function getServerConfig(collector?: string): Promise<ConfigView> {
+  return invoke<ConfigView>('get_server_config', { collector: collector ?? null });
 }
 
 /**
@@ -525,8 +555,9 @@ export async function getObjectTypeFamilies(): Promise<{ name: string; family: s
   return invoke<{ name: string; family: string }[]>('get_object_type_families');
 }
 
-export async function saveServerConfig(text: string): Promise<void> {
-  return invoke<void>('save_server_config', { text });
+/** 콜렉터 설정 저장. **읽은 콜렉터와 같은 `collector` 로** 부른다 */
+export async function saveServerConfig(text: string, collector?: string): Promise<void> {
+  return invoke<void>('save_server_config', { text, collector: collector ?? null });
 }
 
 /**
@@ -743,6 +774,10 @@ export interface AppConfig {
   servers?: ServerProfile[];
   /** 마지막으로 고른 서버 이름 */
   last_server?: string;
+  /** 마지막으로 **함께** 붙었던 서버 이름들 (앞의 것이 주 콜렉터). 둘 이상이면 자동 연결이 이 묶음으로 붙는다 */
+  last_servers?: string[];
+  /** 이름 붙여 둔 서버 묶음 — 골라서 한 번에 함께 붙는다 */
+  workspaces?: Workspace[];
   /** 이름 붙여 담아 둔 조회 조건들 */
   saved_filters?: SavedFilterPrefs[];
   /** 껐을 때 열려 있던 상세 탭들 */
@@ -857,6 +892,15 @@ export interface ServerProfile {
   port: number;
   user: string;
   pass: string;
+}
+
+/**
+ * 이름 붙여 둔 서버 묶음(작업 공간). Rust `Workspace` 와 짝이다.
+ * `servers` 는 서버 프로필의 이름들이다 — 앞의 것이 주 콜렉터 (`workspaces.ts`)
+ */
+export interface Workspace {
+  name: string;
+  servers: string[];
 }
 
 /**
@@ -1043,6 +1087,11 @@ export async function mcpRegenerateToken(): Promise<McpStatus> {
  */
 export async function saveServers(servers: ServerProfile[], lastServer: string): Promise<void> {
   return invoke<void>('save_servers', { servers, lastServer });
+}
+
+/** 서버 묶음(작업 공간) 목록만 갈아 끼운다. `saveServers` 와 같은 이유로 따로 둔다 */
+export async function saveWorkspaces(workspaces: Workspace[]): Promise<void> {
+  return invoke<void>('save_workspaces', { workspaces });
 }
 
 /**

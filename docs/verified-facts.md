@@ -1902,3 +1902,42 @@ INFO = 0   WARN = 1   ERROR = 2   FATAL = 3
 | 글롭 | `*` 하나뿐. 모양은 `COMP` 열거 9가지(EQU·STR·STR_MID·STR_END·MID·MID_MID·MID_END·END·ANY) — 앞·끝·가운데 두 조각까지 |
 | 결과 | `order` 로 찾으면 `/Order/…` 가 **조용히 빠진다.** 문자 클래스가 없어 대소문자 무시로 우회할 길이 없다 |
 | 대응 | 화면 «트랜잭션 찾기»·MCP 목록 조회는 조건을 콜렉터에 넘기지 않는다 — 과거 조회(`TRANX_LOAD_TIME_GROUP_V2`)로 구간을 받아 앱이 대소문자 없이 거른다(`scouter::search::WideMatcher`) |
+
+### F-67. 콜렉터는 `service == 0` 인 XLog 를 **저장하지 않는다** — 그리고 표본 추출 조건
+
+여러 콜렉터 합치기를 실측하려고 에이전트가 보내는 길(UDP)로 합성 XLog 를 넣다가 걸렸다.
+scouter-server 2.21.3 의 `XLogPreCore`·`XLogPack`·`XLogDiscardTypes` 바이트코드와 실측으로 확인했다.
+
+**보내는 모양** — UDP 한 덩어리: `CAFE`(`NetCafe.UDP_CAFE` = 0x43414645) + 팩 종류 1바이트(XLog = 21) + 팩 본문.
+XLogPack 본문은 블롭 하나다(앱의 `XLogPack::to_blob` 을 `write_blob` 으로 감싼 것).
+
+**받고도 버리는 조건** (`XLogPreCore` 의 큐 일꾼):
+
+| 차례 | 조건 | 결과 |
+|---|---|---|
+| 1 | `XLogPack.isDropped()` — **`service == 0`** | 버려진 XLog 로 본다. 저장 안 함 (`ProfilePreCore.addAsDropped`) |
+| 2 | `canProcess` 가 거짓 — 아래 중 하나도 아닐 때: `isDriving()` · `ignoreGlobalConsequentSampling` · `discardType == 0` · (서비스 종류이고 `isAliveXLog(discardType)`) · Zipkin · 같은 gxid 가 이미 처리됨 | 메모리에서 기다린다 (`waitOnMemory`) |
+| 3 | `ignoreGlobalConsequentSampling` 이 켜져 있는데 `isAliveXLog(discardType)` 가 거짓 | 저장 안 함 |
+| — | 그 밖 | `XLogCore` 로 넘어가 저장된다 |
+
+- `isAliveXLog(b)` 는 `b` 가 **1·3·5** 일 때 참이다.
+- 실측: `service=0` 인 합성 XLog 는 콜렉터 로그(`log_udp_packet=true`)에 `XLOG …` 로 찍히는데도
+  그날 디렉토리에 `xlog` 가 생기지 않았다. `service` 에 0 아닌 값을 넣고 `discard_type=1`·
+  `ignore_global_consequent_sampling=true` 로 보내자 과거 조회(`TRANX_LOAD_TIME_GROUP_V2`)로 전부 돌아왔다.
+  (`service≠0` 에 `discard_type=0` 조합은 따로 재지 않았다 — 표의 2·3번은 바이트코드로만 확인했다.)
+- **`log_udp_packet=true`** (콜렉터 설정)를 켜면 받은 UDP 팩이 콜렉터 표준 출력에 찍힌다 — «갔는데 안 보인다» 를 가를 때 쓴다.
+- 재현: `src-tauri/tests/multi_collector.rs` 의 `send_xlogs`.
+
+### F-68. 이름이 같은 오브젝트는 **콜렉터가 달라도 objHash 가 같다**
+
+| 항목 | 내용 |
+|---|---|
+| 실측 | 콜렉터 두 대(`COLL-A`·`COLL-B`)에 `obj_name=web01` 인 호스트 에이전트를 하나씩 붙였다. 두 콜렉터 모두 `objName=/web01`, `objHash=-973536215` 로 등록했다 |
+| 까닭 | `objHash = hash(objName)` (F-58) — 콜렉터와 무관하게 이름만으로 정해진다 |
+| 이름 | 에이전트 설정의 `obj_name=web01` 은 콜렉터에 **`/web01`** 로 올라온다(앞에 `/` 가 붙는다) |
+| 결과 | 콜렉터 여럿을 한 화면에 합칠 때 해시만으로는 두 오브젝트를 가를 수 없다 — 운영·QA 에 같은 이름의 앱이 있으면 한 서버로 섞인다 |
+| 대응 | 화면에는 (콜렉터, 원래 해시) 를 바꾼 화면용 해시를 쓴다(`hub::ObjMap`). 겹치지 않으면 원래 해시 그대로, 겹친 뒤쪽 콜렉터의 것만 다른 해시와 ` @콜렉터` 이름을 받는다 |
+| 재현 | `multi_collector.rs` 의 `두_콜렉터의_오브젝트가_한_목록으로_오고_겹친_해시는_가려진다` |
+
+이름 사전(서비스·SQL 등)의 해시가 콜렉터끼리 같은지는 **재지 않았다.** 그래서 사전은 콜렉터마다 따로 두고,
+화면이 해시만 넘길 때는 주 콜렉터부터 차례로 묻는다(`resolve_texts`).

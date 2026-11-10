@@ -24,7 +24,11 @@ import { Dialog } from '../../components/Dialog';
 
 export type ConfigTarget =
   | { kind: 'agent'; objHash: number; objName: string; objType: string }
-  | { kind: 'collector'; name: string };
+  /**
+   * `collector` — 여러 콜렉터에 함께 붙어 있을 때 **어느 콜렉터의 설정인지** (콜렉터 이름).
+   * 콜렉터 설정은 콜렉터마다 파일이 하나라 합칠 수 없다. 읽은 콜렉터에 그대로 저장한다. 없으면 주 콜렉터
+   */
+  | { kind: 'collector'; name: string; collector?: string };
 
 interface ConfigSettingsDialogProps {
   target: ConfigTarget;
@@ -47,21 +51,22 @@ export const ConfigSettingsDialog = memo(function ConfigSettingsDialog({
   const scope: ConfigScope = target.kind === 'collector' ? 'server' : scopeOfObjType(target.objType);
   const targetName = target.kind === 'collector' ? target.name : target.objName;
   const agentHash = target.kind === 'agent' ? target.objHash : null;
+  const collector = target.kind === 'collector' ? target.collector : undefined;
 
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    (agentHash === null ? getServerConfig() : getAgentConfig(agentHash))
+    (agentHash === null ? getServerConfig(collector) : getAgentConfig(agentHash))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [agentHash]);
+  }, [agentHash, collector]);
 
   useEffect(() => load(), [load]);
 
   const save = useCallback(
-    (text: string) => (agentHash === null ? saveServerConfig(text) : saveAgentConfig(agentHash, text)),
-    [agentHash],
+    (text: string) => (agentHash === null ? saveServerConfig(text, collector) : saveAgentConfig(agentHash, text)),
+    [agentHash, collector],
   );
 
   // Esc 로 닫는다. 고친 것이 있을 때 실수로 닫히는 것은 저장 줄이 막지 못하므로,

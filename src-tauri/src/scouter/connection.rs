@@ -69,6 +69,11 @@ fn resolve_addr(host: &str, port: u16) -> io::Result<SocketAddr> {
 }
 
 impl ScouterConnection {
+    /// 이 연결이 붙은 콜렉터 (`host`, `port`). 여러 콜렉터를 함께 볼 때 빌린 연결을 제자리에 돌려주려고 쓴다
+    pub fn target(&self) -> (&str, u16) {
+        (&self.host, self.port)
+    }
+
     /// 같은 콜렉터·같은 세션으로 소켓을 하나 더 연다 — 여러 요청을 **동시에** 보낼 때.
     /// 로그인은 다시 안 한다 — 세션은 소켓과 무관하게 쓸 수 있다 (F-1)
     pub fn sibling(&self) -> io::Result<Self> {

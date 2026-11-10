@@ -4,6 +4,7 @@ pub mod cache;
 pub mod commands;
 pub mod config;
 pub mod export_store;
+pub mod hub;
 pub mod mcp;
 pub mod object_history_store;
 pub mod profile_store;
@@ -98,6 +99,7 @@ pub fn run() {
         .manage(mcp::McpState::default())
         .invoke_handler(tauri::generate_handler![
             connect_scouter,
+            connect_collectors,
             disconnect_scouter,
             start_xlog_stream,
             stop_xlog_stream,
@@ -152,6 +154,7 @@ pub fn run() {
             save_config,
             save_ui_state,
             save_servers,
+            save_workspaces,
             save_xlog_profile,
             list_saved_profiles,
             open_saved_profile,

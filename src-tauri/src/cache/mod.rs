@@ -52,13 +52,13 @@ pub fn files(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
     out
 }
 
-/// 지금 콜렉터 파일 말고 다른 파일들이 `budget` 을 넘으면 안 쓴 지 오래된 것부터 지운다.
-/// 남은 몫(지금 콜렉터가 쓸 수 있는 바이트)을 돌려준다
-pub fn prune_others(dir: &Path, current: &Path, budget: u64) -> u64 {
-    let mut others: Vec<_> = files(dir).into_iter().filter(|(p, _, _)| p != current).collect();
+/// 지금 붙은 콜렉터들의 파일 말고 다른 파일들이 `budget` 을 넘으면 안 쓴 지 오래된 것부터 지운다.
+/// 남은 몫(지금 붙은 콜렉터들이 함께 쓸 수 있는 바이트)을 돌려준다
+pub fn prune_others(dir: &Path, current: &[&Path], budget: u64) -> u64 {
+    let mut others: Vec<_> = files(dir).into_iter().filter(|(p, _, _)| !current.contains(&p.as_path())).collect();
     others.sort_by_key(|(_, _, t)| *t);
     let mut total: u64 = others.iter().map(|(_, n, _)| n).sum();
-    // 지금 콜렉터에 적어도 절반은 남긴다
+    // 지금 붙은 콜렉터들에 적어도 절반은 남긴다
     let keep_for_current = budget / 2;
     for (p, n, _) in &others {
         if total + keep_for_current <= budget {
@@ -260,11 +260,27 @@ mod tests {
         write("cur_1.db", 10);
         let cur = dir.join("cur_1.db");
         // 상한 1000, 지금 콜렉터에 절반(500)은 남긴다 → 다른 파일 합 700 이 500 아래로 — 오래된 것만 지운다
-        let mine = prune_others(&dir, &cur, 1000);
+        let mine = prune_others(&dir, &[cur.as_path()], 1000);
         assert!(!dir.join("old_1.db").exists(), "오래된 것부터");
         assert!(dir.join("new_1.db").exists());
         assert!(cur.exists(), "지금 콜렉터 파일은 안 지운다");
         assert_eq!(mine, 700);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 함께_붙은_콜렉터들의_파일은_지우지_않는다() {
+        let dir = std::env::temp_dir().join(format!("nscouter-prune2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, n: usize| std::fs::write(dir.join(name), vec![0u8; n]).unwrap();
+        write("a_1.db", 600);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write("b_1.db", 600);
+        let (a, b) = (dir.join("a_1.db"), dir.join("b_1.db"));
+        let mine = prune_others(&dir, &[a.as_path(), b.as_path()], 1000);
+        assert!(a.exists() && b.exists(), "붙은 콜렉터의 파일은 상한을 넘어도 여기서 안 지운다 (각자 줄인다)");
+        assert_eq!(mine, 1000);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

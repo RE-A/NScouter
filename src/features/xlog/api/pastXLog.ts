@@ -17,6 +17,11 @@ export interface PastCursor {
   has_more: boolean;
   last_txid: number;
   last_xlog_time: number;
+  /**
+   * 고른 서버가 콜렉터 여럿에 걸칠 때 콜렉터마다의 자리 (Rust `HubCursor`). **화면은 열어 보지 않고
+   * 받은 그대로 되돌려 준다.** 그때 `last_xlog_time` 은 콜렉터들 자리의 합이라 «밀렸나» 만 볼 수 있다
+   */
+  parts?: unknown[];
 }
 
 interface PastXLogPage {

@@ -34,6 +34,7 @@ import {
   type SavedFilter,
 } from './features/xlog/components/savedFilters';
 import { ServerSwitcher } from './features/xlog/components/ServerSwitcher';
+import { CollectorConfigButton } from './features/xlog/components/CollectorConfigButton';
 import {
   displayName,
   fromLegacy,
@@ -42,8 +43,16 @@ import {
   sameTarget,
   upsert,
 } from './features/xlog/components/serverProfiles';
-import type { ServerProfile } from './features/xlog/api/scouterApi';
-import { switchToServer } from './features/xlog/api/connectFlow';
+import type { CollectorStatus, ServerProfile, Workspace } from './features/xlog/api/scouterApi';
+import {
+  dropMember,
+  matchWorkspace,
+  normalizeWorkspaces,
+  removeWorkspace,
+  renameMember,
+  upsertWorkspace,
+} from './features/xlog/components/workspaces';
+import { switchToCollectors, switchToServer } from './features/xlog/api/connectFlow';
 import { useProfileSearch } from './features/xlog/hooks/useProfileSearch';
 import { toDateString, toFileStamp } from './features/xlog/utils/xlogDate';
 import type { ProfileHit } from './features/xlog/api/scouterApi';
@@ -94,6 +103,7 @@ import {
   saveXLogProfile,
   saveConfig,
   saveServers,
+  saveWorkspaces,
   startXLogStream,
   stopXLogStream,
 } from './features/xlog/api/scouterApi';
@@ -280,6 +290,9 @@ const ALL_CHART_COUNTERS: CounterName[] = [
   ...DATASOURCE_CHART_COUNTERS,
 ];
 
+/** 함께 붙은 콜렉터끼리 시계가 이보다 많이 어긋나면 헤더에 알린다 (ms) */
+const CLOCK_SKEW_WARN_MS = 2_000;
+
 export default function App({ windowLabel }: {
   /**
    * 떼어 낸 XLog 창이면 그 창 이름(`xlogwin-N`), 메인 창이면 없다.
@@ -308,11 +321,23 @@ export default function App({ windowLabel }: {
    */
   const [connectionEpoch, setConnectionEpoch] = useState(0);
   /**
+   * 함께 붙은 콜렉터들 (주 콜렉터가 맨 앞). 둘 이상일 때만 헤더가 콜렉터마다 상태를 보인다 —
+   * 하나라도 못 붙으면 그 콜렉터의 서버는 목록에 안 나오는데, 그걸 «서버가 죽었다» 로 읽으면 안 된다.
+   */
+  const [collectors, setCollectors] = useState<CollectorStatus[]>([]);
+  /**
+   * 함께 붙은 콜렉터끼리 시계가 어긋난 폭(ms). 실시간 «지금» 은 주 콜렉터의 시계라 이게 크면
+   * 다른 콜렉터의 점이 그만큼 앞뒤로 밀려 보인다 — 화면이 틀린 것이 아니라 콜렉터 시계가 다른 것이라고 알린다
+   */
+  const [clockSkew, setClockSkew] = useState<number | null>(null);
+  /**
    * 데모(합성 데이터)로 붙었는가. 그때는 콜렉터가 없어 콜렉터 설정을 물을 곳이 없다.
    * 이름은 Rust `DEMO_SERVER_ID` 와 같아야 한다.
    */
   const isDemo = serverId === 'DEMO (합성 데이터)';
   const [showCollectorConfig, setShowCollectorConfig] = useState(false);
+  /** 콜렉터 설정을 열 콜렉터 이름. 콜렉터가 하나면 undefined(주 콜렉터) */
+  const [configCollector, setConfigCollector] = useState<string | undefined>(undefined);
   /**
    * XLog 탭들.
    *
@@ -565,6 +590,7 @@ export default function App({ windowLabel }: {
         // «어제까지 붙던 서버» 를 다시 쳐야 하는 것은 퇴보다.
         const list = normalize(cfg.servers);
         setServers(list.length > 0 ? list : fromLegacy(cfg));
+        setWorkspaces(normalizeWorkspaces(cfg.workspaces));
         if (cfg.last_server) setCurrentServer(cfg.last_server);
         setPendingDetails(normalizeOpenDetails(cfg.open_details, MAX_DETAIL_TABS));
       })
@@ -614,6 +640,8 @@ export default function App({ windowLabel }: {
       .then(info => {
         if (!info.connected) return;
         setServerClockOffset(info.clock_offset_ms);
+        setCollectors(info.collectors ?? []);
+        setClockSkew(info.clock_skew_ms ?? null);
         setIsConnected(true);
         setServerId(info.server_id);
         setConnectionEpoch(n => n + 1);
@@ -727,11 +755,19 @@ export default function App({ windowLabel }: {
       onConnected(id => {
         setIsConnected(true); setServerId(id); setConnectionEpoch(n => n + 1);
         // 콜렉터 시계 차는 접속 때 Rust 가 쟀다 — 실시간 «지금» 을 그 시계로 잡는다 (serverClock.ts)
-        getConnectionInfo().then(info => setServerClockOffset(info.clock_offset_ms)).catch(() => {});
+        getConnectionInfo()
+          .then(info => {
+            setServerClockOffset(info.clock_offset_ms);
+            setCollectors(info.collectors ?? []);
+            setClockSkew(info.clock_skew_ms ?? null);
+          })
+          .catch(() => {});
       }),
       onDisconnected(() => {
         setIsConnected(false); setServerId('');
         setServerClockOffset(null);
+        setCollectors([]);
+        setClockSkew(null);
         // 콜렉터를 갈아타면 이름도 비운다 — 해시는 이름의 해시라 서버가 달라도 겹친다(F-35).
         setSelectedXLogs([]); clearNames(); clearObjectHistory(); setAgentMap(new Map());
         objectsRef.current = [];
@@ -850,12 +886,33 @@ export default function App({ windowLabel }: {
   /**
    * 갈아 가며 볼 서버들.
    *
-   * **한 번에 한 서버다.** 두 콜렉터를 나란히 보는 것이 아니라, 매번 호스트·계정을
-   * 다시 치지 않고 옮겨 가기 위한 목록이다.
+   * 매번 호스트·계정을 다시 치지 않고 옮겨 가기 위한 목록이다. 여럿을 골라 **함께** 붙을 수도 있다
+   * (`switchServers`) — 그때도 화면은 서버 하나에 붙은 것처럼 보인다.
    */
   const [servers, setServers] = useState<ServerProfile[]>([]);
   /** 지금 붙어 있는 서버 이름. 미연결이면 null */
   const [currentServer, setCurrentServer] = useState<string | null>(null);
+  /**
+   * 이름 붙여 둔 서버 묶음(작업 공간) — 늘 함께 보는 몇 대를 한 번에 붙는다 (`workspaces.ts`).
+   * 서버를 이름으로 가리키므로 서버 이름을 바꾸거나 지울 때 여기도 함께 고친다.
+   */
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  /** 묶음 목록을 바꾸고 config.json 에 남긴다. 저장 실패가 화면을 막을 이유는 없다 */
+  const changeWorkspaces = useCallback((f: (prev: Workspace[]) => Workspace[]) => {
+    setWorkspaces(prev => {
+      const next = f(prev);
+      void saveWorkspaces(next).catch(() => {});
+      return next;
+    });
+  }, []);
+  const saveWorkspace = useCallback(
+    (name: string, members: string[]) => changeWorkspaces(prev => upsertWorkspace(prev, name, members)),
+    [changeWorkspaces],
+  );
+  const deleteWorkspace = useCallback(
+    (name: string) => changeWorkspaces(prev => removeWorkspace(prev, name)),
+    [changeWorkspaces],
+  );
   const [switching, setSwitching] = useState(false);
   /** 비밀번호를 저장 안 한 서버를 골랐을 때, 접속 폼에 채워 줄 값 */
   const [prefill, setPrefill] = useState<ServerProfile | null>(null);
@@ -892,6 +949,9 @@ export default function App({ windowLabel }: {
     [persistServers],
   );
 
+  /** 함께 붙으려다 실패한 까닭 — 헤더에 짧게 보인다 */
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
   /**
    * 다른 서버로 갈아탄다.
    *
@@ -901,6 +961,7 @@ export default function App({ windowLabel }: {
   const switchServer = useCallback(
     (profile: ServerProfile) => {
       const label = displayName(profile);
+      setSwitchError(null);
       if (profile.pass === '') {
         // 저장 안 한 비밀번호는 물어야 한다. 끊고 접속 폼에 값을 채워 둔다.
         setPrefill(profile);
@@ -932,6 +993,39 @@ export default function App({ windowLabel }: {
   );
 
   /**
+   * 여러 서버로 **함께** 갈아탄다 — 서버 하나에 붙은 것처럼 보인다(Rust `crate::hub`).
+   *
+   * 앞의 것이 주 콜렉터다. 일부만 붙어도 성공이다 — 못 붙은 콜렉터는 헤더에 빨갛게 남고,
+   * 새로고침(F5)이 다시 붙어 본다. 비밀번호를 기억한 서버만 온다(고르는 쪽이 막는다).
+   */
+  const switchServers = useCallback(
+    (profiles: ServerProfile[]) => {
+      if (profiles.length === 0) return;
+      const label = profiles.map(displayName).join(' + ');
+      setSwitching(true);
+      setSwitchError(null);
+      switchToCollectors(profiles)
+        .then(info => {
+          setCurrentServer(label);
+          setCollectors(info.collectors ?? []);
+          setClockSkew(info.clock_skew_ms ?? null);
+          // 최신 목록을 setState 안에서 집는다 — `switchServer` 와 같은 이유
+          setServers(prev => {
+            void persistServers(prev, label);
+            return prev;
+          });
+          handleConnected('scouter');
+        })
+        .catch((e: unknown) => {
+          setCurrentServer(null);
+          setSwitchError(String(e));
+        })
+        .finally(() => setSwitching(false));
+    },
+    [persistServers, handleConnected],
+  );
+
+  /**
    * 서버에 이름을 붙인다.
    *
    * `10.89.2.18:6100` 셋이 늘어선 목록에서 운영과 QA 를 가르는 유일한 단서다.
@@ -947,10 +1041,12 @@ export default function App({ windowLabel }: {
         const after = displayName(next.find(x => sameTarget(x, profile)) ?? profile);
         setCurrentServer(cur => (cur === before ? after : cur));
         void persistServers(next, after);
+        // 묶음은 서버를 이름으로 가리킨다 — 함께 옮긴다
+        if (before !== after) changeWorkspaces(ws => renameMember(ws, before, after));
         return next;
       });
     },
-    [persistServers],
+    [persistServers, changeWorkspaces],
   );
 
   /**
@@ -1099,10 +1195,12 @@ export default function App({ windowLabel }: {
       setServers(prev => {
         const next = prev.filter(x => displayName(x) !== displayName(profile));
         void persistServers(next, currentServer ?? '');
+        // 지운 서버는 묶음에서도 뺀다 (하나 남은 묶음은 없어진다)
+        changeWorkspaces(ws => dropMember(ws, displayName(profile)));
         return next;
       });
     },
-    [persistServers, currentServer],
+    [persistServers, currentServer, changeWorkspaces],
   );
   // 지금 탭의 고르기만 바꾼다 — 다른 탭은 저마다 고른 것을 본다
   const handleAgentSelectionChange = useCallback((hashes: Set<number>) => {
@@ -1787,6 +1885,9 @@ export default function App({ windowLabel }: {
     refreshConnection()
       .then(info => {
         setServerClockOffset(info.clock_offset_ms);
+        // 처음에 못 붙었던 콜렉터가 이번에 붙었을 수 있다
+        setCollectors(info.collectors ?? []);
+        setClockSkew(info.clock_skew_ms ?? null);
         setRefreshing({ busy: false, error: null });
       })
       .catch((e: unknown) => setRefreshing({ busy: false, error: String(e) }))
@@ -1965,7 +2066,30 @@ export default function App({ windowLabel }: {
               />
               {/* 데모 서버 이름은 백엔드가 준 한국어 문구다. 진짜 서버 이름은 사전에 없어
                   그대로 나온다 — t() 를 통과시켜도 안전하다. */}
-              {t(serverId)}
+              {collectors.length > 1 ? (
+                // 함께 붙어 있으면 콜렉터마다 붙었는지를 보인다 — 못 붙은 콜렉터의 서버는 목록에 없다
+                collectors.map((c, i) => (
+                  <span
+                    key={c.name}
+                    className="flex items-center gap-1"
+                    title={c.connected ? `${c.host}:${c.port} · ${c.server_id}` : `${c.host}:${c.port} · ${t('붙지 못함')}${c.error ? ` — ${c.error}` : ''}`}
+                  >
+                    {i > 0 && <span className="text-fg-faint">+</span>}
+                    <span className={`size-1.5 rounded-full ${c.connected ? 'bg-ok' : 'bg-danger'}`} aria-hidden />
+                    <span className={c.connected ? '' : 'text-danger'}>{c.name}</span>
+                  </span>
+                ))
+              ) : (
+                t(serverId)
+              )}
+              {clockSkew !== null && clockSkew > CLOCK_SKEW_WARN_MS && (
+                <span
+                  className="text-warn"
+                  title={t('함께 붙은 콜렉터끼리 시계가 어긋나 있습니다 — 실시간 차트는 주 콜렉터(맨 앞)의 시계를 따르므로 다른 콜렉터의 점이 그만큼 밀려 보입니다')}
+                >
+                  ⚠ {t('시계 차')} {(clockSkew / 1000).toFixed(1)}s
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -2006,11 +2130,22 @@ export default function App({ windowLabel }: {
         )}
         {/* 상태·설정 — 평소엔 조용히 물러나 있어야 한다 */}
         {isMain && <div className="flex items-center gap-2">
+          {switchError && (
+            <span className="max-w-[16rem] truncate text-micro text-danger" title={switchError}>
+              {t('함께 연결하지 못했습니다')}: {switchError}
+            </span>
+          )}
           <ServerSwitcher
             profiles={servers}
-            current={isConnected ? currentServer : null}
+            // 붙어 있는 서버들이 저장해 둔 묶음과 같으면 그 묶음 이름으로 보인다
+            current={isConnected ? (matchWorkspace(workspaces, collectors.map(c => c.name)) ?? currentServer) : null}
+            workspaces={workspaces}
+            onSaveWorkspace={saveWorkspace}
+            onRemoveWorkspace={deleteWorkspace}
+            currentSet={isConnected ? collectors.map(c => c.name) : []}
             busy={switching}
             onSwitch={switchServer}
+            onSwitchMany={switchServers}
             onRemove={removeServer}
             onRename={renameServer}
           />
@@ -2032,14 +2167,15 @@ export default function App({ windowLabel }: {
               «로그 좀 받아 주세요» 를 받은 사람이 설정 창을 뒤지다 못 찾았다.
               두 군데 두면 각자 제 상태를 들고 있어 서로 다른 값을 보여준다. */}
           {/* 콜렉터 설정 — **붙어 있을 때만.** 데모는 콜렉터가 없어 물을 곳이 없다 */}
+          {/* 콜렉터가 여럿이면 어느 콜렉터를 고칠지 먼저 고른다 — 설정은 콜렉터마다 따로다 */}
           {isConnected && !isDemo && (
-            <button
-              onClick={() => setShowCollectorConfig(true)}
-              title={t('지금 붙은 콜렉터의 설정을 보고 고칩니다')}
-              className="btn px-2 py-0.5 text-micro"
-            >
-              {t('콜렉터 설정')}
-            </button>
+            <CollectorConfigButton
+              collectors={collectors}
+              onOpen={c => {
+                setConfigCollector(c);
+                setShowCollectorConfig(true);
+              }}
+            />
           )}
           <button
             onClick={() => setShowSettings(true)}
@@ -2057,7 +2193,7 @@ export default function App({ windowLabel }: {
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {showCollectorConfig && (
         <ConfigSettingsDialog
-          target={{ kind: 'collector', name: currentServer ?? serverId }}
+          target={{ kind: 'collector', name: configCollector ?? currentServer ?? serverId, collector: configCollector }}
           onClose={() => setShowCollectorConfig(false)}
         />
       )}

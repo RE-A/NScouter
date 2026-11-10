@@ -170,4 +170,90 @@ describe('ServerSwitcher — 이름 붙이기', () => {
     expect(screen.getByLabelText('10.0.0.2:6200 이름 바꾸기')).toBeTruthy();
     expect(screen.queryByLabelText('10.0.0.2:6200 이름')).toBeNull();
   });
+
+  describe('함께 연결', () => {
+    const qa2: ServerProfile = { name: 'QA', host: '10.0.0.3', port: 6100, user: 'qa', pass: 'y' };
+
+    it('onSwitchMany 가 없으면 체크를 안 보인다', () => {
+      open([prod, qa2]);
+      fireEvent.click(screen.getByRole('button', { name: /운영/ }));
+      expect(screen.queryByLabelText('운영 함께 연결')).toBeNull();
+    });
+
+    it('둘 이상 체크해야 누를 수 있고, 목록 순서대로 넘긴다', () => {
+      const onSwitchMany = vi.fn();
+      open([prod, qa2], { onSwitchMany, current: null });
+      fireEvent.click(screen.getByRole('button', { name: /서버 고르기/ }));
+      const go = screen.getByRole('button', { name: '함께 연결' }) as HTMLButtonElement;
+      expect(go.disabled).toBe(true);
+
+      // 뒤의 것을 먼저 체크해도 넘길 때는 목록 순서다 — 앞의 것이 주 콜렉터다
+      fireEvent.click(screen.getByLabelText('QA 함께 연결'));
+      fireEvent.click(screen.getByLabelText('운영 함께 연결'));
+      expect(go.disabled).toBe(false);
+      fireEvent.click(go);
+      expect(onSwitchMany).toHaveBeenCalledWith([prod, qa2]);
+    });
+
+    it('비밀번호를 기억 안 한 서버는 고를 수 없다', () => {
+      open([prod, qa], { onSwitchMany: vi.fn() });
+      fireEvent.click(screen.getByRole('button', { name: /운영/ }));
+      expect((screen.getByLabelText('10.0.0.2:6200 함께 연결') as HTMLInputElement).disabled).toBe(true);
+    });
+
+    it('함께 붙어 있으면 열 때 그 서버들이 체크돼 있다', () => {
+      open([prod, qa2], { onSwitchMany: vi.fn(), current: '운영 + QA', currentSet: ['운영', 'QA'] });
+      fireEvent.click(screen.getByRole('button', { name: /운영 \+ QA/ }));
+      expect((screen.getByLabelText('운영 함께 연결') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText('QA 함께 연결') as HTMLInputElement).checked).toBe(true);
+    });
+  });
+
+  describe('작업 공간 (이름 붙인 묶음)', () => {
+    const qa2: ServerProfile = { name: 'QA', host: '10.0.0.3', port: 6100, user: 'qa', pass: 'y' };
+    const all = { name: '전체', servers: ['QA', '운영'] };
+
+    it('묶음을 누르면 묶음 순서대로 함께 붙는다', () => {
+      const onSwitchMany = vi.fn();
+      open([prod, qa2], { onSwitchMany, workspaces: [all], current: null });
+      fireEvent.click(screen.getByRole('button', { name: /서버 고르기/ }));
+      fireEvent.click(screen.getByLabelText('작업 공간 전체'));
+      // 서버 목록 순서(운영, QA)가 아니라 묶음 순서(QA, 운영) — 앞의 것이 주 콜렉터다
+      expect(onSwitchMany).toHaveBeenCalledWith([qa2, prod]);
+    });
+
+    it('비밀번호 없는 서버나 없는 서버가 든 묶음은 누를 수 없고 까닭을 말한다', () => {
+      open([prod, qa], { onSwitchMany: vi.fn(), workspaces: [{ name: '깨진것', servers: ['운영', '10.0.0.2:6200'] }, { name: '빠진것', servers: ['운영', '없음'] }] });
+      fireEvent.click(screen.getByRole('button', { name: /운영/ }));
+      const a = screen.getByLabelText('작업 공간 깨진것') as HTMLButtonElement;
+      const b = screen.getByLabelText('작업 공간 빠진것') as HTMLButtonElement;
+      expect(a.disabled).toBe(true);
+      expect(a.title).toContain('10.0.0.2:6200');
+      expect(b.disabled).toBe(true);
+      expect(b.title).toContain('없음');
+    });
+
+    it('체크한 서버들을 이름 붙여 남긴다 — 둘 이상 체크해야 칸이 보인다', () => {
+      const onSaveWorkspace = vi.fn();
+      open([prod, qa2], { onSwitchMany: vi.fn(), onSaveWorkspace, current: null });
+      fireEvent.click(screen.getByRole('button', { name: /서버 고르기/ }));
+      expect(screen.queryByLabelText('작업 공간 이름')).toBeNull();
+
+      fireEvent.click(screen.getByLabelText('운영 함께 연결'));
+      fireEvent.click(screen.getByLabelText('QA 함께 연결'));
+      const input = screen.getByLabelText('작업 공간 이름');
+      expect((screen.getByRole('button', { name: '묶음 저장' }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.change(input, { target: { value: ' 운영 전체 ' } });
+      fireEvent.click(screen.getByRole('button', { name: '묶음 저장' }));
+      expect(onSaveWorkspace).toHaveBeenCalledWith('운영 전체', ['운영', 'QA']);
+    });
+
+    it('묶음을 지운다', () => {
+      const onRemoveWorkspace = vi.fn();
+      open([prod, qa2], { onSwitchMany: vi.fn(), workspaces: [all], onRemoveWorkspace });
+      fireEvent.click(screen.getByRole('button', { name: /운영/ }));
+      fireEvent.click(screen.getByLabelText('작업 공간 전체 지우기'));
+      expect(onRemoveWorkspace).toHaveBeenCalledWith('전체');
+    });
+  });
 });

@@ -81,6 +81,13 @@ pub struct AppConfig {
     /// 마지막으로 고른 서버 이름
     #[serde(default)]
     pub last_server: String,
+    /// 마지막으로 **함께** 붙었던 서버 이름들 (`servers` 의 이름, 앞의 것이 주 콜렉터).
+    /// 둘 이상이면 자동 연결이 이 묶음으로 붙는다. 혼자 붙으면 비운다
+    #[serde(default)]
+    pub last_servers: Vec<String>,
+    /// 이름 붙여 둔 서버 묶음 — 골라서 한 번에 함께 붙는다 (`Workspace`)
+    #[serde(default)]
+    pub workspaces: Vec<Workspace>,
     /// 마지막으로 걸어 두었던 조회 조건
     #[serde(default)]
     pub xlog_filter: XLogFilterPrefs,
@@ -323,6 +330,17 @@ pub struct ServerProfile {
     pub user: String,
     /// 저장하지 않으면 빈 문자열
     pub pass: String,
+}
+
+/// 이름 붙여 둔 서버 묶음 («운영 전체» 처럼).
+///
+/// **서버는 이름으로 가리킨다**(`servers` 의 이름, 앞의 것이 주 콜렉터) — 접속 정보·비밀번호를 여기에 한 벌 더
+/// 두면 서버 쪽을 고쳤을 때 묶음만 옛 값으로 남는다. 서버 이름을 바꾸거나 지우면 화면이 여기도 함께 고친다.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Workspace {
+    pub name: String,
+    pub servers: Vec<String>,
 }
 
 /// 껐을 때 열려 있던 상세 탭 하나.
@@ -592,6 +610,8 @@ impl Default for AppConfig {
             xlog_chart: XLogChartPrefs::default(),
             servers: Vec::new(),
             last_server: String::new(),
+            last_servers: Vec::new(),
+            workspaces: Vec::new(),
             xlog_filter: XLogFilterPrefs::default(),
             xlog_tabs: Vec::new(),
             xlog_split: XLogSplitPrefs::default(),

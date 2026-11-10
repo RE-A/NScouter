@@ -9,6 +9,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const api = vi.hoisted(() => ({
   connectScouter: vi.fn(() => Promise.resolve()),
+  connectCollectors: vi.fn(() => Promise.resolve({ connected: true, server_id: 'A + B', clock_offset_ms: null, collectors: [] })),
   disconnectScouter: vi.fn(() => Promise.resolve()),
   getObjectList: vi.fn(() => Promise.resolve([{ obj_hash: 1 }, { obj_hash: 2 }])),
   startXLogStream: vi.fn(() => Promise.resolve()),
@@ -16,7 +17,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('./scouterApi', () => api);
 
-import { connectToServer, switchToServer } from './connectFlow';
+import { connectToServer, switchToCollectors, switchToServer } from './connectFlow';
 
 const PARAMS = { host: '127.0.0.1', port: 6100, user: 'admin', pass: 'admin' };
 
@@ -62,5 +63,18 @@ describe('서버 갈아타기', () => {
     // 실패를 삼키면 화면이 «붙은 척» 한다.
     api.connectScouter.mockRejectedValueOnce(new Error('로그인 실패'));
     await expect(switchToServer(PARAMS)).rejects.toThrow('로그인 실패');
+  });
+});
+
+describe('여러 서버 함께 갈아타기', () => {
+  it('앞 서버를 세우고 끊은 뒤 고른 순서 그대로 함께 붙는다', async () => {
+    const a = { name: 'A', host: '10.0.0.1', port: 6100, user: 'u', pass: 'p' };
+    const b = { name: 'B', host: '10.0.0.2', port: 6100, user: 'u', pass: 'p' };
+    await switchToCollectors([a, b]);
+
+    expect(api.stopXLogStream).toHaveBeenCalled();
+    expect(api.disconnectScouter).toHaveBeenCalled();
+    expect(api.connectCollectors).toHaveBeenCalledWith([a, b]);
+    expect(api.connectScouter).not.toHaveBeenCalled();
   });
 });

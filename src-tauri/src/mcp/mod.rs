@@ -14,7 +14,7 @@
 // 그것은 화면이 안다(`get_past_counter` 와 같은 이유로 Rust 에서 구하지 않는다).
 
 pub mod digest;
-mod server;
+pub mod server;
 
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicI64, Ordering};

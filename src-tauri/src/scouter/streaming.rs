@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::connection::ScouterConnection;
+use crate::hub::CollectorLink;
+use crate::state::AppState;
 use super::pack::{AnyPack, MapPack, XLogPack};
 use super::protocol::*;
 use super::value::ScouterValue;
@@ -62,8 +64,11 @@ pub enum StreamEnd {
 /// 콜렉터가 다시 뜨거나 네트워크가 한 번 끊기면 그 소켓은 영영 죽어 있어 오류만 계속 났다 —
 /// 서버를 골라도 XLog 가 안 뜨는 상태가 앱을 다시 켤 때까지 갔다. 끝난 까닭을 돌려주고,
 /// 다시 여는 것은 부르는 쪽(`restart_xlog_stream`)이 새 연결로 한다.
+///
+/// `obj_hashes` 는 이 콜렉터(`link`)의 원래 해시다. 받은 XLog 는 화면용 해시로 바꿔 보낸다 (`crate::hub`).
 pub async fn run_xlog_stream(
     conn: &mut ScouterConnection,
+    link: Arc<CollectorLink>,
     obj_hashes: Vec<i32>,
     app: AppHandle,
     stop_flag: Arc<AtomicBool>,
@@ -73,7 +78,7 @@ pub async fn run_xlog_stream(
     let mut first = true;
 
     while !stop_flag.load(Ordering::Relaxed) {
-        let result = poll_once(conn, &obj_hashes, &mut cursor, first, &app);
+        let result = poll_once(conn, &link, &obj_hashes, &mut cursor, first, &app);
         first = false;
 
         match result {
@@ -104,10 +109,45 @@ pub async fn run_xlog_stream(
 /// 단일 폴링 요청/응답 처리
 fn poll_once(
     conn: &mut ScouterConnection,
+    link: &CollectorLink,
     obj_hashes: &[i32],
     cursor: &mut StreamCursor,
     is_first: bool,
     app: &AppHandle,
+) -> io::Result<()> {
+    let state = app.state::<AppState>();
+    poll_xlogs(
+        conn,
+        link,
+        &state,
+        obj_hashes,
+        cursor,
+        is_first,
+        // 에러·느린 것은 프로파일을 미리 받아 둔다 (`cache::prefetch`) — 막히지 않는다
+        &mut |xlog| {
+            if let Some(p) = app.try_state::<crate::cache::prefetch::Prefetcher>() {
+                p.offer(link.idx, xlog);
+            }
+        },
+        &mut |chunk| {
+            let _ = app.emit("xlog-data", XLogColumns::from(chunk));
+        },
+    )
+}
+
+/// 폴링 한 번의 몸통 — 화면(AppHandle) 없이도 돈다(시험이 부른다).
+///
+/// `seen` 은 받은 XLog 하나하나(원래 해시), `sink` 는 화면으로 보낼 묶음(**화면용 해시**로 바꾼 것)을 받는다.
+#[allow(clippy::too_many_arguments)]
+pub fn poll_xlogs(
+    conn: &mut ScouterConnection,
+    link: &CollectorLink,
+    state: &AppState,
+    obj_hashes: &[i32],
+    cursor: &mut StreamCursor,
+    is_first: bool,
+    seen: &mut dyn FnMut(&XLogPack),
+    sink: &mut dyn FnMut(Vec<XLogPack>),
 ) -> io::Result<()> {
     let cmd = if is_first {
         CMD_TRANX_REAL_TIME_GROUP_LATEST
@@ -132,13 +172,12 @@ fn poll_once(
             }
             Some(AnyPack::XLog(xlog)) => {
                 n_xlog += 1;
-                // 에러·느린 것은 프로파일을 미리 받아 둔다 (`cache::prefetch`) — 막히지 않는다
-                if let Some(p) = app.try_state::<crate::cache::prefetch::Prefetcher>() {
-                    p.offer(&xlog);
-                }
+                seen(&xlog);
                 batch.push(xlog);
                 if batch.len() >= EMIT_CHUNK {
-                    let _ = app.emit("xlog-data", XLogColumns::from(std::mem::take(&mut batch)));
+                    let mut chunk = std::mem::take(&mut batch);
+                    state.virtualize_xlogs(link, &mut chunk);
+                    sink(chunk);
                 }
             }
             // 모르는 팩 타입은 여기까지 오지 않는다 — read_next_pack 이 에러를 낸다 (O-5).
@@ -148,7 +187,8 @@ fn poll_once(
     }
 
     if !batch.is_empty() {
-        let _ = app.emit("xlog-data", XLogColumns::from(batch));
+        state.virtualize_xlogs(link, &mut batch);
+        sink(batch);
     }
     // 대량으로 올 때 어디에 시간이 갔는지 보려면 이 줄이 필요하다 (F-56).
     if n_xlog > 0 {

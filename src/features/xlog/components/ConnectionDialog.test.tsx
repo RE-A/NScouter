@@ -15,6 +15,7 @@ import { ConnectionDialog } from './ConnectionDialog';
 import type { AppConfig, ServerProfile } from '../api/scouterApi';
 
 const connectToServer = vi.fn();
+const connectCollectors = vi.fn();
 const getConfig = vi.fn();
 const saveConfig = vi.fn();
 
@@ -23,6 +24,7 @@ vi.mock('../api/connectFlow', () => ({
 }));
 vi.mock('../api/scouterApi', () => ({
   getConfig: (...a: unknown[]) => getConfig(...a),
+  connectCollectors: (...a: unknown[]) => connectCollectors(...a),
   saveConfig: (...a: unknown[]) => saveConfig(...a),
   startMockStream: vi.fn(),
   stopXLogStream: vi.fn(),
@@ -54,6 +56,7 @@ beforeEach(() => {
   getConfig.mockResolvedValue(config());
   saveConfig.mockResolvedValue(undefined);
   connectToServer.mockResolvedValue([1, 2, 3]);
+  connectCollectors.mockResolvedValue({ connected: true, server_id: '운영 + QA', clock_offset_ms: null, collectors: [] });
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -163,5 +166,32 @@ describe('ConnectionDialog — 자동 연결로 붙을 때', () => {
 
     await waitFor(() => expect(onConnectedProfile).toHaveBeenCalled());
     expect(onConnectedProfile.mock.calls[0][1]).toBe(true);
+  });
+});
+
+describe('자동 연결 — 지난번에 함께 본 묶음', () => {
+  const qa: ServerProfile = { name: 'QA', host: '10.0.0.2', port: 6100, user: 'qa', pass: 'y' };
+
+  it('묶음의 서버가 다 있고 비밀번호도 있으면 그 묶음으로 함께 붙는다', async () => {
+    getConfig.mockResolvedValue(config({ auto_connect: true, servers: [saved, qa], last_servers: ['QA', '운영'] }));
+    draw();
+    await waitFor(() => expect(connectCollectors).toHaveBeenCalledWith([qa, saved]));
+    expect(connectToServer).not.toHaveBeenCalled();
+  });
+
+  it('비밀번호가 없는 서버가 섞여 있으면 마지막 서버 하나로 붙는다', async () => {
+    getConfig.mockResolvedValue(
+      config({
+        auto_connect: true,
+        servers: [saved, { ...qa, pass: '' }],
+        last_servers: ['운영', 'QA'],
+        last_host: '10.0.0.1',
+        last_user: 'admin',
+        last_pass: 'secret',
+      }),
+    );
+    draw();
+    await waitFor(() => expect(connectToServer).toHaveBeenCalled());
+    expect(connectCollectors).not.toHaveBeenCalled();
   });
 });
