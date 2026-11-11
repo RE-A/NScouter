@@ -59,7 +59,10 @@ async fn apps(st: &AppState) -> (i32, i32) {
     for o in &list {
         println!("  {:>12} {:<24} {}", o.obj_hash, o.obj_name, o.obj_type);
     }
-    let find = |part: &str| list.iter().find(|o| o.obj_name.contains(part)).unwrap_or_else(|| panic!("{part} 없음")).obj_hash;
+    // 앱 자신(tomcat) — 같은 이름 아래 커넥션 풀(`…/shop-app/HikariPool-1`, datasource)도 있다
+    let find = |part: &str| {
+        list.iter().find(|o| o.obj_type == "tomcat" && o.obj_name.contains(part)).unwrap_or_else(|| panic!("{part} 없음")).obj_hash
+    };
     (find("shop-app"), find("order-app"))
 }
 

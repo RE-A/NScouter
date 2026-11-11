@@ -73,11 +73,11 @@ export function dropMember(list: readonly Workspace[], server: string): Workspac
 
 /** 묶음을 붙을 수 있는 프로필로 푼 것 */
 export interface ResolvedWorkspace {
-  /** 묶음 순서대로 (앞의 것이 주 콜렉터) */
+  /** 묶음 순서대로 (앞의 것이 주 콜렉터). 비밀번호 없는 것도 든다 — 붙기 전에 몰아서 묻는다(`PasswordPrompt`) */
   profiles: ServerProfile[];
   /** 서버 목록에 없는 이름 */
   missing: string[];
-  /** 비밀번호를 기억하지 않은 서버 — 여럿을 붙이는 중에 하나씩 물을 수 없다 */
+  /** 비밀번호를 기억하지 않은 서버 — 붙을 때 묻는다 */
   noPass: string[];
 }
 
@@ -85,16 +85,19 @@ export function resolveWorkspace(ws: Workspace, profiles: readonly ServerProfile
   const out: ResolvedWorkspace = { profiles: [], missing: [], noPass: [] };
   for (const name of ws.servers) {
     const p = profiles.find(x => displayName(x) === name);
-    if (!p) out.missing.push(name);
-    else if (p.pass === '') out.noPass.push(name);
-    else out.profiles.push(p);
+    if (!p) {
+      out.missing.push(name);
+      continue;
+    }
+    if (p.pass === '') out.noPass.push(name);
+    out.profiles.push(p);
   }
   return out;
 }
 
-/** 바로 붙을 수 있나 — 빠진 서버도, 비밀번호 없는 서버도 없다 */
+/** 붙을 수 있나 — 목록에서 빠진 서버가 없다 (비밀번호 없는 서버는 붙을 때 묻는다) */
 export function isReady(r: ResolvedWorkspace): boolean {
-  return r.missing.length === 0 && r.noPass.length === 0 && r.profiles.length >= MIN_MEMBERS;
+  return r.missing.length === 0 && r.profiles.length >= MIN_MEMBERS;
 }
 
 /**

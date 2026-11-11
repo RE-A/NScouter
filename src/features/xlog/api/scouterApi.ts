@@ -69,6 +69,8 @@ export interface CollectorStatus {
   connected: boolean;
   /** 못 붙은 까닭 */
   error: string | null;
+  /** 붙어는 있는데 최근(1분) 조회가 실패한 까닭 — 그 콜렉터만 빼고 답하고 있다. 없으면 null */
+  warning?: string | null;
 }
 
 /** 지금 접속 상태 — 나중에 뜬 창이 묻는다 */
@@ -93,6 +95,15 @@ export async function getConnectionInfo(): Promise<ConnectionInfo> {
  */
 export async function refreshConnection(): Promise<ConnectionInfo> {
   return invoke<ConnectionInfo>('refresh_connection');
+}
+
+/**
+ * **처음부터 다시** — 붙어 있던 콜렉터들에 접속부터 새로 한다(연결·화면용 해시·사전·캐시를 새로 세운다).
+ * `scouter-connected` 가 와서 화면이 받아 둔 것을 버리고 다시 받는다. 고른 서버·탭 조건은 남는다.
+ * 하나도 못 붙으면 `scouter-disconnected` 가 오고 실패한다
+ */
+export async function restartCollectors(): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>('restart_collectors');
 }
 
 export async function startXLogStream(objHashes: number[]): Promise<void> {

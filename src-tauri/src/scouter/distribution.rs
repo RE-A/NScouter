@@ -127,6 +127,24 @@ impl Accumulator {
         self.total
     }
 
+    /// 다른 누적기를 더한다 — 콜렉터마다 따로 센 것을 하나로 (`get_xlog_distribution`).
+    /// 칸·백분위용 세밀 칸까지 더하므로 한 누적기에 다 넣은 것과 결과가 같다
+    pub fn merge(&mut self, other: &Accumulator) {
+        for (a, b) in self.counts.iter_mut().zip(other.counts.iter()) {
+            *a += b;
+        }
+        for (a, b) in self.errors.iter_mut().zip(other.errors.iter()) {
+            *a += b;
+        }
+        for (a, b) in self.fine.iter_mut().zip(other.fine.iter()) {
+            *a += b;
+        }
+        self.total += other.total;
+        self.error += other.error;
+        self.sum_ms += other.sum_ms;
+        self.max_ms = self.max_ms.max(other.max_ms);
+    }
+
     pub fn finish(self, truncated: bool) -> ElapsedDistribution {
         let buckets = (0..self.counts.len())
             .map(|i| ElapsedBucket {
@@ -183,6 +201,19 @@ fn percentile(fine: &[u32], total: i64, p: i64) -> i32 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn 나눠_센_것을_더하면_한꺼번에_센_것과_같다() {
+        let samples: Vec<(i32, bool)> = (0..500).map(|i| ((i * 37) % 9000, i % 7 == 0)).collect();
+        let mut all = Accumulator::new();
+        let (mut a, mut b) = (Accumulator::new(), Accumulator::new());
+        for (i, (e, f)) in samples.iter().enumerate() {
+            all.add(*e, *f);
+            if i % 3 == 0 { a.add(*e, *f) } else { b.add(*e, *f) }
+        }
+        a.merge(&b);
+        assert_eq!(a.finish(false), all.finish(false));
+    }
     use super::*;
 
     #[test]
