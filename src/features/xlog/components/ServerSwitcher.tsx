@@ -4,8 +4,8 @@
 //
 // **여러 서버를 함께 볼 수도 있다.** 시스템별로 콜렉터가 나뉜 곳에서는 서버 목록·XLog 를 한 화면에서
 // 섞어 봐야 한다. 줄 앞의 체크로 둘 이상 고르고 `함께 연결` 을 누르면, 서버 하나에 붙은 것처럼 보인다
-// (Rust `crate::hub`). 맨 위에 고른 것이 주 콜렉터다. 비밀번호를 기억한 서버만 고를 수 있다 —
-// 여럿을 붙이는 중에 하나씩 물을 수가 없다.
+// (Rust `crate::hub`). 맨 위에 고른 것이 주 콜렉터다. 비밀번호를 기억하지 않은 서버는 붙기 전에
+// 한 창에서 몰아서 묻는다(`PasswordPrompt`, 부르는 쪽이 띄운다).
 //
 // 갈아타면 화면이 통째로 바뀐다 — 오브젝트 해시가 서버마다 다르므로 필터도 상세 탭도
 // 그대로 둘 수 없다. 그래서 «지금 어느 서버를 보고 있나» 를 늘 띄워 둔다.
@@ -144,7 +144,7 @@ export const ServerSwitcher = memo(function ServerSwitcher({
                 const why = r.missing.length > 0
                   ? `${t('목록에 없는 서버')}: ${r.missing.join(', ')}`
                   : r.noPass.length > 0
-                    ? `${t('비밀번호를 기억하지 않은 서버')}: ${r.noPass.join(', ')}`
+                    ? `${t('이 묶음의 서버들에 함께 붙습니다')} — ${t('비밀번호를 물을 서버')}: ${r.noPass.join(', ')}`
                     : t('이 묶음의 서버들에 함께 붙습니다');
                 return (
                   <div key={w.name} className={`flex items-center gap-1 rounded px-1 ${w.name === current ? 'bg-hover' : 'hover:bg-hover'}`}>
@@ -191,10 +191,9 @@ export const ServerSwitcher = memo(function ServerSwitcher({
                   <input
                     type="checkbox"
                     checked={picked.has(label)}
-                    disabled={p.pass === ''}
                     onChange={() => togglePick(label)}
                     aria-label={`${label} ${t('함께 연결')}`}
-                    title={p.pass === '' ? t('비밀번호를 기억한 서버만 함께 연결할 수 있습니다') : t('함께 연결할 서버로 고릅니다')}
+                    title={p.pass === '' ? t('함께 연결할 서버로 고릅니다 — 비밀번호는 붙을 때 묻습니다') : t('함께 연결할 서버로 고릅니다')}
                     className="shrink-0"
                   />
                 )}

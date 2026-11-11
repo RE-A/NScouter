@@ -166,6 +166,7 @@ pub fn run() {
             search_xlog_page,
             get_connection_info,
             refresh_connection,
+            restart_collectors,
             get_cache_info,
             clear_cache,
             mcp::mcp_sync,

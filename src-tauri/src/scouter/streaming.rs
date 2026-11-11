@@ -87,6 +87,7 @@ pub async fn run_xlog_stream(
                 // 세션 만료(INVALID_SESSION)도 소켓 오류도 같다 — 새로 붙어 다시 로그인한다
                 let why = if e.kind() == io::ErrorKind::PermissionDenied { "세션 만료" } else { "스트리밍 오류" };
                 log::warn!("{why} — 새 연결로 다시 엽니다: {e}");
+                link.warn(&format!("XLog {why}: {e}"));
                 let _ = app.emit(
                     "xlog-error",
                     XLogErrorPayload {

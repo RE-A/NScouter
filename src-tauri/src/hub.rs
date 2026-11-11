@@ -85,7 +85,15 @@ pub struct CollectorLink {
     pub text_cache: Mutex<TextCache>,
     /// 마지막으로 붙으려다 실패한 까닭
     pub error: Mutex<Option<String>>,
+    /// 붙어는 있는데 **조회가 실패한** 마지막 일 — (언제 ms, 까닭). 주기 조회는 이 콜렉터만 빼고 답하고
+    /// 헤더가 이걸 경고로 보인다. **성공했다고 지우지 않는다** — 같은 콜렉터에서 다른 조회가 성공할 때마다 지우면
+    /// 경고가 깜빡인다. `WARNING_TTL_MS` 가 지나면 안 보이고, 다시 붙으면 지운다.
+    /// 막히는 일꾼 스레드에서도 적으므로 std 뮤텍스다
+    warning: std::sync::Mutex<Option<(i64, String)>>,
 }
+
+/// 조회 경고를 «최근» 으로 보는 시간 — 주기 조회가 2~10초라 이만큼 지나도 다시 안 났으면 나은 것이다
+pub const WARNING_TTL_MS: i64 = 60_000;
 
 impl CollectorLink {
     pub fn new(idx: usize, t: &ConnectTarget) -> Self {
@@ -103,6 +111,7 @@ impl CollectorLink {
             cache: Mutex::new(None),
             text_cache: Mutex::new(TextCache::new()),
             error: Mutex::new(None),
+            warning: std::sync::Mutex::new(None),
         }
     }
 
@@ -132,6 +141,7 @@ impl CollectorLink {
                 *self.server_id.lock().await = Some(sid.clone());
                 *self.connection.lock().await = Some(conn);
                 *self.error.lock().await = None;
+                self.clear_warning();
                 Ok(sid)
             }
             Err(e) => {
@@ -144,6 +154,7 @@ impl CollectorLink {
 
     /// 끊는다 — 주 연결과 풀을 버리고 캐시를 뗀다
     pub async fn close(&self) {
+        self.clear_warning();
         *self.connection.lock().await = None;
         self.clear_query_pool().await;
         self.set_cache(None).await;
@@ -211,6 +222,23 @@ impl CollectorLink {
         local_now_ms() + offset - crate::cache::xlog::SEAL_MS
     }
 
+    /// 조회가 실패했다 — 경고로 남긴다
+    pub fn warn(&self, msg: &str) {
+        log::warn!("콜렉터 조회 실패 ({}): {msg}", self.name);
+        *self.warning.lock().unwrap_or_else(|p| p.into_inner()) = Some((local_now_ms(), msg.to_string()));
+    }
+
+    /// 경고를 지운다 — 다시 붙었을 때
+    pub fn clear_warning(&self) {
+        *self.warning.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    /// 최근(`WARNING_TTL_MS`) 조회 경고
+    pub fn recent_warning(&self) -> Option<String> {
+        let w = self.warning.lock().unwrap_or_else(|p| p.into_inner());
+        w.as_ref().filter(|(t, _)| local_now_ms() - t < WARNING_TTL_MS).map(|(_, m)| m.clone())
+    }
+
     /// 해시가 겹쳐 다른 값을 받은 오브젝트의 화면 이름
     pub fn tagged_name(&self, name: &str) -> String {
         format!("{name}{NAME_TAG}{}", self.name)
@@ -226,6 +254,38 @@ pub fn split_tag(name: &str) -> (&str, Option<&str>) {
         Some(i) => (&name[..i], Some(&name[i + NAME_TAG.len()..])),
         None => (name, None),
     }
+}
+
+// ─── 콜렉터 여럿의 결과 모으기 ────────────────────────────────
+
+/// 콜렉터마다 돌린 결과를 모은다 — **주기 조회용.**
+///
+/// 실패한 콜렉터는 경고로 남기고(`warn`) 빼서, 붙어 있는 나머지 콜렉터의 값으로 답한다. 콜렉터 하나가 흔들릴 때
+/// 패널이 통째로 비면 안 된다. **전부 실패하면 실패다** — 콜렉터가 하나일 때는
+/// 그 오류를 그대로 돌려준다(예전과 같다).
+///
+/// 한 번 누르는 조회(과거 조회·찾기·분포·상세)는 쓰지 않는다 — 콜렉터 하나가 빠진 결과를 «그 구간에 그것뿐» 으로
+/// 믿게 되므로 거기서는 실패를 그대로 올린다.
+pub fn gather<T>(results: Vec<(std::sync::Arc<CollectorLink>, Result<T, String>)>) -> Result<Vec<(std::sync::Arc<CollectorLink>, T)>, String> {
+    if results.is_empty() {
+        return Err("연결되지 않음".to_string());
+    }
+    let n = results.len();
+    let mut ok = Vec::with_capacity(n);
+    let mut errs = Vec::new();
+    for (link, r) in results {
+        match r {
+            Ok(v) => ok.push((link, v)),
+            Err(e) => {
+                link.warn(&e);
+                errs.push(if n > 1 { format!("{e} ({})", link.name) } else { e });
+            }
+        }
+    }
+    if ok.is_empty() {
+        return Err(errs.join(" / "));
+    }
+    Ok(ok)
 }
 
 // ─── 가상 objHash ────────────────────────────────────────────
@@ -323,6 +383,35 @@ mod tests {
     fn 이름_표지를_떼어_낸다() {
         assert_eq!(split_tag("/shop/app @QA"), ("/shop/app", Some("QA")));
         assert_eq!(split_tag("/shop/app"), ("/shop/app", None));
+    }
+
+    fn link(name: &str) -> std::sync::Arc<CollectorLink> {
+        let t = ConnectTarget { name: name.into(), host: "h".into(), port: 1, user: "u".into(), pass: String::new() };
+        std::sync::Arc::new(CollectorLink::new(0, &t))
+    }
+
+    #[test]
+    fn 한_콜렉터가_실패해도_나머지로_답하고_실패한_것은_경고로_남긴다() {
+        let (a, b) = (link("A"), link("B"));
+        let got = gather(vec![(a.clone(), Ok(1)), (b.clone(), Err::<i32, _>("끊김".to_string()))]).unwrap();
+        assert_eq!(got.iter().map(|(l, v)| (l.name.clone(), *v)).collect::<Vec<_>>(), vec![("A".to_string(), 1)]);
+        assert_eq!(b.recent_warning().as_deref(), Some("끊김"));
+        assert_eq!(a.recent_warning(), None);
+        // 성공했다고 지우지 않는다 — 1분 동안은 «최근에 실패가 있었다» 로 남는다(깜빡이지 않게)
+        gather(vec![(b.clone(), Ok(2))]).unwrap();
+        assert_eq!(b.recent_warning().as_deref(), Some("끊김"));
+        b.clear_warning();
+        assert_eq!(b.recent_warning(), None);
+    }
+
+    #[test]
+    fn 전부_실패하면_실패다_콜렉터가_하나면_오류를_그대로() {
+        let a = link("A");
+        assert_eq!(gather(vec![(a.clone(), Err::<i32, _>("x".to_string()))]).err().as_deref(), Some("x"));
+        let b = link("B");
+        let e = gather(vec![(a, Err::<i32, _>("x".to_string())), (b, Err("y".to_string()))]).err();
+        assert_eq!(e.as_deref(), Some("x (A) / y (B)"));
+        assert!(gather::<i32>(vec![]).is_err());
     }
 
     #[test]

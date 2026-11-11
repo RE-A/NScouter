@@ -195,10 +195,16 @@ describe('ServerSwitcher — 이름 붙이기', () => {
       expect(onSwitchMany).toHaveBeenCalledWith([prod, qa2]);
     });
 
-    it('비밀번호를 기억 안 한 서버는 고를 수 없다', () => {
-      open([prod, qa], { onSwitchMany: vi.fn() });
-      fireEvent.click(screen.getByRole('button', { name: /운영/ }));
-      expect((screen.getByLabelText('10.0.0.2:6200 함께 연결') as HTMLInputElement).disabled).toBe(true);
+    it('비밀번호를 기억 안 한 서버도 고를 수 있다 — 붙을 때 묻는다(부르는 쪽 몫)', () => {
+      const onSwitchMany = vi.fn();
+      open([prod, qa], { onSwitchMany, current: null });
+      fireEvent.click(screen.getByRole('button', { name: /서버 고르기/ }));
+      const box = screen.getByLabelText('10.0.0.2:6200 함께 연결') as HTMLInputElement;
+      expect(box.disabled).toBe(false);
+      fireEvent.click(screen.getByLabelText('운영 함께 연결'));
+      fireEvent.click(box);
+      fireEvent.click(screen.getByRole('button', { name: '함께 연결' }));
+      expect(onSwitchMany).toHaveBeenCalledWith([prod, qa]);
     });
 
     it('함께 붙어 있으면 열 때 그 서버들이 체크돼 있다', () => {
@@ -222,15 +228,18 @@ describe('ServerSwitcher — 이름 붙이기', () => {
       expect(onSwitchMany).toHaveBeenCalledWith([qa2, prod]);
     });
 
-    it('비밀번호 없는 서버나 없는 서버가 든 묶음은 누를 수 없고 까닭을 말한다', () => {
-      open([prod, qa], { onSwitchMany: vi.fn(), workspaces: [{ name: '깨진것', servers: ['운영', '10.0.0.2:6200'] }, { name: '빠진것', servers: ['운영', '없음'] }] });
+    it('목록에 없는 서버가 든 묶음은 누를 수 없고, 비밀번호 없는 서버가 든 묶음은 물을 서버를 말하며 누를 수 있다', () => {
+      const onSwitchMany = vi.fn();
+      open([prod, qa], { onSwitchMany, workspaces: [{ name: '물을것', servers: ['운영', '10.0.0.2:6200'] }, { name: '빠진것', servers: ['운영', '없음'] }] });
       fireEvent.click(screen.getByRole('button', { name: /운영/ }));
-      const a = screen.getByLabelText('작업 공간 깨진것') as HTMLButtonElement;
+      const a = screen.getByLabelText('작업 공간 물을것') as HTMLButtonElement;
       const b = screen.getByLabelText('작업 공간 빠진것') as HTMLButtonElement;
-      expect(a.disabled).toBe(true);
-      expect(a.title).toContain('10.0.0.2:6200');
       expect(b.disabled).toBe(true);
       expect(b.title).toContain('없음');
+      expect(a.disabled).toBe(false);
+      expect(a.title).toContain('10.0.0.2:6200');
+      fireEvent.click(a);
+      expect(onSwitchMany).toHaveBeenCalledWith([prod, qa]);
     });
 
     it('체크한 서버들을 이름 붙여 남긴다 — 둘 이상 체크해야 칸이 보인다', () => {

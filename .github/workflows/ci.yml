@@ -1,0 +1,53 @@
+# PR 마다 테스트를 돌린다.
+#
+# 지금까지는 태그를 달 때 도는 릴리스 빌드(release.yml)뿐이라 PR 이 아무 검사 없이 merge 됐다.
+# 여기서 보는 것:
+#   · 화면 — 타입 검사(tsc) · 단위 테스트(vitest) · 번들(vite build)
+#   · Rust — cargo test (콜렉터가 있어야 하는 실측 테스트는 #[ignore] 라 돌지 않는다)
+#
+# 리눅스에서 돈다 — 윈도우 러너보다 빠르고, Tauri 의 Rust 쪽은 webkit2gtk 만 있으면 빌드된다
+# (.claude/hooks/session-start.sh 와 같은 패키지).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 같은 PR 에 새로 푸시하면 앞의 것은 그만 돌린다
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npx vite build
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tauri 빌드용 시스템 라이브러리
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            build-essential pkg-config libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo test --locked
+        working-directory: src-tauri

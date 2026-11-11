@@ -78,11 +78,17 @@ describe('resolveWorkspace', () => {
     expect(isReady(r)).toBe(true);
   });
 
-  it('목록에 없는 서버와 비밀번호 없는 서버를 가려 말한다', () => {
-    const r = resolveWorkspace(ws('운영', 'A', 'B', '없는것'), [p('A'), p('B', '')]);
+  it('목록에 없는 서버가 있으면 붙을 수 없다', () => {
+    const r = resolveWorkspace(ws('운영', 'A', 'B', '없는것'), [p('A'), p('B')]);
     expect(r.missing).toEqual(['없는것']);
-    expect(r.noPass).toEqual(['B']);
     expect(isReady(r)).toBe(false);
+  });
+
+  it('비밀번호 없는 서버는 가려 말하되 붙을 수는 있다 — 붙을 때 묻는다', () => {
+    const r = resolveWorkspace(ws('운영', 'A', 'B'), [p('A'), p('B', '')]);
+    expect(r.noPass).toEqual(['B']);
+    expect(r.profiles.map(x => x.name)).toEqual(['A', 'B']);
+    expect(isReady(r)).toBe(true);
   });
 });
 

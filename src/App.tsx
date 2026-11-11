@@ -35,6 +35,8 @@ import {
 } from './features/xlog/components/savedFilters';
 import { ServerSwitcher } from './features/xlog/components/ServerSwitcher';
 import { CollectorConfigButton } from './features/xlog/components/CollectorConfigButton';
+import { needsRestart } from './features/xlog/components/reloadPlan';
+import { PasswordPrompt } from './features/xlog/components/PasswordPrompt';
 import {
   displayName,
   fromLegacy,
@@ -85,6 +87,7 @@ import {
   onConnected,
   onDisconnected,
   refreshConnection,
+  restartCollectors,
   getObjectList,
   loadObjectHistory,
   saveObjectHistory,
@@ -814,6 +817,14 @@ export default function App({ windowLabel }: {
     // **종류를 가르기 전에 콜렉터의 종류→Family 표부터 받는다.** 커스텀 종류
     // (`monitoring_group_type`)는 이름 목록에 없어서, 표 없이 가르면 WAS 가 통째로 빠진다.
     // 표를 못 받아도(옛 콜렉터) 목록은 연다 — 그때는 `detected` 태그로 배운다.
+    // 콜렉터마다 붙었는지·최근 조회가 실패했는지도 같은 주기로 다시 읽는다 — 헤더의 점(초록·노랑·빨강)과
+    // F5 가 «처음부터 다시» 를 고르는 근거다. 네트워크를 안 탄다(Rust 가 들고 있는 상태를 읽을 뿐)
+    getConnectionInfo()
+      .then(info => {
+        if (cancelled) return;
+        setCollectors(info.collectors ?? []);
+      })
+      .catch(() => {});
     Promise.all([getObjectList(), getObjectTypeFamilies().catch(() => []), restored])
       .then(([fresh, families]) => {
         if (cancelled) return;
@@ -866,11 +877,12 @@ export default function App({ windowLabel }: {
     // 새 서버의 파일을 덮는다.
   }, [isConnected, serverId, connectionEpoch, isMain]);
 
-  // 알림은 메인 창이 받는다 — 뗀 창에는 알림 화면이 없다
+  // 알림은 메인 창이 받는다 — 뗀 창에는 알림 화면이 없다.
+  // 다시 붙을 때마다(connectionEpoch — 처음부터 다시 포함) 연다: Rust 가 붙으며 앞의 스트림을 세운다
   useEffect(() => {
     if (!isConnected || !isMain) return;
     startAlertStream().catch(() => {});
-  }, [isConnected, isMain]);
+  }, [isConnected, isMain, connectionEpoch]);
 
   const handleFilterChange = useCallback((p: Partial<XLogFilterState>) => setFilter(prev => ({ ...prev, ...p })), []);
   /**
@@ -998,7 +1010,7 @@ export default function App({ windowLabel }: {
    * 앞의 것이 주 콜렉터다. 일부만 붙어도 성공이다 — 못 붙은 콜렉터는 헤더에 빨갛게 남고,
    * 새로고침(F5)이 다시 붙어 본다. 비밀번호를 기억한 서버만 온다(고르는 쪽이 막는다).
    */
-  const switchServers = useCallback(
+  const connectTogether = useCallback(
     (profiles: ServerProfile[]) => {
       if (profiles.length === 0) return;
       const label = profiles.map(displayName).join(' + ');
@@ -1023,6 +1035,32 @@ export default function App({ windowLabel }: {
         .finally(() => setSwitching(false));
     },
     [persistServers, handleConnected],
+  );
+
+  /** 비밀번호를 물을 함께 연결 — 비밀번호를 기억하지 않은 서버가 섞여 있을 때 (`PasswordPrompt`) */
+  const [askPass, setAskPass] = useState<ServerProfile[] | null>(null);
+  const switchServers = useCallback(
+    (profiles: ServerProfile[]) => {
+      // 비밀번호를 기억하지 않은 서버가 있으면 붙기 전에 한 창에서 몰아서 묻는다
+      if (profiles.some(p => p.pass === '')) setAskPass(profiles);
+      else connectTogether(profiles);
+    },
+    [connectTogether],
+  );
+  const submitPasswords = useCallback(
+    (filled: ServerProfile[], remember: boolean) => {
+      setAskPass(null);
+      // 기억하기로 했으면 목록에도 남긴다 — 다음부터는 묻지 않는다
+      if (remember) {
+        setServers(prev => {
+          const next = filled.reduce((acc, p) => upsert(acc, p, { savePass: true }), prev);
+          void persistServers(next, currentServer ?? '');
+          return next;
+        });
+      }
+      connectTogether(filled);
+    },
+    [connectTogether, persistServers, currentServer],
   );
 
   /**
@@ -1874,15 +1912,27 @@ export default function App({ windowLabel }: {
    *   Active     지금 한 번 더 묻는다
    *   Counter·Visualize  패널들을 다시 세워 받는다
    * 연결을 못 맺어도 화면은 다시 받는다 — 무엇이 안 되는지는 그쪽 오류가 말한다.
+   *
+   * **오류가 있으면 처음부터 다시 붙는다** (`needsRestart`). 못 붙은 콜렉터가 있거나, 최근 조회가 실패한
+   * 콜렉터가 있거나, 바로 앞의 새로고침이 실패했으면 연결만 새로 맺는 것으로는 안 풀리는 일이 많다 —
+   * 그때는 붙어 있던 콜렉터들에 접속부터 새로 하고(`restartCollectors`) 받아 둔 것을 비워 다시 받는다.
+   * 고른 서버·탭 조건은 남는다.
    */
   const [refreshing, setRefreshing] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const refreshErrorRef = useRef<string | null>(null);
+  refreshErrorRef.current = refreshing.error;
   const handleReload = useCallback(() => {
     if (!isConnected) {
       setRefreshSignal(n => n + 1);
       return;
     }
     setRefreshing({ busy: true, error: null });
-    refreshConnection()
+    // 고르기 전에 지금 상태를 새로 읽는다 — 헤더의 콜렉터 상태는 10초마다라 늦을 수 있다
+    getConnectionInfo()
+      .then(info => info, () => null)
+      .then(info => {
+        return needsRestart(info, refreshErrorRef.current) ? restartCollectors() : refreshConnection();
+      })
       .then(info => {
         setServerClockOffset(info.clock_offset_ms);
         // 처음에 못 붙었던 콜렉터가 이번에 붙었을 수 있다
@@ -2068,15 +2118,22 @@ export default function App({ windowLabel }: {
                   그대로 나온다 — t() 를 통과시켜도 안전하다. */}
               {collectors.length > 1 ? (
                 // 함께 붙어 있으면 콜렉터마다 붙었는지를 보인다 — 못 붙은 콜렉터의 서버는 목록에 없다
+                // 노랑은 붙어는 있는데 최근 조회가 실패한 콜렉터다 — 그 콜렉터만 빼고 보여 주는 중이다
                 collectors.map((c, i) => (
                   <span
                     key={c.name}
                     className="flex items-center gap-1"
-                    title={c.connected ? `${c.host}:${c.port} · ${c.server_id}` : `${c.host}:${c.port} · ${t('붙지 못함')}${c.error ? ` — ${c.error}` : ''}`}
+                    title={
+                      !c.connected
+                        ? `${c.host}:${c.port} · ${t('붙지 못함')}${c.error ? ` — ${c.error}` : ''}`
+                        : c.warning
+                          ? `${c.host}:${c.port} · ${t('최근 조회 실패 — 이 콜렉터를 빼고 보여 주는 중입니다. F5 로 처음부터 다시 붙습니다')} — ${c.warning}`
+                          : `${c.host}:${c.port} · ${c.server_id}`
+                    }
                   >
                     {i > 0 && <span className="text-fg-faint">+</span>}
-                    <span className={`size-1.5 rounded-full ${c.connected ? 'bg-ok' : 'bg-danger'}`} aria-hidden />
-                    <span className={c.connected ? '' : 'text-danger'}>{c.name}</span>
+                    <span className={`size-1.5 rounded-full ${!c.connected ? 'bg-danger' : c.warning ? 'bg-warn' : 'bg-ok'}`} aria-hidden />
+                    <span className={!c.connected ? 'text-danger' : c.warning ? 'text-warn' : ''}>{c.name}</span>
                   </span>
                 ))
               ) : (
@@ -2191,6 +2248,7 @@ export default function App({ windowLabel }: {
 
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {askPass && <PasswordPrompt profiles={askPass} onSubmit={submitPasswords} onCancel={() => setAskPass(null)} />}
       {showCollectorConfig && (
         <ConfigSettingsDialog
           target={{ kind: 'collector', name: configCollector ?? currentServer ?? serverId, collector: configCollector }}
