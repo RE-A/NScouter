@@ -11,7 +11,7 @@ import { fromLocalInput, toLocalInput } from '../xlog/types/timeRange';
 import type { Estimate, StatsRange, StatsRequest, StatsTaskRule } from './statsApi';
 import { picksByRule } from './taskRule';
 import { applyPreset, toPreset, type StatsPreset } from './statsPresets';
-import { addRanges, lastWeek, offHours, recentDays, yesterday } from './statsRanges';
+import { addRanges, lastWeek, offHours, overlaps, recentDays, yesterday } from './statsRanges';
 
 const DAY = 24 * 3600 * 1000;
 const MAX_BASELINES = 14;
@@ -383,6 +383,14 @@ export const StatsForm = memo(function StatsForm({
               {t('모두 빼기')}
             </button>
           </div>
+        )}
+        {d.baselines.some(b => overlaps(b, d.current)) && (
+          <p className="mt-1.5 text-small text-warn">
+            {t('현재 구간과 겹치는 평소 구간이 있습니다 — 같은 트랜잭션이 양쪽에 들어가 차이가 작게 나옵니다')}
+          </p>
+        )}
+        {d.current.etime > Date.now() + 60_000 && (
+          <p className="mt-1.5 text-small text-warn">{t('현재 구간 끝이 지금보다 뒤입니다 — 아직 오지 않은 시간은 0건으로 셉니다')}</p>
         )}
         {off && (
           <p className="mt-1.5 text-small text-warn">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addRanges, lastWeek, offHours, recentDays, yesterday } from './statsRanges';
+import { addRanges, lastWeek, offHours, overlaps, recentDays, yesterday } from './statsRanges';
 
 const H = 3600 * 1000;
 const D = 24 * H;
@@ -17,6 +17,11 @@ describe('기준 구간 빠른 추가', () => {
     const b = addRanges(a, recentDays(cur, 2));
     expect(b.length).toBe(2);
     expect(b[0].stime).toBeGreaterThan(b[1].stime);
+  });
+
+  it('겹침 — 끝과 시작이 맞닿으면 겹치지 않는다', () => {
+    expect(overlaps(cur, { stime: cur.stime - H, etime: cur.stime })).toBe(false);
+    expect(overlaps(cur, { stime: cur.stime - H, etime: cur.stime + 1 })).toBe(true);
   });
 
   it('시각대나 길이가 다르면 알린다', () => {

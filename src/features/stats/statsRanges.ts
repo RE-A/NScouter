@@ -36,6 +36,11 @@ export function addRanges(list: readonly StatsRange[], more: readonly StatsRange
   return out.sort((a, b) => b.stime - a.stime);
 }
 
+/** 기준 구간이 현재 구간과 겹치는가 — 겹치면 같은 트랜잭션이 양쪽에 들어가 차이가 작게 나온다 */
+export function overlaps(a: StatsRange, b: StatsRange): boolean {
+  return a.stime < b.etime && b.stime < a.etime;
+}
+
 /** 하루 안 시각(분)이 현재 구간과 다른 기준 구간 — 시간대가 달라 피크가 섞일 수 있다 */
 export function offHours(current: StatsRange, base: StatsRange, tzOffsetMs: number): boolean {
   const mod = (t: number) => (((t + tzOffsetMs) % DAY) + DAY) % DAY;

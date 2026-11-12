@@ -29,7 +29,7 @@ use super::digest::{
 use super::McpState;
 use crate::hub::CollectorLink;
 use crate::scouter::connection::{local_now_ms, ScouterConnection};
-use crate::scouter::dictionary::{fetch_texts, TextCache};
+use crate::scouter::dictionary::{fetch_texts_on, TextCache};
 use crate::scouter::object::{build_daily_object_param, parse_daily_objects};
 use crate::scouter::objtype::{date_key, split_by_day};
 use crate::scouter::pack::{AnyPack, MapPack, XLogPack};
@@ -451,6 +451,16 @@ pub(crate) fn realtime_objects(conn: &mut ScouterConnection) -> Result<Vec<crate
 
 /// 사전에서 못 찾은 글을 채운다. 그 콜렉터의 공유 캐시를 쓴다 — 화면이 이미 푼 것은 다시 묻지 않는다
 pub(crate) fn fill_texts(conn: &mut ScouterConnection, link: &CollectorLink, wants: &[(&'static str, i32)]) -> Result<(), String> {
+    fill_texts_on(conn, link, wants, None)
+}
+
+/// `fill_texts` 에 날짜를 붙여 — 그날 사전에서 찾는다 (F-70, `fetch_texts_on`)
+pub(crate) fn fill_texts_on(
+    conn: &mut ScouterConnection,
+    link: &CollectorLink,
+    wants: &[(&'static str, i32)],
+    date: Option<&str>,
+) -> Result<(), String> {
     let mut by_kind: HashMap<&str, Vec<i32>> = HashMap::new();
     for (k, h) in wants {
         if *h != 0 {
@@ -461,7 +471,7 @@ pub(crate) fn fill_texts(conn: &mut ScouterConnection, link: &CollectorLink, wan
     for (kind, hashes) in by_kind {
         let missing = cache.missing(kind, &hashes);
         if !missing.is_empty() {
-            fetch_texts(conn, &mut cache, kind, &missing).map_err(|e| format!("텍스트 조회 실패 ({}): {e}", link.name))?;
+            fetch_texts_on(conn, &mut cache, kind, &missing, date).map_err(|e| format!("텍스트 조회 실패 ({}): {e}", link.name))?;
         }
     }
     Ok(())

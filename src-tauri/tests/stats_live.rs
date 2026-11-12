@@ -244,3 +244,62 @@ async fn 요약_점은_어느_5분_몫인가() {
         println!("  점 {} 요약 {est:>5} · 앞 5분 실제 {:>5} · 뒤 5분 실제 {:>5}", nscouter_lib::stats::raw::local_time(t, KST), n(&before), n(&after));
     }
 }
+
+/// 자정을 넘는 구간 — 콜렉터를 `NSC_TZ_HOURS`(기본 9) 시간대로 띄우고 그 자정(`NSC_MIDNIGHT`, ms) 앞뒤 10분을 비교 구간으로 훑는다.
+/// 콜렉터 B 는 서비스 이름을 날짜별 사전에만 두게(`mgr_text_db_daily_service_enabled=true`) 띄워 둔다 —
+/// 자정을 넘긴 뒤 날짜 없이 이름을 물으면 «오늘» 사전만 보므로 어제 서비스가 해시로 남는다(F-70)
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn 자정을_넘는_구간도_양쪽_날짜를_다_훑고_이름을_푼다() {
+    use nscouter_lib::cache::xlog::past_page;
+    use nscouter_lib::scouter::dictionary::{fetch_texts, fetch_texts_on, TextCache};
+    use nscouter_lib::scouter::objtype::date_key;
+    use nscouter_lib::scouter::past::PastCursor;
+    use nscouter_lib::scouter::protocol::text_type;
+
+    let tz: i64 = std::env::var("NSC_TZ_HOURS").ok().and_then(|v| v.parse().ok()).unwrap_or(9) * 3600 * 1000;
+    let m: i64 = std::env::var("NSC_MIDNIGHT").ok().and_then(|v| v.parse().ok()).expect("NSC_MIDNIGHT(ms)");
+    let st = connected().await;
+    let req_of = |s: i64, e: i64| {
+        let mut r = request(&[]);
+        r.task_patterns = vec!["shop-app".into(), "order-app".into()];
+        r.tz_offset_ms = tz;
+        r.current = StatsRange { stime: s, etime: e };
+        r.baselines = vec![StatsRange { stime: m - 30 * MIN, etime: m - 20 * MIN }];
+        r
+    };
+    let total = |v: &[ServiceStats]| v.iter().map(|r| r.current.as_ref().map_or(0, |s| s.count)).sum::<u64>();
+    let (across, miss, _) = go(&st, req_of(m - 10 * MIN, m + 10 * MIN)).await;
+    let (before, _, _) = go(&st, req_of(m - 10 * MIN, m)).await;
+    let (after, _, _) = go(&st, req_of(m, m + 10 * MIN)).await;
+    println!("  날짜 {} → {}", date_key(m - 1, tz), date_key(m, tz));
+    println!("  넘는 구간 {} = 앞 {} + 뒤 {} · 빠진 조각 {miss}", total(&across), total(&before), total(&after));
+    let hashed: Vec<&str> = across.iter().map(|r| r.service.as_str()).filter(|s| s.starts_with('#')).collect();
+    println!("  이름 못 푼 서비스 {:?}", hashed);
+    assert_eq!(miss, 0);
+    assert!(total(&before) > 0 && total(&after) > 0, "자정 앞뒤 모두 있어야 한다");
+    assert_eq!(total(&across), total(&before) + total(&after), "넘는 구간 = 앞 + 뒤");
+    assert!(hashed.is_empty(), "이름을 못 푼 서비스가 있다");
+
+    // 날짜 없이 물으면 어떤가 — 콜렉터 B(날짜별 사전)의 어제 서비스로 견준다
+    let b = st.links().into_iter().find(|l| l.name == "B").unwrap();
+    let objs = nscouter_lib::commands::object_list_all(&st).await.unwrap();
+    let order = objs.iter().find(|o| o.obj_type == "tomcat" && o.obj_name.contains("order-app")).unwrap().obj_hash;
+    let yday = date_key(m - 1, tz);
+    let (no_date, with_date, n) = tokio::task::spawn_blocking(move || {
+        let mut conn = b.open().unwrap();
+        let page = past_page(&mut conn, None, &[order], &yday, m - 10 * MIN, m, 2000, &PastCursor::default(), 0).unwrap();
+        let mut hs: Vec<i32> = page.rows.iter().map(|x| x.service).collect();
+        hs.sort_unstable();
+        hs.dedup();
+        let (mut a, mut c) = (TextCache::new(), TextCache::new());
+        fetch_texts(&mut conn, &mut a, text_type::SERVICE, &hs).unwrap();
+        fetch_texts_on(&mut conn, &mut c, text_type::SERVICE, &hs, Some(&yday)).unwrap();
+        let got = |t: &TextCache| hs.iter().filter(|h| t.get(text_type::SERVICE, **h).is_some()).count();
+        (got(&a), got(&c), hs.len())
+    })
+    .await
+    .unwrap();
+    println!("  B 어제 서비스 {n}개 — 날짜 없이 {no_date}개 풂 · 날짜 붙여 {with_date}개 풂");
+    assert_eq!(with_date, n);
+}

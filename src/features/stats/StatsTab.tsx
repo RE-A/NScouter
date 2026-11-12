@@ -479,6 +479,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   </Warn>
                 )}
                 <NoData result={result} />
+                <EmptyRanges result={result} />
                 <FewerServers result={result} />
                 {missing > 0 && (
                   <Warn>
@@ -554,6 +555,25 @@ function ServerCount({ ranges }: { ranges: StatsResult['ranges'] }) {
     >
       {t('서버')} {t('현재')} {cur.length}{t('대')} · {t('평소')} {base.length}{t('대')}
     </span>
+  );
+}
+
+/**
+ * 한 건도 못 받은 구간 — 콜렉터 보관 기간(기본 90일)이 지났거나, 그때 대상 서버가 없었거나,
+ * 콜렉터 시간대와 이 PC 시간대가 달라 날짜 폴더가 어긋났다(F-18). 평소가 비면 모든 서비스가 «신규» 로 뜬다
+ */
+function EmptyRanges({ result }: { result: StatsResult }) {
+  if (result.status === 'failed') return null;
+  const empty = result.ranges.filter(r => r.slices > 0 && r.slices_done === r.slices && r.scanned === 0);
+  const noServer = result.ranges.filter(r => r.servers.length === 0);
+  const list = [...new Set([...empty, ...noServer])];
+  if (list.length === 0) return null;
+  const fmtR = (r: StatsResult['ranges'][number]) => `${r.kind === 'current' ? t('현재') : t('평소')} ${rangeLabel(r)}`;
+  return (
+    <Warn>
+      {t('데이터가 하나도 없는 구간')}: {list.map(fmtR).join(', ')} —{' '}
+      {t('콜렉터 보관 기간이 지났거나, 그때 대상 서버가 없었거나, 콜렉터와 이 PC 의 시간대가 다를 수 있습니다')}
+    </Warn>
   );
 }
 
