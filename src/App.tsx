@@ -1441,7 +1441,7 @@ export default function App({ windowLabel }: {
     const svc = [...new Set(picked.xlogs.map(x => x.service).filter(Boolean))];
     if (svc.length === 0) return;
     let cancelled = false;
-    // 에러 행은 목록에 에러 한 줄을 붙인다 — 에러 문구는 날짜별 사전이라 행의 날짜로 묻는다(F-70)
+    // 에러 행은 목록에 에러 한 줄을 붙인다 — 에러 문구는 행의 날짜로 묻는다(F-70)
     const errByDate = new Map<string, Set<number>>();
     for (const x of picked.xlogs) {
       if (x.error === 0) continue;

@@ -246,8 +246,8 @@ async fn 요약_점은_어느_5분_몫인가() {
 }
 
 /// 자정을 넘는 구간 — 콜렉터를 `NSC_TZ_HOURS`(기본 9) 시간대로 띄우고 그 자정(`NSC_MIDNIGHT`, ms) 앞뒤 10분을 비교 구간으로 훑는다.
-/// 콜렉터 B 는 서비스 이름을 날짜별 사전에만 두게(`mgr_text_db_daily_service_enabled=true`) 띄워 둔다 —
-/// 자정을 넘긴 뒤 날짜 없이 이름을 물으면 «오늘» 사전만 보므로 어제 서비스가 해시로 남는다(F-70)
+/// 콜렉터 B 는 서비스 이름을 날짜별 사전에 두게(`mgr_text_db_daily_service_enabled=true`) 띄워 두고, 어제 서비스를
+/// 날짜 없이·날짜 붙여 물어 견준다(F-70 — 실측에서는 둘 다 풀렸다)
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn 자정을_넘는_구간도_양쪽_날짜를_다_훑고_이름을_푼다() {

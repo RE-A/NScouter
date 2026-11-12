@@ -507,8 +507,7 @@ pub async fn resolve_texts_all(state: &AppState, type_key: String, hashes: Vec<i
     resolve_texts_on(state, type_key, hashes, None).await
 }
 
-/// 날짜를 붙여 푼다 — **에러 문구는 콜렉터가 늘 날짜별 사전에만 둔다**(F-70). 지난 날 트랜잭션의 에러는
-/// 그 날짜로 물어야 풀린다. 서비스·API·UA 도 콜렉터 설정에 따라 그렇다
+/// 날짜를 붙여 푼다 — 지난 트랜잭션의 글자는 그 날짜로 묻는다(F-70: 필요한지는 실측으로 확인 못 했다)
 pub async fn resolve_texts_on(
     state: &AppState,
     type_key: String,

@@ -454,7 +454,7 @@ pub(crate) fn fill_texts(conn: &mut ScouterConnection, link: &CollectorLink, wan
     fill_texts_on(conn, link, wants, None)
 }
 
-/// `fill_texts` 에 날짜를 붙여 — 그날 사전에서 찾는다 (F-70, `fetch_texts_on`)
+/// `fill_texts` 에 날짜를 붙여 묻는다 (F-70, `fetch_texts_on`)
 pub(crate) fn fill_texts_on(
     conn: &mut ScouterConnection,
     link: &CollectorLink,

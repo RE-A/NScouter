@@ -58,7 +58,7 @@ export async function loadXLogDetail(
       resolve('method', hashes.method),
       resolve('sql', hashes.sql),
       resolve('apicall', hashes.apicall),
-      // 에러 문구는 날짜별 사전에만 있다(F-70) — 지난 날 트랜잭션은 그 날짜로 물어야 풀린다
+      // 그 트랜잭션의 날짜로 묻는다 — 콜렉터는 에러 문구를 날짜별 사전에 둔다(F-70)
       resolve('error', errorHashes, date),
       // HashedMessageStep 전용 타입 (ASIS TextTypes.HASH_MSG)
       resolve('hmsg', hashes.hmsg),

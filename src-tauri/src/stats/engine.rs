@@ -438,7 +438,7 @@ fn scan_slice(
             .collect();
         if !rows.is_empty() {
             let wants: Vec<(&'static str, i32)> = rows.iter().map(|x| (text_type::SERVICE, x.service)).collect::<HashSet<_>>().into_iter().collect();
-            // 그 조각의 날짜 사전에서 찾는다 — 날짜별 사전을 켠 콜렉터에서 지난 서비스가 해시로 남지 않게 (F-70)
+            // 그 조각의 날짜로 묻는다 (F-70)
             fill_texts_on(conn, link, &wants, Some(&sl.date))?;
             let names: HashMap<i32, String> = {
                 let cache = link.text_cache.blocking_lock();
