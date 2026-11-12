@@ -1219,4 +1219,7 @@ export const EN: Record<string, string> = {
   '현재 구간 끝이 지금보다 뒤입니다 — 아직 오지 않은 시간은 0건으로 셉니다': 'The current range ends in the future — time that hasn\'t come yet counts as zero',
   '데이터가 하나도 없는 구간': 'Ranges with no data at all',
   '콜렉터 보관 기간이 지났거나, 그때 대상 서버가 없었거나, 콜렉터와 이 PC 의 시간대가 다를 수 있습니다': 'the collector\'s retention may have passed, the target servers may not have existed then, or the collector\'s time zone may differ from this PC\'s',
+  'CSV 로 내보내기 — 고른 전부': 'Export CSV — all selected',
+  'CSV 로 내보내기 — 보이는 목록': 'Export CSV — visible rows',
+  '보이는 행이 없습니다': 'No visible rows',
 };

@@ -496,19 +496,31 @@ pub async fn stop_counter_stream(state: State<'_, AppState>) -> Result<(), Strin
 pub async fn resolve_texts(
     type_key: String,
     hashes: Vec<i32>,
+    date: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<HashMap<i32, String>, String> {
-    resolve_texts_all(&state, type_key, hashes).await
+    resolve_texts_on(&state, type_key, hashes, date.as_deref()).await
 }
 
-/// `resolve_texts` 의 몸통
+/// `resolve_texts` 의 몸통 (날짜 없이 — 콜렉터는 오늘 사전을 본다)
 pub async fn resolve_texts_all(state: &AppState, type_key: String, hashes: Vec<i32>) -> Result<HashMap<i32, String>, String> {
+    resolve_texts_on(state, type_key, hashes, None).await
+}
+
+/// 날짜를 붙여 푼다 — **에러 문구는 콜렉터가 늘 날짜별 사전에만 둔다**(F-70). 지난 날 트랜잭션의 에러는
+/// 그 날짜로 물어야 풀린다. 서비스·API·UA 도 콜렉터 설정에 따라 그렇다
+pub async fn resolve_texts_on(
+    state: &AppState,
+    type_key: String,
+    hashes: Vec<i32>,
+    date: Option<&str>,
+) -> Result<HashMap<i32, String>, String> {
     log::debug!("resolve_texts: type_key={type_key}, count={}", hashes.len());
 
     if type_key == text_type::OBJECT {
         let mut out = HashMap::new();
         for (link, reals) in state.split_hashes(&hashes) {
-            let got = resolve_on(&link, &type_key, &reals).await?;
+            let got = resolve_on(&link, &type_key, &reals, None).await?;
             for (real, name) in got {
                 let v = state.virt(&link, real);
                 let name = if state.is_tagged(&link, real) { link.tagged_name(&name) } else { name };
@@ -551,8 +563,8 @@ pub async fn resolve_texts_all(state: &AppState, type_key: String, hashes: Vec<i
     let tasks: Vec<_> = links
         .iter()
         .map(|l| {
-            let (l2, kind, left) = (l.clone(), type_key.clone(), left.clone());
-            (l.clone(), tokio::spawn(async move { resolve_on(&l2, &kind, &left).await }))
+            let (l2, kind, left, d) = (l.clone(), type_key.clone(), left.clone(), date.map(str::to_string));
+            (l.clone(), tokio::spawn(async move { resolve_on(&l2, &kind, &left, d.as_deref()).await }))
         })
         .collect();
     let mut results = Vec::with_capacity(tasks.len());
@@ -575,7 +587,7 @@ pub async fn resolve_texts_all(state: &AppState, type_key: String, hashes: Vec<i
 }
 
 /// 콜렉터 하나에 사전을 묻는다 — 그 콜렉터의 캐시에 없는 것만
-async fn resolve_on(link: &CollectorLink, type_key: &str, hashes: &[i32]) -> Result<HashMap<i32, String>, String> {
+async fn resolve_on(link: &CollectorLink, type_key: &str, hashes: &[i32], date: Option<&str>) -> Result<HashMap<i32, String>, String> {
     let mut conn_guard = link.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("연결되지 않음")?;
 
@@ -583,7 +595,8 @@ async fn resolve_on(link: &CollectorLink, type_key: &str, hashes: &[i32]) -> Res
     let missing = cache_guard.missing(type_key, hashes);
 
     if !missing.is_empty() {
-        fetch_texts(conn, &mut cache_guard, type_key, &missing).map_err(|e| format!("텍스트 조회 실패: {e}"))?;
+        crate::scouter::dictionary::fetch_texts_on(conn, &mut cache_guard, type_key, &missing, date)
+            .map_err(|e| format!("텍스트 조회 실패: {e}"))?;
     }
 
     Ok(hashes.iter().filter_map(|&h| cache_guard.get(type_key, h).map(|t| (h, t.to_string()))).collect())

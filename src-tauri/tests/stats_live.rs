@@ -296,6 +296,16 @@ async fn 자정을_넘는_구간도_양쪽_날짜를_다_훑고_이름을_푼다
         fetch_texts(&mut conn, &mut a, text_type::SERVICE, &hs).unwrap();
         fetch_texts_on(&mut conn, &mut c, text_type::SERVICE, &hs, Some(&yday)).unwrap();
         let got = |t: &TextCache| hs.iter().filter(|h| t.get(text_type::SERVICE, **h).is_some()).count();
+        // 에러 문구 — 콜렉터 설정과 상관없이 늘 날짜별 사전이다
+        let mut es: Vec<i32> = page.rows.iter().map(|x| x.error).filter(|e| *e != 0).collect();
+        es.sort_unstable();
+        es.dedup();
+        let (mut ea, mut ec) = (TextCache::new(), TextCache::new());
+        fetch_texts(&mut conn, &mut ea, text_type::ERROR, &es).unwrap();
+        fetch_texts_on(&mut conn, &mut ec, text_type::ERROR, &es, Some(&yday)).unwrap();
+        let egot = |t: &TextCache| es.iter().filter(|h| t.get(text_type::ERROR, **h).is_some()).count();
+        println!("  B 어제 에러 문구 {}개 — 날짜 없이 {}개 풂 · 날짜 붙여 {}개 풂", es.len(), egot(&ea), egot(&ec));
+        assert_eq!(egot(&ec), es.len());
         (got(&a), got(&c), hs.len())
     })
     .await

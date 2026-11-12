@@ -16,7 +16,7 @@ export interface TextResolver {
    * 여러 hash를 한 번에 해석 후 Map<hash, text> 반환
    * 이미 캐시된 항목은 서버 요청 생략
    */
-  resolve: (typeKey: string, hashes: number[]) => Promise<Record<number, string>>;
+  resolve: (typeKey: string, hashes: number[], date?: string) => Promise<Record<number, string>>;
   /** 캐시에서 단건 조회 (없으면 undefined) */
   getCached: (typeKey: string, hash: number) => string | undefined;
 }
@@ -27,7 +27,7 @@ export function useTextResolver(): TextResolver {
   }, []);
 
   const resolve = useCallback(
-    async (typeKey: string, hashes: number[]): Promise<Record<number, string>> => {
+    async (typeKey: string, hashes: number[], date?: string): Promise<Record<number, string>> => {
       if (hashes.length === 0) return {};
 
       // 캐시 미스만 서버 요청
@@ -35,7 +35,8 @@ export function useTextResolver(): TextResolver {
 
       if (missing.length > 0) {
         try {
-          const result = await resolveTexts(typeKey, missing);
+          // 날짜는 콜렉터가 어느 날 사전을 볼지만 정한다 — 해시는 글자에서 나오므로 캐시 열쇠에는 안 넣는다
+          const result = await resolveTexts(typeKey, missing, date);
           for (const [hashStr, text] of Object.entries(result)) {
             globalCache.set(makeCacheKey(typeKey, Number(hashStr)), text);
           }
