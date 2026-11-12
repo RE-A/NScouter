@@ -800,6 +800,8 @@ export interface AppConfig {
   mcp?: McpPrefs;
   /** 통계 탭에서 이름 붙여 저장한 Task 이름 규칙 */
   stats_rules?: { name: string; patterns: string[] }[];
+  /** 통계 탭 설정 — 모양은 `features/stats/statsApi.ts` 의 `StatsPrefs` */
+  stats?: unknown;
 }
 
 /** Rust `McpPrefs` 와 짝이다 */

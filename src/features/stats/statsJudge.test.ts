@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ServiceStats, StatsSummary } from './statsApi';
-import { change, judge, severity } from './statsJudge';
+import { change, DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, severity } from './statsJudge';
 
 const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
   count: 1000,
@@ -39,6 +39,18 @@ describe('judge', () => {
 
   it('p90 만 늘어도 느려짐', () => {
     expect(judge(row(s({ p90_ms: 700 }), s()))).toEqual(['slow']);
+  });
+
+  it('p99 는 켰을 때만 본다', () => {
+    const r = row(s({ p99_ms: 3000 }), s());
+    expect(judge(r)).toEqual([]);
+    expect(judge(r, { ...DEFAULT_RULES, useP99: true })).toEqual(['slow']);
+  });
+
+  it('설정 값을 판정 기준으로 — 못 쓸 값은 기본값', () => {
+    const r = rulesFromPrefs({ slow_ratio: 2, slow_min_ms: 0, error_ratio: -1, error_min_pp: 0.5, volume_pct: 30, min_count: 10, use_p99: true });
+    expect(r).toEqual({ ...DEFAULT_RULES, slowRatio: 2, slowMinMs: 0, errorMinDelta: 0.005, volumeRatio: 0.3, minCount: 10, useP99: true });
+    expect(rulesFromPrefs(prefsFromRules(DEFAULT_RULES))).toEqual(DEFAULT_RULES);
   });
 
   it('두 배여도 차이가 100ms 미만이면 아니다 — 3ms → 6ms', () => {

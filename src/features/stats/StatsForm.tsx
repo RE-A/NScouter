@@ -10,6 +10,7 @@ import { Button } from '../../components/Button';
 import { fromLocalInput, toLocalInput } from '../xlog/types/timeRange';
 import type { Estimate, StatsRange, StatsRequest, StatsTaskRule } from './statsApi';
 import { picksByRule } from './taskRule';
+import { applyPreset, toPreset, type StatsPreset } from './statsPresets';
 import { addRanges, lastWeek, offHours, recentDays, yesterday } from './statsRanges';
 
 const DAY = 24 * 3600 * 1000;
@@ -135,6 +136,9 @@ interface StatsFormProps {
   /** 저장해 둔 Task 이름 규칙 */
   rules: StatsTaskRule[];
   onSaveRules: (rules: StatsTaskRule[]) => void;
+  /** 이름 붙여 저장한 조건 묶음 */
+  presets: StatsPreset[];
+  onSavePresets: (presets: StatsPreset[]) => void;
   tzOffsetMs: number;
   connected: boolean;
   estimate: Estimate | null;
@@ -153,6 +157,8 @@ export const StatsForm = memo(function StatsForm({
   servers,
   rules,
   onSaveRules,
+  presets,
+  onSavePresets,
   tzOffsetMs,
   connected,
   estimate,
@@ -166,6 +172,7 @@ export const StatsForm = memo(function StatsForm({
     () => d.services + d.serviceInclude + d.serviceExclude + d.ipInclude + d.ipExclude + d.title !== '',
   );
   const [custom, setCustom] = useState<StatsRange | null>(null);
+  const [presetName, setPresetName] = useState('');
   const error = draftError(d);
   const rulePatterns = useMemo(() => splitList(d.rule), [d.rule]);
   const matched = useMemo(() => servers.filter(n => picksByRule(rulePatterns, n)), [servers, rulePatterns]);
@@ -189,6 +196,52 @@ export const StatsForm = memo(function StatsForm({
 
   return (
     <div className="flex max-w-4xl flex-col gap-4">
+      {/* 조건 묶음 — 대상·서비스·수집 조건·평소 구간 잡는 법. 현재 구간은 그대로 두고 채운다 */}
+      <div className="flex flex-wrap items-center gap-2 rounded bg-raised px-2 py-1.5">
+        <span className="text-small text-fg-dim">{t('조건 묶음')}</span>
+        <select
+          value=""
+          onChange={e => {
+            const p = presets.find(x => x.name === e.target.value);
+            if (p) {
+              onChange(applyPreset(d, p));
+              setPresetName(p.name);
+            }
+          }}
+          className={`${inputCls} w-56 pr-[26px]`}
+          aria-label={t('조건 묶음 불러오기')}
+        >
+          <option value="">{presets.length > 0 ? t('불러오기…') : t('저장한 묶음 없음')}</option>
+          {presets.map(p => (
+            <option key={p.name} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          value={presetName}
+          spellCheck={false}
+          placeholder={t('조건 묶음 이름')}
+          onChange={e => setPresetName(e.target.value)}
+          className={`${inputCls} w-44`}
+          aria-label={t('조건 묶음 이름')}
+        />
+        <Button
+          size="sm"
+          disabled={presetName.trim() === ''}
+          onClick={() => onSavePresets([toPreset(presetName, d), ...presets.filter(p => p.name !== presetName.trim())])}
+          title={t('평소 구간은 현재 구간에서 떨어진 만큼으로 남깁니다 — 불러오면 그날의 현재 구간에 맞춰 다시 만듭니다')}
+        >
+          {presets.some(p => p.name === presetName.trim()) ? t('고쳐 저장') : t('지금 조건 저장')}
+        </Button>
+        {presets.some(p => p.name === presetName.trim()) && (
+          <Button variant="ghost" size="sm" onClick={() => onSavePresets(presets.filter(p => p.name !== presetName.trim()))}>
+            {t('묶음 지우기')}
+          </Button>
+        )}
+      </div>
+
       <Section title={t('대상')}>
         <div className="flex items-center gap-1">
           {(['group', 'rule'] as TargetKind[]).map(k => (

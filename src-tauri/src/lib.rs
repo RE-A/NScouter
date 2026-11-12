@@ -181,6 +181,8 @@ pub fn run() {
             stats::stats_delete,
             stats::stats_save_rules,
             stats::stats_shutdown,
+            stats::stats_save_prefs,
+            stats::stats_save_report,
             mcp::mcp_configure,
             mcp::mcp_set_limits,
             mcp::mcp_regenerate_token,

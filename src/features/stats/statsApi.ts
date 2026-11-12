@@ -181,6 +181,37 @@ export function statsShutdown(): Promise<number> {
   return invoke<number>('stats_shutdown');
 }
 
+/** 판정 기준 — Rust `StatsJudgePrefs` (config.json) */
+export interface StatsJudgePrefs {
+  slow_ratio: number;
+  slow_min_ms: number;
+  error_ratio: number;
+  /** %p */
+  error_min_pp: number;
+  /** % */
+  volume_pct: number;
+  min_count: number;
+  use_p99: boolean;
+}
+
+/** 통계 탭 설정 — Rust `StatsPrefs` */
+export interface StatsPrefs {
+  judge: StatsJudgePrefs;
+  /** 결과 보관 일수. 0 이면 지우지 않는다 */
+  keep_days: number;
+  /** 조건 묶음 (`statsPresets.ts` 모양) */
+  presets: unknown[];
+}
+
+export function statsSavePrefs(prefs: StatsPrefs): Promise<void> {
+  return invoke<void>('stats_save_prefs', { prefs });
+}
+
+/** HTML 보고서를 내보내기 폴더에 남긴다. 경로를 돌려준다 */
+export function statsSaveReport(name: string, stamp: string, html: string): Promise<string> {
+  return invoke<string>('stats_save_report', { name, stamp, html });
+}
+
 export function statsDelete(id: string): Promise<void> {
   return invoke<void>('stats_delete', { id });
 }

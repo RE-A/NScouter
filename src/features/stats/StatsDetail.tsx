@@ -2,7 +2,8 @@
 
 import { memo, useEffect, useState } from 'react';
 import { t } from '../../i18n';
-import type { Sample, ServiceStats, StatsSummary } from './statsApi';
+import type { Sample, ServiceStats, StatsRange, StatsSummary } from './statsApi';
+import { StatsCharts } from './StatsCharts';
 import { statsService } from './statsApi';
 import { change } from './statsJudge';
 
@@ -10,6 +11,9 @@ interface StatsDetailProps {
   jobId: string;
   service: string;
   onOpenTxid: (txid: string, date: string) => void;
+  /** 차트의 시간축 — 현재 구간과 평소 구간들 */
+  range: StatsRange;
+  baselines: StatsRange[];
 }
 
 type Field = { label: string; get: (s: StatsSummary) => number; fmt: (v: number) => string; judge?: boolean };
@@ -31,7 +35,7 @@ function fields(): Field[] {
   ];
 }
 
-export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxid }: StatsDetailProps) {
+export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxid, range, baselines }: StatsDetailProps) {
   const [data, setData] = useState<ServiceStats | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +57,8 @@ export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxi
   if (!data) return <p className="text-small text-fg-dim">{t('불러오는 중…')}</p>;
   const samples = (c?.slowest.length ?? 0) + (c?.errored.length ?? 0) > 0;
   return (
+    <div className="flex flex-col gap-4">
+    <StatsCharts current={c} baseline={b} range={range} baselines={baselines} />
     <div className="flex flex-wrap items-start gap-x-10 gap-y-3">
       <table className="tnum w-80 text-body">
         <thead className="text-small text-fg-dim">
@@ -88,6 +94,7 @@ export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxi
           <p className="text-micro text-fg-faint">{t('누르면 XLog 탭에서 프로파일을 엽니다')}</p>
         </div>
       )}
+    </div>
     </div>
   );
 });

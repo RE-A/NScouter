@@ -21,17 +21,25 @@ import {
   statsEstimate,
   statsJobs,
   statsResult,
+  statsSavePrefs,
+  statsSaveReport,
   statsSaveRules,
+  statsService,
   statsShutdown,
   statsStart,
   type Estimate,
   type JobInfo,
   type StatsProgress,
+  type ServiceStats,
+  type StatsPrefs,
   type StatsResult,
   type StatsTaskRule,
 } from './statsApi';
 import { statsCsv } from './statsCsv';
-import { DEFAULT_RULES } from './statsJudge';
+import { DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, type JudgeRules } from './statsJudge';
+import { StatsSettingsDialog } from './StatsSettingsDialog';
+import { parsePresets, type StatsPreset } from './statsPresets';
+import { statsReport } from './statsReport';
 import { draftError, initialDraft, rangeLabel, StatsForm, toRequest, type StatsDraft } from './StatsForm';
 import { StatsTable } from './StatsTable';
 import { StatsDetail } from './StatsDetail';
@@ -84,6 +92,12 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   const [showForm, setShowForm] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [rules, setRules] = useState<StatsTaskRule[]>([]);
+  /** 판정 기준 · 보관 일수 · 조건 묶음 (config.json `stats`) */
+  const [judgeRules, setJudgeRules] = useState<JudgeRules>(DEFAULT_RULES);
+  const [keepDays, setKeepDays] = useState(90);
+  const [presets, setPresets] = useState<StatsPreset[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [reporting, setReporting] = useState(false);
   /** 돌던 작업이 있는데 창을 닫으려 했다 */
   const [closeAsk, setCloseAsk] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -133,9 +147,32 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   // 저장한 Task 이름 규칙 (config.json)
   useEffect(() => {
     getConfig()
-      .then(c => setRules(c.stats_rules ?? []))
+      .then(c => {
+        setRules(c.stats_rules ?? []);
+        const p = c.stats as Partial<StatsPrefs> | undefined;
+        setJudgeRules(rulesFromPrefs(p?.judge));
+        if (typeof p?.keep_days === 'number') setKeepDays(p.keep_days);
+        setPresets(parsePresets(p?.presets));
+      })
       .catch(() => {});
   }, []);
+
+  /** 설정 한 벌을 통째로 저장한다 — 바꾼 것만 넘기면 나머지를 옛 값으로 덮는다 */
+  const savePrefs = useCallback(
+    (next: { rules?: JudgeRules; keepDays?: number; presets?: StatsPreset[] }) => {
+      const r = next.rules ?? judgeRules;
+      const k = next.keepDays ?? keepDays;
+      const ps = next.presets ?? presets;
+      statsSavePrefs({ judge: prefsFromRules(r), keep_days: k, presets: ps })
+        .then(() => {
+          setJudgeRules(r);
+          setKeepDays(k);
+          setPresets(ps);
+        })
+        .catch(e => setError(String(e)));
+    },
+    [judgeRules, keepDays, presets],
+  );
 
   const saveRules = useCallback((next: StatsTaskRule[]) => {
     statsSaveRules(next)
@@ -238,15 +275,39 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
     if (!result) return;
     const r = result.request;
     const name = `stats-${r.groups[0] ?? r.task_patterns?.[0] ?? r.servers[0] ?? 'target'}`;
-    saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsCsv(result.services, DEFAULT_RULES) })
+    saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsCsv(result.services, judgeRules) })
       .then(path => setNotice(path))
       .catch(e => setError(String(e)));
-  }, [result]);
+  }, [result, judgeRules]);
+
+  /** HTML 보고서 — 특이사항 서비스는 추이까지 받아 차트를 넣는다(많으면 앞의 30개) */
+  const exportReport = useCallback(() => {
+    if (!result) return;
+    setReporting(true);
+    const flagged = result.services
+      .filter(s => s.current !== null && judge(s, judgeRules).some(f => f !== 'few' && f !== 'gone'))
+      .slice(0, 30);
+    Promise.all(flagged.map(s => statsService(result.id, s.service).catch(() => null)))
+      .then(list => {
+        const details = new Map<string, ServiceStats>();
+        for (const d of list) if (d) details.set(d.service, d);
+        const r = result.request;
+        const name = `stats-report-${r.groups[0] ?? r.task_patterns?.[0] ?? r.servers[0] ?? 'target'}`;
+        return statsSaveReport(name, toFileStamp(result.started_at), statsReport(result, judgeRules, details, t));
+      })
+      .then(path => setNotice(path))
+      .catch(e => setError(String(e)))
+      .finally(() => setReporting(false));
+  }, [result, judgeRules]);
 
   const resultId = result?.id ?? null;
+  const resultReq = result?.request ?? null;
   const renderDetail = useCallback(
-    (svc: string) => (resultId ? <StatsDetail jobId={resultId} service={svc} onOpenTxid={onOpenTxid} /> : null),
-    [resultId, onOpenTxid],
+    (svc: string) =>
+      resultId && resultReq ? (
+        <StatsDetail jobId={resultId} service={svc} onOpenTxid={onOpenTxid} range={resultReq.current} baselines={resultReq.baselines} />
+      ) : null,
+    [resultId, resultReq, onOpenTxid],
   );
 
   const openJob = jobs.find(j => j.id === openId) ?? null;
@@ -299,6 +360,10 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
             </div>
           );
         })}
+        <span className="flex-1" />
+        <Button variant="ghost" size="sm" onClick={() => setShowSettings(true)}>
+          ⚙ {t('통계 설정')}
+        </Button>
       </aside>
 
       {/* ── 본문 ── */}
@@ -321,6 +386,8 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               servers={servers}
               rules={rules}
               onSaveRules={saveRules}
+              presets={presets}
+              onSavePresets={ps => savePrefs({ presets: ps })}
               tzOffsetMs={tz}
               connected={connected}
               estimate={estimate}
@@ -353,6 +420,11 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               {result && (
                 <Button size="sm" onClick={exportCsv} disabled={result.services.length === 0} title={t('서비스 한 줄에 현재·평소·변화')}>
                   {t('요약 CSV')}
+                </Button>
+              )}
+              {result && (
+                <Button size="sm" onClick={exportReport} disabled={result.services.length === 0 || reporting} title={t('남에게 넘길 HTML 한 장 — 특이사항과 추이 차트')}>
+                  {reporting ? t('만드는 중…') : t('HTML 보고서')}
                 </Button>
               )}
               {result?.raw_path && (
@@ -406,6 +478,8 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                     {t('건은 «(기타)» 한 줄로 합쳤습니다 — URL 에 ID 가 들어가 서비스 이름이 늘어나는지 확인하세요')}
                   </Warn>
                 )}
+                <NoData result={result} />
+                <FewerServers result={result} />
                 {missing > 0 && (
                   <Warn>
                     {t('못 받은 5분 조각이 있습니다')} ({missing}) — {t('그 시간대는 빠진 채로 계산했습니다')}
@@ -413,19 +487,35 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                 )}
                 <StatsTable
                   rows={result.services}
-                  rules={DEFAULT_RULES}
+                  rules={judgeRules}
                   selected={service}
                   onSelect={setService}
                   detail={renderDetail}
                 />
-                <p className="text-small text-fg-faint" title={rulesText()}>
-                  {t('판정 기준')} ⓘ · {t('수집')} {result.collectors.join(' + ')} · {duration(result.finished_at - result.started_at)}
+                <p className="text-small text-fg-faint">
+                  <button type="button" className="underline decoration-dotted hover:text-fg" title={rulesText(judgeRules)} onClick={() => setShowSettings(true)}>
+                    {t('판정 기준')} ⓘ
+                  </button>{' '}
+                  · {t('수집')} {result.collectors.join(' + ')} · {duration(result.finished_at - result.started_at)}
                 </p>
               </>
             )}
           </>
         )}
       </section>
+
+      {showSettings && (
+        <StatsSettingsDialog
+          rules={judgeRules}
+          keepDays={keepDays}
+          onClose={() => setShowSettings(false)}
+          onSave={(r, k) => {
+            savePrefs({ rules: r, keepDays: k });
+            setShowSettings(false);
+            reloadJobs();
+          }}
+        />
+      )}
 
       {closeAsk && (
         <Dialog
@@ -467,16 +557,49 @@ function ServerCount({ ranges }: { ranges: StatsResult['ranges'] }) {
   );
 }
 
+/** 직접 지정했는데 한 건도 없던 서비스 — 이름이 틀렸을 가능성이 크다 (8) */
+function NoData({ result }: { result: StatsResult }) {
+  const have = new Set(result.services.map(s => s.service.toLowerCase()));
+  const none = result.request.services.filter(s => s.trim() !== '' && !have.has(s.trim().toLowerCase()));
+  if (none.length === 0 || result.status === 'failed') return null;
+  return (
+    <Warn>
+      {t('지정한 서비스 중 현재·평소 모두 0건인 것')} ({none.length}): <span className="font-mono">{none.slice(0, 5).join(', ')}{none.length > 5 ? ' …' : ''}</span>
+      {' — '}
+      {t('이름(대소문자 무시, 완전 일치)을 확인하세요')}
+    </Warn>
+  );
+}
+
+/**
+ * 서비스 묶음으로 골랐는데 평소 구간 어딘가의 서버가 현재보다 적다 (9).
+ * 묶음이 태그로 정해지면 지난 Task 는 그날 목록에 태그가 없어 빠질 수 있다 — 축소일 수도 있으니 «확인» 으로 알린다
+ */
+function FewerServers({ result }: { result: StatsResult }) {
+  if (result.request.groups.length === 0) return null;
+  const cur = result.ranges.filter(r => r.kind === 'current').flatMap(r => r.servers);
+  const curN = new Set(cur).size;
+  const base = result.ranges.filter(r => r.kind === 'baseline');
+  if (curN === 0 || base.length === 0) return null;
+  const minN = Math.min(...base.map(r => new Set(r.servers).size));
+  if (minN >= curN) return null;
+  return (
+    <Warn>
+      {t('평소 구간 중 서버가 현재보다 적은 구간이 있습니다')} ({t('현재')} {curN}{t('대')} · {t('평소 최소')} {minN}{t('대')}) —{' '}
+      {t('묶음이 태그로 정해지면 내려간 지난 Task 가 빠질 수 있습니다. 실제로 줄인 게 아니라면 Task 이름 규칙으로 다시 돌려 보세요')}
+    </Warn>
+  );
+}
+
 function Warn({ children }: { children: React.ReactNode }) {
   return <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-small text-warn">{children}</p>;
 }
 
 /** 판정 기준 — 표 아래 ⓘ 에 마우스를 올리면 보인다 */
-function rulesText(): string {
-  const r = DEFAULT_RULES;
+function rulesText(r: JudgeRules): string {
   return [
     `${t('에러 증가')}: ${t('에러율')} ×${r.errorRatio} · +${r.errorMinDelta * 100}%p`,
-    `${t('느려짐')}: ${t('평균 또는 p90 이')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
+    `${t('느려짐')}: ${r.useP99 ? t('평균·p90·p99 중 하나가') : t('평균 또는 p90 이')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
     `${t('호출량 급변')}: TPS ±${r.volumeRatio * 100}%`,
     `${t('표본 적음')}: < ${r.minCount}${t('건')} (${t('판정하지 않음')})`,
   ].join('\n');

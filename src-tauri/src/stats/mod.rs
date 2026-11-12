@@ -280,6 +280,54 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
     Ok(id)
 }
 
+/// 통계 탭 설정(판정 기준·보관 일수·조건 묶음)을 갈아 끼운다
+#[tauri::command]
+pub async fn stats_save_prefs(app: AppHandle, prefs: crate::config::StatsPrefs) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let path = state.config_path.clone();
+    let mut cfg = state.config.lock().await;
+    cfg.stats = prefs;
+    cfg.save(&path)
+}
+
+/// 보관 일수가 지난 결과를 지운다. 지운 수를 돌려준다
+fn prune(dir: &Path, keep_days: u32, now: i64) -> usize {
+    if keep_days == 0 {
+        return 0;
+    }
+    let cutoff = now - keep_days as i64 * 86_400_000;
+    let mut n = 0;
+    for j in list_saved(dir) {
+        let at = if j.finished_at > 0 { j.finished_at } else { j.started_at };
+        if at < cutoff && remove_files(dir, &j.id).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+fn remove_files(dir: &Path, id: &str) -> Result<(), String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(format!("잘못된 통계 결과 이름: {id}"));
+    }
+    let _ = std::fs::remove_file(result_path(dir, id));
+    std::fs::remove_file(meta_path(dir, id)).map_err(|e| e.to_string())
+}
+
+/// HTML 보고서를 내보내기 폴더에 남긴다 — `20261112-095012_stats-report-shop.html`. 만든 경로를 돌려준다
+#[tauri::command]
+pub async fn stats_save_report(app: AppHandle, name: String, stamp: String, html: String) -> Result<String, String> {
+    if html.is_empty() {
+        return Err("내보낼 내용이 없습니다".into());
+    }
+    let dir = app.state::<AppState>().export_dir().await;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{} 폴더를 만들지 못했습니다: {e}", dir.display()))?;
+    let sanitize = crate::profile_store::sanitize;
+    let path = dir.join(format!("{}_{}.html", sanitize(&stamp), sanitize(&name)));
+    std::fs::write(&path, html.as_bytes()).map_err(|e| format!("{} 에 쓰지 못했습니다: {e}", path.display()))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// 앱을 닫기 전에 — 돌거나 기다리는 작업을 모두 취소하고, 그때까지 모은 것이 파일로 남을 때까지 기다린다(최대 20초).
 /// 남긴 작업 수를 돌려준다
 #[tauri::command]
@@ -384,6 +432,11 @@ pub async fn stats_control(app: AppHandle, id: String, action: String) -> Result
 #[tauri::command]
 pub async fn stats_jobs(app: AppHandle) -> Result<Vec<JobInfo>, String> {
     let dir = stats_dir(&app).await;
+    let keep = app.state::<AppState>().config.lock().await.stats.keep_days;
+    let pruned = prune(&dir, keep, local_now_ms());
+    if pruned > 0 {
+        log::info!("통계: 보관 {keep}일이 지난 결과 {pruned}개를 지웠다");
+    }
     let mut out = list_saved(&dir);
     let st = app.state::<StatsState>();
     for (id, job) in st.jobs.lock().unwrap_or_else(|p| p.into_inner()).iter() {
@@ -461,6 +514,23 @@ pub async fn stats_delete(app: AppHandle, id: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 보관_일수가_지난_결과만_지운다() {
+        let dir = std::env::temp_dir().join(format!("nscouter-stats-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let day = 86_400_000i64;
+        let now = 100 * day;
+        for (id, at) in [("old-1", now - 40 * day), ("new-1", now - 10 * day)] {
+            let r = super::model::StatsResult { id: id.into(), started_at: at, finished_at: at, ..Default::default() };
+            super::save(&dir, &r).unwrap();
+        }
+        assert_eq!(super::prune(&dir, 0, now), 0, "0 이면 지우지 않는다");
+        assert_eq!(super::prune(&dir, 30, now), 1);
+        let left: Vec<String> = super::list_saved(&dir).into_iter().map(|j| j.id).collect();
+        assert_eq!(left, vec!["new-1".to_string()]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn 받은_시간은_못_받은_조각의_합집합을_뺀다() {
         let c = super::model::RangeCoverage {
