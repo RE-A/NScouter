@@ -95,6 +95,21 @@ pub fn fetch_texts(
     type_key: &str,
     hashes: &[i32],
 ) -> io::Result<()> {
+    fetch_texts_on(conn, cache, type_key, hashes, None)
+}
+
+/// 날짜를 붙여 묻는다 (F-70).
+///
+/// `GET_TEXT_100` 은 `date` 를 받고, 없으면 콜렉터의 오늘 날짜를 쓴다(바이트코드). 날짜별 사전을 켠 콜렉터에서
+/// 어제만 쓴 서비스도 날짜 없이 풀렸으므로(실측) **꼭 필요하다고 확인된 것은 아니다** — 지난 트랜잭션은 그 날짜로
+/// 묻는 것이 프로토콜에 맞아서 그렇게 한다. 에러 문구(늘 날짜별)는 실측하지 못했다
+pub fn fetch_texts_on(
+    conn: &mut ScouterConnection,
+    cache: &mut TextCache,
+    type_key: &str,
+    hashes: &[i32],
+    date: Option<&str>,
+) -> io::Result<()> {
     if hashes.is_empty() {
         return Ok(());
     }
@@ -102,9 +117,9 @@ pub fn fetch_texts(
     // 최대 100개씩 분할 요청
     let chunks: Vec<&[i32]> = hashes.chunks(100).collect();
     let r = if chunks.len() <= 1 {
-        chunks.iter().try_for_each(|chunk| fetch_chunk(conn, cache, type_key, chunk))
+        chunks.iter().try_for_each(|chunk| fetch_chunk(conn, cache, type_key, chunk, date))
     } else {
-        fetch_chunks_parallel(conn, cache, type_key, &chunks)
+        fetch_chunks_parallel(conn, cache, type_key, &chunks, date)
     };
     // 받은 만큼은 실패해도 남긴다
     cache.flush();
@@ -121,6 +136,7 @@ fn fetch_chunks_parallel(
     cache: &mut TextCache,
     type_key: &str,
     chunks: &[&[i32]],
+    date: Option<&str>,
 ) -> io::Result<()> {
     let workers = (crate::tuning::perf().text_workers as usize).clamp(1, chunks.len());
     let siblings: Vec<io::Result<ScouterConnection>> = (1..workers).map(|_| conn.sibling()).collect();
@@ -132,12 +148,12 @@ fn fetch_chunks_parallel(
             handles.push(sc.spawn(move || -> io::Result<TextCache> {
                 let mut c = sib?;
                 let mut local = TextCache::new();
-                part.iter().try_for_each(|chunk| fetch_chunk(&mut c, &mut local, type_key, chunk))?;
+                part.iter().try_for_each(|chunk| fetch_chunk(&mut c, &mut local, type_key, chunk, date))?;
                 Ok(local)
             }));
         }
         let mut local = TextCache::new();
-        let first = mine.iter().try_for_each(|chunk| fetch_chunk(conn, &mut local, type_key, chunk)).map(|_| local);
+        let first = mine.iter().try_for_each(|chunk| fetch_chunk(conn, &mut local, type_key, chunk, date)).map(|_| local);
         std::iter::once(first)
             .chain(handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err(io::Error::other("사전 조회 스레드 실패")))))
             .collect()
@@ -164,9 +180,13 @@ fn fetch_chunk(
     cache: &mut TextCache,
     type_key: &str,
     hashes: &[i32],
+    date: Option<&str>,
 ) -> io::Result<()> {
     let mut param = MapPack::new();
     param.put("type", ScouterValue::Text(type_key.to_string()));
+    if let Some(d) = date.filter(|d| !d.is_empty()) {
+        param.put("date", ScouterValue::Text(d.to_string()));
+    }
 
     let hash_list: Vec<ScouterValue> = hashes
         .iter()

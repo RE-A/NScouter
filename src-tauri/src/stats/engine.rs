@@ -24,7 +24,7 @@ use super::model::{Book, RangeCoverage, Sample, StatsRange, StatsRequest};
 use crate::cache::xlog::past_page;
 use crate::hub::CollectorLink;
 use crate::mcp::digest::{plan_slices, GroupRule, Patterns, Slice, SortBy, Window, SLICE_MS};
-use crate::mcp::server::{fill_texts, realtime_objects, request_all};
+use crate::mcp::server::{fill_texts_on, realtime_objects, request_all};
 use crate::scouter::connection::{local_now_ms, ScouterConnection};
 use crate::scouter::object::{build_daily_object_param, parse_daily_objects};
 use crate::scouter::objtype::{date_key, split_by_day};
@@ -438,7 +438,8 @@ fn scan_slice(
             .collect();
         if !rows.is_empty() {
             let wants: Vec<(&'static str, i32)> = rows.iter().map(|x| (text_type::SERVICE, x.service)).collect::<HashSet<_>>().into_iter().collect();
-            fill_texts(conn, link, &wants)?;
+            // 그 조각의 날짜로 묻는다 (F-70)
+            fill_texts_on(conn, link, &wants, Some(&sl.date))?;
             let names: HashMap<i32, String> = {
                 let cache = link.text_cache.blocking_lock();
                 wants.iter().map(|(_, h)| (*h, cache.get(text_type::SERVICE, *h).map(str::to_string).unwrap_or_else(|| format!("#{h}")))).collect()
@@ -546,7 +547,7 @@ pub fn estimate(state: &AppState, req: &StatsRequest) -> Result<Estimate, String
                         continue;
                     }
                     let wants: Vec<(&'static str, i32)> = rows.iter().map(|x| (text_type::SERVICE, x.id)).collect();
-                    fill_texts(&mut conn, link, &wants)?;
+                    fill_texts_on(&mut conn, link, &wants, Some(&date))?;
                     let cache = link.text_cache.blocking_lock();
                     counted += rows
                         .iter()

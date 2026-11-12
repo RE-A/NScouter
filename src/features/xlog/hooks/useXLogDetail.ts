@@ -58,7 +58,8 @@ export async function loadXLogDetail(
       resolve('method', hashes.method),
       resolve('sql', hashes.sql),
       resolve('apicall', hashes.apicall),
-      resolve('error', errorHashes),
+      // 그 트랜잭션의 날짜로 묻는다 — 콜렉터는 에러 문구를 날짜별 사전에 둔다(F-70)
+      resolve('error', errorHashes, date),
       // HashedMessageStep 전용 타입 (ASIS TextTypes.HASH_MSG)
       resolve('hmsg', hashes.hmsg),
       // XLog 자체의 서비스명. 이걸 안 부르면 화면에 해시가 그대로 남는다.

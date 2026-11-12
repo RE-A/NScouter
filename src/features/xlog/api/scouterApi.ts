@@ -166,11 +166,16 @@ export async function loadXLogByGxid(
 
 // ─── 딕셔너리 조회 ────────────────────────────────────────────
 
+/**
+ * 해시 → 글자. `date`(`yyyymmdd`)를 주면 그 날짜로 묻는다(안 주면 콜렉터가 오늘로 본다).
+ * 지난 트랜잭션은 그 날짜로 묻는다 — 필요한지는 실측으로 확인하지 못했다(F-70)
+ */
 export async function resolveTexts(
   typeKey: string,
   hashes: number[],
+  date?: string,
 ): Promise<Record<number, string>> {
-  return invoke<Record<number, string>>('resolve_texts', { typeKey, hashes });
+  return invoke<Record<number, string>>('resolve_texts', date === undefined ? { typeKey, hashes } : { typeKey, hashes, date });
 }
 
 // ─── 프로파일 본문 검색 ───────────────────────────────────────

@@ -1215,4 +1215,11 @@ export const EN: Record<string, string> = {
   '특이사항이 없습니다': 'No findings',
   '5분 평균 응답시간 — 실선 현재, 점선 평소': '5-min avg response — solid current, dashed usual',
   '전체 서비스': 'All services',
+  '현재 구간과 겹치는 평소 구간이 있습니다 — 같은 트랜잭션이 양쪽에 들어가 차이가 작게 나옵니다': 'A usual range overlaps the current range — the same transactions land on both sides and differences shrink',
+  '현재 구간 끝이 지금보다 뒤입니다 — 아직 오지 않은 시간은 0건으로 셉니다': 'The current range ends in the future — time that hasn\'t come yet counts as zero',
+  '데이터가 하나도 없는 구간': 'Ranges with no data at all',
+  '콜렉터 보관 기간이 지났거나, 그때 대상 서버가 없었거나, 콜렉터와 이 PC 의 시간대가 다를 수 있습니다': 'the collector\'s retention may have passed, the target servers may not have existed then, or the collector\'s time zone may differ from this PC\'s',
+  'CSV 로 내보내기 — 고른 전부': 'Export CSV — all selected',
+  'CSV 로 내보내기 — 보이는 목록': 'Export CSV — visible rows',
+  '보이는 행이 없습니다': 'No visible rows',
 };

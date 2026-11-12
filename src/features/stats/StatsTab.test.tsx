@@ -118,4 +118,22 @@ describe('StatsTab', () => {
     await waitFor(() => expect(win.destroy).toHaveBeenCalled());
     expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_shutdown');
   });
+
+  it('한 건도 못 받은 평소 구간은 알린다 — 보관 기간이 지나면 모든 서비스가 «신규» 로 뜬다', async () => {
+    const empty: StatsResult = {
+      ...result,
+      ranges: [
+        { kind: 'current', stime: 1_000_000, etime: 4_600_000, servers: ['/h/shop-1'], slices: 12, slices_done: 12, missing: [], scanned: 500 },
+        { kind: 'baseline', stime: 1, etime: 3_600_001, servers: ['/h/shop-1'], slices: 12, slices_done: 12, missing: [], scanned: 0 },
+      ],
+    };
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'stats_jobs') return [job];
+      if (cmd === 'stats_result') return empty;
+      return null;
+    });
+    render(<StatsTab connected groups={[]} servers={[]} onOpenTxid={() => {}} />);
+    fireEvent.click(await screen.findByText('shop 오전'));
+    expect((await screen.findByText(/데이터가 하나도 없는 구간/)).textContent).toContain('평소');
+  });
 });

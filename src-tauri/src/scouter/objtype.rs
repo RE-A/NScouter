@@ -120,7 +120,7 @@ pub fn build_past_time_counter_param(
 /// 넘는 요청을 일별로 나눠 순차 조회하고 합친다(05-webapp-service-layer.md).
 /// 한 번에 던지면 자정 이전 몫이 조용히 비는데, 그건 «그 시간에 트래픽이 없었다» 로 읽힌다.
 ///
-/// **자정을 넘는 경우는 실측하지 못했다** — 테스트 환경에 어제 데이터가 없다.
+/// 자정을 넘는 경우도 실측했다(F-71) — 날짜마다 나눠 받은 합이 넘는 구간 전체와 같았다.
 /// 하루 안 구간(조각 1개)은 실측했다.
 pub fn split_by_day(stime: i64, etime: i64, tz_offset_ms: i64) -> Vec<(i64, i64)> {
     if etime <= stime {

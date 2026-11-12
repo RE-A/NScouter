@@ -107,9 +107,13 @@ import {
   saveConfig,
   saveServers,
   saveWorkspaces,
+  saveCsvExport,
   startXLogStream,
   stopXLogStream,
 } from './features/xlog/api/scouterApi';
+import { ContextMenu } from './components/ContextMenu';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { errorLine, xlogCsv } from './features/xlog/components/xlogCsv';
 import { subscribe } from './features/xlog/api/subscribe';
 import { passesFilter } from './features/xlog/engine/rectSelect';
 import { alertWatchMessage } from './features/xlog/utils/alertWatch';
@@ -1437,7 +1441,19 @@ export default function App({ windowLabel }: {
     const svc = [...new Set(picked.xlogs.map(x => x.service).filter(Boolean))];
     if (svc.length === 0) return;
     let cancelled = false;
-    resolve('service', svc)
+    // 에러 행은 목록에 에러 한 줄을 붙인다 — 에러 문구는 행의 날짜로 묻는다(F-70)
+    const errByDate = new Map<string, Set<number>>();
+    for (const x of picked.xlogs) {
+      if (x.error === 0) continue;
+      const d = toDateString(x.endTime);
+      let set = errByDate.get(d);
+      if (!set) errByDate.set(d, (set = new Set()));
+      set.add(x.error);
+    }
+    Promise.all([
+      resolve('service', svc),
+      ...[...errByDate].map(([d, hs]) => resolve('error', [...hs], d)),
+    ])
       .then(() => { if (!cancelled) setTextVersion(v => v + 1); })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -3092,8 +3108,70 @@ function XLogTable({
   /** 잘라 내기 전의 수. 상한 이하면 0 — 머리에 적어야 «이게 전부» 로 안 읽힌다 */
   const cut = picked.matched > XLOG_TABLE_LIMIT ? picked.matched : 0;
 
+  // ── 오른쪽 클릭 → CSV ──
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [saved, setSaved] = useState<{ path: string } | { error: string } | null>(null);
+  const exportCsv = useCallback(
+    (all: boolean) => {
+      // «고른 전부» 는 표의 500건 상한을 넘는 것까지 — 지금 정렬 그대로 늘어놓는다
+      const rows = all
+        ? sortXLogs(searchHits === null ? [...xlogs] : xlogs.filter(x => searchHits.has(x.txid)), sort, sortNames)
+        : shown;
+      const csv = xlogCsv(rows, {
+        server: h => agentMap.get(h) ?? `[0x${h.toString(16)}]`,
+        service: h => getCached('service', h) ?? `[0x${h.toString(16)}]`,
+        error: h => getCached('error', h) ?? '',
+      });
+      saveCsvExport({ name: 'xlog-list', stamp: toFileStamp(Date.now()), csv })
+        .then(path => setSaved({ path }))
+        .catch(e => setSaved({ error: String(e) }));
+    },
+    [xlogs, searchHits, sort, sortNames, shown, agentMap, getCached],
+  );
+
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div
+      className="flex h-full flex-col bg-surface"
+      onContextMenu={e => {
+        if (xlogs.length === 0) return;
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
+    >
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              label: `${t('CSV 로 내보내기 — 보이는 목록')} ${shown.length.toLocaleString()}${t('건')}`,
+              onSelect: () => exportCsv(false),
+              disabled: shown.length === 0 ? t('보이는 행이 없습니다') : undefined,
+            },
+            ...(cut > 0
+              ? [{ label: `${t('CSV 로 내보내기 — 고른 전부')} ${cut.toLocaleString()}${t('건')}`, onSelect: () => exportCsv(true) }]
+              : []),
+          ]}
+        />
+      )}
+      {saved && (
+        <p className="shrink-0 border-b border-line px-3 py-1 text-micro text-fg-dim">
+          {'path' in saved ? (
+            <>
+              {t('저장했습니다')}:{' '}
+              <button type="button" className="underline hover:text-fg" onClick={() => void revealItemInDir(saved.path).catch(() => {})}>
+                {saved.path}
+              </button>
+            </>
+          ) : (
+            <span className="text-danger">{saved.error}</span>
+          )}{' '}
+          <button type="button" className="text-fg-faint hover:text-fg" onClick={() => setSaved(null)} aria-label={t('닫기')}>
+            ✕
+          </button>
+        </p>
+      )}
       {/* **잘랐으면 잘랐다고 적는다.** 정렬을 바꿔도 화면에 있는 것은 여전히
           «느린 상위 500건» 이라, 안 적으면 «시간순 전부» 로 읽힌다. */}
       {cut > 0 && (
@@ -3207,6 +3285,17 @@ function XLogTable({
                   </span>
                 )}
               </div>
+
+              {/* 에러는 무엇이었는지 한 줄 — 상세를 안 열어도 갈래를 안다. 스택이면 첫 줄만 */}
+              {hasErr && (() => {
+                const full = getCached('error', x.error);
+                const line = errorLine(full);
+                return line ? (
+                  <div className="truncate px-2 pb-1 font-mono text-micro text-danger/90" title={full}>
+                    {line}
+                  </div>
+                ) : null;
+              })()}
 
               {/* **왜 걸렸는지 보여준다.** 목록만 좁혀 놓으면 검색어가 어디에 맞았는지
                   알 수 없어 매번 상세를 열어 봐야 한다. */}
