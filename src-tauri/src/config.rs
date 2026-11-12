@@ -128,6 +128,63 @@ pub struct AppConfig {
     /// 로컬 MCP 서버 (Claude Code · Cursor 가 붙는 자리). `src/mcp/`
     #[serde(default)]
     pub mcp: McpPrefs,
+    /// 통계 탭에서 이름 붙여 저장한 Task 이름 규칙
+    #[serde(default)]
+    pub stats_rules: Vec<StatsTaskRule>,
+    /// 통계 탭 설정 — 판정 기준 · 결과 보관 · 조건 묶음
+    #[serde(default)]
+    pub stats: StatsPrefs,
+}
+
+/// 통계 탭 설정
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct StatsPrefs {
+    pub judge: StatsJudgePrefs,
+    /// 결과를 며칠 남기나 — 지난 것은 목록을 읽을 때 지운다. **0 이면 지우지 않는다**
+    pub keep_days: u32,
+    /// 이름 붙여 저장한 조건 묶음. 모양은 화면이 정한다(`statsPresets.ts`) — 여기서는 그대로 들고 있기만 한다
+    pub presets: Vec<serde_json::Value>,
+}
+
+impl Default for StatsPrefs {
+    fn default() -> Self {
+        Self { judge: StatsJudgePrefs::default(), keep_days: 90, presets: Vec::new() }
+    }
+}
+
+/// 특이사항 판정 기준 (판정은 화면이 한다 — 바꾸면 지난 결과도 바로 다시 판정된다)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct StatsJudgePrefs {
+    /// 평균·p90(·p99) 이 평소의 몇 배 넘게 늘면 «느려짐»
+    pub slow_ratio: f64,
+    /// 그리고 이만큼(ms) 이상 늘었을 때만
+    pub slow_min_ms: f64,
+    /// 에러율이 평소의 몇 배 이상이면 «에러 증가»
+    pub error_ratio: f64,
+    /// 그리고 이만큼(%p) 이상 늘었을 때만
+    pub error_min_pp: f64,
+    /// TPS 가 평소에서 이 비율(%) 넘게 변하면 «호출량 급변»
+    pub volume_pct: f64,
+    /// 한쪽 건수가 이보다 적으면 판정하지 않는다
+    pub min_count: u32,
+    /// «느려짐» 에 p99 도 본다
+    pub use_p99: bool,
+}
+
+impl Default for StatsJudgePrefs {
+    fn default() -> Self {
+        Self { slow_ratio: 1.5, slow_min_ms: 100.0, error_ratio: 2.0, error_min_pp: 1.0, volume_pct: 50.0, min_count: 30, use_p99: false }
+    }
+}
+
+/// 통계 대상으로 묶을 Task 이름 규칙 (`shop-app-*` 같은 것 여럿)
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct StatsTaskRule {
+    pub name: String,
+    pub patterns: Vec<String>,
 }
 
 /// 로컬 MCP 서버 설정.
@@ -242,6 +299,8 @@ pub struct PerfPrefs {
     pub prefetch_min_elapsed_ms: u32,
     /// 미리 받기 초당 최대 건수
     pub prefetch_per_sec: u32,
+    /// 통계 작업이 콜렉터마다 동시에 받는 조각 수 — 하루치를 오래 훑으므로 화면 조회보다 낮게 둔다(운영 콜렉터 보호)
+    pub stats_parallel: u32,
 }
 
 impl Default for PerfPrefs {
@@ -255,6 +314,7 @@ impl Default for PerfPrefs {
             prefetch_enabled: true,
             prefetch_min_elapsed_ms: 3_000,
             prefetch_per_sec: 20,
+            stats_parallel: 4,
         }
     }
 }
@@ -271,6 +331,7 @@ impl PerfPrefs {
             prefetch_enabled: self.prefetch_enabled,
             prefetch_min_elapsed_ms: self.prefetch_min_elapsed_ms.clamp(500, 60_000),
             prefetch_per_sec: self.prefetch_per_sec.clamp(1, 100),
+            stats_parallel: self.stats_parallel.clamp(1, 16),
         }
     }
 }
@@ -628,6 +689,8 @@ impl Default for AppConfig {
             saved_filters: Vec::new(),
             open_details: Vec::new(),
             mcp: McpPrefs::default(),
+            stats_rules: Vec::new(),
+            stats: StatsPrefs::default(),
         }
     }
 }
@@ -838,6 +901,7 @@ mod bind_default_tests {
             ("pagerows", d.page_rows),
             ("prefetchminelapsedms", d.prefetch_min_elapsed_ms),
             ("prefetchpersec", d.prefetch_per_sec),
+            ("statsparallel", d.stats_parallel),
         ] {
             assert!(ts.contains(&format!("{k}: {v},")), "perfDefaults.ts 의 {k} 가 {v} 가 아니다");
         }

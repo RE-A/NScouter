@@ -7,6 +7,7 @@ import type { PerfPrefs } from './scouterApi';
 /** Rust `PerfPrefs::default` 와 같은 값이어야 한다 — 갈리면 설정 창이 «기본값» 이라고 보여주는 값과 실제가 달라진다 */
 export const DEFAULT_PERF: PerfPrefs = {
   scan_parallel: 4,
+  stats_parallel: 4,
   past_parallel: 8,
   profile_workers: 32,
   text_workers: 8,

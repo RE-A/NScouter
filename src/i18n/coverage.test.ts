@@ -11,6 +11,8 @@ import { EN } from './en';
 import { SHORTCUT_LABEL } from '../features/settings/SettingsDialog';
 import { KIND_LABEL } from '../features/active/activeModel';
 import { SHORTCUT_HELP } from '../features/xlog/hooks/shortcuts';
+import { FLAG_LABEL } from '../features/stats/statsJudge';
+import { STATUS_LABEL } from '../features/stats/StatsTab';
 
 function tsxFiles(dir: string): string[] {
   const out: string[] = [];
@@ -73,6 +75,11 @@ describe('간접 호출', () => {
   it('Active 탭의 리소스 종류 이름이 사전에 있다', () => {
     // 같은 덫이다 — `t(KIND_LABEL[kind])` 라 소스에 리터럴이 안 남는다.
     const missing = Object.values(KIND_LABEL).filter(v => !(v in EN)).sort();
+    expect(missing).toEqual([]);
+  });
+
+  it('통계 탭의 판정·상태 이름이 사전에 있다', () => {
+    const missing = [...Object.values(FLAG_LABEL), ...Object.values(STATUS_LABEL), '통계'].filter(v => !(v in EN)).sort();
     expect(missing).toEqual([]);
   });
 

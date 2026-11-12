@@ -798,6 +798,10 @@ export interface AppConfig {
    * `save_config` 는 이 칸을 덮어쓰지 않는다(열 때 읽은 옛 토큰이 새 토큰을 되돌리지 않게).
    */
   mcp?: McpPrefs;
+  /** 통계 탭에서 이름 붙여 저장한 Task 이름 규칙 */
+  stats_rules?: { name: string; patterns: string[] }[];
+  /** 통계 탭 설정 — 모양은 `features/stats/statsApi.ts` 의 `StatsPrefs` */
+  stats?: unknown;
 }
 
 /** Rust `McpPrefs` 와 짝이다 */
@@ -823,6 +827,8 @@ export interface McpLimits {
 /** 콜렉터 동시 요청·페이지 크기·미리 받기. Rust `PerfPrefs` 와 짝이다 */
 export interface PerfPrefs {
   scan_parallel: number;
+  /** 통계 작업이 콜렉터마다 동시에 받는 조각 수 */
+  stats_parallel: number;
   past_parallel: number;
   profile_workers: number;
   text_workers: number;

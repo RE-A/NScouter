@@ -77,6 +77,7 @@ NScouter는 Java 기반 Scouter Eclipse 클라이언트를 **Tauri + Rust + Reac
 │   config.rs   — config.json 읽기/쓰기                                │
 │   profile_store.rs / export_store.rs — 프로파일 저장, CSV 내보내기    │
 │   object_history_store.rs — 서버별 오브젝트 기록 (재시작 후 복원)    │
+│   stats/ — 통계 비교 작업 (백그라운드 스캔·집계·결과 저장)           │
 ├─────────────────────────────────────────────────────────────────────┤
 │                         Scouter 프로토콜 레이어 (Rust, scouter/)      │
 │                                                                       │

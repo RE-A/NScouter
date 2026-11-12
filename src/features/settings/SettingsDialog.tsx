@@ -39,6 +39,7 @@ export const SHORTCUT_LABEL: Record<ShortcutAction, string> = {
   'tab-visualize': 'Visualize 탭',
   'tab-counter': 'Counter 탭',
   'tab-alert': 'Alert 탭',
+  'tab-stats': '통계 탭',
   'close-detail-tab': '상세 탭 닫기',
   'cycle-detail-next': '다음 상세 탭',
   'cycle-detail-prev': '이전 상세 탭',
@@ -478,6 +479,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
           <NumberField label={t('과거 조회 — 동시 조각')} value={perf.past_parallel} min={1} max={16} onChange={v => setPerfField('past_parallel', v)}
             hint={t('과거 구간을 몇 조각으로 나눠 동시에 받을지')} />
+          <NumberField label={t('통계 — 동시 조각')} value={perf.stats_parallel} min={1} max={16} onChange={v => setPerfField('stats_parallel', v)} />
           <NumberField label={t('트랜잭션 찾기·AI — 동시 조각')} value={perf.scan_parallel} min={1} max={16} onChange={v => setPerfField('scan_parallel', v)}
             hint={t('넓은 구간 찾기와 AI 목록 조회가 구간을 몇 조각씩 동시에 받을지')} />
           <NumberField label={t('프로파일 — 동시 받기')} value={perf.profile_workers} min={1} max={64} onChange={v => setPerfField('profile_workers', v)}

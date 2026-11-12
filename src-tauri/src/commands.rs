@@ -3371,6 +3371,9 @@ pub async fn save_config(
     // 바로 적용된다(`mcp_configure`·토큰 재발급). 사본을 그대로 쓰면 방금 바꾼 토큰이 되돌아간다.
     let mut new_config = new_config;
     new_config.mcp = cfg.mcp.clone();
+    // 통계 규칙도 통계 탭이 따로 저장한다(`stats_save_rules`) — 설정 창의 옛 사본이 되돌리지 않게
+    new_config.stats_rules = cfg.stats_rules.clone();
+    new_config.stats = cfg.stats.clone();
     new_config.save(&path)?;
     let cache_changed = cfg.cache_max_mb != new_config.cache_max_mb;
     *cfg = new_config;

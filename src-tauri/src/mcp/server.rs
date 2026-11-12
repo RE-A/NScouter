@@ -429,7 +429,7 @@ where
 }
 
 /// 요청 하나를 보내고 응답 팩을 끝까지 읽는다
-fn request_all(conn: &mut ScouterConnection, cmd: &str, param: &MapPack) -> Result<Vec<AnyPack>, String> {
+pub(crate) fn request_all(conn: &mut ScouterConnection, cmd: &str, param: &MapPack) -> Result<Vec<AnyPack>, String> {
     let session = conn.session;
     conn.send_request(cmd, session, param).map_err(|e| format!("{cmd} 요청 실패: {e}"))?;
     let mut out = Vec::new();
@@ -439,7 +439,7 @@ fn request_all(conn: &mut ScouterConnection, cmd: &str, param: &MapPack) -> Resu
     Ok(out)
 }
 
-fn realtime_objects(conn: &mut ScouterConnection) -> Result<Vec<crate::scouter::pack::ObjectPack>, String> {
+pub(crate) fn realtime_objects(conn: &mut ScouterConnection) -> Result<Vec<crate::scouter::pack::ObjectPack>, String> {
     Ok(request_all(conn, CMD_OBJECT_LIST_REAL_TIME, &MapPack::new())?
         .into_iter()
         .filter_map(|p| match p {
@@ -450,7 +450,7 @@ fn realtime_objects(conn: &mut ScouterConnection) -> Result<Vec<crate::scouter::
 }
 
 /// 사전에서 못 찾은 글을 채운다. 그 콜렉터의 공유 캐시를 쓴다 — 화면이 이미 푼 것은 다시 묻지 않는다
-fn fill_texts(conn: &mut ScouterConnection, link: &CollectorLink, wants: &[(&'static str, i32)]) -> Result<(), String> {
+pub(crate) fn fill_texts(conn: &mut ScouterConnection, link: &CollectorLink, wants: &[(&'static str, i32)]) -> Result<(), String> {
     let mut by_kind: HashMap<&str, Vec<i32>> = HashMap::new();
     for (k, h) in wants {
         if *h != 0 {
