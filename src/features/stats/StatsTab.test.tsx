@@ -1,10 +1,25 @@
 // 통계 탭 — 지난 결과를 열면 비교 표가 나빠진 순으로 뜨고, 줄을 누르면 그 서비스를 펼친다
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import type { JobInfo, StatsRequest, StatsResult, StatsSummary } from './statsApi';
 import { StatsTab } from './StatsTab';
+
+// 창 닫기 — 닫으려는 순간의 처리기를 잡아 두고 시험에서 부른다
+const win = vi.hoisted(() => ({
+  onClose: null as null | ((e: { preventDefault: () => void }) => void),
+  destroy: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    onCloseRequested: (fn: (e: { preventDefault: () => void }) => void) => {
+      win.onClose = fn;
+      return Promise.resolve(() => {});
+    },
+    destroy: win.destroy,
+  }),
+}));
 
 const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
   count: 1000, errors: 0, error_rate: 0, tps: 1, avg_ms: 200, p50_ms: 150, p90_ms: 400, p95_ms: 500, p99_ms: 900,
@@ -20,7 +35,7 @@ const req: StatsRequest = {
 const job: JobInfo = { id: '1-0', title: 'shop 오전', status: 'done', started_at: 10, finished_at: 20, request: req, progress: null, services: 2 };
 const result: StatsResult = {
   id: '1-0', request: req, started_at: 10, finished_at: 20, status: 'done', message: null, collectors: ['A'],
-  ranges: [], raw_path: '/x/exports/raw.csv', raw_rows: 2000, raw_error: null,
+  ranges: [], raw_path: '/x/exports/raw.csv', raw_rows: 2000, raw_error: null, raw_files: 1, folded: 0,
   services: [
     { service: '/same', current: s({ count: 5000 }), baseline: s() },
     { service: '/slow', current: s({ avg_ms: 900 }), baseline: s() },
@@ -84,5 +99,23 @@ describe('StatsTab', () => {
         rules: [{ name: 'shop2', patterns: ['shop-app-*'] }, { name: 'shop', patterns: ['shop-app-*'] }],
       }),
     );
+  });
+
+  it('돌고 있는 작업이 있으면 바로 닫지 않고 묻고, 닫기로 하면 저장을 기다린 뒤 닫는다', async () => {
+    const runningJob: JobInfo = { ...job, id: '2-0', title: '도는 작업', status: 'running', progress: { phase: 'queue', slices_total: 0, slices_done: 0, scanned: 0, matched: 0, started_at: 0, eta_ms: null, paused: false } };
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'stats_jobs') return [runningJob];
+      if (cmd === 'stats_shutdown') return 1;
+      return null;
+    });
+    render(<StatsTab connected groups={[]} servers={[]} onOpenTxid={() => {}} />);
+    await screen.findByText('도는 작업');
+    expect(screen.getByText('대기'), '앞 작업을 기다리는 중').toBeTruthy();
+    const prevent = vi.fn();
+    act(() => win.onClose?.({ preventDefault: prevent }));
+    expect(prevent).toHaveBeenCalled();
+    fireEvent.click(await screen.findByText('중단하고 닫기'));
+    await waitFor(() => expect(win.destroy).toHaveBeenCalled());
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_shutdown');
   });
 });

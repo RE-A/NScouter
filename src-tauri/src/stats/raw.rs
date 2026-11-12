@@ -18,11 +18,23 @@ const BOM: &str = "\u{feff}";
 
 pub const HEADER: &str = "구분,종료 시각,서비스,서버,응답(ms),에러,IP,SQL 횟수,SQL(ms),API 횟수,API(ms),CPU(ms),HTTP 상태,txid";
 
+/// 파일 하나에 담을 데이터 줄 수. 엑셀 한 시트가 1,048,576줄까지라 머리글을 빼고 넉넉히 100만에서 끊는다
+pub const ROWS_PER_FILE: u64 = 1_000_000;
+
 pub struct RawSink {
+    /// 첫 파일. 다음 파일은 `이름_2.csv`, `이름_3.csv` …
     path: PathBuf,
-    w: Mutex<Option<BufWriter<File>>>,
+    inner: Mutex<Inner>,
     rows: AtomicU64,
     error: Mutex<Option<String>>,
+    per_file: u64,
+}
+
+struct Inner {
+    w: Option<BufWriter<File>>,
+    /// 지금 파일 번호(1부터)와 그 파일에 쓴 줄 수
+    part: u32,
+    in_part: u64,
 }
 
 /// CSV 한 칸 — 쉼표·따옴표·줄바꿈이 있으면 감싸고 따옴표는 두 번 쓴다(RFC 4180)
@@ -70,44 +82,94 @@ pub fn line(current: bool, x: &XLogPack, service: &str, server: &str, tz_offset_
     )
 }
 
+fn open(path: &Path) -> Result<BufWriter<File>, String> {
+    let f = File::create(path).map_err(|e| format!("{} 를 만들지 못했습니다: {e}", path.display()))?;
+    let mut w = BufWriter::with_capacity(1 << 20, f);
+    write!(w, "{BOM}{HEADER}\r\n").map_err(|e| e.to_string())?;
+    Ok(w)
+}
+
+/// n 번째 파일 경로 — 1 은 그대로, 2부터 `_n` 을 붙인다
+pub fn part_path(first: &Path, n: u32) -> PathBuf {
+    if n <= 1 {
+        return first.to_path_buf();
+    }
+    let stem = first.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    first.with_file_name(format!("{stem}_{n}.csv"))
+}
+
 impl RawSink {
     pub fn create(path: &Path) -> Result<Self, String> {
+        Self::with_limit(path, ROWS_PER_FILE)
+    }
+
+    pub fn with_limit(path: &Path, per_file: u64) -> Result<Self, String> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{} 폴더를 만들지 못했습니다: {e}", dir.display()))?;
         }
-        let f = File::create(path).map_err(|e| format!("{} 를 만들지 못했습니다: {e}", path.display()))?;
-        let mut w = BufWriter::with_capacity(1 << 20, f);
-        write!(w, "{BOM}{HEADER}\r\n").map_err(|e| e.to_string())?;
-        Ok(Self { path: path.to_path_buf(), w: Mutex::new(Some(w)), rows: AtomicU64::new(0), error: Mutex::new(None) })
+        let w = open(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            inner: Mutex::new(Inner { w: Some(w), part: 1, in_part: 0 }),
+            rows: AtomicU64::new(0),
+            error: Mutex::new(None),
+            per_file: per_file.max(1),
+        })
     }
 
-    /// 조각 하나의 줄들을 붙인다. 쓰기에 실패하면 그 뒤로는 쓰지 않고 까닭을 남긴다(통계는 계속한다)
-    pub fn append(&self, chunk: &str, n: u64) {
-        if chunk.is_empty() {
-            return;
-        }
-        let mut g = self.w.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(w) = g.as_mut() else { return };
-        match w.write_all(chunk.as_bytes()) {
-            Ok(()) => {
-                self.rows.fetch_add(n, Ordering::Relaxed);
+    fn fail(&self, inner: &mut Inner, e: String) {
+        *self.error.lock().unwrap_or_else(|p| p.into_inner()) = Some(format!("원본 CSV 쓰기 실패: {e}"));
+        inner.w = None;
+    }
+
+    /// 조각 하나의 줄들을 붙인다. 파일이 차면 다음 파일로 넘어간다.
+    /// 쓰기에 실패하면 그 뒤로는 쓰지 않고 까닭을 남긴다(통계는 계속한다)
+    pub fn append(&self, lines: &[String]) {
+        let mut g = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        for l in lines {
+            if g.w.is_none() {
+                return;
             }
-            Err(e) => {
-                *self.error.lock().unwrap_or_else(|p| p.into_inner()) = Some(format!("원본 CSV 쓰기 실패: {e}"));
-                *g = None;
+            if g.in_part >= self.per_file {
+                if let Some(mut w) = g.w.take() {
+                    if let Err(e) = w.flush() {
+                        self.fail(&mut g, e.to_string());
+                        return;
+                    }
+                }
+                let next = g.part + 1;
+                match open(&part_path(&self.path, next)) {
+                    Ok(w) => {
+                        g.w = Some(w);
+                        g.part = next;
+                        g.in_part = 0;
+                    }
+                    Err(e) => {
+                        self.fail(&mut g, e);
+                        return;
+                    }
+                }
             }
+            let res = g.w.as_mut().map(|w| w.write_all(l.as_bytes()));
+            if let Some(Err(e)) = res {
+                self.fail(&mut g, e.to_string());
+                return;
+            }
+            g.in_part += 1;
+            self.rows.fetch_add(1, Ordering::Relaxed);
         }
     }
 
-    /// 닫는다 — (경로, 줄 수, 실패 까닭)
-    pub fn finish(&self) -> (String, u64, Option<String>) {
-        if let Some(mut w) = self.w.lock().unwrap_or_else(|p| p.into_inner()).take() {
+    /// 닫는다 — (첫 파일 경로, 줄 수, 파일 수, 실패 까닭)
+    pub fn finish(&self) -> (String, u64, u32, Option<String>) {
+        let mut g = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(mut w) = g.w.take() {
             if let Err(e) = w.flush() {
                 *self.error.lock().unwrap_or_else(|p| p.into_inner()) = Some(format!("원본 CSV 쓰기 실패: {e}"));
             }
         }
         let err = self.error.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        (self.path.to_string_lossy().to_string(), self.rows.load(Ordering::Relaxed), err)
+        (self.path.to_string_lossy().to_string(), self.rows.load(Ordering::Relaxed), g.part, err)
     }
 }
 
@@ -141,13 +203,32 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nscouter-raw-{}", std::process::id()));
         let path = dir.join("r.csv");
         let sink = RawSink::create(&path).unwrap();
-        sink.append(&l, 1);
-        sink.append(&format!("{l}{l}"), 2);
-        let (p, rows, err) = sink.finish();
-        assert_eq!((rows, err), (3, None));
+        sink.append(std::slice::from_ref(&l));
+        sink.append(&[l.clone(), l.clone()]);
+        let (p, rows, files, err) = sink.finish();
+        assert_eq!((rows, files, err), (3, 1, None));
         let body = std::fs::read_to_string(p).unwrap();
         assert!(body.starts_with('\u{feff}'));
         assert_eq!(body.lines().count(), 4);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn 파일이_차면_다음_파일로_넘어가고_파일마다_머리글이_있다() {
+        let dir = std::env::temp_dir().join(format!("nscouter-raw-split-{}", std::process::id()));
+        let path = dir.join("x.csv");
+        let sink = RawSink::with_limit(&path, 2).unwrap();
+        let ls: Vec<String> = (0..5).map(|i| format!("{i}\r\n")).collect();
+        sink.append(&ls[..3]);
+        sink.append(&ls[3..]);
+        let (_, rows, files, err) = sink.finish();
+        assert_eq!((rows, files, err), (5, 3, None));
+        let read = |n: u32| std::fs::read_to_string(part_path(&path, n)).unwrap();
+        assert_eq!(read(1).lines().skip(1).collect::<Vec<_>>(), ["0", "1"]);
+        assert_eq!(read(2).lines().skip(1).collect::<Vec<_>>(), ["2", "3"]);
+        assert_eq!(read(3).lines().skip(1).collect::<Vec<_>>(), ["4"]);
+        assert!(read(3).starts_with('\u{feff}'));
+        assert_eq!(part_path(&path, 2).file_name().unwrap(), "x_2.csv");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -17,7 +17,8 @@ pub mod raw;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -44,10 +45,25 @@ struct Job {
     result: Mutex<Option<Arc<StatsResult>>>,
 }
 
-#[derive(Default)]
 pub struct StatsState {
     jobs: Mutex<HashMap<String, Arc<Job>>>,
     seq: AtomicU64,
+    /// **한 번에 하나만 돈다.** 작업 하나가 콜렉터마다 연결 `stats_parallel` 개로 지난 데이터를 훑는다 —
+    /// 여럿을 겹치면 운영 콜렉터에 그 곱만큼 붙어 실시간 수집이 밀린다. 나머지는 «대기» 로 줄 선다
+    runner: Arc<tokio::sync::Semaphore>,
+    /// 앱을 닫는 중 — 취소된 작업의 까닭을 «앱을 닫아 중단» 으로 남긴다
+    closing: AtomicBool,
+}
+
+impl Default for StatsState {
+    fn default() -> Self {
+        Self {
+            jobs: Mutex::default(),
+            seq: AtomicU64::default(),
+            runner: Arc::new(tokio::sync::Semaphore::new(1)),
+            closing: AtomicBool::new(false),
+        }
+    }
 }
 
 /// 작업 목록 한 줄 (화면용) — 돌고 있는 것과 파일로 남은 것
@@ -156,7 +172,7 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
     let job = Arc::new(Job {
         request: request.clone(),
         control: Control::default(),
-        progress: Mutex::new(Progress { phase: "plan".into(), started_at: local_now_ms(), ..Progress::default() }),
+        progress: Mutex::new(Progress { phase: "queue".into(), started_at: local_now_ms(), ..Progress::default() }),
         status: Mutex::new("running".into()),
         result: Mutex::new(None),
     });
@@ -164,9 +180,23 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
     let dir = stats_dir(&app).await;
     let export_dir = app.state::<AppState>().export_dir().await;
 
+    let runner = st.runner.clone();
+
     let (app2, id2) = (app.clone(), id.clone());
     tauri::async_runtime::spawn(async move {
         let (app3, id3, job3) = (app2.clone(), id2.clone(), job.clone());
+        // 앞 작업이 끝날 때까지 기다린다 — 기다리는 중에도 취소할 수 있다
+        let queued = job.progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let _ = app2.emit("stats-progress", serde_json::json!({ "id": id2, "progress": queued }));
+        let _permit = loop {
+            if job.control.cancel.load(Ordering::Relaxed) {
+                break None;
+            }
+            if let Ok(p) = runner.clone().try_acquire_owned() {
+                break Some(p);
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        };
         let started_at = local_now_ms();
         // 원본 CSV — 파일을 못 만들면 통계는 그대로 돌리고 까닭만 남긴다
         let (sink, sink_error) = if job.request.raw {
@@ -178,17 +208,22 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
             (None, None)
         };
         let sink3 = sink.clone();
-        let outcome = tokio::task::spawn_blocking(move || {
+        let outcome = if _permit.is_none() {
+            Err("대기 중에 취소했습니다".to_string())
+        } else {
+            tokio::task::spawn_blocking(move || {
             let state = app3.state::<AppState>();
             engine::run(&state, &job3.request, &job3.control, sink3.as_deref(), &|p: Progress| {
                 *job3.progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clone();
                 let _ = app3.emit("stats-progress", serde_json::json!({ "id": id3, "progress": p }));
             })
         })
-        .await
-        .unwrap_or_else(|e| Err(format!("통계 작업이 중간에 끝났습니다: {e}")));
+            .await
+            .unwrap_or_else(|e| Err(format!("통계 작업이 중간에 끝났습니다: {e}")))
+        };
 
         let cancelled = job.control.cancel.load(Ordering::Relaxed);
+        let closing = app2.state::<StatsState>().closing.load(Ordering::Relaxed);
         let req = &job.request;
         // TPS 는 **실제로 받은 시간**으로 나눈다 — 못 받은 조각·취소로 빠진 시간까지 나누면 TPS 가 낮게 나와
         // «호출량 급변» 이 잘못 뜬다
@@ -197,6 +232,7 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
         };
         let result = match outcome {
             Ok((ranges, book, collectors)) => {
+                let folded = book.folded;
                 let services = book.finish(secs_of(&ranges, "current"), secs_of(&ranges, "baseline"));
                 StatsResult {
                 id: id2.clone(),
@@ -204,10 +240,11 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
                 started_at,
                 finished_at: local_now_ms(),
                 status: if cancelled { "cancelled" } else { "done" }.into(),
-                message: None,
+                message: (cancelled && closing).then(|| "앱을 닫아 중단했습니다".to_string()),
                 collectors,
                 ranges,
                 services,
+                folded,
                 ..StatsResult::default()
                 }
             }
@@ -216,16 +253,17 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
                 request: req.clone(),
                 started_at,
                 finished_at: local_now_ms(),
-                status: "failed".into(),
+                status: if cancelled { "cancelled" } else { "failed" }.into(),
                 message: Some(e),
                 ..StatsResult::default()
             },
         };
         let mut result = result;
         if let Some(sink) = &sink {
-            let (path, rows, err) = sink.finish();
+            let (path, rows, files, err) = sink.finish();
             result.raw_path = Some(path);
             result.raw_rows = rows;
+            result.raw_files = files;
             result.raw_error = err;
         } else {
             result.raw_error = sink_error;
@@ -240,6 +278,34 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
         trim_memory(&app2.state::<StatsState>());
     });
     Ok(id)
+}
+
+/// 앱을 닫기 전에 — 돌거나 기다리는 작업을 모두 취소하고, 그때까지 모은 것이 파일로 남을 때까지 기다린다(최대 20초).
+/// 남긴 작업 수를 돌려준다
+#[tauri::command]
+pub async fn stats_shutdown(app: AppHandle) -> Result<usize, String> {
+    let st = app.state::<StatsState>();
+    st.closing.store(true, Ordering::Relaxed);
+    let live: Vec<Arc<Job>> = st
+        .jobs
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .values()
+        .filter(|j| j.result.lock().unwrap_or_else(|p| p.into_inner()).is_none())
+        .cloned()
+        .collect();
+    for j in &live {
+        j.control.cancel.store(true, Ordering::Relaxed);
+        j.control.pause.store(false, Ordering::Relaxed);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        if live.iter().all(|j| j.result.lock().unwrap_or_else(|p| p.into_inner()).is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Ok(live.len())
 }
 
 /// 구간에서 못 받은 조각을 뺀 시간(초). 조각은 콜렉터마다 따로라 겹칠 수 있어 합집합으로 뺀다

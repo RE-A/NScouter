@@ -105,10 +105,15 @@ export interface StatsResult {
   raw_path: string | null;
   raw_rows: number;
   raw_error: string | null;
+  /** 원본 CSV 파일 수 — 100만 줄마다 나눈다(엑셀 한 시트 한계) */
+  raw_files: number;
+  /** 서비스 수 상한을 넘어 «기타» 로 합친 건수 */
+  folded: number;
 }
 
 export interface StatsProgress {
-  phase: 'plan' | 'scan' | 'done';
+  /** queue: 앞 작업이 끝나길 기다리는 중 (한 번에 하나만 돈다) */
+  phase: 'queue' | 'plan' | 'scan' | 'done';
   slices_total: number;
   slices_done: number;
   scanned: number;
@@ -169,6 +174,11 @@ export interface StatsTaskRule {
 /** 저장한 규칙 목록을 통째로 갈아 끼운다 (config.json) */
 export function statsSaveRules(rules: StatsTaskRule[]): Promise<void> {
   return invoke<void>('stats_save_rules', { rules });
+}
+
+/** 앱을 닫기 전에 — 돌거나 기다리는 작업을 취소하고 그때까지 모은 것이 저장될 때까지 기다린다 */
+export function statsShutdown(): Promise<number> {
+  return invoke<number>('stats_shutdown');
 }
 
 export function statsDelete(id: string): Promise<void> {

@@ -5,9 +5,11 @@
 // 이 탭은 조건을 넣고, 진행을 보이고, 결과 표를 그리는 일만 한다.
 
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../../components/Button';
+import { Dialog } from '../../components/Dialog';
 import { getConfig, saveCsvExport } from '../xlog/api/scouterApi';
 import { toFileStamp } from '../xlog/utils/xlogDate';
 import { toLocalInput } from '../xlog/types/timeRange';
@@ -20,6 +22,7 @@ import {
   statsJobs,
   statsResult,
   statsSaveRules,
+  statsShutdown,
   statsStart,
   type Estimate,
   type JobInfo,
@@ -55,6 +58,11 @@ function duration(ms: number): string {
   return m < 60 ? `${m}${t('분')} ${s % 60}${t('초')}` : `${Math.floor(m / 60)}${t('시간')} ${m % 60}${t('분')}`;
 }
 
+/** 목록·머리에 쓰는 상태 — 돌고 있어도 앞 작업을 기다리는 중이면 «대기» */
+function statusText(j: JobInfo, p: StatsProgress | null | undefined): string {
+  return j.status === 'running' && p?.phase === 'queue' ? t('대기') : t(STATUS_LABEL[j.status]);
+}
+
 export const STATUS_LABEL: Record<JobInfo['status'], string> = {
   running: '도는 중',
   done: '완료',
@@ -76,6 +84,32 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   const [showForm, setShowForm] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [rules, setRules] = useState<StatsTaskRule[]>([]);
+  /** 돌던 작업이 있는데 창을 닫으려 했다 */
+  const [closeAsk, setCloseAsk] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const runningRef = useRef(0);
+  runningRef.current = jobs.filter(j => j.status === 'running').length;
+
+  // **돌던 작업이 있으면 바로 닫지 않고 묻는다.** 그냥 닫히면 몇십 분짜리 작업이 흔적 없이 사라진다.
+  // 닫기로 하면 취소하고 그때까지 모은 것을 «취소됨» 결과로 남긴 뒤 닫는다
+  useEffect(() => {
+    const un = getCurrentWindow().onCloseRequested(e => {
+      if (runningRef.current > 0) {
+        e.preventDefault();
+        setCloseAsk(true);
+      }
+    });
+    return () => {
+      void un.then(f => f());
+    };
+  }, []);
+
+  const closeNow = useCallback(() => {
+    setClosing(true);
+    statsShutdown()
+      .catch(() => 0)
+      .finally(() => void getCurrentWindow().destroy());
+  }, []);
   const openRef = useRef(openId);
   openRef.current = openId;
 
@@ -253,7 +287,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               </div>
               <div className="flex items-center gap-1 text-fg-dim">
                 <span className={j.status === 'failed' ? 'text-danger' : j.status === 'running' ? 'text-accent-bright' : ''}>
-                  {t(STATUS_LABEL[j.status])}
+                  {statusText(j, p)}
                 </span>
                 {j.status === 'running' && p && p.slices_total > 0 && (
                   <span className="tnum">{Math.floor((p.slices_done / p.slices_total) * 100)}%</span>
@@ -327,7 +361,12 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   onClick={() => void revealItemInDir(result.raw_path ?? '').catch(() => {})}
                   title={result.raw_path}
                 >
-                  {t('원본 CSV')} <span className="tnum text-fg-faint">{result.raw_rows.toLocaleString()}{t('건')}</span>
+                  {t('원본 CSV')}{' '}
+                  <span className="tnum text-fg-faint">
+                    {result.raw_rows.toLocaleString()}
+                    {t('건')}
+                    {result.raw_files > 1 ? ` · ${t('파일')} ${result.raw_files}${t('개')}` : ''}
+                  </span>
                 </Button>
               )}
               {openJob && openJob.status !== 'running' && (
@@ -361,6 +400,12 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   </Warn>
                 )}
                 {result.raw_error && <Warn>{result.raw_error}</Warn>}
+                {result.folded > 0 && (
+                  <Warn>
+                    {t('서비스가 5,000개를 넘어 나머지')} {result.folded.toLocaleString()}
+                    {t('건은 «(기타)» 한 줄로 합쳤습니다 — URL 에 ID 가 들어가 서비스 이름이 늘어나는지 확인하세요')}
+                  </Warn>
+                )}
                 {missing > 0 && (
                   <Warn>
                     {t('못 받은 5분 조각이 있습니다')} ({missing}) — {t('그 시간대는 빠진 채로 계산했습니다')}
@@ -381,6 +426,28 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
           </>
         )}
       </section>
+
+      {closeAsk && (
+        <Dialog
+          title={t('통계 작업이 돌고 있습니다')}
+          onClose={() => !closing && setCloseAsk(false)}
+          widthClass="w-[28rem]"
+          footer={
+            <>
+              <Button size="md" onClick={() => setCloseAsk(false)} disabled={closing}>
+                {t('계속 돌리기')}
+              </Button>
+              <Button variant="danger" size="md" onClick={closeNow} disabled={closing}>
+                {closing ? t('저장하는 중…') : t('중단하고 닫기')}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-body text-fg-muted">
+            {t('닫으면 작업을 멈추고 그때까지 모은 것을 «취소됨» 결과로 남깁니다. 다음에 열어 볼 수 있지만, 빠진 시간대가 있습니다.')}
+          </p>
+        </Dialog>
+      )}
     </div>
   );
 });
@@ -424,7 +491,13 @@ function ProgressBox({ id, progress: p }: { id: string; progress: StatsProgress 
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <span>
-          {!p || p.phase === 'plan' ? t('대상 서버를 찾는 중…') : p.paused ? t('잠시 멈춤') : t('훑는 중…')}
+          {p?.phase === 'queue'
+            ? t('대기 중 — 앞 작업이 끝나면 시작합니다 (한 번에 하나씩 돕니다)')
+            : !p || p.phase === 'plan'
+              ? t('대상 서버를 찾는 중…')
+              : p.paused
+                ? t('잠시 멈춤')
+                : t('훑는 중…')}
         </span>
         {p && p.slices_total > 0 && (
           <span className="tnum">

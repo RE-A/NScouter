@@ -198,7 +198,7 @@ fn plan_range(
                 (o.obj_hash, name, o.obj_type, g)
             })
             .chain(alive.iter().cloned());
-        for (h, name, kind, group) in candidates {
+        for (h, name, _kind, group) in candidates {
             if servers.picks(&name, group.as_deref()) && !hashes.contains(&h) {
                 hashes.push(h);
                 by_hash.entry(h).or_insert_with(|| name.clone());
@@ -326,7 +326,7 @@ pub fn run(
                         match outcome {
                             Ok((part, n_scanned, n_matched, lines)) => {
                                 if let Some(sink) = raw {
-                                    sink.append(&lines, n_matched);
+                                    sink.append(&lines);
                                 }
                                 scanned.fetch_add(n_scanned, Ordering::Relaxed);
                                 matched.fetch_add(n_matched, Ordering::Relaxed);
@@ -415,8 +415,8 @@ fn scan_slice(
     page_rows: i32,
     ctl: &Control,
     raw: Option<&RawOut>,
-) -> Result<(Book, u64, u64, String), String> {
-    let mut lines = String::new();
+) -> Result<(Book, u64, u64, Vec<String>), String> {
+    let mut lines: Vec<String> = Vec::new();
     let current = task.range == 0;
     let sl = &task.slice;
     let mut book = Book::default();
@@ -451,7 +451,7 @@ fn scan_slice(
                 n_matched += 1;
                 if let Some(r) = raw {
                     let server = r.names.get(&x.obj_hash).map(String::as_str).unwrap_or("");
-                    lines.push_str(&super::raw::line(current, x, name, server, r.tz));
+                    lines.push(super::raw::line(current, x, name, server, r.tz));
                 }
                 let entry = book.by_service.entry(name.clone()).or_default();
                 let agg = if current { &mut entry.0 } else { &mut entry.1 };

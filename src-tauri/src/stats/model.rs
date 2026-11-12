@@ -335,17 +335,38 @@ pub struct StatsResult {
     /// 원본 CSV 를 쓰다 실패한 까닭
     #[serde(default)]
     pub raw_error: Option<String>,
+    /// 원본 CSV 파일 수 — 엑셀 한 시트 한계(1,048,576줄) 때문에 100만 줄마다 나눈다
+    #[serde(default)]
+    pub raw_files: u32,
+    /// 서비스 수 상한(`MAX_SERVICES`)을 넘어 «기타» 로 합친 건수
+    #[serde(default)]
+    pub folded: u64,
 }
 
 /// 서비스 이름 → (현재, 기준) 집계. 작업 안에서 조각마다 모았다가 합친다
 #[derive(Debug, Default)]
 pub struct Book {
     pub by_service: HashMap<String, (Agg, Agg)>,
+    /// 서비스 수 상한을 넘어 `OTHER_SERVICE` 로 합친 건수
+    pub folded: u64,
 }
+
+/// 작업 하나에서 따로 셀 서비스 수 상한. URL 에 ID 가 박혀(`/order/12345`) 이름이 끝없이 늘면
+/// 서비스마다 히스토그램·추이를 들고 있어 메모리가 GB 단위로 커진다. 넘는 것은 한 줄로 합친다
+pub const MAX_SERVICES: usize = 5_000;
+pub const OTHER_SERVICE: &str = "(기타 — 서비스 수 상한 초과)";
 
 impl Book {
     pub fn merge(&mut self, o: Book) {
+        self.folded += o.folded;
         for (k, (c, b)) in o.by_service {
+            // 상한에 닿으면 처음 보는 서비스는 «기타» 로 — 이미 있는 서비스는 계속 센다
+            let k = if self.by_service.len() >= MAX_SERVICES && !self.by_service.contains_key(&k) {
+                self.folded += c.count() + b.count();
+                OTHER_SERVICE.to_string()
+            } else {
+                k
+            };
             let e = self.by_service.entry(k).or_default();
             e.0.merge(&c);
             e.1.merge(&b);
@@ -376,6 +397,27 @@ impl Book {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 서비스_수_상한을_넘으면_기타로_합친다() {
+        use crate::scouter::pack::XLogPack;
+        let one = |name: &str| {
+            let mut b = Book::default();
+            b.by_service.entry(name.to_string()).or_default().0.add(&XLogPack { elapsed: 10, ..XLogPack::default() }, || Sample {
+                txid: "1".into(), date: String::new(), end_time: 0, elapsed: 10, error: false, obj_hash: 0,
+            });
+            b
+        };
+        let mut all = Book::default();
+        for i in 0..MAX_SERVICES + 3 {
+            all.merge(one(&format!("/s/{i}")));
+        }
+        all.merge(one("/s/0")); // 이미 있는 것은 계속 따로 센다
+        assert_eq!(all.by_service.len(), MAX_SERVICES + 1);
+        assert_eq!(all.folded, 3);
+        assert_eq!(all.by_service[OTHER_SERVICE].0.count(), 3);
+        assert_eq!(all.by_service["/s/0"].0.count(), 2);
+    }
+
     use super::*;
 
     fn x(txid: i64, end: i64, elapsed: i32, error: i32) -> XLogPack {

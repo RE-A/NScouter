@@ -172,7 +172,7 @@ async fn 콜렉터_둘에서_현재와_기준을_훑어_서비스별로_비교�
             (cov, book)
         })
     };
-    let (_, rows_raw, err) = sink.finish();
+    let (_, rows_raw, _, err) = sink.finish();
     let counted: u64 = book.finish(1.0, 1.0).iter().map(|r| r.current.as_ref().map_or(0, |s| s.count) + r.baseline.as_ref().map_or(0, |s| s.count)).sum();
     let body = std::fs::read_to_string(&path).unwrap();
     println!("  원본 CSV {rows_raw}줄 · 집계 {counted}건 · 빠진 조각 {}", cov.iter().map(|c| c.missing.len()).sum::<usize>());
@@ -189,4 +189,31 @@ async fn 콜렉터_둘에서_현재와_기준을_훑어_서비스별로_비교�
     let real: u64 = rows.iter().map(|r| r.current.as_ref().map_or(0, |s| s.count) + r.baseline.as_ref().map_or(0, |s| s.count)).sum();
     println!("  예상 {} · 실제 {real}", est.total);
     assert!(est.total > 0);
+}
+
+/// 건수 미리 보기(서비스 요약)가 실제보다 큰 까닭을 잰다 — 구간 경계를 바꿔 가며 견준다
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn 예상_건수와_실제_건수를_구간_경계별로_견준다() {
+    let st = connected().await;
+    let end = now_ms() / (5 * MIN) * (5 * MIN);
+    let cases: Vec<(&str, i64, i64)> = vec![
+        ("5분 정렬", end - 10 * MIN, end - 5 * MIN),
+        ("10분 정렬", end - 15 * MIN, end - 5 * MIN),
+        ("5분 정렬 안쪽 1초", end - 10 * MIN + 1000, end - 5 * MIN - 1000),
+        ("5분 2분30초 밀림", end - 10 * MIN + 150_000, end - 5 * MIN + 150_000),
+        ("1분", end - 7 * MIN, end - 6 * MIN),
+    ];
+    for (label, s, e) in cases {
+        let mut req = request(&["shop-app"]);
+        req.current = StatsRange { stime: s, etime: e };
+        req.baselines = vec![StatsRange { stime: s, etime: e }];
+        let st2 = st.clone();
+        let r2 = req.clone();
+        let est = tokio::task::spawn_blocking(move || estimate(&st2, &r2)).await.unwrap().unwrap();
+        let (rows, _, _) = go(&st, req).await;
+        let real: u64 = rows.iter().map(|r| r.current.as_ref().map_or(0, |s| s.count)).sum();
+        let guess = est.ranges[0].count;
+        println!("  {label:<16} 예상 {guess:>6} · 실제 {real:>6} · 비 {:.2}", guess as f64 / real.max(1) as f64);
+    }
 }
