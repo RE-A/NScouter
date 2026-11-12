@@ -186,6 +186,7 @@ import {
 import { usePastCandidates } from './features/xlog/hooks/usePastCandidates';
 import { searchAll, type WideProgress } from './features/xlog/hooks/wideSearchAll';
 import { instanceLabel, serviceNameOf } from './features/xlog/components/instanceGroup';
+import { StatsTab } from './features/stats/StatsTab';
 import { setAgentColorKey } from './features/xlog/utils/colorPalette';
 import { repaintCharts } from './styles/theme';
 import { useSectionFold } from './features/xlog/hooks/useSectionFold';
@@ -249,7 +250,7 @@ const C = {
   success: T.success, warn: T.warn, error: T.error,
 };
 
-type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert';
+type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert' | 'stats';
 
 /** 열린 탭이 하나도 없을 때 상세 패널에 줄 빈 상태 */
 /** 고른 것 없음. 매 렌더 새 객체를 만들면 목록 memo 가 매번 다시 돈다 */
@@ -1417,6 +1418,17 @@ export default function App({ windowLabel }: {
     openByTxid(txid, date);
   }, [openByTxid]);
 
+  /** 통계 탭에서 고를 대상 — 지금 보이는 서버의 서비스 묶음과 이름 */
+  const statsGroups = useMemo(() => {
+    const out = new Set<string>();
+    for (const o of objects) {
+      const g = serviceNameOf(o, groupRule);
+      if (g) out.add(g);
+    }
+    return [...out].sort();
+  }, [objects, groupRule]);
+  const statsServers = useMemo(() => [...new Set(objects.map(o => o.obj_name))].sort(), [objects]);
+
   // 목록의 서비스 컬럼은 getCached 만 쓰므로 누가 채워주지 않으면 해시가 그대로 남는다.
   // **걸러지기 전 원본을 푼다.** 거른 것만 풀면, 이름을 몰라 빠진 것은 끝내 안 풀려
   // 영영 빠진 채로 남는다.
@@ -2067,6 +2079,7 @@ export default function App({ windowLabel }: {
     'tab-visualize': () => { if (isMain) setActiveTab('visualize'); },
     'tab-counter': () => { if (isMain) setActiveTab('counter'); },
     'tab-alert': () => { if (isMain) setActiveTab('alert'); },
+    'tab-stats': () => { if (isMain) setActiveTab('stats'); },
     'open-settings': () => setShowSettings(true),
     'toggle-mode': () => setXLogMode(m => (m === 'live' ? 'past' : 'live')),
     /**
@@ -2154,7 +2167,7 @@ export default function App({ windowLabel }: {
         {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다. 뗀 창은 XLog 만 띄운다 */}
         {!isMain && <span className="text-micro text-fg-dim">XLog · {t('떼어 낸 창')}</span>}
         {isMain && <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
-          {(['xlog', 'active', 'visualize', 'counter', 'alert'] as TabId[]).map(tab => {
+          {(['xlog', 'active', 'visualize', 'counter', 'alert', 'stats'] as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
               <button
@@ -2166,7 +2179,7 @@ export default function App({ windowLabel }: {
                   active ? 'border-accent bg-accent/15 text-accent-bright' : ''
                 }`}
               >
-                {TAB_LABELS[tab]}
+                {t(TAB_LABELS[tab])}
               </button>
             );
           })}
@@ -2308,7 +2321,7 @@ export default function App({ windowLabel }: {
           title={t('서버')}
           className="shrink-0"
           // 클래스(hidden)로 숨기면 Pane 의 flex 와 부딪쳐 어느 쪽이 이길지 순서에 달린다
-          style={activeTab === 'alert' ? { width: servicesW, display: 'none' } : { width: servicesW }}
+          style={activeTab === 'alert' || activeTab === 'stats' ? { width: servicesW, display: 'none' } : { width: servicesW }}
         >
           <AgentSelectorPanel
             isConnected={isConnected}
@@ -2324,7 +2337,7 @@ export default function App({ windowLabel }: {
           />
         </Pane>
 
-        {activeTab !== 'alert' && <Divider
+        {activeTab !== 'alert' && activeTab !== 'stats' && <Divider
           orientation="vertical"
           label={t('서비스 목록 너비')}
           onDrag={d =>
@@ -2697,6 +2710,20 @@ export default function App({ windowLabel }: {
             connected={isStreaming}
             onClear={alertStream.clear}
             agentMap={agentMap}
+          />
+        </div>
+      )}
+
+      {/* ── 통계 탭 ── */}
+      {/* **떠나도 내리지 않고 숨긴다.** 작업은 Rust 가 백그라운드에서 돌리지만, 넣던 조건·열어 둔 결과가
+          탭을 오갈 때마다 날아가면 다시 넣어야 한다. 왼쪽 서버 목록은 쓰지 않는다 — 대상은 탭 안에서 하나 고른다. */}
+      {isMain && (
+        <div style={activeTab === 'stats' ? tabBodyStyle : HIDDEN_TAB_STYLE}>
+          <StatsTab
+            connected={isConnected}
+            groups={statsGroups}
+            servers={statsServers}
+            onOpenTxid={openSummaryTxid}
           />
         </div>
       )}
@@ -3421,6 +3448,7 @@ const TAB_LABELS: Record<TabId, string> = {
   visualize: 'Visualize',
   counter: 'Counter',
   alert: 'Alert',
+  stats: '통계',
 };
 
 // ─── 스타일 ────────────────────────────────────────────────────

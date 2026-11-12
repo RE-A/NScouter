@@ -20,7 +20,7 @@ import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTab, type XLo
 import type { XLogMode } from '../types/timeRange';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
-export type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert';
+export type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert' | 'stats';
 
 export interface StoredLayout {
   servicesW: number;
@@ -42,7 +42,7 @@ export const DEFAULT_LAYOUT: StoredLayout = {
   xlogCols: {},
 };
 
-const TABS: readonly TabId[] = ['xlog', 'active', 'visualize', 'counter', 'alert'];
+const TABS: readonly TabId[] = ['xlog', 'active', 'visualize', 'counter', 'alert', 'stats'];
 const GROUP_BYS: readonly GroupBy[] = ['type', 'group'];
 
 /** 0·음수·NaN 이면 기본값으로 돌린다 */

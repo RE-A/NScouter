@@ -823,6 +823,8 @@ export interface McpLimits {
 /** 콜렉터 동시 요청·페이지 크기·미리 받기. Rust `PerfPrefs` 와 짝이다 */
 export interface PerfPrefs {
   scan_parallel: number;
+  /** 통계 작업이 콜렉터마다 동시에 받는 조각 수 */
+  stats_parallel: number;
   past_parallel: number;
   profile_workers: number;
   text_workers: number;

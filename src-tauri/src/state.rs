@@ -301,6 +301,11 @@ impl AppState {
         self.set_links(Vec::new());
     }
 
+    /// 통계 결과 폴더. `{data_dir}/stats/`
+    pub async fn stats_dir(&self) -> PathBuf {
+        self.data_sub_dir(crate::stats::DIR_NAME).await
+    }
+
     /// 오브젝트 기록 폴더. `{data_dir}/object-history/`
     pub async fn object_history_dir(&self) -> PathBuf {
         self.data_sub_dir(crate::object_history_store::DIR_NAME).await

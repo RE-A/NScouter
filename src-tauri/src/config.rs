@@ -242,6 +242,8 @@ pub struct PerfPrefs {
     pub prefetch_min_elapsed_ms: u32,
     /// 미리 받기 초당 최대 건수
     pub prefetch_per_sec: u32,
+    /// 통계 작업이 콜렉터마다 동시에 받는 조각 수 — 하루치를 오래 훑으므로 화면 조회보다 낮게 둔다(운영 콜렉터 보호)
+    pub stats_parallel: u32,
 }
 
 impl Default for PerfPrefs {
@@ -255,6 +257,7 @@ impl Default for PerfPrefs {
             prefetch_enabled: true,
             prefetch_min_elapsed_ms: 3_000,
             prefetch_per_sec: 20,
+            stats_parallel: 4,
         }
     }
 }
@@ -271,6 +274,7 @@ impl PerfPrefs {
             prefetch_enabled: self.prefetch_enabled,
             prefetch_min_elapsed_ms: self.prefetch_min_elapsed_ms.clamp(500, 60_000),
             prefetch_per_sec: self.prefetch_per_sec.clamp(1, 100),
+            stats_parallel: self.stats_parallel.clamp(1, 16),
         }
     }
 }
@@ -838,6 +842,7 @@ mod bind_default_tests {
             ("pagerows", d.page_rows),
             ("prefetchminelapsedms", d.prefetch_min_elapsed_ms),
             ("prefetchpersec", d.prefetch_per_sec),
+            ("statsparallel", d.stats_parallel),
         ] {
             assert!(ts.contains(&format!("{k}: {v},")), "perfDefaults.ts 의 {k} 가 {v} 가 아니다");
         }

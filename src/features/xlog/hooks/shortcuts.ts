@@ -17,6 +17,7 @@ export type ShortcutAction =
   | 'tab-visualize'
   | 'tab-counter'
   | 'tab-alert'
+  | 'tab-stats'
   | 'close-detail-tab'
   | 'cycle-detail-next'
   | 'cycle-detail-prev'
@@ -46,6 +47,7 @@ export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; action: ShortcutAction
   { keys: 'Ctrl+3', action: 'tab-visualize' },
   { keys: 'Ctrl+4', action: 'tab-counter' },
   { keys: 'Ctrl+5', action: 'tab-alert' },
+  { keys: 'Ctrl+6', action: 'tab-stats' },
   { keys: 'Ctrl+W', action: 'close-detail-tab' },
   { keys: 'Ctrl+Tab', action: 'cycle-detail-next' },
   { keys: 'Ctrl+Shift+Tab', action: 'cycle-detail-prev' },
@@ -88,6 +90,8 @@ export function matchShortcut(e: KeyEventLike): ShortcutAction | null {
       return 'tab-counter';
     case '5':
       return 'tab-alert';
+    case '6':
+      return 'tab-stats';
     case 'w':
     case 'W':
       return 'close-detail-tab';

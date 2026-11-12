@@ -1,0 +1,382 @@
+// 통계 탭 — 대상 하나의 URL 서비스를 «현재» 와 «평소(기준)» 로 나눠 비교한다
+//
+// 작업은 Rust 가 백그라운드에서 돌린다(`stats` 모듈) — 하루치를 훑으면 몇 분이 걸릴 수 있어서
+// 화면을 떠나도, 다른 탭을 봐도 계속 돈다. 끝난 결과는 파일로 남아 다시 열 수 있다.
+// 이 탭은 조건을 넣고, 진행을 보이고, 결과 표를 그리는 일만 한다.
+
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { t } from '../../i18n';
+import { Button } from '../../components/Button';
+import { saveCsvExport } from '../xlog/api/scouterApi';
+import { toFileStamp } from '../xlog/utils/xlogDate';
+import { toLocalInput } from '../xlog/types/timeRange';
+import {
+  onStatsDone,
+  onStatsProgress,
+  statsControl,
+  statsDelete,
+  statsEstimate,
+  statsJobs,
+  statsResult,
+  statsStart,
+  type Estimate,
+  type JobInfo,
+  type StatsProgress,
+  type StatsResult,
+} from './statsApi';
+import { statsCsv } from './statsCsv';
+import { DEFAULT_RULES } from './statsJudge';
+import { draftError, initialDraft, StatsForm, toRequest, type StatsDraft } from './StatsForm';
+import { StatsTable } from './StatsTable';
+import { StatsDetail } from './StatsDetail';
+
+interface StatsTabProps {
+  connected: boolean;
+  /** 고를 수 있는 서비스 묶음 이름 */
+  groups: string[];
+  /** 고를 수 있는 서버 이름 */
+  servers: string[];
+  onOpenTxid: (txid: string, date: string) => void;
+}
+
+const fmt = (ms: number) => toLocalInput(ms).replace('T', ' ');
+
+function tzOffset(): number {
+  return -new Date().getTimezoneOffset() * 60_000;
+}
+
+function duration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}${t('초')}`;
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}${t('분')} ${s % 60}${t('초')}` : `${Math.floor(m / 60)}${t('시간')} ${m % 60}${t('분')}`;
+}
+
+export const STATUS_LABEL: Record<JobInfo['status'], string> = {
+  running: '도는 중',
+  done: '완료',
+  cancelled: '취소됨',
+  failed: '실패',
+};
+
+export const StatsTab = memo(function StatsTab({ connected, groups, servers, onOpenTxid }: StatsTabProps) {
+  const [draft, setDraft] = useState<StatsDraft>(() => initialDraft(Date.now()));
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<JobInfo[]>([]);
+  const [progress, setProgress] = useState<Record<string, StatsProgress>>({});
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [result, setResult] = useState<StatsResult | null>(null);
+  const [service, setService] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+  const openRef = useRef(openId);
+  openRef.current = openId;
+
+  const reloadJobs = useCallback(() => {
+    statsJobs()
+      .then(list => setJobs(list.sort((a, b) => b.started_at - a.started_at)))
+      .catch(e => setError(String(e)));
+  }, []);
+
+  const openResult = useCallback((id: string) => {
+    setOpenId(id);
+    setService(null);
+    setResult(null);
+    statsResult(id)
+      .then(r => {
+        if (openRef.current === id) setResult(r);
+      })
+      .catch(e => setError(String(e)));
+  }, []);
+
+  useEffect(() => {
+    reloadJobs();
+    const subs = [
+      onStatsProgress((id, p) => setProgress(prev => ({ ...prev, [id]: p }))),
+      onStatsDone(id => {
+        setProgress(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        reloadJobs();
+        // 지금 보고 있는 작업이 끝났으면 결과를 바로 띄운다
+        if (openRef.current === id) openResult(id);
+      }),
+    ];
+    return () => {
+      for (const s of subs) void s.then(un => un());
+    };
+  }, [reloadJobs, openResult]);
+
+  // 조건이 바뀌면 미리 본 건수는 맞지 않는다
+  useEffect(() => setEstimate(null), [draft]);
+
+  const tz = useMemo(tzOffset, []);
+
+  const onEstimate = useCallback(() => {
+    if (draftError(draft)) return;
+    setEstimating(true);
+    setError(null);
+    statsEstimate(toRequest(draft, tz))
+      .then(setEstimate)
+      .catch(e => setError(String(e)))
+      .finally(() => setEstimating(false));
+  }, [draft, tz]);
+
+  const onStart = useCallback(() => {
+    if (draftError(draft)) return;
+    setStarting(true);
+    setError(null);
+    statsStart(toRequest(draft, tz))
+      .then(id => {
+        setOpenId(id);
+        setResult(null);
+        setService(null);
+        setShowForm(false);
+        reloadJobs();
+      })
+      .catch(e => setError(String(e)))
+      .finally(() => setStarting(false));
+  }, [draft, tz, reloadJobs]);
+
+  const onDelete = useCallback(
+    (id: string) => {
+      statsDelete(id)
+        .then(() => {
+          if (openRef.current === id) {
+            setOpenId(null);
+            setResult(null);
+          }
+          reloadJobs();
+        })
+        .catch(e => setError(String(e)));
+    },
+    [reloadJobs],
+  );
+
+  /** 지난 조건을 폼으로 되돌린다 — 구간만 바꿔 다시 돌리는 일이 잦다 */
+  const reuse = useCallback((j: JobInfo) => {
+    const r = j.request;
+    const join = (l: string[]) => l.join(', ');
+    setDraft({
+      title: '',
+      targetKind: r.groups.length > 0 ? 'group' : 'server',
+      target: r.groups[0] ?? r.servers[0] ?? '',
+      current: r.current,
+      baselines: r.baselines,
+      services: r.services.join('\n'),
+      serviceInclude: join(r.service_include),
+      serviceExclude: join(r.service_exclude),
+      ipInclude: join(r.ip_include),
+      ipExclude: join(r.ip_exclude),
+    });
+    setShowForm(true);
+  }, []);
+
+  const exportCsv = useCallback(() => {
+    if (!result) return;
+    const name = `stats-${result.request.groups[0] ?? result.request.servers[0] ?? 'target'}`;
+    saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsCsv(result.services, DEFAULT_RULES) })
+      .then(path => setNotice(`${t('저장했습니다')}: ${path}`))
+      .catch(e => setError(String(e)));
+  }, [result]);
+
+  const openJob = jobs.find(j => j.id === openId) ?? null;
+  const running = openJob?.status === 'running' ? (progress[openJob.id] ?? openJob.progress) : null;
+  const missing = result?.ranges.reduce((n, r) => n + r.missing.length, 0) ?? 0;
+
+  return (
+    <div className="flex h-full min-h-0 gap-2 p-2">
+      {/* ── 작업 목록 ── */}
+      <aside className="flex w-64 shrink-0 flex-col gap-1 overflow-auto rounded border border-line p-1">
+        <Button variant={showForm ? 'default' : 'primary'} size="sm" onClick={() => setShowForm(true)}>
+          {t('+ 새 비교')}
+        </Button>
+        {jobs.length === 0 && <p className="p-2 text-micro text-fg-dim">{t('지난 결과가 없습니다')}</p>}
+        {jobs.map(j => {
+          const p = progress[j.id] ?? j.progress;
+          const on = j.id === openId;
+          return (
+            <div
+              key={j.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                setShowForm(false);
+                if (j.status === 'running') {
+                  setOpenId(j.id);
+                  setResult(null);
+                } else openResult(j.id);
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') openResult(j.id);
+              }}
+              className={`cursor-pointer rounded px-1.5 py-1 text-micro ${on ? 'bg-accent/15' : 'hover:bg-hover'}`}
+            >
+              <div className="truncate text-small text-fg" title={j.title}>
+                {j.title}
+              </div>
+              <div className="flex items-center gap-1 text-fg-dim">
+                <span className={j.status === 'failed' ? 'text-danger' : j.status === 'running' ? 'text-accent-bright' : ''}>
+                  {t(STATUS_LABEL[j.status])}
+                </span>
+                {j.status === 'running' && p && p.slices_total > 0 && (
+                  <span className="tnum">{Math.floor((p.slices_done / p.slices_total) * 100)}%</span>
+                )}
+                {j.status !== 'running' && <span className="tnum">· {j.services.toLocaleString()}{t('개 서비스')}</span>}
+                <span className="flex-1" />
+                <span className="tnum">{fmt(j.started_at).slice(5)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </aside>
+
+      {/* ── 본문 ── */}
+      <section className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
+        {error && (
+          <p className="rounded border-l-2 border-danger bg-danger/10 px-2 py-1 text-micro text-danger">
+            {error}{' '}
+            <button type="button" className="underline" onClick={() => setError(null)}>
+              {t('닫기')}
+            </button>
+          </p>
+        )}
+
+        {showForm ? (
+          <div className="overflow-auto rounded border border-line p-2">
+            <StatsForm
+              draft={draft}
+              onChange={setDraft}
+              groups={groups}
+              servers={servers}
+              tzOffsetMs={tz}
+              connected={connected}
+              estimate={estimate}
+              estimating={estimating}
+              onEstimate={onEstimate}
+              onStart={onStart}
+              starting={starting}
+            />
+          </div>
+        ) : openJob === null && result === null ? (
+          <p className="p-3 text-micro text-fg-dim">{t('왼쪽에서 결과를 고르거나 새 비교를 시작하세요')}</p>
+        ) : (
+          <>
+            {/* 머리 — 조건 요약과 할 일 */}
+            <div className="flex flex-wrap items-center gap-2 text-micro text-fg-dim">
+              <span className="text-small text-fg">{openJob?.title ?? result?.request.title}</span>
+              {(openJob?.request ?? result?.request) && (() => {
+                const r = (openJob?.request ?? result?.request)!;
+                return (
+                  <span>
+                    {t('현재')} {fmt(r.current.stime)} – {fmt(r.current.etime).slice(11)} · {t('기준')} {r.baselines.length}
+                    {t('개 구간')}
+                  </span>
+                );
+              })()}
+              <span className="flex-1" />
+              {openJob && (
+                <Button size="xs" onClick={() => reuse(openJob)}>
+                  {t('조건 다시 쓰기')}
+                </Button>
+              )}
+              {result && (
+                <Button size="xs" onClick={exportCsv} disabled={result.services.length === 0}>
+                  CSV
+                </Button>
+              )}
+              {openJob && openJob.status !== 'running' && (
+                <Button variant="danger" size="xs" onClick={() => onDelete(openJob.id)}>
+                  {t('지우기')}
+                </Button>
+              )}
+            </div>
+            {notice && (
+              <p className="text-micro text-fg-dim">
+                {notice}{' '}
+                <button type="button" className="underline" onClick={() => setNotice(null)}>
+                  {t('닫기')}
+                </button>
+              </p>
+            )}
+
+            {openJob?.status === 'running' && (
+              <ProgressBox id={openJob.id} progress={running} />
+            )}
+
+            {result && (
+              <>
+                {result.status !== 'done' && (
+                  <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-micro text-warn">
+                    {result.status === 'cancelled' ? t('취소한 작업입니다 — 그때까지 모은 것만 있습니다') : t('실패한 작업입니다')}
+                    {result.message ? ` — ${result.message}` : ''}
+                  </p>
+                )}
+                {missing > 0 && (
+                  <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-micro text-warn">
+                    {t('못 받은 5분 조각이 있습니다')} ({missing}) — {t('그 시간대는 빠진 채로 계산했습니다')}
+                  </p>
+                )}
+                <div className="flex min-h-0 flex-1 gap-2">
+                  <StatsTable rows={result.services} rules={DEFAULT_RULES} selected={service} onSelect={setService} />
+                  {service && (
+                    <div className="flex w-80 shrink-0 flex-col">
+                      <StatsDetail jobId={result.id} service={service} onOpenTxid={onOpenTxid} onClose={() => setService(null)} />
+                    </div>
+                  )}
+                </div>
+                <p className="text-micro text-fg-faint">
+                  {t('판정 기준')}: {t('느려짐')} = {t('평균 또는 p90 이')} ×{DEFAULT_RULES.slowRatio} · +{DEFAULT_RULES.slowMinMs}ms ·{' '}
+                  {t('에러 증가')} = ×{DEFAULT_RULES.errorRatio} · +{DEFAULT_RULES.errorMinDelta * 100}%p ·{' '}
+                  {t('호출량 급변')} = ±{DEFAULT_RULES.volumeRatio * 100}% · {t('표본 적음')} &lt; {DEFAULT_RULES.minCount}
+                  {t('건')} · {t('수집')} {result.collectors.join(' + ')} · {duration(result.finished_at - result.started_at)}
+                </p>
+              </>
+            )}
+          </>
+        )}
+      </section>
+    </div>
+  );
+});
+
+function ProgressBox({ id, progress: p }: { id: string; progress: StatsProgress | null }) {
+  const ratio = p && p.slices_total > 0 ? p.slices_done / p.slices_total : 0;
+  return (
+    <div className="flex flex-col gap-1 rounded border border-line p-2 text-micro text-fg-dim" role="status">
+      <div className="h-1.5 overflow-hidden rounded bg-hover">
+        <div className="h-full bg-accent" style={{ width: `${Math.round(ratio * 100)}%` }} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span>
+          {!p || p.phase === 'plan' ? t('대상 서버를 찾는 중…') : p.paused ? t('잠시 멈춤') : t('훑는 중…')}
+        </span>
+        {p && p.slices_total > 0 && (
+          <span className="tnum">
+            {p.slices_done.toLocaleString()} / {p.slices_total.toLocaleString()} {t('조각')} · {t('받은 것')}{' '}
+            {p.scanned.toLocaleString()} · {t('맞는 것')} {p.matched.toLocaleString()}
+            {p.eta_ms !== null && !p.paused ? ` · ${t('남은 시간')} ~${duration(p.eta_ms)}` : ''}
+          </span>
+        )}
+        <span className="flex-1" />
+        {p?.paused ? (
+          <Button size="xs" onClick={() => void statsControl(id, 'resume')}>
+            {t('계속')}
+          </Button>
+        ) : (
+          <Button size="xs" onClick={() => void statsControl(id, 'pause')}>
+            {t('잠시 멈춤')}
+          </Button>
+        )}
+        <Button variant="danger" size="xs" onClick={() => void statsControl(id, 'cancel')}>
+          {t('취소')}
+        </Button>
+      </div>
+    </div>
+  );
+}

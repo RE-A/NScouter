@@ -10,6 +10,7 @@ pub mod object_history_store;
 pub mod profile_store;
 pub mod scouter;
 pub mod state;
+pub mod stats;
 pub mod tuning;
 
 use std::path::PathBuf;
@@ -97,6 +98,7 @@ pub fn run() {
         })
         .manage(AppState::new_with_config(config, config_path))
         .manage(mcp::McpState::default())
+        .manage(stats::StatsState::default())
         .invoke_handler(tauri::generate_handler![
             connect_scouter,
             connect_collectors,
@@ -170,6 +172,13 @@ pub fn run() {
             get_cache_info,
             clear_cache,
             mcp::mcp_sync,
+            stats::stats_estimate,
+            stats::stats_start,
+            stats::stats_control,
+            stats::stats_jobs,
+            stats::stats_result,
+            stats::stats_service,
+            stats::stats_delete,
             mcp::mcp_configure,
             mcp::mcp_set_limits,
             mcp::mcp_regenerate_token,
