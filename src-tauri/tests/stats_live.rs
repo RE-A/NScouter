@@ -257,7 +257,8 @@ async fn 자정을_넘는_구간도_양쪽_날짜를_다_훑고_이름을_푼다
     use nscouter_lib::scouter::past::PastCursor;
     use nscouter_lib::scouter::protocol::text_type;
 
-    let tz: i64 = std::env::var("NSC_TZ_HOURS").ok().and_then(|v| v.parse().ok()).unwrap_or(9) * 3600 * 1000;
+    // 시간대는 30분 단위도 있다(UTC+6:30) — 소수로 받는다
+    let tz: i64 = (std::env::var("NSC_TZ_HOURS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(9.0) * 3_600_000.0) as i64;
     let m: i64 = std::env::var("NSC_MIDNIGHT").ok().and_then(|v| v.parse().ok()).expect("NSC_MIDNIGHT(ms)");
     let st = connected().await;
     let req_of = |s: i64, e: i64| {
