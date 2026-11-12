@@ -13,6 +13,7 @@
 pub mod engine;
 pub mod hist;
 pub mod model;
+pub mod raw;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -161,14 +162,25 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
     });
     st.jobs.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone(), job.clone());
     let dir = stats_dir(&app).await;
+    let export_dir = app.state::<AppState>().export_dir().await;
 
     let (app2, id2) = (app.clone(), id.clone());
     tauri::async_runtime::spawn(async move {
         let (app3, id3, job3) = (app2.clone(), id2.clone(), job.clone());
         let started_at = local_now_ms();
+        // 원본 CSV — 파일을 못 만들면 통계는 그대로 돌리고 까닭만 남긴다
+        let (sink, sink_error) = if job.request.raw {
+            match raw::RawSink::create(&export_dir.join(raw_file_name(&job.request, started_at))) {
+                Ok(s) => (Some(Arc::new(s)), None),
+                Err(e) => (None, Some(e)),
+            }
+        } else {
+            (None, None)
+        };
+        let sink3 = sink.clone();
         let outcome = tokio::task::spawn_blocking(move || {
             let state = app3.state::<AppState>();
-            engine::run(&state, &job3.request, &job3.control, &|p: Progress| {
+            engine::run(&state, &job3.request, &job3.control, sink3.as_deref(), &|p: Progress| {
                 *job3.progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clone();
                 let _ = app3.emit("stats-progress", serde_json::json!({ "id": id3, "progress": p }));
             })
@@ -190,6 +202,7 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
                 collectors,
                 ranges,
                 services: book.finish(req.current.secs(), secs(&req.baselines)),
+                ..StatsResult::default()
             },
             Err(e) => StatsResult {
                 id: id2.clone(),
@@ -201,6 +214,15 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
                 ..StatsResult::default()
             },
         };
+        let mut result = result;
+        if let Some(sink) = &sink {
+            let (path, rows, err) = sink.finish();
+            result.raw_path = Some(path);
+            result.raw_rows = rows;
+            result.raw_error = err;
+        } else {
+            result.raw_error = sink_error;
+        }
         if let Err(e) = save(&dir, &result) {
             log::error!("통계 결과 저장 실패: {e}");
         }
@@ -211,6 +233,13 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
         trim_memory(&app2.state::<StatsState>());
     });
     Ok(id)
+}
+
+/// 원본 CSV 파일 이름 — `20261112-095012_stats-raw-shop-app.csv` (요약 CSV 와 같은 폴더·규칙)
+fn raw_file_name(req: &StatsRequest, started_at: i64) -> String {
+    let stamp = raw::file_stamp(started_at, req.tz_offset_ms);
+    let target = req.groups.first().or(req.servers.first()).map(String::as_str).unwrap_or("target");
+    format!("{stamp}_{}.csv", crate::profile_store::sanitize(&format!("stats-raw-{target}")))
 }
 
 /// 끝난 결과는 몇 개만 메모리에 둔다 — 나머지는 파일에서 다시 읽는다

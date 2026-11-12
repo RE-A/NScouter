@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use super::raw::RawSink;
 use super::model::{Book, RangeCoverage, Sample, StatsRange, StatsRequest};
 use crate::cache::xlog::past_page;
 use crate::hub::CollectorLink;
@@ -64,6 +65,8 @@ pub struct Progress {
 struct Plan {
     by_date: HashMap<String, Vec<i32>>,
     servers: Vec<String>,
+    /// 원래 해시 → 서버 이름 (원본 CSV 의 «서버» 칸)
+    names: HashMap<i32, String>,
 }
 
 /// 조각 하나의 일
@@ -132,6 +135,7 @@ fn plan_range(
         .collect();
     let mut by_date: HashMap<String, Vec<i32>> = HashMap::new();
     let mut names: Vec<String> = Vec::new();
+    let mut by_hash: HashMap<i32, String> = HashMap::new();
     for (day_start, _) in split_by_day(range.stime, range.etime, tz) {
         let date = date_key(day_start, tz);
         let daily = request_all(conn, crate::scouter::protocol::CMD_OBJECT_LIST_LOAD_DATE, &build_daily_object_param(&date))?
@@ -153,6 +157,7 @@ fn plan_range(
         for (h, name, kind, group) in candidates {
             if servers.picks(&name, &kind, group.as_deref()) && !hashes.contains(&h) {
                 hashes.push(h);
+                by_hash.entry(h).or_insert_with(|| name.clone());
                 if !names.contains(&name) {
                     names.push(name);
                 }
@@ -163,7 +168,7 @@ fn plan_range(
         }
     }
     names.sort();
-    Ok(Plan { by_date, servers: names })
+    Ok(Plan { by_date, servers: names, names: by_hash })
 }
 
 /// 통계 작업을 끝까지 돈다 — **막힌다.** 돌려주는 것: 구간별 커버리지, 서비스별 집계, 훑은 콜렉터 이름들
@@ -171,6 +176,7 @@ pub fn run(
     state: &AppState,
     req: &StatsRequest,
     ctl: &Control,
+    raw: Option<&RawSink>,
     on_progress: &(dyn Fn(Progress) + Sync),
 ) -> Result<(Vec<RangeCoverage>, Book, Vec<String>), String> {
     req.validate()?;
@@ -199,15 +205,20 @@ pub fn run(
         })
         .collect();
     let mut queues: Vec<Mutex<VecDeque<Task>>> = Vec::with_capacity(links.len());
+    let mut server_names: Vec<HashMap<i32, String>> = Vec::with_capacity(links.len());
     for link in &links {
         let mut conn = link.open()?;
         let mut q = VecDeque::new();
+        let mut link_names: HashMap<i32, String> = HashMap::new();
         for (ri, r) in ranges.iter().enumerate() {
             let plan = plan_range(&mut conn, link, state, *r, tz, &servers, &rule).map_err(|e| format!("{e} ({})", link.name))?;
             for s in &plan.servers {
                 if !coverage[ri].servers.contains(s) {
                     coverage[ri].servers.push(s.clone());
                 }
+            }
+            for (h, n) in plan.names {
+                link_names.entry(h).or_insert(n);
             }
             let hashes_of: HashMap<String, Arc<Vec<i32>>> = plan.by_date.into_iter().map(|(d, h)| (d, Arc::new(h))).collect();
             for slice in plan_slices(Window { stime: r.stime, etime: r.etime }, tz, SLICE_MS, SortBy::Slowest) {
@@ -218,6 +229,7 @@ pub fn run(
             }
         }
         queues.push(Mutex::new(q));
+        server_names.push(link_names);
     }
     if coverage[0].servers.is_empty() && coverage.iter().all(|c| c.servers.is_empty()) {
         return Err("고른 대상(서비스 묶음·서버)에 속한 서버를 어느 구간에서도 찾지 못했습니다".into());
@@ -236,11 +248,12 @@ pub fn run(
     let page_rows = crate::tuning::perf().page_rows as i32;
 
     std::thread::scope(|sc| {
-        for (link, queue) in links.iter().zip(&queues) {
+        for ((link, queue), names) in links.iter().zip(&queues).zip(&server_names) {
             let n = parallel.min(queue.lock().unwrap_or_else(|p| p.into_inner()).len());
             for _ in 0..n {
                 workers_left.fetch_add(1, Ordering::Relaxed);
                 let (link, queue, filters, book, cov) = (link.clone(), queue, &filters, &book, &cov);
+                let raw_out = raw.map(|_| RawOut { names, tz: req.tz_offset_ms });
                 let (slices_done, scanned, matched, workers_left) = (&slices_done, &scanned, &matched, &workers_left);
                 sc.spawn(move || {
                     let mut conn: Option<ScouterConnection> = None;
@@ -259,7 +272,7 @@ pub fn run(
                                 conn = link.open().ok();
                             }
                             let Some(c) = conn.as_mut() else { continue };
-                            outcome = scan_slice(c, &link, state, &task, filters, page_rows, ctl);
+                            outcome = scan_slice(c, &link, state, &task, filters, page_rows, ctl, raw_out.as_ref());
                             if outcome.is_ok() {
                                 break;
                             }
@@ -267,7 +280,10 @@ pub fn run(
                         }
                         let mut cv = cov.lock().unwrap_or_else(|p| p.into_inner());
                         match outcome {
-                            Ok((part, n_scanned, n_matched)) => {
+                            Ok((part, n_scanned, n_matched, lines)) => {
+                                if let Some(sink) = raw {
+                                    sink.append(&lines, n_matched);
+                                }
                                 scanned.fetch_add(n_scanned, Ordering::Relaxed);
                                 matched.fetch_add(n_matched, Ordering::Relaxed);
                                 cv[task.range].scanned += n_scanned;
@@ -337,7 +353,15 @@ pub fn run(
     Ok((coverage, book.into_inner().unwrap_or_else(|p| p.into_inner()), names))
 }
 
-/// 조각 하나를 페이지로 넘겨 가며 받아 센다. (집계, 받은 건수, 센 건수)
+/// 원본 CSV 를 쓸 때 조각이 알아야 할 것
+struct RawOut<'a> {
+    /// 원래 해시 → 서버 이름 (이 콜렉터)
+    names: &'a HashMap<i32, String>,
+    tz: i64,
+}
+
+/// 조각 하나를 페이지로 넘겨 가며 받아 센다. (집계, 받은 건수, 센 건수, 원본 CSV 줄)
+#[allow(clippy::too_many_arguments)]
 fn scan_slice(
     conn: &mut ScouterConnection,
     link: &CollectorLink,
@@ -346,7 +370,9 @@ fn scan_slice(
     f: &Filters,
     page_rows: i32,
     ctl: &Control,
-) -> Result<(Book, u64, u64), String> {
+    raw: Option<&RawOut>,
+) -> Result<(Book, u64, u64, String), String> {
+    let mut lines = String::new();
     let current = task.range == 0;
     let sl = &task.slice;
     let mut book = Book::default();
@@ -379,6 +405,10 @@ fn scan_slice(
                     continue;
                 }
                 n_matched += 1;
+                if let Some(r) = raw {
+                    let server = r.names.get(&x.obj_hash).map(String::as_str).unwrap_or("");
+                    lines.push_str(&super::raw::line(current, x, name, server, r.tz));
+                }
                 let entry = book.by_service.entry(name.clone()).or_default();
                 let agg = if current { &mut entry.0 } else { &mut entry.1 };
                 agg.add(x, || Sample {
@@ -392,7 +422,7 @@ fn scan_slice(
             }
         }
         if page.done {
-            return Ok((book, n_scanned, n_matched));
+            return Ok((book, n_scanned, n_matched, lines));
         }
         cursor = page.next;
     }

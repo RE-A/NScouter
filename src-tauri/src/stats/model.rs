@@ -56,6 +56,8 @@ pub struct StatsRequest {
     pub ip_exclude: Vec<String>,
     /// 화면의 시간대(ms). 콜렉터 날짜 디렉토리(F-18)를 고를 때 쓴다
     pub tz_offset_ms: i64,
+    /// 통계에 들어간 트랜잭션을 원본 CSV 로도 남긴다 (내보내기 폴더)
+    pub raw: bool,
 }
 
 impl StatsRequest {
@@ -321,6 +323,14 @@ pub struct StatsResult {
     pub collectors: Vec<String>,
     pub ranges: Vec<RangeCoverage>,
     pub services: Vec<ServiceStats>,
+    /// 원본 CSV 경로 — 남기기로 했을 때만
+    #[serde(default)]
+    pub raw_path: Option<String>,
+    #[serde(default)]
+    pub raw_rows: u64,
+    /// 원본 CSV 를 쓰다 실패한 까닭
+    #[serde(default)]
+    pub raw_error: Option<String>,
 }
 
 /// 서비스 이름 → (현재, 기준) 집계. 작업 안에서 조각마다 모았다가 합친다

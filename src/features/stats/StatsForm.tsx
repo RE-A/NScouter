@@ -28,6 +28,8 @@ export interface StatsDraft {
   serviceExclude: string;
   ipInclude: string;
   ipExclude: string;
+  /** 통계에 들어간 트랜잭션을 원본 CSV 로도 남긴다 */
+  raw: boolean;
 }
 
 export function initialDraft(now: number): StatsDraft {
@@ -44,6 +46,7 @@ export function initialDraft(now: number): StatsDraft {
     serviceExclude: '',
     ipInclude: '',
     ipExclude: '',
+    raw: false,
   };
 }
 
@@ -90,7 +93,25 @@ export function toRequest(d: StatsDraft, tzOffsetMs: number): StatsRequest {
     ip_include: splitList(d.ipInclude),
     ip_exclude: splitList(d.ipExclude),
     tz_offset_ms: tzOffsetMs,
+    raw: d.raw,
   };
+}
+
+/** 기준 구간 한 줄 — `11/11 (수) 08:50–09:50`. 날이 넘으면 끝에도 날짜를 붙인다 */
+export function rangeLabel(r: StatsRange): string {
+  const s = new Date(r.stime);
+  const e = new Date(r.etime);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const day = (d: Date) => `${d.getMonth() + 1}/${d.getDate()} (${d.toLocaleDateString(undefined, { weekday: 'short' })})`;
+  const hm = (d: Date) => `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const sameDay = s.toDateString() === e.toDateString() || (e.getHours() === 0 && e.getMinutes() === 0 && r.etime - r.stime <= DAY);
+  return `${day(s)} ${hm(s)}–${sameDay ? '' : `${day(e)} `}${hm(e)}`;
+}
+
+/** 원본 CSV 크기 어림 — 한 줄 150바이트쯤 */
+function rawSize(rows: number): string {
+  const mb = (rows * 150) / 1e6;
+  return mb >= 1000 ? `${(mb / 1000).toFixed(1)}GB` : `${Math.max(1, Math.round(mb))}MB`;
 }
 
 interface StatsFormProps {
@@ -109,7 +130,7 @@ interface StatsFormProps {
   starting: boolean;
 }
 
-const inputCls = 'rounded border border-line-control bg-input px-2 py-0.5 text-body text-fg placeholder:text-fg-faint';
+const inputCls = 'rounded border border-line-control bg-input px-2 py-1 text-body text-fg placeholder:text-fg-faint';
 
 export const StatsForm = memo(function StatsForm({
   draft: d,
@@ -125,9 +146,10 @@ export const StatsForm = memo(function StatsForm({
   starting,
 }: StatsFormProps) {
   const set = <K extends keyof StatsDraft>(k: K, v: StatsDraft[K]) => onChange({ ...d, [k]: v });
-  const [showFilters, setShowFilters] = useState(
-    () => d.serviceInclude + d.serviceExclude + d.ipInclude + d.ipExclude !== '',
+  const [showMore, setShowMore] = useState(
+    () => d.services + d.serviceInclude + d.serviceExclude + d.ipInclude + d.ipExclude + d.title !== '',
   );
+  const [custom, setCustom] = useState<StatsRange | null>(null);
   const error = draftError(d);
   const choices = d.targetKind === 'group' ? groups : servers;
   const off = useMemo(
@@ -135,140 +157,198 @@ export const StatsForm = memo(function StatsForm({
     [d.baselines, d.current, tzOffsetMs],
   );
   const addBase = (more: StatsRange[]) => set('baselines', addRanges(d.baselines, more).slice(0, MAX_BASELINES));
+  const conditions = [
+    splitList(d.services).length > 0 ? `${t('서비스')} ${splitList(d.services).length}${t('개 지정')}` : t('서비스 전부'),
+    ...(d.serviceInclude || d.serviceExclude ? [t('서비스 조건')] : []),
+    ...(d.ipInclude || d.ipExclude ? [t('IP 조건')] : []),
+  ].join(' · ');
 
   return (
-    <div className="flex flex-col gap-2 text-body">
-      <Row label={t('대상')}>
-        <select
-          value={d.targetKind}
-          onChange={e => onChange({ ...d, targetKind: e.target.value as TargetKind, target: '' })}
-          className={`${inputCls} pr-[26px]`}
-        >
-          <option value="group">{t('서비스 묶음')}</option>
-          <option value="server">{t('서버 이름')}</option>
-        </select>
-        <input
-          type="text"
-          list="stats-target-choices"
-          value={d.target}
-          spellCheck={false}
-          placeholder={d.targetKind === 'group' ? t('묶음 이름') : t('이름에 든 글자')}
-          onChange={e => set('target', e.target.value)}
-          className={`${inputCls} min-w-0 flex-1`}
-        />
-        <datalist id="stats-target-choices">
-          {choices.map(c => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
-      </Row>
-
-      <Row label={t('현재 구간')}>
-        <RangeInput value={d.current} onChange={v => set('current', v)} />
-      </Row>
-
-      <Row label={t('기준 구간')}>
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          {d.baselines.map((b, i) => (
-            <div key={`${b.stime}-${b.etime}-${i}`} className="flex items-center gap-1">
-              <RangeInput
-                value={b}
-                onChange={v => set('baselines', d.baselines.map((x, j) => (j === i ? v : x)))}
-              />
-              {offHours(d.current, b, tzOffsetMs) && (
-                <span className="text-micro text-warn" title={t('현재 구간과 시각·길이가 달라 피크가 섞일 수 있습니다')}>
-                  ⚠
-                </span>
-              )}
-              <Button variant="ghost" size="xs" onClick={() => set('baselines', d.baselines.filter((_, j) => j !== i))} aria-label={t('빼기')}>
-                ✕
-              </Button>
-            </div>
-          ))}
-          <div className="flex flex-wrap items-center gap-1">
-            <Button size="xs" onClick={() => addBase(yesterday(d.current))}>{t('+ 어제 같은 시각')}</Button>
-            <Button size="xs" onClick={() => addBase(lastWeek(d.current))}>{t('+ 지난주 같은 요일')}</Button>
-            <Button size="xs" onClick={() => addBase(recentDays(d.current, 7))}>{t('+ 최근 7일 같은 시각')}</Button>
-            <Button
-              size="xs"
-              onClick={() => addBase([{ stime: 2 * d.current.stime - d.current.etime, etime: d.current.stime }])}
-              title={t('현재 구간 바로 앞의 같은 길이 — 시각이 달라 피크가 섞일 수 있습니다')}
-            >
-              {t('+ 바로 앞 구간')}
-            </Button>
-            {d.baselines.length > 0 && (
-              <Button variant="ghost" size="xs" onClick={() => set('baselines', [])}>{t('모두 빼기')}</Button>
-            )}
-          </div>
-          {off && <p className="text-micro text-warn">{t('현재 구간과 시각·길이가 다른 기준이 있습니다 — 피크·한가한 시간이 섞이면 «느려짐» 이 잘못 뜰 수 있습니다')}</p>}
+    <div className="flex max-w-4xl flex-col gap-4">
+      <Section title={t('대상')}>
+        <div className="flex items-center gap-2">
+          <select
+            value={d.targetKind}
+            onChange={e => onChange({ ...d, targetKind: e.target.value as TargetKind, target: '' })}
+            className={`${inputCls} pr-[26px]`}
+          >
+            <option value="group">{t('서비스 묶음')}</option>
+            <option value="server">{t('서버 이름')}</option>
+          </select>
+          <input
+            type="text"
+            list="stats-target-choices"
+            value={d.target}
+            spellCheck={false}
+            placeholder={d.targetKind === 'group' ? t('묶음 이름') : t('이름에 든 글자')}
+            onChange={e => set('target', e.target.value)}
+            className={`${inputCls} w-80`}
+          />
+          <datalist id="stats-target-choices">
+            {choices.map(c => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
         </div>
-      </Row>
+      </Section>
 
-      <Row label={t('서비스')}>
-        <textarea
-          value={d.services}
-          spellCheck={false}
-          rows={2}
-          placeholder={t('비우면 현재 구간에 찍힌 서비스 전부. 직접 고르려면 한 줄에 하나')}
-          onChange={e => set('services', e.target.value)}
-          className={`${inputCls} min-w-0 flex-1 font-mono text-small`}
-        />
-      </Row>
+      <Section title={t('현재 구간')} hint={t('최대 하루')}>
+        <RangeInput value={d.current} onChange={v => set('current', v)} />
+      </Section>
+
+      <Section title={t('평소 (기준 구간)')} hint={t('여러 개를 넣으면 하나로 합쳐 «평소» 로 봅니다')}>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button size="sm" onClick={() => addBase(yesterday(d.current))}>{t('+ 어제 같은 시각')}</Button>
+          <Button size="sm" onClick={() => addBase(lastWeek(d.current))}>{t('+ 지난주 같은 요일')}</Button>
+          <Button size="sm" onClick={() => addBase(recentDays(d.current, 7))}>{t('+ 최근 7일 같은 시각')}</Button>
+          <Button size="sm" variant="ghost" onClick={() => setCustom(custom ? null : shiftOneDay(d.current))}>
+            {t('+ 직접 입력')}
+          </Button>
+        </div>
+        {custom && (
+          <div className="mt-2 flex items-center gap-2">
+            <RangeInput value={custom} onChange={setCustom} />
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!(custom.etime > custom.stime)}
+              onClick={() => {
+                addBase([custom]);
+                setCustom(null);
+              }}
+            >
+              {t('추가')}
+            </Button>
+          </div>
+        )}
+        {d.baselines.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {d.baselines.map((b, i) => {
+              const odd = offHours(d.current, b, tzOffsetMs);
+              return (
+                <span
+                  key={`${b.stime}-${b.etime}`}
+                  className={`tnum inline-flex items-center gap-1 rounded border px-2 py-0.5 text-small ${
+                    odd ? 'border-warn/50 text-warn' : 'border-line-control text-fg'
+                  }`}
+                  title={odd ? t('현재 구간과 시각·길이가 달라 피크가 섞일 수 있습니다') : undefined}
+                >
+                  {rangeLabel(b)}
+                  <button
+                    type="button"
+                    className="text-fg-faint hover:text-fg"
+                    onClick={() => set('baselines', d.baselines.filter((_, j) => j !== i))}
+                    aria-label={t('빼기')}
+                  >
+                    ✕
+                  </button>
+                </span>
+              );
+            })}
+            <button type="button" className="text-small text-fg-dim underline hover:text-fg" onClick={() => set('baselines', [])}>
+              {t('모두 빼기')}
+            </button>
+          </div>
+        )}
+        {off && (
+          <p className="mt-1.5 text-small text-warn">
+            {t('현재 구간과 시각·길이가 다른 기준이 있습니다 — 피크·한가한 시간이 섞이면 «느려짐» 이 잘못 뜰 수 있습니다')}
+          </p>
+        )}
+      </Section>
 
       <div>
-        <Button variant="ghost" size="xs" onClick={() => setShowFilters(v => !v)}>
-          {showFilters ? t('수집 조건 접기') : t('수집 조건 (서비스·IP 포함/제외)')}
-        </Button>
+        <button
+          type="button"
+          onClick={() => setShowMore(v => !v)}
+          className="flex items-center gap-2 text-small text-fg-muted hover:text-fg"
+          aria-expanded={showMore}
+        >
+          <span>{showMore ? '▾' : '▸'}</span>
+          <span>{t('서비스 · 수집 조건')}</span>
+          {!showMore && <span className="text-fg-faint">{conditions}</span>}
+        </button>
+        {showMore && (
+          <div className="mt-2 flex flex-col gap-2 border-l-2 border-line pl-3">
+            <Field label={t('서비스')}>
+              <textarea
+                value={d.services}
+                spellCheck={false}
+                rows={3}
+                placeholder={t('비우면 현재 구간에 찍힌 서비스 전부. 직접 고르려면 한 줄에 하나')}
+                onChange={e => set('services', e.target.value)}
+                className={`${inputCls} min-w-0 flex-1 font-mono`}
+              />
+            </Field>
+            <Field label={t('서비스 포함')}>
+              <Text value={d.serviceInclude} onChange={v => set('serviceInclude', v)} placeholder="/api/, /order" />
+            </Field>
+            <Field label={t('서비스 제외')}>
+              <Text value={d.serviceExclude} onChange={v => set('serviceExclude', v)} placeholder="/health, .css" />
+            </Field>
+            <Field label={t('IP 포함')}>
+              <Text value={d.ipInclude} onChange={v => set('ipInclude', v)} placeholder="10.89." />
+            </Field>
+            <Field label={t('IP 제외')}>
+              <Text value={d.ipExclude} onChange={v => set('ipExclude', v)} placeholder="10.0.0.5" />
+            </Field>
+            <p className="text-small text-fg-faint">
+              {t('쉼표로 여럿. 그 글자가 들어 있으면 맞는 것으로 봅니다(대소문자 무시). 제외가 포함보다 먼저입니다.')}
+            </p>
+            <Field label={t('제목')}>
+              <Text value={d.title} onChange={v => set('title', v)} placeholder={t('비우면 대상과 시각')} />
+            </Field>
+          </div>
+        )}
       </div>
-      {showFilters && (
-        <>
-          <Row label={t('서비스 포함')}>
-            <Text value={d.serviceInclude} onChange={v => set('serviceInclude', v)} placeholder="/api/, /order" />
-          </Row>
-          <Row label={t('서비스 제외')}>
-            <Text value={d.serviceExclude} onChange={v => set('serviceExclude', v)} placeholder="/health, .css" />
-          </Row>
-          <Row label={t('IP 포함')}>
-            <Text value={d.ipInclude} onChange={v => set('ipInclude', v)} placeholder="10.89." />
-          </Row>
-          <Row label={t('IP 제외')}>
-            <Text value={d.ipExclude} onChange={v => set('ipExclude', v)} placeholder="10.0.0.5" />
-          </Row>
-          <p className="text-micro text-fg-faint">
-            {t('쉼표로 여럿. 그 글자가 들어 있으면 맞는 것으로 봅니다(대소문자 무시). 제외가 포함보다 먼저입니다.')}
-          </p>
-        </>
-      )}
 
-      <Row label={t('제목')}>
-        <Text value={d.title} onChange={v => set('title', v)} placeholder={t('비우면 대상과 시각')} />
-      </Row>
+      <label className="flex items-center gap-2 text-body text-fg-muted">
+        <input type="checkbox" checked={d.raw} onChange={e => set('raw', e.target.checked)} />
+        {t('원본 트랜잭션도 CSV 로 남기기')}
+        <span className="text-small text-fg-faint">
+          {estimate ? `— ${t('약')} ${rawSize(estimate.total)}` : `— ${t('한 건 한 줄, 내보내기 폴더')}`}
+        </span>
+      </label>
 
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        <Button size="md" onClick={onEstimate} disabled={!connected || error !== null || estimating}>
-          {estimating ? t('세는 중…') : t('건수 미리 보기')}
-        </Button>
+      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
         <Button variant="primary" size="md" onClick={onStart} disabled={!connected || error !== null || starting}>
           {t('통계 시작')}
         </Button>
-        {error && <span className="text-micro text-danger">{error}</span>}
-        {!connected && <span className="text-micro text-fg-dim">{t('연결 후 사용 가능합니다.')}</span>}
+        <Button size="md" onClick={onEstimate} disabled={!connected || error !== null || estimating}>
+          {estimating ? t('세는 중…') : t('건수 미리 보기')}
+        </Button>
+        {estimate && (
+          <span className="text-small text-fg-muted" title={t('IP 조건은 세지 않은 값입니다')}>
+            {t('약')} <span className="tnum text-fg">{estimate.total.toLocaleString()}</span>
+            {t('건')}
+          </span>
+        )}
+        {error && <span className="text-small text-danger">{error}</span>}
+        {!connected && <span className="text-small text-fg-dim">{t('연결 후 사용 가능합니다.')}</span>}
       </div>
-      {estimate && (
-        <p className="text-micro text-fg-dim">
-          {t('예상')} <span className="tnum font-mono text-fg-muted">{estimate.total.toLocaleString()}</span>
-          {t('건')} ({estimate.ranges.map(r => `${r.kind === 'current' ? t('현재') : t('기준')} ${r.count.toLocaleString()}`).join(' · ')})
-          {' — '}
-          {t('IP 조건은 세지 않은 값입니다')}
-        </p>
-      )}
     </div>
   );
 });
 
+function shiftOneDay(r: StatsRange): StatsRange {
+  return { stime: r.stime - DAY, etime: r.etime - DAY };
+}
+
+function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="mb-1.5 flex items-baseline gap-2">
+        <h3 className="text-body font-medium text-fg">{title}</h3>
+        {hint && <span className="text-small text-fg-faint">{hint}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function RangeInput({ value, onChange }: { value: StatsRange; onChange: (r: StatsRange) => void }) {
   return (
-    <span className="flex items-center gap-1">
+    <span className="flex items-center gap-1.5">
       <input
         type="datetime-local"
         value={toLocalInput(value.stime)}
@@ -286,10 +366,10 @@ function RangeInput({ value, onChange }: { value: StatsRange; onChange: (r: Stat
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="w-20 shrink-0 pt-1 text-micro text-fg-dim">{label}</span>
+      <span className="w-24 shrink-0 pt-1.5 text-small text-fg-dim">{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-1">{children}</div>
     </div>
   );

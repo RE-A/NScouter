@@ -12,6 +12,7 @@ use nscouter_lib::config::AppConfig;
 use nscouter_lib::hub::ConnectTarget;
 use nscouter_lib::state::AppState;
 use nscouter_lib::stats::engine::{estimate, run, Control};
+use nscouter_lib::stats::raw::RawSink;
 use nscouter_lib::stats::model::{ServiceStats, StatsRange, StatsRequest};
 
 const KST: i64 = 9 * 3600 * 1000;
@@ -54,6 +55,7 @@ fn request(servers: &[&str]) -> StatsRequest {
         ip_include: vec![],
         ip_exclude: vec![],
         tz_offset_ms: KST,
+        raw: false,
     }
 }
 
@@ -62,7 +64,7 @@ async fn go(st: &Arc<AppState>, req: StatsRequest) -> (Vec<ServiceStats>, usize,
     tokio::task::spawn_blocking(move || {
         let ctl = Control::default();
         let t0 = std::time::Instant::now();
-        let (cov, book, collectors) = run(&st, &req, &ctl, &|_| {}).expect("통계 실패");
+        let (cov, book, collectors) = run(&st, &req, &ctl, None, &|_| {}).expect("통계 실패");
         let missing: usize = cov.iter().map(|c| c.missing.len()).sum();
         let scanned: u64 = cov.iter().map(|c| c.scanned).sum();
         println!(
@@ -135,6 +137,32 @@ async fn 콜렉터_둘에서_현재와_기준을_훑어_서비스별로_비교�
     println!("  직접 고름: {:?}", picked.iter().map(|r| &r.service).collect::<Vec<_>>());
     assert!(picked.iter().any(|r| r.service == first));
     assert!(picked.len() <= 2);
+
+    // ── 원본 CSV — 센 건수만큼 줄이 있고 서버 이름이 찬다 ──
+    let path = std::env::temp_dir().join(format!("nscouter-stats-raw-{}.csv", std::process::id()));
+    let sink = RawSink::create(&path).unwrap();
+    let req = request(&["shop-app"]);
+    let st3 = st.clone();
+    let (cov, book) = {
+        let sink = &sink;
+        let st3 = st3.clone();
+        let req = req.clone();
+        // RawSink 는 빌림으로 넘기므로 같은 스레드에서 돈다 (spawn_blocking 대신 block_in_place)
+        tokio::task::block_in_place(move || {
+            let (cov, book, _) = run(&st3, &req, &Control::default(), Some(sink), &|_| {}).unwrap();
+            (cov, book)
+        })
+    };
+    let (_, rows_raw, err) = sink.finish();
+    let counted: u64 = book.finish(1.0, 1.0).iter().map(|r| r.current.as_ref().map_or(0, |s| s.count) + r.baseline.as_ref().map_or(0, |s| s.count)).sum();
+    let body = std::fs::read_to_string(&path).unwrap();
+    println!("  원본 CSV {rows_raw}줄 · 집계 {counted}건 · 빠진 조각 {}", cov.iter().map(|c| c.missing.len()).sum::<usize>());
+    println!("    {}", body.lines().nth(1).unwrap_or(""));
+    assert_eq!(err, None);
+    assert_eq!(rows_raw, counted, "원본 줄 수와 집계 건수가 같아야 한다");
+    assert_eq!(body.lines().count() as u64, rows_raw + 1);
+    assert!(body.lines().skip(1).all(|l| l.split(',').nth(3).is_some_and(|s| s.contains("shop-app"))), "서버 칸이 비었다");
+    let _ = std::fs::remove_file(&path);
 
     // ── 예상 건수 — 실제 훑은 것과 크게 다르지 않다 ──
     let st2 = st.clone();

@@ -4,6 +4,7 @@
 // 화면을 떠나도, 다른 탭을 봐도 계속 돈다. 끝난 결과는 파일로 남아 다시 열 수 있다.
 // 이 탭은 조건을 넣고, 진행을 보이고, 결과 표를 그리는 일만 한다.
 
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../../components/Button';
@@ -26,7 +27,7 @@ import {
 } from './statsApi';
 import { statsCsv } from './statsCsv';
 import { DEFAULT_RULES } from './statsJudge';
-import { draftError, initialDraft, StatsForm, toRequest, type StatsDraft } from './StatsForm';
+import { draftError, initialDraft, rangeLabel, StatsForm, toRequest, type StatsDraft } from './StatsForm';
 import { StatsTable } from './StatsTable';
 import { StatsDetail } from './StatsDetail';
 
@@ -112,8 +113,9 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
     };
   }, [reloadJobs, openResult]);
 
-  // 조건이 바뀌면 미리 본 건수는 맞지 않는다
-  useEffect(() => setEstimate(null), [draft]);
+  // 조건이 바뀌면 미리 본 건수는 맞지 않는다 (제목·원본 CSV 여부는 건수와 무관)
+  const countKey = JSON.stringify({ ...draft, title: '', raw: false });
+  useEffect(() => setEstimate(null), [countKey]);
 
   const tz = useMemo(tzOffset, []);
 
@@ -173,6 +175,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
       serviceExclude: join(r.service_exclude),
       ipInclude: join(r.ip_include),
       ipExclude: join(r.ip_exclude),
+      raw: r.raw,
     });
     setShowForm(true);
   }, []);
@@ -181,12 +184,19 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
     if (!result) return;
     const name = `stats-${result.request.groups[0] ?? result.request.servers[0] ?? 'target'}`;
     saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsCsv(result.services, DEFAULT_RULES) })
-      .then(path => setNotice(`${t('저장했습니다')}: ${path}`))
+      .then(path => setNotice(path))
       .catch(e => setError(String(e)));
   }, [result]);
 
+  const resultId = result?.id ?? null;
+  const renderDetail = useCallback(
+    (svc: string) => (resultId ? <StatsDetail jobId={resultId} service={svc} onOpenTxid={onOpenTxid} /> : null),
+    [resultId, onOpenTxid],
+  );
+
   const openJob = jobs.find(j => j.id === openId) ?? null;
   const running = openJob?.status === 'running' ? (progress[openJob.id] ?? openJob.progress) : null;
+  const req = openJob?.request ?? result?.request ?? null;
   const missing = result?.ranges.reduce((n, r) => n + r.missing.length, 0) ?? 0;
 
   return (
@@ -196,7 +206,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
         <Button variant={showForm ? 'default' : 'primary'} size="sm" onClick={() => setShowForm(true)}>
           {t('+ 새 비교')}
         </Button>
-        {jobs.length === 0 && <p className="p-2 text-micro text-fg-dim">{t('지난 결과가 없습니다')}</p>}
+        {jobs.length === 0 && <p className="p-2 text-small text-fg-dim">{t('지난 결과가 없습니다')}</p>}
         {jobs.map(j => {
           const p = progress[j.id] ?? j.progress;
           const on = j.id === openId;
@@ -215,9 +225,9 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               onKeyDown={e => {
                 if (e.key === 'Enter') openResult(j.id);
               }}
-              className={`cursor-pointer rounded px-1.5 py-1 text-micro ${on ? 'bg-accent/15' : 'hover:bg-hover'}`}
+              className={`cursor-pointer rounded px-2 py-1.5 text-small ${on ? 'bg-accent/15' : 'hover:bg-hover'}`}
             >
-              <div className="truncate text-small text-fg" title={j.title}>
+              <div className="truncate text-body text-fg" title={j.title}>
                 {j.title}
               </div>
               <div className="flex items-center gap-1 text-fg-dim">
@@ -239,7 +249,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
       {/* ── 본문 ── */}
       <section className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
         {error && (
-          <p className="rounded border-l-2 border-danger bg-danger/10 px-2 py-1 text-micro text-danger">
+          <p className="rounded border-l-2 border-danger bg-danger/10 px-2 py-1 text-small text-danger">
             {error}{' '}
             <button type="button" className="underline" onClick={() => setError(null)}>
               {t('닫기')}
@@ -248,7 +258,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
         )}
 
         {showForm ? (
-          <div className="overflow-auto rounded border border-line p-2">
+          <div className="overflow-auto rounded border border-line p-4">
             <StatsForm
               draft={draft}
               onChange={setDraft}
@@ -264,43 +274,52 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
             />
           </div>
         ) : openJob === null && result === null ? (
-          <p className="p-3 text-micro text-fg-dim">{t('왼쪽에서 결과를 고르거나 새 비교를 시작하세요')}</p>
+          <p className="p-3 text-small text-fg-dim">{t('왼쪽에서 결과를 고르거나 새 비교를 시작하세요')}</p>
         ) : (
           <>
             {/* 머리 — 조건 요약과 할 일 */}
-            <div className="flex flex-wrap items-center gap-2 text-micro text-fg-dim">
-              <span className="text-small text-fg">{openJob?.title ?? result?.request.title}</span>
-              {(openJob?.request ?? result?.request) && (() => {
-                const r = (openJob?.request ?? result?.request)!;
-                return (
-                  <span>
-                    {t('현재')} {fmt(r.current.stime)} – {fmt(r.current.etime).slice(11)} · {t('기준')} {r.baselines.length}
-                    {t('개 구간')}
-                  </span>
-                );
-              })()}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h2 className="text-title font-medium text-fg">{openJob?.title ?? result?.request.title}</h2>
+              {req && (
+                <span className="tnum text-small text-fg-dim">
+                  {t('현재')} {rangeLabel(req.current)} · {t('평소')} {req.baselines.length}
+                  {t('개 구간')}
+                </span>
+              )}
               <span className="flex-1" />
               {openJob && (
-                <Button size="xs" onClick={() => reuse(openJob)}>
+                <Button size="sm" onClick={() => reuse(openJob)}>
                   {t('조건 다시 쓰기')}
                 </Button>
               )}
               {result && (
-                <Button size="xs" onClick={exportCsv} disabled={result.services.length === 0}>
-                  CSV
+                <Button size="sm" onClick={exportCsv} disabled={result.services.length === 0} title={t('서비스 한 줄에 현재·평소·변화')}>
+                  {t('요약 CSV')}
+                </Button>
+              )}
+              {result?.raw_path && (
+                <Button
+                  size="sm"
+                  onClick={() => void revealItemInDir(result.raw_path ?? '').catch(() => {})}
+                  title={result.raw_path}
+                >
+                  {t('원본 CSV')} <span className="tnum text-fg-faint">{result.raw_rows.toLocaleString()}{t('건')}</span>
                 </Button>
               )}
               {openJob && openJob.status !== 'running' && (
-                <Button variant="danger" size="xs" onClick={() => onDelete(openJob.id)}>
+                <Button variant="danger" size="sm" onClick={() => onDelete(openJob.id)}>
                   {t('지우기')}
                 </Button>
               )}
             </div>
             {notice && (
-              <p className="text-micro text-fg-dim">
-                {notice}{' '}
-                <button type="button" className="underline" onClick={() => setNotice(null)}>
-                  {t('닫기')}
+              <p className="text-small text-fg-dim">
+                {t('저장했습니다')}:{' '}
+                <button type="button" className="underline hover:text-fg" onClick={() => void revealItemInDir(notice).catch(() => {})}>
+                  {notice}
+                </button>{' '}
+                <button type="button" className="text-fg-faint hover:text-fg" onClick={() => setNotice(null)} aria-label={t('닫기')}>
+                  ✕
                 </button>
               </p>
             )}
@@ -312,29 +331,26 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
             {result && (
               <>
                 {result.status !== 'done' && (
-                  <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-micro text-warn">
+                  <Warn>
                     {result.status === 'cancelled' ? t('취소한 작업입니다 — 그때까지 모은 것만 있습니다') : t('실패한 작업입니다')}
                     {result.message ? ` — ${result.message}` : ''}
-                  </p>
+                  </Warn>
                 )}
+                {result.raw_error && <Warn>{result.raw_error}</Warn>}
                 {missing > 0 && (
-                  <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-micro text-warn">
+                  <Warn>
                     {t('못 받은 5분 조각이 있습니다')} ({missing}) — {t('그 시간대는 빠진 채로 계산했습니다')}
-                  </p>
+                  </Warn>
                 )}
-                <div className="flex min-h-0 flex-1 gap-2">
-                  <StatsTable rows={result.services} rules={DEFAULT_RULES} selected={service} onSelect={setService} />
-                  {service && (
-                    <div className="flex w-80 shrink-0 flex-col">
-                      <StatsDetail jobId={result.id} service={service} onOpenTxid={onOpenTxid} onClose={() => setService(null)} />
-                    </div>
-                  )}
-                </div>
-                <p className="text-micro text-fg-faint">
-                  {t('판정 기준')}: {t('느려짐')} = {t('평균 또는 p90 이')} ×{DEFAULT_RULES.slowRatio} · +{DEFAULT_RULES.slowMinMs}ms ·{' '}
-                  {t('에러 증가')} = ×{DEFAULT_RULES.errorRatio} · +{DEFAULT_RULES.errorMinDelta * 100}%p ·{' '}
-                  {t('호출량 급변')} = ±{DEFAULT_RULES.volumeRatio * 100}% · {t('표본 적음')} &lt; {DEFAULT_RULES.minCount}
-                  {t('건')} · {t('수집')} {result.collectors.join(' + ')} · {duration(result.finished_at - result.started_at)}
+                <StatsTable
+                  rows={result.services}
+                  rules={DEFAULT_RULES}
+                  selected={service}
+                  onSelect={setService}
+                  detail={renderDetail}
+                />
+                <p className="text-small text-fg-faint" title={rulesText()}>
+                  {t('판정 기준')} ⓘ · {t('수집')} {result.collectors.join(' + ')} · {duration(result.finished_at - result.started_at)}
                 </p>
               </>
             )}
@@ -345,10 +361,25 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   );
 });
 
+function Warn({ children }: { children: React.ReactNode }) {
+  return <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-small text-warn">{children}</p>;
+}
+
+/** 판정 기준 — 표 아래 ⓘ 에 마우스를 올리면 보인다 */
+function rulesText(): string {
+  const r = DEFAULT_RULES;
+  return [
+    `${t('에러 증가')}: ${t('에러율')} ×${r.errorRatio} · +${r.errorMinDelta * 100}%p`,
+    `${t('느려짐')}: ${t('평균 또는 p90 이')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
+    `${t('호출량 급변')}: TPS ±${r.volumeRatio * 100}%`,
+    `${t('표본 적음')}: < ${r.minCount}${t('건')} (${t('판정하지 않음')})`,
+  ].join('\n');
+}
+
 function ProgressBox({ id, progress: p }: { id: string; progress: StatsProgress | null }) {
   const ratio = p && p.slices_total > 0 ? p.slices_done / p.slices_total : 0;
   return (
-    <div className="flex flex-col gap-1 rounded border border-line p-2 text-micro text-fg-dim" role="status">
+    <div className="flex flex-col gap-1 rounded border border-line p-2 text-small text-fg-dim" role="status">
       <div className="h-1.5 overflow-hidden rounded bg-hover">
         <div className="h-full bg-accent" style={{ width: `${Math.round(ratio * 100)}%` }} />
       </div>

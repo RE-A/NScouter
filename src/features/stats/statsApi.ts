@@ -26,6 +26,8 @@ export interface StatsRequest {
   ip_include: string[];
   ip_exclude: string[];
   tz_offset_ms: number;
+  /** 통계에 들어간 트랜잭션을 원본 CSV 로도 남긴다 (내보내기 폴더) */
+  raw: boolean;
 }
 
 export interface Sample {
@@ -97,6 +99,10 @@ export interface StatsResult {
   collectors: string[];
   ranges: RangeCoverage[];
   services: ServiceStats[];
+  /** 원본 CSV 경로 — 남기기로 했을 때만 */
+  raw_path: string | null;
+  raw_rows: number;
+  raw_error: string | null;
 }
 
 export interface StatsProgress {

@@ -15,12 +15,12 @@ const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
 const req: StatsRequest = {
   title: 'shop 오전', groups: ['shop-app'], servers: [],
   current: { stime: 1_000_000, etime: 4_600_000 }, baselines: [{ stime: 1, etime: 3_600_001 }],
-  services: [], service_include: [], service_exclude: [], ip_include: [], ip_exclude: [], tz_offset_ms: 0,
+  services: [], service_include: [], service_exclude: [], ip_include: [], ip_exclude: [], tz_offset_ms: 0, raw: true,
 };
 const job: JobInfo = { id: '1-0', title: 'shop 오전', status: 'done', started_at: 10, finished_at: 20, request: req, progress: null, services: 2 };
 const result: StatsResult = {
   id: '1-0', request: req, started_at: 10, finished_at: 20, status: 'done', message: null, collectors: ['A'],
-  ranges: [],
+  ranges: [], raw_path: '/x/exports/raw.csv', raw_rows: 2000, raw_error: null,
   services: [
     { service: '/same', current: s({ count: 5000 }), baseline: s() },
     { service: '/slow', current: s({ avg_ms: 900 }), baseline: s() },
@@ -47,6 +47,8 @@ describe('StatsTab', () => {
     const rows = screen.getAllByRole('row').slice(1);
     expect(rows[0].textContent).toContain('/slow');
     expect(rows[0].textContent).toContain('느려짐');
+    // 원본 CSV 를 남긴 작업은 단추가 뜬다
+    expect(screen.getByText('원본 CSV')).toBeTruthy();
     fireEvent.click(rows[0]);
     await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_service', { id: '1-0', service: '/slow' }));
   });
