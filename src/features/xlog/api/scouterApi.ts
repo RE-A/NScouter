@@ -798,6 +798,8 @@ export interface AppConfig {
    * `save_config` 는 이 칸을 덮어쓰지 않는다(열 때 읽은 옛 토큰이 새 토큰을 되돌리지 않게).
    */
   mcp?: McpPrefs;
+  /** 통계 탭에서 이름 붙여 저장한 Task 이름 규칙 */
+  stats_rules?: { name: string; patterns: string[] }[];
 }
 
 /** Rust `McpPrefs` 와 짝이다 */

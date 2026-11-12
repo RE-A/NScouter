@@ -13,7 +13,7 @@ const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
 });
 
 const req: StatsRequest = {
-  title: 'shop 오전', groups: ['shop-app'], servers: [],
+  title: 'shop 오전', groups: ['shop-app'], servers: [], task_patterns: [],
   current: { stime: 1_000_000, etime: 4_600_000 }, baselines: [{ stime: 1, etime: 3_600_001 }],
   services: [], service_include: [], service_exclude: [], ip_include: [], ip_exclude: [], tz_offset_ms: 0, raw: true,
 };
@@ -24,6 +24,7 @@ const result: StatsResult = {
   services: [
     { service: '/same', current: s({ count: 5000 }), baseline: s() },
     { service: '/slow', current: s({ avg_ms: 900 }), baseline: s() },
+    { service: '/old', current: null, baseline: s() },
   ],
 };
 
@@ -34,6 +35,8 @@ beforeEach(() => {
       case 'stats_jobs': return [job];
       case 'stats_result': return result;
       case 'stats_service': return result.services[1];
+      case 'get_config': return { stats_rules: [{ name: 'shop', patterns: ['shop-app-*'] }] };
+      case 'stats_save_rules': return null;
       default: throw new Error(cmd);
     }
   });
@@ -45,6 +48,9 @@ describe('StatsTab', () => {
     fireEvent.click(await screen.findByText('shop 오전'));
     await screen.findByText('/slow');
     const rows = screen.getAllByRole('row').slice(1);
+    // 평소에만 있던 서비스는 기본으로 숨기고 «사라짐» 칩을 눌러야 보인다
+    expect(rows.length).toBe(2);
+    expect(screen.queryByText('/old')).toBeNull();
     expect(rows[0].textContent).toContain('/slow');
     expect(rows[0].textContent).toContain('느려짐');
     // 원본 CSV 를 남긴 작업은 단추가 뜬다
@@ -61,5 +67,22 @@ describe('StatsTab', () => {
     expect(screen.getByText('기준 구간을 하나 이상 넣으세요')).toBeTruthy();
     fireEvent.click(screen.getByText('+ 어제 같은 시각'));
     expect((screen.getByText('통계 시작') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('Task 이름 규칙 — 저장한 규칙을 불러오고, 지금 걸리는 서버를 보이고, 새 이름으로 저장한다', async () => {
+    render(<StatsTab connected groups={[]} servers={['/h/shop-app-1', '/h/shop-app-2', '/h/order-1']} onOpenTxid={() => {}} />);
+    fireEvent.click(screen.getByText('Task 이름 규칙'));
+    const pick = await screen.findByLabelText('저장한 규칙');
+    await waitFor(() => expect(screen.getByRole('option', { name: 'shop' })).toBeTruthy());
+    fireEvent.change(pick, { target: { value: 'shop' } });
+    expect((screen.getByPlaceholderText(/shop-app-\*/) as HTMLTextAreaElement).value).toBe('shop-app-*');
+    expect(screen.getByText(/지금 걸리는 서버/).textContent).toMatch(/지금 걸리는 서버 2.*shop-app-1, shop-app-2$/);
+    fireEvent.change(screen.getByPlaceholderText('규칙 이름 (저장할 때)'), { target: { value: 'shop2' } });
+    fireEvent.click(screen.getByText('규칙 저장'));
+    await waitFor(() =>
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_save_rules', {
+        rules: [{ name: 'shop2', patterns: ['shop-app-*'] }, { name: 'shop', patterns: ['shop-app-*'] }],
+      }),
+    );
   });
 });

@@ -47,6 +47,7 @@ fn request(servers: &[&str]) -> StatsRequest {
         title: "live".into(),
         groups: vec![],
         servers: servers.iter().map(|s| s.to_string()).collect(),
+        task_patterns: vec![],
         current: StatsRange { stime: end - 5 * MIN, etime: end },
         baselines: vec![StatsRange { stime: end - 10 * MIN, etime: end - 5 * MIN }],
         services: vec![],
@@ -115,6 +116,24 @@ async fn 콜렉터_둘에서_현재와_기준을_훑어_서비스별로_비교�
     let (rows_b, missing_b, _) = go(&st, request(&["order-app"])).await;
     assert_eq!(missing_b, 0);
     assert!(!rows_b.is_empty() && rows_b.iter().all(|r| !r.service.contains("/shop")));
+
+    // ── Task 이름 규칙 — `shop-*` 는 shop-app 만, 이름이 같으면 서버 글자로 고른 것과 같은 결과 ──
+    let mut req = request(&[]);
+    req.task_patterns = vec!["SHOP-*".into()];
+    let (by_rule, missing_r, _) = go(&st, req).await;
+    assert_eq!(missing_r, 0);
+    let names = |v: &[ServiceStats]| {
+        let mut n: Vec<(String, u64)> = v.iter().map(|r| (r.service.clone(), r.current.as_ref().map_or(0, |s| s.count))).collect();
+        n.sort();
+        n
+    };
+    println!("  규칙 shop-*: 서비스 {}개", by_rule.len());
+    assert_eq!(names(&by_rule), names(&rows), "규칙으로 고른 것과 이름 글자로 고른 것이 같아야 한다");
+    let mut req = request(&[]);
+    req.task_patterns = vec!["shop-?".into()];
+    let st4 = st.clone();
+    let err = tokio::task::spawn_blocking(move || run(&st4, &req, &Control::default(), None, &|_| {}).err()).await.unwrap();
+    assert!(err.is_some_and(|e| e.contains("찾지 못했습니다")), "아무 서버도 안 걸리면 알려야 한다");
 
     // ── 수집 조건: 서비스 포함 ──
     let first = rows[0].service.clone();

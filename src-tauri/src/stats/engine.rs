@@ -23,7 +23,7 @@ use super::raw::RawSink;
 use super::model::{Book, RangeCoverage, Sample, StatsRange, StatsRequest};
 use crate::cache::xlog::past_page;
 use crate::hub::CollectorLink;
-use crate::mcp::digest::{plan_slices, GroupRule, Patterns, ServerFilter, Slice, SortBy, Window, SLICE_MS};
+use crate::mcp::digest::{plan_slices, GroupRule, Patterns, Slice, SortBy, Window, SLICE_MS};
 use crate::mcp::server::{fill_texts, realtime_objects, request_all};
 use crate::scouter::connection::{local_now_ms, ScouterConnection};
 use crate::scouter::object::{build_daily_object_param, parse_daily_objects};
@@ -98,11 +98,55 @@ impl Filters {
     }
 }
 
-fn server_filter(req: &StatsRequest) -> ServerFilter {
-    ServerFilter {
-        names: Patterns::new(&req.servers, &[]),
-        groups: req.groups.iter().map(|g| g.trim().to_lowercase()).filter(|g| !g.is_empty()).collect(),
+/// 통계 대상 — 서비스 묶음 이름(완전 일치) · 서버 이름 글자 · Task 이름 규칙 중 하나라도 맞으면 든다.
+/// **이름만 본다** — 종류(`tomcat`)까지 보면 `tomcat` 한 마디에 같은 종류가 전부 걸린다
+pub(crate) struct Target {
+    groups: Vec<String>,
+    names: Vec<String>,
+    patterns: Vec<String>,
+}
+
+impl Target {
+    pub(crate) fn of(req: &StatsRequest) -> Self {
+        let low = |v: &[String]| v.iter().map(|g| g.trim().to_lowercase()).filter(|g| !g.is_empty()).collect();
+        Self { groups: low(&req.groups), names: low(&req.servers), patterns: low(&req.task_patterns) }
     }
+
+    pub(crate) fn picks(&self, name: &str, group: Option<&str>) -> bool {
+        let n = name.to_lowercase();
+        // Task 이름은 보통 `/호스트/이름` 의 끝 마디다 — 규칙은 끝 마디와 전체 어느 쪽에 맞아도 된다
+        let short = n.rsplit('/').find(|s| !s.is_empty()).unwrap_or(&n).to_string();
+        group.is_some_and(|g| self.groups.iter().any(|w| *w == g.to_lowercase()))
+            || self.names.iter().any(|w| n.contains(w.as_str()))
+            || self.patterns.iter().any(|p| task_match(p, &short) || task_match(p, &n))
+    }
+}
+
+/// Task 이름 규칙 하나 (이미 소문자). `*` 는 아무 글자 여럿, `?` 는 한 글자. 둘 다 없으면 «포함»
+pub fn task_match(pattern: &str, name: &str) -> bool {
+    if !pattern.contains(['*', '?']) {
+        return name.contains(pattern);
+    }
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), name.chars().collect());
+    // 별표 되짚기 — 별표 자리를 기억해 두고 안 맞으면 한 글자씩 더 먹인다
+    let (mut i, mut j, mut star, mut mark) = (0usize, 0usize, None::<usize>, 0usize);
+    while j < t.len() {
+        if i < p.len() && (p[i] == '?' || p[i] == t[j]) {
+            i += 1;
+            j += 1;
+        } else if i < p.len() && p[i] == '*' {
+            star = Some(i);
+            mark = j;
+            i += 1;
+        } else if let Some(si) = star {
+            i = si + 1;
+            mark += 1;
+            j = mark;
+        } else {
+            return false;
+        }
+    }
+    p[i..].iter().all(|c| *c == '*')
 }
 
 fn group_rule(state: &AppState) -> GroupRule {
@@ -117,7 +161,7 @@ fn plan_range(
     state: &AppState,
     range: StatsRange,
     tz: i64,
-    servers: &ServerFilter,
+    servers: &Target,
     rule: &GroupRule,
 ) -> Result<Plan, String> {
     let tag = |real: i32, name: String| {
@@ -155,7 +199,7 @@ fn plan_range(
             })
             .chain(alive.iter().cloned());
         for (h, name, kind, group) in candidates {
-            if servers.picks(&name, &kind, group.as_deref()) && !hashes.contains(&h) {
+            if servers.picks(&name, group.as_deref()) && !hashes.contains(&h) {
                 hashes.push(h);
                 by_hash.entry(h).or_insert_with(|| name.clone());
                 if !names.contains(&name) {
@@ -190,7 +234,7 @@ pub fn run(
     }
     let ranges: Vec<StatsRange> = std::iter::once(req.current).chain(req.baselines.iter().copied()).collect();
     let tz = req.tz_offset_ms;
-    let servers = server_filter(req);
+    let servers = Target::of(req);
     let rule = group_rule(state);
 
     // 1) 구간마다·콜렉터마다 서버를 찾고 조각을 짠다
@@ -455,7 +499,7 @@ pub fn estimate(state: &AppState, req: &StatsRequest) -> Result<Estimate, String
         return Err("연결되지 않음".into());
     }
     let tz = req.tz_offset_ms;
-    let servers = server_filter(req);
+    let servers = Target::of(req);
     let rule = group_rule(state);
     let filters = Filters::of(req);
     let ranges: Vec<StatsRange> = std::iter::once(req.current).chain(req.baselines.iter().copied()).collect();
@@ -553,10 +597,27 @@ mod tests {
     }
 
     #[test]
-    fn 대상은_묶음_이름이나_서버_이름_글자다() {
-        let s = server_filter(&StatsRequest { groups: vec![" Order ".into()], servers: vec!["batch".into()], ..Default::default() });
-        assert!(s.picks("/h/order-7f9", "tomcat", Some("order")));
-        assert!(s.picks("/h/batch-1", "tomcat", None));
-        assert!(!s.picks("/h/shop-1", "tomcat", Some("shop")));
+    fn 대상은_묶음_이름이나_서버_이름_글자다_종류는_보지_않는다() {
+        let s = Target::of(&StatsRequest { groups: vec![" Order ".into()], servers: vec!["batch".into()], ..Default::default() });
+        assert!(s.picks("/h/order-7f9", Some("order")));
+        assert!(s.picks("/h/batch-1", None));
+        assert!(!s.picks("/h/shop-1", Some("shop")));
+        let t = Target::of(&StatsRequest { servers: vec!["tomcat".into()], ..Default::default() });
+        assert!(!t.picks("/h/shop-1", None), "종류 이름으로 걸리면 안 된다");
+    }
+
+    #[test]
+    fn task_이름_규칙() {
+        assert!(task_match("shop-app-*", "shop-app-ip-10-1-2-3"));
+        assert!(!task_match("shop-app-*", "my-shop-app-1"));
+        assert!(task_match("*shop*", "my-shop-app-1"));
+        assert!(task_match("shop-?", "shop-1"));
+        assert!(!task_match("shop-?", "shop-12"));
+        assert!(task_match("shop", "my-shop-app"), "별표가 없으면 포함");
+        assert!(task_match("a*b*c", "axxbyyc"));
+        assert!(!task_match("a*b*c", "axxbyy"));
+        let t = Target::of(&StatsRequest { task_patterns: vec!["Shop-App-*".into()], ..Default::default() });
+        assert!(t.picks("/13fc079be9ec/shop-app-ip-10-0-0-1", None), "끝 마디에 맞춘다");
+        assert!(!t.picks("/h/order-app-1", None));
     }
 }

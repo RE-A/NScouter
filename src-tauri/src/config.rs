@@ -128,6 +128,17 @@ pub struct AppConfig {
     /// 로컬 MCP 서버 (Claude Code · Cursor 가 붙는 자리). `src/mcp/`
     #[serde(default)]
     pub mcp: McpPrefs,
+    /// 통계 탭에서 이름 붙여 저장한 Task 이름 규칙
+    #[serde(default)]
+    pub stats_rules: Vec<StatsTaskRule>,
+}
+
+/// 통계 대상으로 묶을 Task 이름 규칙 (`shop-app-*` 같은 것 여럿)
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct StatsTaskRule {
+    pub name: String,
+    pub patterns: Vec<String>,
 }
 
 /// 로컬 MCP 서버 설정.
@@ -632,6 +643,7 @@ impl Default for AppConfig {
             saved_filters: Vec::new(),
             open_details: Vec::new(),
             mcp: McpPrefs::default(),
+            stats_rules: Vec::new(),
         }
     }
 }

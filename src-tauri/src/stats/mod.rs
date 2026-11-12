@@ -190,9 +190,15 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
 
         let cancelled = job.control.cancel.load(Ordering::Relaxed);
         let req = &job.request;
-        let secs = |rs: &[model::StatsRange]| rs.iter().map(|r| r.secs()).sum::<f64>();
+        // TPS 는 **실제로 받은 시간**으로 나눈다 — 못 받은 조각·취소로 빠진 시간까지 나누면 TPS 가 낮게 나와
+        // «호출량 급변» 이 잘못 뜬다
+        let secs_of = |ranges: &[model::RangeCoverage], kind: &str| {
+            ranges.iter().filter(|c| c.kind == kind).map(covered_secs).sum::<f64>()
+        };
         let result = match outcome {
-            Ok((ranges, book, collectors)) => StatsResult {
+            Ok((ranges, book, collectors)) => {
+                let services = book.finish(secs_of(&ranges, "current"), secs_of(&ranges, "baseline"));
+                StatsResult {
                 id: id2.clone(),
                 request: req.clone(),
                 started_at,
@@ -201,9 +207,10 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
                 message: None,
                 collectors,
                 ranges,
-                services: book.finish(req.current.secs(), secs(&req.baselines)),
+                services,
                 ..StatsResult::default()
-            },
+                }
+            }
             Err(e) => StatsResult {
                 id: id2.clone(),
                 request: req.clone(),
@@ -233,6 +240,38 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
         trim_memory(&app2.state::<StatsState>());
     });
     Ok(id)
+}
+
+/// 구간에서 못 받은 조각을 뺀 시간(초). 조각은 콜렉터마다 따로라 겹칠 수 있어 합집합으로 뺀다
+fn covered_secs(c: &model::RangeCoverage) -> f64 {
+    let mut miss: Vec<(i64, i64)> = c.missing.iter().map(|(s, e)| ((*s).max(c.stime), (*e).min(c.etime))).filter(|(s, e)| e > s).collect();
+    miss.sort_unstable();
+    let (mut gone, mut end) = (0i64, i64::MIN);
+    for (s, e) in miss {
+        let s = s.max(end);
+        if e > s {
+            gone += e - s;
+            end = e;
+        }
+    }
+    ((c.etime - c.stime - gone).max(0) as f64) / 1000.0
+}
+
+/// 저장해 둔 Task 이름 규칙을 통째로 갈아 끼운다 (설정 전체를 덮지 않는다 — `save_workspaces` 와 같은 이유)
+#[tauri::command]
+pub async fn stats_save_rules(app: AppHandle, rules: Vec<crate::config::StatsTaskRule>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let path = state.config_path.clone();
+    let mut cfg = state.config.lock().await;
+    cfg.stats_rules = rules
+        .into_iter()
+        .map(|r| crate::config::StatsTaskRule {
+            name: r.name.trim().to_string(),
+            patterns: r.patterns.into_iter().map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect(),
+        })
+        .filter(|r| !r.name.is_empty() && !r.patterns.is_empty())
+        .collect();
+    cfg.save(&path)
 }
 
 /// 원본 CSV 파일 이름 — `20261112-095012_stats-raw-shop-app.csv` (요약 CSV 와 같은 폴더·규칙)
@@ -356,6 +395,18 @@ pub async fn stats_delete(app: AppHandle, id: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 받은_시간은_못_받은_조각의_합집합을_뺀다() {
+        let c = super::model::RangeCoverage {
+            stime: 0,
+            etime: 600_000,
+            missing: vec![(0, 300_000), (0, 300_000), (200_000, 400_000)],
+            ..Default::default()
+        };
+        assert_eq!(super::covered_secs(&c), 200.0, "0~400초가 빠졌다 — 두 콜렉터가 같은 조각을 놓쳐도 한 번만");
+        assert_eq!(super::covered_secs(&super::model::RangeCoverage { stime: 0, etime: 60_000, ..Default::default() }), 60.0);
+    }
+
     use super::*;
 
     fn sample_result(id: &str) -> StatsResult {

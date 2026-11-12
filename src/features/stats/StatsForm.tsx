@@ -8,18 +8,25 @@ import { memo, useMemo, useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../../components/Button';
 import { fromLocalInput, toLocalInput } from '../xlog/types/timeRange';
-import type { Estimate, StatsRange, StatsRequest } from './statsApi';
+import type { Estimate, StatsRange, StatsRequest, StatsTaskRule } from './statsApi';
+import { picksByRule } from './taskRule';
 import { addRanges, lastWeek, offHours, recentDays, yesterday } from './statsRanges';
 
 const DAY = 24 * 3600 * 1000;
 const MAX_BASELINES = 14;
 
-export type TargetKind = 'group' | 'server';
+/** 서비스 묶음(설정의 묶기 규칙) · Task 이름 규칙(`shop-app-*`) */
+export type TargetKind = 'group' | 'rule';
 
 export interface StatsDraft {
   title: string;
   targetKind: TargetKind;
+  /** 서비스 묶음 이름 */
   target: string;
+  /** Task 이름 규칙 — 줄바꿈·쉼표로 여럿 */
+  rule: string;
+  /** 불러온(저장할) 규칙 이름 */
+  ruleName: string;
   current: StatsRange;
   baselines: StatsRange[];
   /** 한 줄에 하나 — 비면 현재 구간에 찍힌 서비스 전부 */
@@ -39,6 +46,8 @@ export function initialDraft(now: number): StatsDraft {
     title: '',
     targetKind: 'group',
     target: '',
+    rule: '',
+    ruleName: '',
     current: { stime: end - 3600_000, etime: end },
     baselines: [],
     services: '',
@@ -66,7 +75,7 @@ function rangeError(r: StatsRange): string | null {
 
 /** 시작할 수 없는 까닭. 없으면 null */
 export function draftError(d: StatsDraft): string | null {
-  if (d.target.trim() === '') return t('대상을 고르세요');
+  if (d.targetKind === 'group' ? d.target.trim() === '' : splitList(d.rule).length === 0) return t('대상을 고르세요');
   const cur = rangeError(d.current);
   if (cur) return `${t('현재 구간')}: ${cur}`;
   if (d.baselines.length === 0) return t('기준 구간을 하나 이상 넣으세요');
@@ -79,12 +88,14 @@ export function draftError(d: StatsDraft): string | null {
 }
 
 export function toRequest(d: StatsDraft, tzOffsetMs: number): StatsRequest {
-  const target = d.target.trim();
+  const rule = splitList(d.rule);
+  const target = d.targetKind === 'group' ? d.target.trim() : d.ruleName.trim() || rule.join(', ');
   const fmt = (ms: number) => toLocalInput(ms).replace('T', ' ');
   return {
     title: d.title.trim() || `${target} ${fmt(d.current.stime)}`,
     groups: d.targetKind === 'group' ? [target] : [],
-    servers: d.targetKind === 'server' ? [target] : [],
+    servers: [],
+    task_patterns: d.targetKind === 'rule' ? rule : [],
     current: d.current,
     baselines: d.baselines,
     services: splitList(d.services),
@@ -119,8 +130,11 @@ interface StatsFormProps {
   onChange: (d: StatsDraft) => void;
   /** 고를 수 있는 서비스 묶음 이름 */
   groups: string[];
-  /** 고를 수 있는 서버 이름 */
+  /** 지금 보이는 서버 이름 — 규칙에 걸리는 것을 미리 보인다 */
   servers: string[];
+  /** 저장해 둔 Task 이름 규칙 */
+  rules: StatsTaskRule[];
+  onSaveRules: (rules: StatsTaskRule[]) => void;
   tzOffsetMs: number;
   connected: boolean;
   estimate: Estimate | null;
@@ -137,6 +151,8 @@ export const StatsForm = memo(function StatsForm({
   onChange,
   groups,
   servers,
+  rules,
+  onSaveRules,
   tzOffsetMs,
   connected,
   estimate,
@@ -151,7 +167,15 @@ export const StatsForm = memo(function StatsForm({
   );
   const [custom, setCustom] = useState<StatsRange | null>(null);
   const error = draftError(d);
-  const choices = d.targetKind === 'group' ? groups : servers;
+  const rulePatterns = useMemo(() => splitList(d.rule), [d.rule]);
+  const matched = useMemo(() => servers.filter(n => picksByRule(rulePatterns, n)), [servers, rulePatterns]);
+  const saved = rules.find(r => r.name === d.ruleName.trim());
+  const dirty = !saved || saved.patterns.join('\n') !== rulePatterns.join('\n');
+  const saveRule = () => {
+    const name = d.ruleName.trim();
+    if (name === '' || rulePatterns.length === 0) return;
+    onSaveRules([{ name, patterns: rulePatterns }, ...rules.filter(r => r.name !== name)]);
+  };
   const off = useMemo(
     () => d.baselines.some(b => offHours(d.current, b, tzOffsetMs)),
     [d.baselines, d.current, tzOffsetMs],
@@ -166,30 +190,87 @@ export const StatsForm = memo(function StatsForm({
   return (
     <div className="flex max-w-4xl flex-col gap-4">
       <Section title={t('대상')}>
-        <div className="flex items-center gap-2">
-          <select
-            value={d.targetKind}
-            onChange={e => onChange({ ...d, targetKind: e.target.value as TargetKind, target: '' })}
-            className={`${inputCls} pr-[26px]`}
-          >
-            <option value="group">{t('서비스 묶음')}</option>
-            <option value="server">{t('서버 이름')}</option>
-          </select>
-          <input
-            type="text"
-            list="stats-target-choices"
-            value={d.target}
-            spellCheck={false}
-            placeholder={d.targetKind === 'group' ? t('묶음 이름') : t('이름에 든 글자')}
-            onChange={e => set('target', e.target.value)}
-            className={`${inputCls} w-80`}
-          />
-          <datalist id="stats-target-choices">
-            {choices.map(c => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
+        <div className="flex items-center gap-1">
+          {(['group', 'rule'] as TargetKind[]).map(k => (
+            <Button key={k} size="sm" aria-pressed={d.targetKind === k} onClick={() => set('targetKind', k)}>
+              {k === 'group' ? t('서비스 묶음') : t('Task 이름 규칙')}
+            </Button>
+          ))}
         </div>
+        {d.targetKind === 'group' ? (
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type="text"
+              list="stats-target-choices"
+              value={d.target}
+              spellCheck={false}
+              placeholder={t('묶음 이름')}
+              onChange={e => set('target', e.target.value)}
+              className={`${inputCls} w-80`}
+            />
+            <datalist id="stats-target-choices">
+              {groups.map(c => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
+            <span className="text-small text-fg-faint">{t('설정의 «서비스로 묶기» 규칙을 씁니다')}</span>
+          </div>
+        ) : (
+          <div className="mt-2 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <select
+                value={saved ? saved.name : ''}
+                onChange={e => {
+                  const r = rules.find(x => x.name === e.target.value);
+                  onChange({ ...d, ruleName: r?.name ?? '', rule: r ? r.patterns.join('\n') : '' });
+                }}
+                className={`${inputCls} w-56 pr-[26px]`}
+                aria-label={t('저장한 규칙')}
+              >
+                <option value="">{rules.length > 0 ? t('저장한 규칙 고르기…') : t('저장한 규칙 없음')}</option>
+                {rules.map(r => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={d.ruleName}
+                spellCheck={false}
+                placeholder={t('규칙 이름 (저장할 때)')}
+                onChange={e => set('ruleName', e.target.value)}
+                className={`${inputCls} w-48`}
+              />
+              <Button size="sm" onClick={saveRule} disabled={d.ruleName.trim() === '' || rulePatterns.length === 0 || !dirty}>
+                {saved ? t('고쳐 저장') : t('규칙 저장')}
+              </Button>
+              {saved && (
+                <Button variant="ghost" size="sm" onClick={() => onSaveRules(rules.filter(r => r.name !== saved.name))}>
+                  {t('규칙 지우기')}
+                </Button>
+              )}
+            </div>
+            <textarea
+              value={d.rule}
+              spellCheck={false}
+              rows={2}
+              placeholder={'shop-app-*\nshop-batch-*'}
+              onChange={e => set('rule', e.target.value)}
+              className={`${inputCls} w-[34rem] font-mono`}
+            />
+            <p className="text-small text-fg-faint">
+              {t('한 줄에 하나. * 는 아무 글자, ? 는 한 글자 — 별표가 없으면 «포함». 대소문자 무시. 지난 Task 도 그날 목록에서 같은 규칙으로 찾습니다.')}
+            </p>
+            {rulePatterns.length > 0 && (
+              <p className="text-small text-fg-muted" title={matched.join('\n')}>
+                {t('지금 걸리는 서버')} <span className="tnum text-fg">{matched.length}</span>
+                {t('대')}
+                {matched.length > 0 && <span className="text-fg-faint"> — {matched.slice(0, 4).map(shortName).join(', ')}{matched.length > 4 ? ' …' : ''}</span>}
+              </p>
+            )}
+          </div>
+        )}
       </Section>
 
       <Section title={t('현재 구간')} hint={t('최대 하루')}>
@@ -329,6 +410,10 @@ export const StatsForm = memo(function StatsForm({
     </div>
   );
 });
+
+function shortName(n: string): string {
+  return n.split('/').filter(x => x !== '').pop() ?? n;
+}
 
 function shiftOneDay(r: StatsRange): StatsRange {
   return { stime: r.stime - DAY, etime: r.etime - DAY };

@@ -8,7 +8,7 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../../components/Button';
-import { saveCsvExport } from '../xlog/api/scouterApi';
+import { getConfig, saveCsvExport } from '../xlog/api/scouterApi';
 import { toFileStamp } from '../xlog/utils/xlogDate';
 import { toLocalInput } from '../xlog/types/timeRange';
 import {
@@ -19,11 +19,13 @@ import {
   statsEstimate,
   statsJobs,
   statsResult,
+  statsSaveRules,
   statsStart,
   type Estimate,
   type JobInfo,
   type StatsProgress,
   type StatsResult,
+  type StatsTaskRule,
 } from './statsApi';
 import { statsCsv } from './statsCsv';
 import { DEFAULT_RULES } from './statsJudge';
@@ -73,6 +75,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   const [service, setService] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rules, setRules] = useState<StatsTaskRule[]>([]);
   const openRef = useRef(openId);
   openRef.current = openId;
 
@@ -90,6 +93,19 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
       .then(r => {
         if (openRef.current === id) setResult(r);
       })
+      .catch(e => setError(String(e)));
+  }, []);
+
+  // 저장한 Task 이름 규칙 (config.json)
+  useEffect(() => {
+    getConfig()
+      .then(c => setRules(c.stats_rules ?? []))
+      .catch(() => {});
+  }, []);
+
+  const saveRules = useCallback((next: StatsTaskRule[]) => {
+    statsSaveRules(next)
+      .then(() => setRules(next))
       .catch(e => setError(String(e)));
   }, []);
 
@@ -164,10 +180,14 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   const reuse = useCallback((j: JobInfo) => {
     const r = j.request;
     const join = (l: string[]) => l.join(', ');
+    // 예전 결과의 «서버 이름 글자» 는 별표 없는 규칙과 같다(포함)
+    const pats = r.task_patterns?.length ? r.task_patterns : r.servers;
     setDraft({
       title: '',
-      targetKind: r.groups.length > 0 ? 'group' : 'server',
-      target: r.groups[0] ?? r.servers[0] ?? '',
+      targetKind: r.groups.length > 0 ? 'group' : 'rule',
+      target: r.groups[0] ?? '',
+      rule: r.groups.length > 0 ? '' : pats.join('\n'),
+      ruleName: rules.find(x => x.patterns.join('\n') === pats.join('\n'))?.name ?? '',
       current: r.current,
       baselines: r.baselines,
       services: r.services.join('\n'),
@@ -178,11 +198,12 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
       raw: r.raw,
     });
     setShowForm(true);
-  }, []);
+  }, [rules]);
 
   const exportCsv = useCallback(() => {
     if (!result) return;
-    const name = `stats-${result.request.groups[0] ?? result.request.servers[0] ?? 'target'}`;
+    const r = result.request;
+    const name = `stats-${r.groups[0] ?? r.task_patterns?.[0] ?? r.servers[0] ?? 'target'}`;
     saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsCsv(result.services, DEFAULT_RULES) })
       .then(path => setNotice(path))
       .catch(e => setError(String(e)));
@@ -264,6 +285,8 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               onChange={setDraft}
               groups={groups}
               servers={servers}
+              rules={rules}
+              onSaveRules={saveRules}
               tzOffsetMs={tz}
               connected={connected}
               estimate={estimate}
@@ -286,6 +309,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   {t('개 구간')}
                 </span>
               )}
+              {result && result.ranges.length > 0 && <ServerCount ranges={result.ranges} />}
               <span className="flex-1" />
               {openJob && (
                 <Button size="sm" onClick={() => reuse(openJob)}>
@@ -360,6 +384,21 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
     </div>
   );
 });
+
+/** 실제로 훑은 서버 — 규칙이 맞게 걸렸는지 결과에서 확인한다 (마우스를 올리면 이름) */
+function ServerCount({ ranges }: { ranges: StatsResult['ranges'] }) {
+  const of = (kind: string) => [...new Set(ranges.filter(r => r.kind === kind).flatMap(r => r.servers))].sort();
+  const cur = of('current');
+  const base = of('baseline');
+  return (
+    <span
+      className="tnum cursor-help text-small text-fg-dim underline decoration-dotted"
+      title={`${t('현재')}:\n${cur.join('\n')}\n\n${t('평소')}:\n${base.join('\n')}`}
+    >
+      {t('서버')} {t('현재')} {cur.length}{t('대')} · {t('평소')} {base.length}{t('대')}
+    </span>
+  );
+}
 
 function Warn({ children }: { children: React.ReactNode }) {
   return <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-small text-warn">{children}</p>;

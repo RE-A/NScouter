@@ -14,8 +14,10 @@ export interface StatsRequest {
   title: string;
   /** 서비스 묶음 이름들 (완전 일치) */
   groups: string[];
-  /** 서버 이름·종류에 든 글자 (묶음과 OR) */
+  /** 서버 이름에 든 글자 — 예전 결과를 읽으려고 남김. 지금 화면은 `task_patterns` */
   servers: string[];
+  /** Task 이름 규칙. `*` 가 있으면 그 모양 그대로, 없으면 «포함» (대소문자 무시) */
+  task_patterns: string[];
   current: StatsRange;
   /** 기준(평소) 구간들 — 하나의 기준으로 합친다 */
   baselines: StatsRange[];
@@ -156,6 +158,17 @@ export function statsResult(id: string): Promise<StatsResult> {
 /** 서비스 하나의 전부 (추이·분포 포함) */
 export function statsService(id: string, service: string): Promise<ServiceStats> {
   return invoke<ServiceStats>('stats_service', { id, service });
+}
+
+/** 이름 붙여 저장한 Task 이름 규칙 */
+export interface StatsTaskRule {
+  name: string;
+  patterns: string[];
+}
+
+/** 저장한 규칙 목록을 통째로 갈아 끼운다 (config.json) */
+export function statsSaveRules(rules: StatsTaskRule[]): Promise<void> {
+  return invoke<void>('stats_save_rules', { rules });
 }
 
 export function statsDelete(id: string): Promise<void> {

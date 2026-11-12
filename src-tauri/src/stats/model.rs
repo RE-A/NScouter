@@ -40,8 +40,11 @@ pub struct StatsRequest {
     pub title: String,
     /// 대상 — 서비스 묶음 이름들 (완전 일치, 대소문자 무시). 서버 이름 글자(`servers`)와 OR
     pub groups: Vec<String>,
-    /// 대상 — 서버(오브젝트) 이름·종류에 든 글자. 묶음이 없는 곳에서 쓴다
+    /// 대상 — 서버(오브젝트) 이름에 든 글자. 예전 요청을 읽으려고 남긴다 — 지금 화면은 `task_patterns` 를 쓴다
     pub servers: Vec<String>,
+    /// 대상 — Task 이름 규칙. `*` 가 있으면 그 모양 그대로(대소문자 무시), 없으면 «포함».
+    /// 서비스 묶음 규칙(태그)이 지난 Task 에는 안 걸려서(그날 목록에 태그가 없다) 이름으로 묶는 길을 둔다
+    pub task_patterns: Vec<String>,
     /// 현재 구간
     pub current: StatsRange,
     /// 기준(평소) 구간들 — 하나의 기준 통계로 합친다
@@ -63,7 +66,8 @@ pub struct StatsRequest {
 impl StatsRequest {
     /// 쓸 수 있는 요청인가
     pub fn validate(&self) -> Result<(), String> {
-        if self.groups.iter().all(|g| g.trim().is_empty()) && self.servers.iter().all(|s| s.trim().is_empty()) {
+        let blank = |v: &[String]| v.iter().all(|s| s.trim().is_empty());
+        if blank(&self.groups) && blank(&self.servers) && blank(&self.task_patterns) {
             return Err("대상(서비스 묶음 또는 서버)을 고르세요".into());
         }
         if self.baselines.is_empty() {

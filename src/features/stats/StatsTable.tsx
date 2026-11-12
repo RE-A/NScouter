@@ -102,13 +102,21 @@ export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSe
     for (const j of judged) for (const f of j.flags) m.set(f, (m.get(f) ?? 0) + 1);
     return m;
   }, [judged]);
-  const flaggedCount = useMemo(() => judged.filter(j => j.flags.some(f => f !== 'few')).length, [judged]);
+  // **평소에만 있던 서비스(사라짐)는 기본으로 숨긴다** — 비교 대상은 현재 구간에 찍힌 서비스다.
+  // «사라짐» 칩을 눌렀을 때만 보인다
+  const notable = (f: Flag) => f !== 'few' && f !== 'gone';
+  const flaggedCount = useMemo(() => judged.filter(j => j.flags.some(notable)).length, [judged]);
+  const currentCount = useMemo(() => judged.filter(j => j.row.current !== null).length, [judged]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = judged.filter(
       j =>
-        (only === null || (only === 'any' ? j.flags.some(f => f !== 'few') : j.flags.includes(only))) &&
+        (only === null
+          ? j.row.current !== null
+          : only === 'any'
+            ? j.flags.some(notable)
+            : j.flags.includes(only)) &&
         (q === '' || j.row.service.toLowerCase().includes(q)),
     );
     if (sort === 'worst') return list.sort((a, b) => b.score - a.score);
@@ -147,7 +155,7 @@ export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSe
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1">
-        <Chip value={null} label={t('전체')} n={rows.length} />
+        <Chip value={null} label={t('전체')} n={currentCount} />
         <Chip value="any" label={t('특이사항')} n={flaggedCount} />
         {FLAG_ORDER.filter(f => f !== 'few' && counts.get(f)).map(f => (
           <Chip key={f} value={f} label={t(FLAG_LABEL[f])} n={counts.get(f) ?? 0} />
