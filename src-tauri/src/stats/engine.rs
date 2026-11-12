@@ -474,6 +474,17 @@ fn scan_slice(
     Err(format!("페이지가 {MAX_PAGES}개를 넘었다 (커서가 안 밀림)"))
 }
 
+const SUMMARY_STEP: i64 = 5 * 60 * 1000;
+
+/// 서비스 요약을 물을 창과 덜어 낼 비율 — `[ds, de)` 를 5분 경계로 넓힌 `[S, E)` 를 `[S, E−1]` 로 묻고,
+/// 받은 건수에 `(de−ds)/(E−S)` 를 곱한다
+fn summary_window(ds: i64, de: i64) -> (i64, i64, f64) {
+    let s = ds.div_euclid(SUMMARY_STEP) * SUMMARY_STEP;
+    let e = (de + SUMMARY_STEP - 1).div_euclid(SUMMARY_STEP) * SUMMARY_STEP;
+    let frac = if e > s { (de - ds) as f64 / (e - s) as f64 } else { 0.0 };
+    (s, e - 1, frac)
+}
+
 /// 예상 규모 — 구간별로 대상 서버들의 서비스 요약(가벼운 조회)에서 건수를 더한다.
 /// 서비스 조건(포함·제외·직접 지정)은 반영하고 IP 조건은 반영하지 못한다(요약에 IP 가 없다)
 #[derive(Debug, Clone, Default, Serialize)]
@@ -506,6 +517,7 @@ pub fn estimate(state: &AppState, req: &StatsRequest) -> Result<Estimate, String
     let mut out = Estimate::default();
     for (ri, r) in ranges.iter().enumerate() {
         let mut er = EstimateRange { kind: if ri == 0 { "current" } else { "baseline" }.into(), stime: r.stime, etime: r.etime, ..Default::default() };
+        let mut counted = 0f64;
         for link in &links {
             let mut conn = link.open()?;
             let plan = plan_range(&mut conn, link, state, *r, tz, &servers, &rule)?;
@@ -515,9 +527,13 @@ pub fn estimate(state: &AppState, req: &StatsRequest) -> Result<Estimate, String
             for (day_start, day_end) in split_by_day(r.stime, r.etime, tz) {
                 let date = date_key(day_start, tz);
                 let Some(hashes) = plan.by_date.get(&date) else { continue };
+                // 요약은 5분 경계에 찍힌 점이고 점 T 가 [T, T+5분) 몫이다. 조회는 양 끝을 **둘 다** 넣는다(F-69).
+                // 그래서 구간을 5분 경계로 넓혀 [S, E−1] 로 묻고(끝 점을 빼야 한 칸이 더 붙지 않는다), 넓힌 만큼 비율로 덜어 낸다
+                let (ds, de) = (day_start.max(r.stime), day_end.min(r.etime));
+                let (qs, qe, frac) = summary_window(ds, de);
                 for h in hashes {
                     let Some(kind) = kinds.get(h) else { continue };
-                    let param = build_summary_param(&date, day_start.max(r.stime), day_end.min(r.etime), kind, *h);
+                    let param = build_summary_param(&date, qs, qe, kind, *h);
                     let rows = request_all(&mut conn, crate::scouter::protocol::CMD_LOAD_SERVICE_SUMMARY, &param)?
                         .into_iter()
                         .find_map(|p| match p {
@@ -526,20 +542,22 @@ pub fn estimate(state: &AppState, req: &StatsRequest) -> Result<Estimate, String
                         })
                         .unwrap_or_default();
                     if filters.service.is_empty() && filters.picked.is_empty() {
-                        er.count += rows.iter().map(|x| x.count.max(0) as u64).sum::<u64>();
+                        counted += rows.iter().map(|x| x.count.max(0) as f64).sum::<f64>() * frac;
                         continue;
                     }
                     let wants: Vec<(&'static str, i32)> = rows.iter().map(|x| (text_type::SERVICE, x.id)).collect();
                     fill_texts(&mut conn, link, &wants)?;
                     let cache = link.text_cache.blocking_lock();
-                    er.count += rows
+                    counted += rows
                         .iter()
                         .filter(|x| filters.passes_name(cache.get(text_type::SERVICE, x.id).unwrap_or_default()))
-                        .map(|x| x.count.max(0) as u64)
-                        .sum::<u64>();
+                        .map(|x| x.count.max(0) as f64)
+                        .sum::<f64>()
+                        * frac;
                 }
             }
         }
+        er.count = counted.round() as u64;
         er.servers.sort();
         er.servers.dedup();
         out.total += er.count;
@@ -604,6 +622,16 @@ mod tests {
         assert!(!s.picks("/h/shop-1", Some("shop")));
         let t = Target::of(&StatsRequest { servers: vec!["tomcat".into()], ..Default::default() });
         assert!(!t.picks("/h/shop-1", None), "종류 이름으로 걸리면 안 된다");
+    }
+
+    #[test]
+    fn 요약_창은_5분_경계로_넓히고_끝점을_뺀다() {
+        let m = 60_000;
+        assert_eq!(summary_window(10 * m, 20 * m), (10 * m, 20 * m - 1, 1.0), "경계에 맞으면 그대로 — 끝 점(20분)은 다음 칸 몫");
+        let (s, e, f) = summary_window(11 * m, 12 * m);
+        assert_eq!((s, e), (10 * m, 15 * m - 1));
+        assert!((f - 0.2).abs() < 1e-9, "1분 = 5분 칸의 1/5");
+        assert_eq!(summary_window(5, 5).2, 0.0);
     }
 
     #[test]

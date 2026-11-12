@@ -217,3 +217,30 @@ async fn 예상_건수와_실제_건수를_구간_경계별로_견준다() {
         println!("  {label:<16} 예상 {guess:>6} · 실제 {real:>6} · 비 {:.2}", guess as f64 / real.max(1) as f64);
     }
 }
+
+/// 요약 점 하나가 «앞 5분» 몫인지 «뒤 5분» 몫인지 — 데이터가 시작된 시각 근처의 점을 하나씩 물어 실제 5분 칸과 견준다
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn 요약_점은_어느_5분_몫인가() {
+    let st = connected().await;
+    let first: i64 = std::env::var("NSC_DATA_START").ok().and_then(|v| v.parse().ok()).expect("NSC_DATA_START(ms)");
+    let t0 = first / (5 * MIN) * (5 * MIN);
+    for k in 0..4 {
+        let t = t0 + k * 5 * MIN;
+        let mut req = request(&["shop-app"]);
+        req.current = StatsRange { stime: t, etime: t + 1 };
+        req.baselines = vec![req.current];
+        let st2 = st.clone();
+        let est = tokio::task::spawn_blocking(move || estimate(&st2, &req)).await.unwrap().unwrap().ranges[0].count;
+        let real = |s: i64| {
+            let mut r = request(&["shop-app"]);
+            r.current = StatsRange { stime: s, etime: s + 5 * MIN };
+            r.baselines = vec![r.current];
+            r
+        };
+        let (before, _, _) = go(&st, real(t - 5 * MIN)).await;
+        let (after, _, _) = go(&st, real(t)).await;
+        let n = |v: &[ServiceStats]| v.iter().map(|r| r.current.as_ref().map_or(0, |s| s.count)).sum::<u64>();
+        println!("  점 {} 요약 {est:>5} · 앞 5분 실제 {:>5} · 뒤 5분 실제 {:>5}", nscouter_lib::stats::raw::local_time(t, KST), n(&before), n(&after));
+    }
+}
