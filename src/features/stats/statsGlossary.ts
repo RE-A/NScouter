@@ -14,7 +14,7 @@ export function termHelp(k: Term): string {
     case 'ref':
       return t('기준 — 살펴보는 시점. 이 구간을 과거와 견줍니다.');
     case 'past':
-      return t('과거 — 견줄 지난 시점. 여러 구간을 넣었으면 트랜잭션을 한데 모아 계산합니다.');
+      return t('과거 — 견줄 지난 시점. 여러 구간을 넣었으면 과거 칸은 날마다 낸 값의 평균(일평균)입니다.\n펼친 상세에 일자별 값과 최소·최대가 있습니다.');
     case 'vs':
       return t('과거 대비 — 기준이 과거보다 얼마나 변했나.\n2배 이상은 ×배수(×4.1), 그 밖은 %(+78%, −31%), 10% 안쪽은 비웁니다.\n에러율은 %p 차이입니다. 빨간 칸은 판정에 걸린 것입니다.');
     case 'count':
@@ -46,11 +46,12 @@ export function termHelp(k: Term): string {
 
 /** 판정 하나의 뜻 — 지금 규칙의 숫자로 */
 export function flagHelp(f: Flag, r: JudgeRules): string {
+  const worst = r.beyondWorst ? `\n${t('과거가 여럿이면 과거 날들 중 가장 나빴던 날보다도 나쁠 때만입니다.')}` : '';
   switch (f) {
     case 'errors':
-      return `${t('에러 증가 — 에러율이 과거의')} ${r.errorRatio}${t('배 이상이고')} ${(r.errorMinDelta * 100).toFixed(1)}%p ${t('이상 늘었습니다.')}`;
+      return `${t('에러 증가 — 에러율이 과거의')} ${r.errorRatio}${t('배 이상이고')} ${(r.errorMinDelta * 100).toFixed(1)}%p ${t('이상 늘었습니다.')}${worst}`;
     case 'slow':
-      return `${t('느려짐 —')} ${r.slowOn.map(m => slowName(m, t)).join('·')} ${t('중 하나가 과거의')} ${r.slowRatio}${t('배 이상이고')} ${r.slowMinMs}ms ${t('이상 늘었습니다.')}`;
+      return `${t('느려짐 —')} ${r.slowOn.map(m => slowName(m, t)).join('·')} ${t('중 하나가 과거의')} ${r.slowRatio}${t('배 이상이고')} ${r.slowMinMs}ms ${t('이상 늘었습니다.')}${worst}`;
     case 'volume':
       return `${t('호출량 급변 — TPS 가 과거에서')} ±${Math.round(r.volumeRatio * 100)}% ${t('넘게 변했습니다.')}`;
     case 'new':

@@ -38,7 +38,7 @@ import {
 import { statsCsv } from './statsCsv';
 import { DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, type JudgeRules } from './statsJudge';
 import { termHelp } from './statsGlossary';
-import { slowName } from './statsFormat';
+import { slowName, withPastView } from './statsFormat';
 import { StatsSettingsDialog } from './StatsSettingsDialog';
 import { parsePresets, type StatsPreset } from './statsPresets';
 import { statsReport } from './statsReport';
@@ -316,6 +316,12 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
       .finally(() => setReporting(false));
   }, [result, judgeRules]);
 
+  // 과거는 일자별 평균으로 — 표·판정·요약 카드가 모두 이것을 본다
+  const pastViewRows = useMemo(
+    () => (result ? withPastView(result.services, result.request.baselines.length) : []),
+    [result],
+  );
+
   const resultId = result?.id ?? null;
   const resultReq = result?.request ?? null;
   const renderDetail = useCallback(
@@ -437,6 +443,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                     >
                       <span className="st-pill st-pill-past">{t('과거')}</span>
                       {req.baselines.length === 1 ? rangeLabel(req.baselines[0]) : `${req.baselines.length}${t('개 구간')}`}
+                      {req.baselines.length > 1 && <span className="text-fg-faint">· {t('과거 값은 일평균')}</span>}
                     </span>
                     {result && result.ranges.length > 0 && <ServerCount ranges={result.ranges} />}
                   </div>
@@ -520,9 +527,8 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   </Warn>
                 )}
                 <StatsTable
-                  rows={result.services}
+                  rows={pastViewRows}
                   rules={judgeRules}
-                  pastRanges={result.request.baselines.length}
                   selected={service}
                   onSelect={setService}
                   detail={renderDetail}
@@ -658,6 +664,7 @@ function rulesText(r: JudgeRules): string {
     `${t('느려짐')}: ${r.slowOn.map(m => slowName(m, t)).join('·')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
     `${t('호출량 급변')}: TPS ±${r.volumeRatio * 100}%`,
     `${t('표본 적음')}: < ${r.minCount}${t('건')} (${t('판정하지 않음')})`,
+    ...(r.beyondWorst ? [t('과거가 여럿이면 과거 날들 중 가장 나빴던 날보다도 나쁠 때만입니다.')] : []),
   ].join('\n');
 }
 

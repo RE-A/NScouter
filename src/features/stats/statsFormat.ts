@@ -4,7 +4,8 @@
 // 과거 구간이 여럿이면 건수는 **구간당 평균**으로 적는다 — 합계를 그대로 견주면 과거 7개일 때 «▼86%» 처럼 거꾸로 읽힌다.
 
 import type { ServiceStats, StatsSummary } from './statsApi';
-import { change, slowValue, type Flag, type JudgeRules, type SlowMetric } from './statsJudge';
+import type { DaySummary, StatsSummary as Summary } from './statsApi';
+import { change, errHit, slowHit, slowValue, type Flag, type JudgeRules, type SlowMetric } from './statsJudge';
 
 /** «느려짐» 지표의 이름 */
 export function slowName(m: SlowMetric, tr: (s: string) => string = x => x): string {
@@ -16,12 +17,46 @@ export type MetricKey = 'count' | 'avg' | 'p90' | 'p99' | 'err';
 
 export const METRICS: MetricKey[] = ['count', 'avg', 'p90', 'p99', 'err'];
 
-/** 지표의 기준·과거 값. 과거 건수는 구간당 평균 */
-export function metricValue(s: StatsSummary | null | undefined, k: MetricKey, pastRanges = 1): number | undefined {
+/**
+ * 과거를 **일자별 평균**으로 — 과거 구간마다 따로 센 값의 평균(날마다 같은 무게).
+ *   · 건수·에러 수: 모든 과거 구간의 평균(한 건도 없던 구간은 0 으로 넣는다)
+ *   · 응답시간(평균·p50·p90·p99)·에러율·TPS: 건수가 있던 구간들의 평균
+ *   · 최대: 날들 중 가장 큰 값. 나머지(SQL·API 시간, 추이·분포·표본)는 합쳐 센 값 그대로
+ * 0.9.4 전 결과(일자별이 없음)는 합쳐 센 값에 건수만 구간 수로 나눈다
+ */
+export function pastView(row: ServiceStats, pastRanges: number): Summary | null {
+  const b = row.baseline;
+  if (!b) return null;
+  const all = row.baseline_days ?? [];
+  const n = Math.max(1, all.length || pastRanges);
+  const days = all.filter(d => d.count > 0);
+  if (days.length === 0) return { ...b, count: b.count / n, errors: b.errors / n };
+  const mean = (f: (d: DaySummary) => number) => days.reduce((x, d) => x + f(d), 0) / days.length;
+  return {
+    ...b,
+    count: all.reduce((x, d) => x + d.count, 0) / n,
+    errors: all.reduce((x, d) => x + d.errors, 0) / n,
+    error_rate: mean(d => d.error_rate),
+    tps: mean(d => d.tps),
+    avg_ms: mean(d => d.avg_ms),
+    p50_ms: mean(d => d.p50_ms),
+    p90_ms: mean(d => d.p90_ms),
+    p99_ms: mean(d => d.p99_ms),
+    max_ms: Math.max(...days.map(d => d.max_ms)),
+  };
+}
+
+/** 비교 표·판정·보고서가 쓰는 줄 — 과거를 일자별 평균으로 바꾼 것 (일자별 원본은 그대로 들고 간다) */
+export function withPastView(rows: readonly ServiceStats[], pastRanges: number): ServiceStats[] {
+  return rows.map(r => ({ ...r, baseline: pastView(r, pastRanges) }));
+}
+
+/** 지표 값 — 과거 쪽은 `withPastView` 를 거친 줄을 넘긴다(건수가 이미 구간당 평균) */
+export function metricValue(s: StatsSummary | null | undefined, k: MetricKey): number | undefined {
   if (!s) return undefined;
   switch (k) {
     case 'count':
-      return s.count / Math.max(1, pastRanges);
+      return s.count;
     case 'avg':
       return s.avg_ms;
     case 'p90':
@@ -74,14 +109,13 @@ export function metricBad(k: MetricKey, row: ServiceStats, r: JudgeRules): boole
   const c = row.current;
   const b = row.baseline;
   if (!c || !b || c.count < r.minCount || b.count < r.minCount) return false;
-  const slower = (x: number, y: number) => x - y >= r.slowMinMs && x >= y * r.slowRatio;
   switch (k) {
     case 'avg':
     case 'p90':
     case 'p99':
-      return r.slowOn.includes(k) && slower(slowValue(c, k), slowValue(b, k));
+      return r.slowOn.includes(k) && slowHit(row, k, r);
     case 'err':
-      return c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio);
+      return errHit(row, r);
     case 'count':
       return false;
   }
@@ -95,8 +129,7 @@ export function flagReason(f: Flag, row: ServiceStats, r: JudgeRules, tr: (s: st
   if (f === 'errors') return `${fmtPp(c.error_rate, b.error_rate)}`;
   if (f === 'volume') return `TPS ${fmtVs(c.tps, b.tps) || `${Math.round((c.tps / b.tps - 1) * 100)}%`}`;
   if (f === 'slow') {
-    const slower = (x: number, y: number) => x - y >= r.slowMinMs && x >= y * r.slowRatio;
-    const hits = r.slowOn.filter(m => slower(slowValue(c, m), slowValue(b, m)));
+    const hits = r.slowOn.filter(m => slowHit(row, m, r));
     const best = hits.sort((x, y) => (change(slowValue(c, y), slowValue(b, y)) ?? 0) - (change(slowValue(c, x), slowValue(b, x)) ?? 0))[0];
     if (!best) return '';
     return `${slowName(best, tr)} ${fmtVs(slowValue(c, best), slowValue(b, best))}`;

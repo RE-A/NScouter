@@ -29,6 +29,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
     volumePct: String(rules.volumeRatio * 100),
     minCount: String(rules.minCount),
     slowOn: rules.slowOn,
+    beyondWorst: rules.beyondWorst,
     keepDays: String(keepDays),
   });
   const num = (s: string) => Number(s.trim());
@@ -48,6 +49,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
         volumeRatio: num(v.volumePct) / 100,
         minCount: Math.round(num(v.minCount)),
         slowOn: v.slowOn,
+        beyondWorst: v.beyondWorst,
       },
       Math.round(num(v.keepDays)),
     );
@@ -62,6 +64,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
       volumePct: String(DEFAULT_RULES.volumeRatio * 100),
       minCount: String(DEFAULT_RULES.minCount),
       slowOn: DEFAULT_RULES.slowOn,
+      beyondWorst: DEFAULT_RULES.beyondWorst,
     });
 
   return (
@@ -117,6 +120,16 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
           </Row>
           <Row label={t('표본 적음')}>
             {t('한쪽이')} <input className={inputCls} value={v.minCount} onChange={set('minCount')} /> {t('건 미만이면 판정하지 않음')}
+          </Row>
+          <Row label={t('과거가 여럿일 때')}>
+            <label className="flex items-start gap-2 text-fg-muted">
+              <input type="checkbox" className="mt-1" checked={v.beyondWorst} onChange={e => setV({ ...v, beyondWorst: e.target.checked })} />
+              <span>
+                {t('과거 날들 중 가장 나빴던 날보다도 나쁠 때만 «느려짐»·«에러 증가» 로 봅니다')}
+                <br />
+                <span className="text-small text-fg-faint">{t('날마다 들쭉날쭉한 서비스가 늘 뜨지 않게 합니다. 과거 구간이 하나면 쓰지 않습니다.')}</span>
+              </span>
+            </label>
           </Row>
           <p className="text-small text-fg-faint">{t('저장하면 지난 결과도 바로 다시 판정합니다.')}</p>
         </section>

@@ -2,10 +2,13 @@
 
 import { memo, useEffect, useState } from 'react';
 import { t } from '../../i18n';
-import type { Sample, ServiceStats, StatsRange, StatsSummary } from './statsApi';
+import type { Sample, ServiceStats, StatsSummary } from './statsApi';
 import { StatsCharts } from './StatsCharts';
 import { statsService } from './statsApi';
-import { fmtVs } from './statsFormat';
+import { fmtMetric, fmtVs, pastView } from './statsFormat';
+import { dayValue } from './statsJudge';
+import { rangeLabel } from './StatsForm';
+import type { DaySummary, StatsRange } from './statsApi';
 import { termHelp } from './statsGlossary';
 
 interface StatsDetailProps {
@@ -50,13 +53,15 @@ export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxi
   }, [jobId, service]);
 
   const c = data?.current ?? null;
-  const b = data?.baseline ?? null;
+  // 과거는 표와 같이 일자별 평균으로
+  const b = data ? pastView(data, baselines.length) : null;
   if (error) return <p className="text-small text-danger">{error}</p>;
   if (!data) return <p className="text-small text-fg-dim">{t('불러오는 중…')}</p>;
   const samples = (c?.slowest.length ?? 0) + (c?.errored.length ?? 0) > 0;
   return (
     <div className="flex flex-col gap-4">
-    <StatsCharts current={c} baseline={b} range={range} baselines={baselines} />
+    <StatsCharts current={c} baseline={data.baseline} range={range} baselines={baselines} />
+    {(data.baseline_days?.length ?? 0) >= 2 && <DaysTable data={data} baselines={baselines} />}
     <div className="flex flex-wrap items-start gap-x-10 gap-y-3">
       <table className="st-card tnum w-[22rem] border-separate border-spacing-x-3 border-spacing-y-0 p-2 text-body">
         <thead className="text-small text-fg-dim">
@@ -95,6 +100,106 @@ export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxi
     </div>
   );
 });
+
+type DayCol = { label: string; get: (d: DaySummary) => number; fmt: (v: number) => string; worse: 'up' | 'none'; help: string };
+
+function dayCols(): DayCol[] {
+  const ms = (v: number) => Math.round(v).toLocaleString();
+  return [
+    { label: t('건수'), get: d => d.count, fmt: ms, worse: 'none', help: termHelp('count') },
+    { label: t('평균(ms)'), get: d => dayValue(d, 'avg'), fmt: ms, worse: 'up', help: termHelp('avg') },
+    { label: 'p50(ms)', get: d => dayValue(d, 'p50'), fmt: ms, worse: 'up', help: termHelp('p50') },
+    { label: 'p90(ms)', get: d => dayValue(d, 'p90'), fmt: ms, worse: 'up', help: termHelp('p90') },
+    { label: 'p99(ms)', get: d => dayValue(d, 'p99'), fmt: ms, worse: 'up', help: termHelp('p99') },
+    { label: t('에러율'), get: d => dayValue(d, 'err'), fmt: v => fmtMetric('err', v), worse: 'up', help: termHelp('err') },
+  ];
+}
+
+/**
+ * 과거 일자별 — 날마다의 값, 그리고 **일평균**(날마다 같은 무게)·최소·최대.
+ * 맨 위에 기준을 두어 «과거 어느 날보다도 나쁜가» 를 한눈에 본다. 날들 중 가장 나빴던 칸은 진하게
+ */
+function DaysTable({ data, baselines }: { data: ServiceStats; baselines: StatsRange[] }) {
+  const all = data.baseline_days ?? [];
+  const days = all.filter(d => d.count > 0);
+  const cols = dayCols();
+  const c = data.current;
+  const cur: DaySummary | null = c
+    ? { count: c.count, errors: c.errors, error_rate: c.error_rate, tps: c.tps, avg_ms: c.avg_ms, p50_ms: c.p50_ms, p90_ms: c.p90_ms, p99_ms: c.p99_ms, max_ms: c.max_ms }
+    : null;
+  const stat = (f: (vs: number[]) => number) => (col: DayCol) =>
+    days.length === 0 ? '–' : col.fmt(f(col === cols[0] ? all.map(col.get) : days.map(col.get)));
+  const mean = stat(vs => vs.reduce((x, y) => x + y, 0) / vs.length);
+  const min = stat(vs => Math.min(...vs));
+  const max = stat(vs => Math.max(...vs));
+  const worst = cols.map(col => (col.worse === 'up' && days.length > 0 ? Math.max(...days.map(col.get)) : null));
+  return (
+    <div className="st-card w-fit max-w-full overflow-auto p-2">
+      <div className="mb-1.5 px-1 text-small text-fg-muted" title={termHelp('past')}>
+        <span className="st-help">{t('과거 일자별')}</span>
+        <span className="ml-2 text-micro text-fg-faint">{t('일평균은 날마다 낸 값의 평균 · 건수가 없던 날은 응답시간·에러율 평균에서 뺍니다')}</span>
+      </div>
+      <table className="tnum w-auto border-collapse text-small">
+        <thead className="text-micro text-fg-dim">
+          <tr>
+            <th className="px-2 py-1 text-left font-normal" />
+            {cols.map(col => (
+              <th key={col.label} className="px-2 py-1 text-right font-normal" title={col.help}>
+                <span className="st-help-soft">{col.label}</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {cur && (
+            <tr className="st-ref border-b border-line">
+              <td className="px-2 py-1">
+                <span className="st-pill st-pill-ref">{t('기준')}</span>
+              </td>
+              {cols.map((col, i) => {
+                const v = col.get(cur);
+                const above = worst[i] !== null && v > (worst[i] ?? 0);
+                return (
+                  <td key={col.label} className={`px-2 py-1 text-right font-semibold ${above ? 'text-danger' : 'text-fg'}`} title={above ? t('과거 어느 날보다도 나쁩니다') : undefined}>
+                    {col.fmt(v)}
+                  </td>
+                );
+              })}
+            </tr>
+          )}
+          {all.map((d, di) => (
+            <tr key={di} className="border-b border-line/60">
+              <td className="whitespace-nowrap px-2 py-1 text-fg-dim">{baselines[di] ? rangeLabel(baselines[di]) : `#${di + 1}`}</td>
+              {cols.map((col, i) => {
+                const v = col.get(d);
+                const isWorst = d.count > 0 && worst[i] !== null && v === worst[i] && days.length > 1;
+                return (
+                  <td key={col.label} className={`px-2 py-1 text-right ${d.count === 0 && i > 0 ? 'text-fg-faint' : isWorst ? 'font-semibold text-warn' : 'text-fg-muted'}`}>
+                    {d.count === 0 && i > 0 ? '–' : col.fmt(v)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+          {[
+            [t('일평균'), mean],
+            [t('최소'), min],
+            [t('최대'), max],
+          ].map(([label, f]) => (
+            <tr key={label as string} className="bg-surface/60">
+              <td className="px-2 py-1 font-medium text-fg-muted">{label as string}</td>
+              {cols.map(col => (
+                <td key={col.label} className="px-2 py-1 text-right text-fg-muted">
+                  {(f as (c: DayCol) => string)(col)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function Samples({ title, list, onOpen }: { title: string; list: Sample[]; onOpen: (txid: string, date: string) => void }) {
   if (list.length === 0) return null;

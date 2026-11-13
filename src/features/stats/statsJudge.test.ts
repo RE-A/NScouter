@@ -55,9 +55,25 @@ describe('judge', () => {
 
   it('설정 값을 판정 기준으로 — 못 쓸 값은 기본값, 예전 use_p99 도 읽는다', () => {
     const r = rulesFromPrefs({ slow_ratio: 2, slow_min_ms: 0, error_ratio: -1, error_min_pp: 0.5, volume_pct: 30, min_count: 10, use_p99: true });
-    expect(r).toEqual({ ...DEFAULT_RULES, slowRatio: 2, slowMinMs: 0, errorMinDelta: 0.005, volumeRatio: 0.3, minCount: 10, slowOn: ['avg', 'p90', 'p99'] });
+    expect(r).toEqual({ ...DEFAULT_RULES, slowRatio: 2, slowMinMs: 0, errorMinDelta: 0.005, volumeRatio: 0.3, minCount: 10, slowOn: ['avg', 'p90', 'p99'], beyondWorst: true });
     expect(rulesFromPrefs({ ...prefsFromRules(DEFAULT_RULES), slow_metrics: ['p99', 'p50', 'bogus'] }).slowOn).toEqual(['p50', 'p99']);
     expect(rulesFromPrefs(prefsFromRules(DEFAULT_RULES))).toEqual(DEFAULT_RULES);
+  });
+
+  it('과거가 여럿이면 과거 최악의 날보다도 나쁠 때만 — 끄면 평균만 본다', () => {
+    const d = (p90: number, err = 0) => ({ count: 500, errors: 0, error_rate: err, tps: 1, avg_ms: 100, p50_ms: 80, p90_ms: p90, p99_ms: 900, max_ms: 1000 });
+    // 평소 p90 은 400 이지만 날마다 200~1000 으로 들쭉날쭉 — 기준 700 은 최악(1000)보다 낫다
+    const base = s({ p90_ms: 400 });
+    const r: ServiceStats = { service: '/a', current: s({ p90_ms: 700 }), baseline: base, baseline_days: [d(200), d(1000)] };
+    expect(judge(r)).toEqual([]);
+    expect(judge(r, { ...DEFAULT_RULES, beyondWorst: false })).toEqual(['slow']);
+    expect(judge({ ...r, current: s({ p90_ms: 1200 }) })).toEqual(['slow']);
+    // 하루뿐이면 쓰지 않는다
+    expect(judge({ ...r, baseline_days: [d(1000)] })).toEqual(['slow']);
+    // 에러도 같다
+    const e: ServiceStats = { service: '/e', current: s({ error_rate: 0.05 }), baseline: s({ error_rate: 0.01 }), baseline_days: [d(400, 0.001), d(400, 0.08)] };
+    expect(judge(e)).toEqual([]);
+    expect(judge({ ...e, current: s({ error_rate: 0.09 }) })).toEqual(['errors']);
   });
 
   it('두 배여도 차이가 100ms 미만이면 아니다 — 3ms → 6ms', () => {

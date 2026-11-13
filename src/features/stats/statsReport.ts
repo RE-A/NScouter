@@ -6,7 +6,7 @@
 
 import type { ServiceStats, StatsResult } from './statsApi';
 import { FLAG_LABEL, FLAG_ORDER, judge, severity, type Flag, type JudgeRules } from './statsJudge';
-import { flagReason, fmtMetric, fmtMetricVs, metricBad, metricValue, METRICS, splitService, type MetricKey } from './statsFormat';
+import { flagReason, fmtMetric, fmtMetricVs, metricBad, metricValue, METRICS, splitService, withPastView, type MetricKey } from './statsFormat';
 import { overlay } from './statsSeries';
 import { flagHelp, termHelp, type Term } from './statsGlossary';
 
@@ -31,10 +31,10 @@ function span(s: number, e: number) {
   return a.slice(0, 10) === b.slice(0, 10) ? `${a} – ${b.slice(11)}` : `${a} – ${b}`;
 }
 
-function metricHead(k: MetricKey, tr: Tr, pastRanges: number): string {
+function metricHead(k: MetricKey, tr: Tr): string {
   switch (k) {
     case 'count':
-      return pastRanges > 1 ? tr('건수 (과거는 구간당 평균)') : tr('건수');
+      return tr('건수');
     case 'avg':
       return tr('평균(ms)');
     case 'p90':
@@ -85,7 +85,8 @@ export function statsReport(
   tr: Tr,
 ): string {
   const pastRanges = Math.max(1, r.request.baselines.length);
-  const rows = r.services
+  // 과거는 일자별 평균으로 (앱 표와 같다)
+  const rows = withPastView(r.services, pastRanges)
     .filter(s => s.current !== null)
     .map(s => ({ s, flags: judge(s, rules), score: severity(s, rules) }))
     .sort((a, b) => b.score - a.score);
@@ -96,7 +97,7 @@ export function statsReport(
 
   const tip = (k: Term) => ` title="${esc(termHelp(k))}"`;
   const head = `<thead><tr><th rowspan="2" class="l">${esc(tr('서비스'))}</th><th rowspan="2" class="l"${tip('verdict')}><span class="help">${esc(tr('판정'))}</span></th>${METRICS.map(
-    k => `<th colspan="3" class="g"${tip(k)}><span class="help">${esc(metricHead(k, tr, pastRanges))}</span></th>`,
+    k => `<th colspan="3" class="g"${tip(k)}><span class="help">${esc(metricHead(k, tr))}</span></th>`,
   ).join('')}</tr><tr class="sub">${METRICS.map(
     () => `<th class="g cur"${tip('ref')}><span class="pill ref">${esc(tr('기준'))}</span></th><th${tip('past')}><span class="pill past">${esc(tr('과거'))}</span></th><th${tip('vs')}>${esc(tr('과거 대비'))}</th>`,
   ).join('')}</tr></thead>`;
@@ -108,7 +109,7 @@ export function statsReport(
   const tableRow = ({ s, flags }: (typeof rows)[number]) => {
     const cells = METRICS.map(k => {
       const c = metricValue(s.current, k);
-      const b = metricValue(s.baseline, k, pastRanges);
+      const b = metricValue(s.baseline, k);
       const bad = metricBad(k, s, rules);
       const vs = fmtMetricVs(k, c, b);
       return `<td class="n g cur">${fmtMetric(k, c)}</td><td class="n past">${fmtMetric(k, b)}</td><td class="n vs">${vs ? (bad ? `<span class="bad">${esc(vs)}</span>` : esc(vs)) : ''}</td>`;
@@ -178,7 +179,7 @@ svg .base{fill:none;stroke:#999;stroke-width:1.3;stroke-dasharray:4 3}
 <table class="meta">
 <tr><td class="k">${esc(tr('대상'))}</td><td>${esc(target)}</td></tr>
 <tr><td><span class="pill ref" title="${esc(termHelp('ref'))}">${esc(tr('기준'))}</span></td><td>${span(r.request.current.stime, r.request.current.etime)}</td></tr>
-<tr><td><span class="pill past" title="${esc(termHelp('past'))}">${esc(tr('과거'))}</span></td><td>${r.request.baselines.map(b => span(b.stime, b.etime)).join('<br>')}${pastRanges > 1 ? ` <span class="k">(${pastRanges}${esc(tr('개 구간을 합침'))})</span>` : ''}</td></tr>
+<tr><td><span class="pill past" title="${esc(termHelp('past'))}">${esc(tr('과거'))}</span></td><td>${r.request.baselines.map(b => span(b.stime, b.etime)).join('<br>')}${pastRanges > 1 ? ` <span class="k">(${pastRanges}${esc(tr('개 구간'))} · ${esc(tr('과거 값은 일평균'))})</span>` : ''}</td></tr>
 <tr><td class="k">${esc(tr('수집'))}</td><td>${esc(r.collectors.join(' + '))} · ${esc(tr('만든 시각'))} ${when(Date.now())}</td></tr>
 </table>
 <div class="kpis">

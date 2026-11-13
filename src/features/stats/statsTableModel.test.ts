@@ -27,18 +27,18 @@ describe('정렬', () => {
   });
 
   it('기준·과거·과거 대비 열로 줄 세운다 — 값이 없는 줄은 어느 방향이든 맨 아래', () => {
-    expect(names(sortRows(list, { col: 'p90.cur', dir: 'desc' }, 1))).toEqual(['/b', '/new', '/a']);
-    expect(names(sortRows(list, { col: 'p90.vs', dir: 'desc' }, 1))).toEqual(['/b', '/a', '/new']);
-    expect(names(sortRows(list, { col: 'p90.vs', dir: 'asc' }, 1))).toEqual(['/a', '/b', '/new']);
-    expect(names(sortRows(list, { col: 'p90.past', dir: 'asc' }, 1))).toEqual(['/b', '/a', '/new']);
-    expect(names(sortRows(list, { col: 'service', dir: 'asc' }, 1))).toEqual(['/a', '/b', '/new']);
-    expect(names(sortRows(list, DEFAULT_SORT, 1))).toEqual(['/new', '/b', '/a']);
+    expect(names(sortRows(list, { col: 'p90.cur', dir: 'desc' }))).toEqual(['/b', '/new', '/a']);
+    expect(names(sortRows(list, { col: 'p90.vs', dir: 'desc' }))).toEqual(['/b', '/a', '/new']);
+    expect(names(sortRows(list, { col: 'p90.vs', dir: 'asc' }))).toEqual(['/a', '/b', '/new']);
+    expect(names(sortRows(list, { col: 'p90.past', dir: 'asc' }))).toEqual(['/b', '/a', '/new']);
+    expect(names(sortRows(list, { col: 'service', dir: 'asc' }))).toEqual(['/a', '/b', '/new']);
+    expect(names(sortRows(list, DEFAULT_SORT))).toEqual(['/new', '/b', '/a']);
   });
 
   it('에러율 과거 대비는 %p 차이로 견준다', () => {
     const e = [r('/x', s({ error_rate: 0.5 }), s({ error_rate: 0.45 })), r('/y', s({ error_rate: 0.02 }), s({ error_rate: 0.001 }))];
     // 비율로는 /y(×20) 가 크지만 %p 로는 /x(+5%p) 가 크다
-    expect(names(sortRows(e, { col: 'err.vs', dir: 'desc' }, 1))).toEqual(['/x', '/y']);
+    expect(names(sortRows(e, { col: 'err.vs', dir: 'desc' }))).toEqual(['/x', '/y']);
   });
 });
 

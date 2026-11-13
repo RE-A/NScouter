@@ -74,10 +74,26 @@ export interface StatsSummary {
   errored: Sample[];
 }
 
+/** 과거 구간 하나의 요약 — Rust `DaySummary` */
+export interface DaySummary {
+  count: number;
+  errors: number;
+  error_rate: number;
+  tps: number;
+  avg_ms: number;
+  p50_ms: number;
+  p90_ms: number;
+  p99_ms: number;
+  max_ms: number;
+}
+
 export interface ServiceStats {
   service: string;
   current: StatsSummary | null;
+  /** 과거 — Rust 가 준 그대로는 구간들을 합쳐 센 값. 화면은 `pastView` 로 **일자별 평균**으로 바꿔 쓴다 */
   baseline: StatsSummary | null;
+  /** 과거 구간마다 따로 센 것 (요청의 baselines 순서). 0.9.4 전 결과에는 없다 */
+  baseline_days?: DaySummary[];
 }
 
 export interface RangeCoverage {
@@ -194,6 +210,8 @@ export interface StatsJudgePrefs {
   use_p99: boolean;
   /** «느려짐» 을 볼 지표. 비면 평균·p90(+use_p99) — 예전 설정 */
   slow_metrics?: string[];
+  /** 과거 구간이 여럿이면 과거 날들 중 최악보다도 나쁠 때만 판정. 없으면 켬 */
+  beyond_worst?: boolean;
 }
 
 /** 통계 탭 설정 — Rust `StatsPrefs` */

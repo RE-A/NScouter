@@ -3,7 +3,7 @@
 // Rust 는 숫자만 낸다. 판정은 여기서 한다 — 기준값을 바꿔 가며 같은 결과를 다시 볼 수 있게.
 // 몇 건 안 되는 서비스는 한 건만 느려도 경보가 되므로 `minCount` 보다 적으면 판정하지 않고 «표본 적음» 으로 둔다.
 
-import type { ServiceStats, StatsJudgePrefs, StatsSummary } from './statsApi';
+import type { DaySummary, ServiceStats, StatsJudgePrefs, StatsSummary } from './statsApi';
 
 export interface JudgeRules {
   /** 평균 또는 p90 이 기준의 몇 배 넘게 늘면 «느려짐» */
@@ -20,6 +20,8 @@ export interface JudgeRules {
   minCount: number;
   /** «느려짐» 을 볼 지표 — 하나라도 걸리면 느려짐 */
   slowOn: SlowMetric[];
+  /** 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가 — 날마다 들쭉날쭉한 서비스가 늘 뜨지 않게 */
+  beyondWorst: boolean;
 }
 
 /** «느려짐» 을 볼 수 있는 지표 */
@@ -39,6 +41,7 @@ export const DEFAULT_RULES: JudgeRules = {
   volumeRatio: 0.5,
   minCount: 30,
   slowOn: ['avg', 'p90'],
+  beyondWorst: true,
 };
 
 /** 설정의 «느려짐» 지표 — 없으면 예전 설정(평균·p90, use_p99 면 p99 도) */
@@ -60,6 +63,7 @@ export function rulesFromPrefs(p: StatsJudgePrefs | undefined): JudgeRules {
     volumeRatio: pos(p.volume_pct, DEFAULT_RULES.volumeRatio * 100) / 100,
     minCount: Number.isFinite(p.min_count) && p.min_count >= 0 ? Math.round(p.min_count) : DEFAULT_RULES.minCount,
     slowOn: slowFromPrefs(p),
+    beyondWorst: p.beyond_worst !== false,
   };
 }
 
@@ -73,6 +77,7 @@ export function prefsFromRules(r: JudgeRules): StatsJudgePrefs {
     min_count: r.minCount,
     use_p99: r.slowOn.includes('p99'),
     slow_metrics: [...r.slowOn],
+    beyond_worst: r.beyondWorst,
   };
 }
 
@@ -90,6 +95,43 @@ export const FLAG_LABEL: Record<Flag, string> = {
 /** 위쪽 것이 더 나쁜 일 — 표의 «특이사항» 칸과 정렬에 쓴다 */
 export const FLAG_ORDER: Flag[] = ['errors', 'slow', 'volume', 'gone', 'new', 'few'];
 
+/** 날마다 따로 센 과거 중 건수가 있는 날 */
+function pastDays(row: ServiceStats): DaySummary[] {
+  return (row.baseline_days ?? []).filter(d => d.count > 0);
+}
+
+/** 그날의 지표 값 */
+export function dayValue(d: DaySummary, m: SlowMetric | 'err'): number {
+  return m === 'err' ? d.error_rate : m === 'avg' ? d.avg_ms : m === 'p50' ? d.p50_ms : m === 'p90' ? d.p90_ms : d.p99_ms;
+}
+
+/** 과거 날들 중 가장 나빴던 날의 값 — 날이 둘 이상일 때만(하나면 «최악» 이 평균과 같다) */
+export function worstDay(row: ServiceStats, m: SlowMetric | 'err'): number | null {
+  const ds = pastDays(row);
+  return ds.length >= 2 ? Math.max(...ds.map(d => dayValue(d, m))) : null;
+}
+
+/** 이 지표로 느려졌나 — 비율·차이 조건, 그리고 켜져 있으면 과거 최악보다도 나쁜가 */
+export function slowHit(row: ServiceStats, m: SlowMetric, r: JudgeRules): boolean {
+  const c = row.current;
+  const b = row.baseline;
+  if (!c || !b) return false;
+  if (!slower(slowValue(c, m), slowValue(b, m), r)) return false;
+  const w = r.beyondWorst ? worstDay(row, m) : null;
+  return w === null || slowValue(c, m) > w;
+}
+
+/** 에러가 늘었나 — 같은 방식 */
+export function errHit(row: ServiceStats, r: JudgeRules): boolean {
+  const c = row.current;
+  const b = row.baseline;
+  if (!c || !b) return false;
+  const up = c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio);
+  if (!up) return false;
+  const w = r.beyondWorst ? worstDay(row, 'err') : null;
+  return w === null || c.error_rate > w;
+}
+
 function slower(cur: number, base: number, r: JudgeRules): boolean {
   return cur - base >= r.slowMinMs && cur >= base * r.slowRatio;
 }
@@ -101,10 +143,8 @@ export function judge(row: ServiceStats, r: JudgeRules = DEFAULT_RULES): Flag[] 
   if (!c || !b) return [];
   if (c.count < r.minCount || b.count < r.minCount) return ['few'];
   const out: Flag[] = [];
-  if (c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio)) {
-    out.push('errors');
-  }
-  if (r.slowOn.some(m => slower(slowValue(c, m), slowValue(b, m), r))) out.push('slow');
+  if (errHit(row, r)) out.push('errors');
+  if (r.slowOn.some(m => slowHit(row, m, r))) out.push('slow');
   if (b.tps > 0 && Math.abs(c.tps / b.tps - 1) > r.volumeRatio) out.push('volume');
   return out;
 }

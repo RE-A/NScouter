@@ -89,7 +89,13 @@ fn compact(r: &StatsResult) -> StatsResult {
         services: r
             .services
             .iter()
-            .map(|s| ServiceStats { service: s.service.clone(), current: strip(&s.current), baseline: strip(&s.baseline) })
+            // 일자별 요약은 가벼워서 그대로 — 비교 표가 일자별 평균과 «과거 최악» 판정에 쓴다
+            .map(|s| ServiceStats {
+                service: s.service.clone(),
+                current: strip(&s.current),
+                baseline: strip(&s.baseline),
+                baseline_days: s.baseline_days.clone(),
+            })
             .collect(),
         ..r.clone()
     }
@@ -233,7 +239,8 @@ pub async fn stats_start(app: AppHandle, request: StatsRequest) -> Result<String
         let result = match outcome {
             Ok((ranges, book, collectors)) => {
                 let folded = book.folded;
-                let services = book.finish(secs_of(&ranges, "current"), secs_of(&ranges, "baseline"));
+                let day_secs: Vec<f64> = ranges.iter().filter(|c| c.kind == "baseline").map(covered_secs).collect();
+                let services = book.finish(secs_of(&ranges, "current"), secs_of(&ranges, "baseline"), &day_secs);
                 StatsResult {
                 id: id2.clone(),
                 request: req.clone(),
@@ -556,7 +563,7 @@ mod tests {
             error: false,
             obj_hash: 7,
         });
-        StatsResult { id: id.into(), status: "done".into(), services: book.finish(60.0, 60.0), ..StatsResult::default() }
+        StatsResult { id: id.into(), status: "done".into(), services: book.finish(60.0, 60.0, &[60.0]), ..StatsResult::default() }
     }
 
     #[test]

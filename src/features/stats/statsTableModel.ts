@@ -30,12 +30,12 @@ export function nextSort(prev: SortState, col: ColId): SortState {
 }
 
 /** 정렬에 쓸 값. 없으면 null */
-export function sortValue(row: ServiceStats, col: ColId, score: number, pastRanges: number): number | string | null {
+export function sortValue(row: ServiceStats, col: ColId, score: number): number | string | null {
   if (col === 'service') return row.service;
   if (col === 'verdict') return score;
   const [k, side] = col.split('.') as [MetricKey, Side];
   const c = metricValue(row.current, k);
-  const b = metricValue(row.baseline, k, pastRanges);
+  const b = metricValue(row.baseline, k);
   if (side === 'cur') return c ?? null;
   if (side === 'past') return b ?? null;
   if (c === undefined || b === undefined) return null;
@@ -43,11 +43,11 @@ export function sortValue(row: ServiceStats, col: ColId, score: number, pastRang
   return k === 'err' ? c - b : change(c, b);
 }
 
-export function sortRows<T extends { row: ServiceStats; score: number }>(list: T[], s: SortState, pastRanges: number): T[] {
+export function sortRows<T extends { row: ServiceStats; score: number }>(list: T[], s: SortState): T[] {
   const sign = s.dir === 'asc' ? 1 : -1;
   return [...list].sort((a, b) => {
-    const x = sortValue(a.row, s.col, a.score, pastRanges);
-    const y = sortValue(b.row, s.col, b.score, pastRanges);
+    const x = sortValue(a.row, s.col, a.score);
+    const y = sortValue(b.row, s.col, b.score);
     if (x === null && y === null) return 0;
     if (x === null) return 1;
     if (y === null) return -1;

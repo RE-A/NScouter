@@ -14,10 +14,9 @@ import { clampWidth, COLS, DEFAULT_SORT, defaultWidth, nextSort, SIDES, sortRows
 
 
 interface StatsTableProps {
+  /** 과거가 일자별 평균으로 바뀐 줄 (`withPastView`) */
   rows: ServiceStats[];
   rules: JudgeRules;
-  /** 과거 구간 수 — 과거 건수를 구간당 평균으로 */
-  pastRanges: number;
   selected: string | null;
   /** 같은 줄을 다시 누르면 null — 접는다 */
   onSelect: (service: string | null) => void;
@@ -80,10 +79,10 @@ export const FLAG_CLS: Record<Flag, string> = {
 };
 
 /** 지표 머리 — 함수라 언어를 바꿔도 따라온다 */
-function metricLabel(k: MetricKey, pastRanges: number): string {
+function metricLabel(k: MetricKey): string {
   switch (k) {
     case 'count':
-      return pastRanges > 1 ? t('건수 (과거는 구간당 평균)') : t('건수');
+      return t('건수');
     case 'avg':
       return t('평균(ms)');
     case 'p90':
@@ -107,7 +106,7 @@ export function ServiceName({ name }: { name: string }) {
   );
 }
 
-export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, selected, onSelect, detail, widths, onWidthsChange }: StatsTableProps) {
+export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSelect, detail, widths, onWidthsChange }: StatsTableProps) {
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   // 끄는 동안의 너비 — 놓으면 설정으로 넘긴다
   const [live, setLive] = useState<Partial<Record<ColId, number>>>({});
@@ -161,8 +160,8 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
             : j.flags.includes(only)) &&
         (q === '' || j.row.service.toLowerCase().includes(q)),
     );
-    return sortRows(list, sort, pastRanges);
-  }, [judged, only, query, sort, pastRanges]);
+    return sortRows(list, sort);
+  }, [judged, only, query, sort]);
 
   /** 정렬 머리 — 누르면 그 열로, 다시 누르면 반대로 */
   const sortBtn = ({ col, label, help, className = '' }: { col: ColId; label: ReactNode; help?: string; className?: string }) => {
@@ -237,7 +236,7 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
               </th>
               {METRICS.map(k => (
                 <th key={k} colSpan={3} className={`${groupEdge} truncate px-2 pt-1.5 text-center font-medium text-fg-muted`} title={termHelp(k)}>
-                  <span className="st-help">{metricLabel(k, pastRanges)}</span>
+                  <span className="st-help">{metricLabel(k)}</span>
                 </th>
               ))}
             </tr>
@@ -297,7 +296,7 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
                     </td>
                     {METRICS.map(k => {
                       const c = metricValue(r.current, k);
-                      const b = metricValue(r.baseline, k, pastRanges);
+                      const b = metricValue(r.baseline, k);
                       const vs = fmtMetricVs(k, c, b);
                       const bad = metricBad(k, r, rules);
                       return (

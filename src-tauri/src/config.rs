@@ -175,11 +175,13 @@ pub struct StatsJudgePrefs {
     pub use_p99: bool,
     /// «느려짐» 을 볼 지표(`avg`·`p50`·`p90`·`p99`) — 하나라도 걸리면 느려짐. 비면 평균·p90(+ use_p99)
     pub slow_metrics: Vec<String>,
+    /// 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가로 본다
+    pub beyond_worst: bool,
 }
 
 impl Default for StatsJudgePrefs {
     fn default() -> Self {
-        Self { slow_ratio: 1.5, slow_min_ms: 100.0, error_ratio: 2.0, error_min_pp: 1.0, volume_pct: 50.0, min_count: 30, use_p99: false, slow_metrics: Vec::new() }
+        Self { slow_ratio: 1.5, slow_min_ms: 100.0, error_ratio: 2.0, error_min_pp: 1.0, volume_pct: 50.0, min_count: 30, use_p99: false, slow_metrics: Vec::new(), beyond_worst: true }
     }
 }
 

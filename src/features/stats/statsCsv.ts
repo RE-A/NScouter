@@ -1,12 +1,13 @@
 // 비교 표를 CSV 한 장으로 — 서비스 한 줄에 기준·과거·과거 대비를 나란히
 //
-// 용어: **기준** = 살펴본 시점, **과거** = 견준 지난 시점(여럿이면 합쳐서). 과거 건수는 **구간당 평균**과 합계를 둘 다 둔다.
+// 용어: **기준** = 살펴본 시점, **과거** = 견준 지난 시점. 과거가 여럿이면 과거 칸은 **일자별 평균**(`pastView`)이고, 건수 합계를 따로 둔다.
 // (0.9.3 까지는 «현재 / 기준» 이라 적었다 — 그때의 «기준» 은 지금의 «과거» 다.)
 // 엑셀에서 정렬·필터를 바로 걸 수 있게 머리글 한 줄 + 데이터만 둔다. 변화율은 계산하기 좋게 숫자(%)로 둔다.
 
 import { csvCell } from '../xlog/components/summaryCsv';
 import type { ServiceStats, StatsSummary } from './statsApi';
 import { change, FLAG_LABEL, judge, type JudgeRules } from './statsJudge';
+import { pastView } from './statsFormat';
 
 type Cell = string | number | null;
 
@@ -15,11 +16,11 @@ const SIDE_HEAD = ['건수', '에러', '에러율(%)', 'TPS', '평균(ms)', 'p50
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 
-/** 한쪽 값들. `per` 로 건수·에러 수를 나눈다(과거는 구간당 평균) */
-function side(s: StatsSummary | null, per = 1): Cell[] {
+/** 한쪽 값들 */
+function side(s: StatsSummary | null): Cell[] {
   if (!s) return SIDE_HEAD.map(() => null);
   return [
-    r1(s.count / per), r1(s.errors / per), r3(s.error_rate * 100), r3(s.tps), r1(s.avg_ms), s.p50_ms, s.p90_ms, s.p95_ms, s.p99_ms, s.max_ms,
+    r1(s.count), r1(s.errors), r3(s.error_rate * 100), r3(s.tps), r1(s.avg_ms), s.p50_ms, s.p90_ms, s.p95_ms, s.p99_ms, s.max_ms,
     r1(s.sql_count_avg), r1(s.sql_ms_avg), r1(s.api_count_avg), r1(s.api_ms_avg), r1(s.cpu_ms_avg),
   ];
 }
@@ -32,7 +33,7 @@ function pct(cur: number | undefined, base: number | undefined): Cell {
 
 export function statsCsv(rows: readonly ServiceStats[], rules: JudgeRules, pastRanges = 1, tr: (s: string) => string = x => x): string {
   const per = Math.max(1, pastRanges);
-  const pastHead = SIDE_HEAD.map(h => (h === '건수' || h === '에러') && per > 1 ? `과거 ${h}(구간당 평균)` : `과거 ${h}`);
+  const pastHead = SIDE_HEAD.map(h => (per > 1 ? `과거 일평균 ${h}` : `과거 ${h}`));
   const head = [
     '서비스', '판정',
     ...SIDE_HEAD.map(h => `기준 ${h}`),
@@ -41,15 +42,17 @@ export function statsCsv(rows: readonly ServiceStats[], rules: JudgeRules, pastR
     '평균 과거 대비(%)', 'p90 과거 대비(%)', 'p99 과거 대비(%)', '에러율 과거 대비(%p)', 'TPS 과거 대비(%)',
   ];
   const lines = [head.map(csvCell).join(',')];
-  for (const r of rows) {
+  for (const orig of rows) {
+    // 과거는 일자별 평균(앱 표와 같다) — 합계 칸만 합쳐 센 값에서
+    const r = { ...orig, baseline: pastView(orig, per) };
     const c = r.current ?? undefined;
     const b = r.baseline ?? undefined;
     const cells: Cell[] = [
       r.service,
       judge(r, rules).map(f => tr(FLAG_LABEL[f])).join(' · '),
       ...side(r.current),
-      ...side(r.baseline, per),
-      b ? b.count : null,
+      ...side(r.baseline),
+      orig.baseline ? orig.baseline.count : null,
       pct(c?.avg_ms, b?.avg_ms),
       pct(c?.p90_ms, b?.p90_ms),
       pct(c?.p99_ms, b?.p99_ms),

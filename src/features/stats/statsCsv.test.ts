@@ -10,7 +10,7 @@ const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
 });
 
 describe('statsCsv', () => {
-  it('머리글은 기준·과거 — 과거가 여럿이면 건수는 구간당 평균과 합계를 둘 다', () => {
+  it('머리글은 기준·과거 — 과거가 여럿이면 과거는 일평균, 건수 합계도 따로', () => {
     const csv = statsCsv(
       [
         { service: '/a,b', current: s({ avg_ms: 400 }), baseline: s({ count: 7000, errors: 70 }) },
@@ -22,14 +22,14 @@ describe('statsCsv', () => {
     const lines = csv.split('\r\n');
     const head = lines[0].split(',');
     expect(head).toContain('기준 건수');
-    expect(head).toContain('과거 건수(구간당 평균)');
+    expect(head).toContain('과거 일평균 건수');
     expect(head).toContain('과거 건수(합계)');
     expect(head.some(h => h.startsWith('현재') || h.includes('평소'))).toBe(false);
     expect(lines.length).toBe(3);
     expect(lines[1].startsWith('"/a,b",느려짐,1000,10,')).toBe(true);
-    // 과거 구간당 평균 1000, 합계 7000
+    // 과거 일평균 1000, 합계 7000
     const cells = lines[1].replace('"/a,b"', 's').split(',');
-    expect(cells[head.indexOf('과거 건수(구간당 평균)')]).toBe('1000');
+    expect(cells[head.indexOf('과거 일평균 건수')]).toBe('1000');
     expect(cells[head.indexOf('과거 건수(합계)')]).toBe('7000');
     expect(cells[head.indexOf('평균 과거 대비(%)')]).toBe('100');
     expect(lines[2].startsWith('/new,기준에만 있음,')).toBe(true);

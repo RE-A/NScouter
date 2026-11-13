@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ServiceStats, StatsSummary } from './statsApi';
 import { DEFAULT_RULES } from './statsJudge';
-import { flagReason, fmtMetric, fmtPp, fmtVs, metricBad, metricValue, splitService } from './statsFormat';
+import { flagReason, fmtMetric, fmtPp, fmtVs, metricBad, metricValue, pastView, splitService } from './statsFormat';
 
 const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
   count: 1000, errors: 0, error_rate: 0, tps: 1, avg_ms: 200, p50_ms: 150, p90_ms: 400, p95_ms: 500, p99_ms: 900,
@@ -26,8 +26,17 @@ describe('표기', () => {
     expect(fmtPp(0.01, 0.03)).toBe('−2.0%p');
   });
 
-  it('과거 건수는 구간당 평균', () => {
-    expect(metricValue(s({ count: 700 }), 'count', 7)).toBe(100);
+  it('과거는 일자별 평균 — 응답시간은 날마다 값의 평균(같은 무게), 건수는 모든 구간의 평균', () => {
+    const d = (count: number, p90: number, err = 0) => ({ count, errors: 0, error_rate: err, tps: count / 60, avg_ms: p90 / 2, p50_ms: p90 / 3, p90_ms: p90, p99_ms: p90 * 2, max_ms: p90 * 3 });
+    const row: ServiceStats = { service: '/a', current: s(), baseline: s({ count: 1100, p90_ms: 999 }), baseline_days: [d(1000, 100), d(100, 300, 0.1), d(0, 0)] };
+    const v = pastView(row, 3)!;
+    expect(v.p90_ms).toBe(200); // (100 + 300) / 2 — 건수가 없던 날은 빼고, 날마다 같은 무게
+    expect(v.count).toBeCloseTo(1100 / 3); // 건수는 세 구간 평균
+    expect(v.error_rate).toBeCloseTo(0.05);
+    expect(v.max_ms).toBe(900);
+    // 예전 결과(일자별 없음)는 합쳐 센 값에 건수만 나눈다
+    expect(pastView({ service: '/b', current: null, baseline: s({ count: 700 }) }, 7)!.count).toBe(100);
+    expect(metricValue(v, 'p90')).toBe(200);
     expect(fmtMetric('count', 12.5)).toBe('12.5');
     expect(fmtMetric('count', 1234)).toBe('1,234');
     expect(fmtMetric('err', 0.0123)).toBe('1.23%');
