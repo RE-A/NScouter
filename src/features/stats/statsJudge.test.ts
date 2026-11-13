@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ServiceStats, StatsSummary } from './statsApi';
-import { change, DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, severity } from './statsJudge';
+import { change, DEFAULT_RULES, judge as judgeWith, prefsFromRules, rulesFromPrefs, severity as severityWith, type JudgeRules } from './statsJudge';
+
+// 판정 논리를 보는 시험 — 기본값(1.3배·1000ms)이 아니라 고정한 규칙으로 본다
+const R: JudgeRules = { ...DEFAULT_RULES, slowRatio: 1.5, slowMinMs: 100 };
+const judge = (row: ServiceStats, r: JudgeRules = R) => judgeWith(row, r);
+const severity = (row: ServiceStats, r: JudgeRules = R) => severityWith(row, r);
 
 const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
   count: 1000,
@@ -45,12 +50,12 @@ describe('judge', () => {
     const r = row(s({ p99_ms: 3000 }), s());
     // 기본은 평균·p90
     expect(judge(r)).toEqual([]);
-    expect(judge(r, { ...DEFAULT_RULES, slowOn: ['p99'] })).toEqual(['slow']);
+    expect(judge(r, { ...R, slowOn: ['p99'] })).toEqual(['slow']);
     const mid = row(s({ p50_ms: 500 }), s());
     expect(judge(mid)).toEqual([]);
-    expect(judge(mid, { ...DEFAULT_RULES, slowOn: ['p50'] })).toEqual(['slow']);
+    expect(judge(mid, { ...R, slowOn: ['p50'] })).toEqual(['slow']);
     // 평균을 빼면 평균만 늘어난 것은 안 걸린다
-    expect(judge(row(s({ avg_ms: 900 }), s()), { ...DEFAULT_RULES, slowOn: ['p90'] })).toEqual([]);
+    expect(judge(row(s({ avg_ms: 900 }), s()), { ...R, slowOn: ['p90'] })).toEqual([]);
   });
 
   it('설정 값을 판정 기준으로 — 못 쓸 값은 기본값, 예전 use_p99 도 읽는다', () => {
@@ -66,7 +71,7 @@ describe('judge', () => {
     const base = s({ p90_ms: 400 });
     const r: ServiceStats = { service: '/a', current: s({ p90_ms: 700 }), baseline: base, baseline_days: [d(200), d(1000)] };
     expect(judge(r)).toEqual([]);
-    expect(judge(r, { ...DEFAULT_RULES, beyondWorst: false })).toEqual(['slow']);
+    expect(judge(r, { ...R, beyondWorst: false })).toEqual(['slow']);
     expect(judge({ ...r, current: s({ p90_ms: 1200 }) })).toEqual(['slow']);
     // 하루뿐이면 쓰지 않는다
     expect(judge({ ...r, baseline_days: [d(1000)] })).toEqual(['slow']);
@@ -95,6 +100,56 @@ describe('judge', () => {
     expect(judge(row(s(), null))).toEqual(['new']);
     expect(judge(row(null, s()))).toEqual(['gone']);
     expect(judge(row(s({ count: 10, avg_ms: 5000 }), s()))).toEqual(['few']);
+  });
+});
+
+describe('배율·차이 스위치와 기본값', () => {
+  it('기본값은 느려짐 1.3배·1000ms', () => {
+    expect(DEFAULT_RULES.slowRatio).toBe(1.3);
+    expect(DEFAULT_RULES.slowMinMs).toBe(1000);
+    // 1.5배·+300ms 는 기본값으로는 아니다(1000ms 미만)
+    expect(judgeWith(row(s({ avg_ms: 500 }), s({ avg_ms: 200 })))).toEqual([]);
+    expect(judgeWith(row(s({ avg_ms: 1300 }), s({ avg_ms: 200 })))).toEqual(['slow']);
+  });
+
+  it('느려짐 — 배율만 · 차이만', () => {
+    const big = row(s({ avg_ms: 9000 }), s({ avg_ms: 8000 })); // ×1.125, +1000ms
+    const ratio = row(s({ avg_ms: 30 }), s({ avg_ms: 10 })); // ×3, +20ms
+    const both = { ...R, slowRatio: 1.3, slowMinMs: 1000 };
+    expect(judge(big, both)).toEqual([]);
+    expect(judge(big, { ...both, slowUseRatio: false })).toEqual(['slow']);
+    expect(judge(ratio, both)).toEqual([]);
+    expect(judge(ratio, { ...both, slowUseMs: false })).toEqual(['slow']);
+    // 배율만 써도 줄어든 것은 아니다
+    expect(judge(row(s({ avg_ms: 10 }), s({ avg_ms: 30 })), { ...both, slowUseMs: false })).toEqual([]);
+  });
+
+  it('에러 증가 — 배율만 · 차이만', () => {
+    const smallStep = row(s({ error_rate: 0.004 }), s({ error_rate: 0.001 })); // ×4, +0.3%p
+    const bigBase = row(s({ error_rate: 0.3 }), s({ error_rate: 0.2 })); // ×1.5, +10%p
+    expect(judge(smallStep)).toEqual([]);
+    expect(judge(smallStep, { ...R, errorUsePp: false })).toEqual(['errors']);
+    expect(judge(bigBase)).toEqual([]);
+    expect(judge(bigBase, { ...R, errorUseRatio: false })).toEqual(['errors']);
+  });
+
+  it('배율·차이 묶기 — 또는이면 하나만 넘어도', () => {
+    const big = row(s({ avg_ms: 9000 }), s({ avg_ms: 8000 })); // ×1.125, +1000ms
+    const base = { ...R, slowRatio: 1.3, slowMinMs: 1000 };
+    expect(judge(big, base)).toEqual([]);
+    expect(judge(big, { ...base, slowCombine: 'or' })).toEqual(['slow']);
+    const err = row(s({ error_rate: 0.004 }), s({ error_rate: 0.001 })); // ×4, +0.3%p
+    expect(judge(err)).toEqual([]);
+    expect(judge(err, { ...R, errorCombine: 'or' })).toEqual(['errors']);
+    expect(rulesFromPrefs({ ...prefsFromRules(DEFAULT_RULES), slow_combine: 'or', error_combine: 'bogus' })).toMatchObject({ slowCombine: 'or', errorCombine: 'and' });
+  });
+
+  it('설정 — 스위치는 없으면 켬, 한 판정에서 둘 다 꺼져 있으면 둘 다 켠다', () => {
+    const p = prefsFromRules(DEFAULT_RULES);
+    expect(rulesFromPrefs({ ...p, slow_use_ratio: false }).slowUseRatio).toBe(false);
+    expect(rulesFromPrefs({ ...p, slow_use_ratio: false, slow_use_ms: false })).toMatchObject({ slowUseRatio: true, slowUseMs: true });
+    const { error_use_pp: _, ...old } = p;
+    expect(rulesFromPrefs(old).errorUsePp).toBe(true);
   });
 });
 

@@ -212,6 +212,14 @@ export interface StatsJudgePrefs {
   slow_metrics?: string[];
   /** 과거 구간이 여럿이면 과거 날들 중 최악보다도 나쁠 때만 판정. 없으면 켬 */
   beyond_worst?: boolean;
+  /** 느려짐·에러 증가에 배율 / 차이를 쓰나 — 없으면 켬 */
+  slow_use_ratio?: boolean;
+  slow_use_ms?: boolean;
+  error_use_ratio?: boolean;
+  error_use_pp?: boolean;
+  /** 배율·차이를 둘 다 쓸 때 — 'and' · 'or'. 없으면 'and' */
+  slow_combine?: string;
+  error_combine?: string;
 }
 
 /** 통계 탭 설정 — Rust `StatsPrefs` */

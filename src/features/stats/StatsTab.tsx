@@ -37,7 +37,7 @@ import {
 } from './statsApi';
 import { statsCsv } from './statsCsv';
 import { DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, type JudgeRules } from './statsJudge';
-import { termHelp } from './statsGlossary';
+import { errCondText, slowCondText, termHelp } from './statsGlossary';
 import { slowName, withPastView } from './statsFormat';
 import { StatsSettingsDialog } from './StatsSettingsDialog';
 import { parsePresets, type StatsPreset } from './statsPresets';
@@ -248,20 +248,32 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
       .finally(() => setStarting(false));
   }, [draft, tz, reloadJobs]);
 
+  /** 지울 결과 — 확인 창을 거친다(되돌릴 수 없다) */
+  const [delAsk, setDelAsk] = useState<string[] | null>(null);
   const onDelete = useCallback(
-    (id: string) => {
-      statsDelete(id)
-        .then(() => {
-          if (openRef.current === id) {
-            setOpenId(null);
-            setResult(null);
+    (ids: string[]) => {
+      // 하나씩 지운다 — 하나가 실패해도 나머지는 지우고, 실패한 까닭만 알린다
+      void (async () => {
+        const failed: string[] = [];
+        for (const id of ids) {
+          try {
+            await statsDelete(id);
+            if (openRef.current === id) {
+              setOpenId(null);
+              setResult(null);
+            }
+          } catch (e) {
+            failed.push(String(e));
           }
-          reloadJobs();
-        })
-        .catch(e => setError(String(e)));
+        }
+        if (failed.length > 0) setError(failed[0]);
+        setDelAsk(null);
+        reloadJobs();
+      })();
     },
     [reloadJobs],
   );
+  const deletable = jobs.filter(j => j.status !== 'running');
 
   /** 지난 조건을 폼으로 되돌린다 — 구간만 바꿔 다시 돌리는 일이 잦다 */
   const reuse = useCallback((j: JobInfo) => {
@@ -364,13 +376,28 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               onKeyDown={e => {
                 if (e.key === 'Enter') openResult(j.id);
               }}
-              className={`cursor-pointer rounded-md px-2.5 py-2 text-small transition-colors ${
+              className={`group relative cursor-pointer rounded-md px-2.5 py-2 text-small transition-colors ${
                 on ? 'bg-accent/12 shadow-[inset_3px_0_0_var(--accent)]' : 'hover:bg-hover'
               }`}
             >
-              <div className="truncate text-body font-medium text-fg" title={j.title}>
+              <div className="truncate pr-6 text-body font-medium text-fg" title={j.title}>
                 {j.title}
               </div>
+              {/* 지우기 — 올리면 보인다. 도는 작업은 먼저 취소해야 한다 */}
+              {j.status !== 'running' && (
+                <button
+                  type="button"
+                  className="btn-ghost absolute top-1.5 right-1.5 hidden px-1.5 py-0.5 text-micro text-fg-dim group-hover:inline-flex group-focus-within:inline-flex hover:text-danger"
+                  aria-label={t('이 결과 지우기')}
+                  title={t('이 결과 지우기')}
+                  onClick={e => {
+                    e.stopPropagation();
+                    setDelAsk([j.id]);
+                  }}
+                >
+                  ✕
+                </button>
+              )}
               <div className="mt-0.5 flex items-center gap-1.5 text-fg-dim">
                 <span className={`st-dot ${STATUS_DOT[j.status]} ${j.status === 'running' ? 'animate-pulse' : ''}`} />
                 <span className={j.status === 'failed' ? 'text-danger' : j.status === 'running' ? 'text-accent-bright' : ''}>
@@ -387,6 +414,11 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
           );
         })}
         <span className="flex-1" />
+        {deletable.length > 1 && (
+          <Button variant="ghost" size="sm" className="text-fg-dim hover:text-danger" onClick={() => setDelAsk(deletable.map(j => j.id))}>
+            {t('지난 결과 모두 지우기')} ({deletable.length})
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={() => setShowSettings(true)}>
           ⚙ {t('통계 설정')}
         </Button>
@@ -481,7 +513,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   </Button>
                 )}
                 {openJob && openJob.status !== 'running' && (
-                  <Button variant="danger" size="sm" onClick={() => onDelete(openJob.id)}>
+                  <Button variant="danger" size="sm" onClick={() => setDelAsk([openJob.id])}>
                     {t('지우기')}
                   </Button>
                 )}
@@ -558,6 +590,35 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
             reloadJobs();
           }}
         />
+      )}
+
+      {delAsk && (
+        <Dialog
+          title={delAsk.length === 1 ? t('이 결과를 지울까요?') : `${t('지난 결과')} ${delAsk.length}${t('개를 지울까요?')}`}
+          onClose={() => setDelAsk(null)}
+          widthClass="w-[28rem]"
+          footer={
+            <>
+              <Button size="md" onClick={() => setDelAsk(null)}>
+                {t('취소')}
+              </Button>
+              <Button variant="danger" size="md" onClick={() => onDelete(delAsk)}>
+                {t('지우기')}
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-2 text-body text-fg-muted">
+            <p>{t('되돌릴 수 없습니다. 저장된 통계 결과 파일만 지우고, 내보낸 CSV·HTML 은 그대로 둡니다.')}</p>
+            {delAsk.length <= 5 && (
+              <ul className="list-disc pl-5 text-small text-fg-dim">
+                {delAsk.map(id => (
+                  <li key={id}>{jobs.find(j => j.id === id)?.title ?? id}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Dialog>
       )}
 
       {closeAsk && (
@@ -660,8 +721,8 @@ function Warn({ children }: { children: React.ReactNode }) {
 /** 판정 기준 — 표 아래 ⓘ 에 마우스를 올리면 보인다 */
 function rulesText(r: JudgeRules): string {
   return [
-    `${t('에러 증가')}: ${t('에러율')} ×${r.errorRatio} · +${r.errorMinDelta * 100}%p`,
-    `${t('느려짐')}: ${r.slowOn.map(m => slowName(m, t)).join('·')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
+    `${t('에러 증가')}: ${t('에러율')} ${errCondText(r)}`,
+    `${t('느려짐')}: ${r.slowOn.map(m => slowName(m, t)).join('·')} ${slowCondText(r)}`,
     `${t('호출량 급변')}: TPS ±${r.volumeRatio * 100}%`,
     `${t('표본 적음')}: < ${r.minCount}${t('건')} (${t('판정하지 않음')})`,
     ...(r.beyondWorst ? [t('과거가 여럿이면 과거 날들 중 가장 나빴던 날보다도 나쁠 때만입니다.')] : []),

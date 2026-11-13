@@ -44,14 +44,32 @@ export function termHelp(k: Term): string {
   }
 }
 
+/** 느려짐 조건 — 켠 것만, 둘이면 «그리고»/«또는»(slowCombine) */
+export function slowCondText(r: JudgeRules): string {
+  const parts = [
+    ...(r.slowUseRatio ? [`${t('과거의')} ${r.slowRatio}${t('배 이상')}`] : []),
+    ...(r.slowUseMs ? [`${r.slowMinMs}ms ${t('이상 늘어남')}`] : []),
+  ];
+  return parts.join(r.slowCombine === 'or' ? ` ${t('또는')} ` : ` ${t('그리고')} `);
+}
+
+/** 에러 증가 조건 — 같은 방식 */
+export function errCondText(r: JudgeRules): string {
+  const parts = [
+    ...(r.errorUseRatio ? [`${t('과거의')} ${r.errorRatio}${t('배 이상')}`] : []),
+    ...(r.errorUsePp ? [`${(r.errorMinDelta * 100).toFixed(1)}%p ${t('이상 늘어남')}`] : []),
+  ];
+  return parts.join(r.errorCombine === 'or' ? ` ${t('또는')} ` : ` ${t('그리고')} `);
+}
+
 /** 판정 하나의 뜻 — 지금 규칙의 숫자로 */
 export function flagHelp(f: Flag, r: JudgeRules): string {
   const worst = r.beyondWorst ? `\n${t('과거가 여럿이면 과거 날들 중 가장 나빴던 날보다도 나쁠 때만입니다.')}` : '';
   switch (f) {
     case 'errors':
-      return `${t('에러 증가 — 에러율이 과거의')} ${r.errorRatio}${t('배 이상이고')} ${(r.errorMinDelta * 100).toFixed(1)}%p ${t('이상 늘었습니다.')}${worst}`;
+      return `${t('에러 증가 — 에러율이')} ${errCondText(r)}.${worst}`;
     case 'slow':
-      return `${t('느려짐 —')} ${r.slowOn.map(m => slowName(m, t)).join('·')} ${t('중 하나가 과거의')} ${r.slowRatio}${t('배 이상이고')} ${r.slowMinMs}ms ${t('이상 늘었습니다.')}${worst}`;
+      return `${t('느려짐 —')} ${r.slowOn.map(m => slowName(m, t)).join('·')} ${t('중 하나가')} ${slowCondText(r)}.${worst}`;
     case 'volume':
       return `${t('호출량 급변 — TPS 가 과거에서')} ±${Math.round(r.volumeRatio * 100)}% ${t('넘게 변했습니다.')}`;
     case 'new':

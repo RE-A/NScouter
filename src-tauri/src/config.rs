@@ -177,11 +177,36 @@ pub struct StatsJudgePrefs {
     pub slow_metrics: Vec<String>,
     /// 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가로 본다
     pub beyond_worst: bool,
+    /// 느려짐에 배율(`slow_ratio`)을 쓰나 · 차이(`slow_min_ms`)를 쓰나 — 둘 다 켜면 `slow_combine` 으로 묶는다
+    pub slow_use_ratio: bool,
+    pub slow_use_ms: bool,
+    /// 에러 증가에 배율(`error_ratio`)을 쓰나 · 차이(`error_min_pp`)를 쓰나
+    pub error_use_ratio: bool,
+    pub error_use_pp: bool,
+    /// 배율·차이를 둘 다 쓸 때 묶는 법 — `and`(둘 다 넘어야) · `or`(하나만 넘어도). 모르는 값은 `and`
+    pub slow_combine: String,
+    pub error_combine: String,
 }
 
 impl Default for StatsJudgePrefs {
     fn default() -> Self {
-        Self { slow_ratio: 1.5, slow_min_ms: 100.0, error_ratio: 2.0, error_min_pp: 1.0, volume_pct: 50.0, min_count: 30, use_p99: false, slow_metrics: Vec::new(), beyond_worst: true }
+        Self {
+            slow_ratio: 1.3,
+            slow_min_ms: 1000.0,
+            error_ratio: 2.0,
+            error_min_pp: 1.0,
+            volume_pct: 50.0,
+            min_count: 30,
+            use_p99: false,
+            slow_metrics: Vec::new(),
+            beyond_worst: true,
+            slow_use_ratio: true,
+            slow_use_ms: true,
+            error_use_ratio: true,
+            error_use_pp: true,
+            slow_combine: "and".into(),
+            error_combine: "and".into(),
+        }
     }
 }
 

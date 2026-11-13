@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { StatsSummary } from './statsApi';
 import { statsCsv } from './statsCsv';
-import { DEFAULT_RULES } from './statsJudge';
+import { DEFAULT_RULES as D } from './statsJudge';
+
+// 판정 논리 시험 — 고정한 규칙으로(기본값 1.3배·1000ms 와 상관없이)
+const DEFAULT_RULES = { ...D, slowRatio: 1.5, slowMinMs: 100 };
 
 const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
   count: 1000, errors: 10, error_rate: 0.01, tps: 2, avg_ms: 200, p50_ms: 150, p90_ms: 400, p95_ms: 500, p99_ms: 900,
