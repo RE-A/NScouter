@@ -38,7 +38,7 @@ const result: StatsResult = {
   ranges: [], raw_path: '/x/exports/raw.csv', raw_rows: 2000, raw_error: null, raw_files: 1, folded: 0,
   services: [
     { service: '/same', current: s({ count: 5000 }), baseline: s() },
-    { service: '/slow', current: s({ avg_ms: 900 }), baseline: s() },
+    { service: '/slow', current: s({ avg_ms: 2000 }), baseline: s() },
     { service: '/old', current: null, baseline: s() },
   ],
 };

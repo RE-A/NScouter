@@ -22,7 +22,18 @@ export interface JudgeRules {
   slowOn: SlowMetric[];
   /** 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가 — 날마다 들쭉날쭉한 서비스가 늘 뜨지 않게 */
   beyondWorst: boolean;
+  /** 느려짐에 배율·차이를 쓰나 — 둘 다 켜면 둘 다 넘어야 한다(AND). 적어도 하나는 켠다 */
+  slowUseRatio: boolean;
+  slowUseMs: boolean;
+  /** 에러 증가에 배율·차이를 쓰나 — 같은 방식 */
+  errorUseRatio: boolean;
+  errorUsePp: boolean;
+  /** 배율·차이를 둘 다 쓸 때 묶는 법 — and: 둘 다 넘어야, or: 하나만 넘어도 */
+  slowCombine: Combine;
+  errorCombine: Combine;
 }
+
+export type Combine = 'and' | 'or';
 
 /** «느려짐» 을 볼 수 있는 지표 */
 export type SlowMetric = 'avg' | 'p50' | 'p90' | 'p99';
@@ -34,15 +45,32 @@ export function slowValue(s: StatsSummary, m: SlowMetric): number {
 }
 
 export const DEFAULT_RULES: JudgeRules = {
-  slowRatio: 1.5,
-  slowMinMs: 100,
+  slowRatio: 1.3,
+  slowMinMs: 1000,
   errorRatio: 2,
   errorMinDelta: 0.01,
   volumeRatio: 0.5,
   minCount: 30,
   slowOn: ['avg', 'p90'],
   beyondWorst: true,
+  slowUseRatio: true,
+  slowUseMs: true,
+  errorUseRatio: true,
+  errorUsePp: true,
+  slowCombine: 'and',
+  errorCombine: 'and',
 };
+
+/** 배율·차이 스위치 — 없으면 켬. 한 판정에서 둘 다 꺼져 있으면(손으로 고친 파일) 둘 다 켠다 */
+function useFlags(p: StatsJudgePrefs): Pick<JudgeRules, 'slowUseRatio' | 'slowUseMs' | 'errorUseRatio' | 'errorUsePp'> {
+  let slowUseRatio = p.slow_use_ratio !== false;
+  let slowUseMs = p.slow_use_ms !== false;
+  let errorUseRatio = p.error_use_ratio !== false;
+  let errorUsePp = p.error_use_pp !== false;
+  if (!slowUseRatio && !slowUseMs) slowUseRatio = slowUseMs = true;
+  if (!errorUseRatio && !errorUsePp) errorUseRatio = errorUsePp = true;
+  return { slowUseRatio, slowUseMs, errorUseRatio, errorUsePp };
+}
 
 /** 설정의 «느려짐» 지표 — 없으면 예전 설정(평균·p90, use_p99 면 p99 도) */
 function slowFromPrefs(p: StatsJudgePrefs): SlowMetric[] {
@@ -64,6 +92,9 @@ export function rulesFromPrefs(p: StatsJudgePrefs | undefined): JudgeRules {
     minCount: Number.isFinite(p.min_count) && p.min_count >= 0 ? Math.round(p.min_count) : DEFAULT_RULES.minCount,
     slowOn: slowFromPrefs(p),
     beyondWorst: p.beyond_worst !== false,
+    ...useFlags(p),
+    slowCombine: p.slow_combine === 'or' ? 'or' : 'and',
+    errorCombine: p.error_combine === 'or' ? 'or' : 'and',
   };
 }
 
@@ -78,6 +109,12 @@ export function prefsFromRules(r: JudgeRules): StatsJudgePrefs {
     use_p99: r.slowOn.includes('p99'),
     slow_metrics: [...r.slowOn],
     beyond_worst: r.beyondWorst,
+    slow_use_ratio: r.slowUseRatio,
+    slow_use_ms: r.slowUseMs,
+    error_use_ratio: r.errorUseRatio,
+    error_use_pp: r.errorUsePp,
+    slow_combine: r.slowCombine,
+    error_combine: r.errorCombine,
   };
 }
 
@@ -126,14 +163,29 @@ export function errHit(row: ServiceStats, r: JudgeRules): boolean {
   const c = row.current;
   const b = row.baseline;
   if (!c || !b) return false;
-  const up = c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio);
-  if (!up) return false;
+  if (!errorUp(c.error_rate, b.error_rate, r)) return false;
   const w = r.beyondWorst ? worstDay(row, 'err') : null;
   return w === null || c.error_rate > w;
 }
 
-function slower(cur: number, base: number, r: JudgeRules): boolean {
-  return cur - base >= r.slowMinMs && cur >= base * r.slowRatio;
+/** 켠 조건만 묶는다 — 하나만 켜면 그것, 둘 다 켜면 and/or. 둘 다 꺼진 일은 `useFlags` 가 막는다 */
+function combine(useA: boolean, a: boolean, useB: boolean, b: boolean, how: Combine): boolean {
+  if (useA && useB) return how === 'or' ? a || b : a && b;
+  if (useA) return a;
+  if (useB) return b;
+  return false;
+}
+
+/** 응답시간이 늘었나 — 켠 조건만 본다(둘 다 켜면 and/or). 배율만 쓸 때도 늘기는 해야 한다 */
+export function slower(cur: number, base: number, r: JudgeRules): boolean {
+  if (!(cur > base)) return false;
+  return combine(r.slowUseMs, cur - base >= r.slowMinMs, r.slowUseRatio, cur >= base * r.slowRatio, r.slowCombine);
+}
+
+/** 에러율이 늘었나 — 같은 방식. 과거가 0 이면 배율은 «늘었으면 넘은 것» 으로 본다 */
+export function errorUp(cur: number, base: number, r: JudgeRules): boolean {
+  if (!(cur > base)) return false;
+  return combine(r.errorUsePp, cur - base >= r.errorMinDelta, r.errorUseRatio, base === 0 || cur >= base * r.errorRatio, r.errorCombine);
 }
 
 export function judge(row: ServiceStats, r: JudgeRules = DEFAULT_RULES): Flag[] {

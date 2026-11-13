@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ServiceStats, StatsSummary } from './statsApi';
-import { DEFAULT_RULES } from './statsJudge';
+import { DEFAULT_RULES as D } from './statsJudge';
+
+// 판정 논리 시험 — 고정한 규칙으로(기본값 1.3배·1000ms 와 상관없이)
+const DEFAULT_RULES = { ...D, slowRatio: 1.5, slowMinMs: 100 };
 import { flagReason, fmtMetric, fmtPp, fmtVs, metricBad, metricValue, pastView, splitService } from './statsFormat';
 
 const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({

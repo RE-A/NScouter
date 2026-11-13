@@ -37,7 +37,7 @@ import {
 } from './statsApi';
 import { statsCsv } from './statsCsv';
 import { DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, type JudgeRules } from './statsJudge';
-import { termHelp } from './statsGlossary';
+import { errCondText, slowCondText, termHelp } from './statsGlossary';
 import { slowName, withPastView } from './statsFormat';
 import { StatsSettingsDialog } from './StatsSettingsDialog';
 import { parsePresets, type StatsPreset } from './statsPresets';
@@ -660,8 +660,8 @@ function Warn({ children }: { children: React.ReactNode }) {
 /** 판정 기준 — 표 아래 ⓘ 에 마우스를 올리면 보인다 */
 function rulesText(r: JudgeRules): string {
   return [
-    `${t('에러 증가')}: ${t('에러율')} ×${r.errorRatio} · +${r.errorMinDelta * 100}%p`,
-    `${t('느려짐')}: ${r.slowOn.map(m => slowName(m, t)).join('·')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
+    `${t('에러 증가')}: ${t('에러율')} ${errCondText(r)}`,
+    `${t('느려짐')}: ${r.slowOn.map(m => slowName(m, t)).join('·')} ${slowCondText(r)}`,
     `${t('호출량 급변')}: TPS ±${r.volumeRatio * 100}%`,
     `${t('표본 적음')}: < ${r.minCount}${t('건')} (${t('판정하지 않음')})`,
     ...(r.beyondWorst ? [t('과거가 여럿이면 과거 날들 중 가장 나빴던 날보다도 나쁠 때만입니다.')] : []),
