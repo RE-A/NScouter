@@ -85,6 +85,8 @@ function metricLabel(k: MetricKey): string {
       return t('건수');
     case 'avg':
       return t('평균(ms)');
+    case 'p50':
+      return 'p50(ms)';
     case 'p90':
       return 'p90(ms)';
     case 'p99':
