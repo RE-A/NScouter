@@ -7,7 +7,8 @@
 import { memo, useMemo, useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../../components/Button';
-import { fromLocalInput, toLocalInput } from '../xlog/types/timeRange';
+import { TimeInput } from '../../components/TimeInput';
+import { toLocalInput } from '../xlog/types/timeRange';
 import type { Estimate, StatsRange, StatsRequest, StatsTaskRule } from './statsApi';
 import { picksByRule } from './taskRule';
 import { termHelp } from './statsGlossary';
@@ -499,19 +500,9 @@ function Section({ title, hint, tag, help, children }: { title: string; hint?: s
 function RangeInput({ value, onChange }: { value: StatsRange; onChange: (r: StatsRange) => void }) {
   return (
     <span className="flex items-center gap-1.5">
-      <input
-        type="datetime-local"
-        value={toLocalInput(value.stime)}
-        onChange={e => onChange({ ...value, stime: fromLocalInput(e.target.value) ?? 0 })}
-        className={inputCls}
-      />
+      <TimeInput ms={value.stime} onChange={stime => onChange({ ...value, stime })} className={inputCls} />
       <span className="text-fg-faint">–</span>
-      <input
-        type="datetime-local"
-        value={toLocalInput(value.etime)}
-        onChange={e => onChange({ ...value, etime: fromLocalInput(e.target.value) ?? 0 })}
-        className={inputCls}
-      />
+      <TimeInput ms={value.etime} onChange={etime => onChange({ ...value, etime })} className={inputCls} />
     </span>
   );
 }

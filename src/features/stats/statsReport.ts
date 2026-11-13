@@ -37,6 +37,8 @@ function metricHead(k: MetricKey, tr: Tr): string {
       return tr('건수');
     case 'avg':
       return tr('평균(ms)');
+    case 'p50':
+      return 'p50(ms)';
     case 'p90':
       return 'p90(ms)';
     case 'p99':
@@ -197,7 +199,7 @@ ${detail ? `<h2>${esc(tr('5분 평균 응답시간 — 실선 기준, 점선 과
 <h2>${esc(tr('전체 서비스'))} <span class="count">${rows.length}</span></h2>
 <div class="wrap"><table class="t">${head}<tbody>${rows.map(tableRow).join('\n')}</tbody></table></div>
 <div class="gloss"><b>${esc(tr('용어 설명'))}</b><dl>
-${(['ref', 'past', 'vs', 'count', 'avg', 'p90', 'p99', 'err'] as Term[])
+${(['ref', 'past', 'vs', 'count', 'avg', 'p50', 'p90', 'p99', 'err'] as Term[])
   .map(k => {
     const [name, ...rest] = termHelp(k).split(' — ');
     return `<dt>${esc(name)}</dt><dd>${esc(rest.join(' — '))}</dd>`;

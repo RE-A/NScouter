@@ -13,9 +13,9 @@ export function slowName(m: SlowMetric, tr: (s: string) => string = x => x): str
 }
 
 /** 표에 두는 지표 */
-export type MetricKey = 'count' | 'avg' | 'p90' | 'p99' | 'err';
+export type MetricKey = 'count' | 'avg' | 'p50' | 'p90' | 'p99' | 'err';
 
-export const METRICS: MetricKey[] = ['count', 'avg', 'p90', 'p99', 'err'];
+export const METRICS: MetricKey[] = ['count', 'avg', 'p50', 'p90', 'p99', 'err'];
 
 /**
  * 과거를 **일자별 평균**으로 — 과거 구간마다 따로 센 값의 평균(날마다 같은 무게).
@@ -59,6 +59,8 @@ export function metricValue(s: StatsSummary | null | undefined, k: MetricKey): n
       return s.count;
     case 'avg':
       return s.avg_ms;
+    case 'p50':
+      return s.p50_ms;
     case 'p90':
       return s.p90_ms;
     case 'p99':
@@ -103,7 +105,7 @@ export function fmtMetricVs(k: MetricKey, cur: number | undefined, base: number 
 
 /**
  * 이 칸의 변화가 **판정에 걸렸나** — 빨간색은 이것만. 건수는 색을 안 쓴다(늘고 줄어드는 게 나쁜 일이 아니다).
- * p99 는 «p99 도 본다» 를 켰을 때만
+ * 응답시간 지표는 «느려짐» 을 볼 지표로 골랐을 때만
  */
 export function metricBad(k: MetricKey, row: ServiceStats, r: JudgeRules): boolean {
   const c = row.current;
@@ -111,6 +113,7 @@ export function metricBad(k: MetricKey, row: ServiceStats, r: JudgeRules): boole
   if (!c || !b || c.count < r.minCount || b.count < r.minCount) return false;
   switch (k) {
     case 'avg':
+    case 'p50':
     case 'p90':
     case 'p99':
       return r.slowOn.includes(k) && slowHit(row, k, r);
@@ -121,7 +124,7 @@ export function metricBad(k: MetricKey, row: ServiceStats, r: JudgeRules): boole
   }
 }
 
-/** 판정 이유 — 칩 옆에 짧게. 걸린 지표 중 가장 크게 변한 것 (p50 처럼 표에 없는 지표도 적는다) */
+/** 판정 이유 — 칩 옆에 짧게. 걸린 지표 중 가장 크게 변한 것 */
 export function flagReason(f: Flag, row: ServiceStats, r: JudgeRules, tr: (s: string) => string = x => x): string {
   const c = row.current;
   const b = row.baseline;

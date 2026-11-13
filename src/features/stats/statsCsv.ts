@@ -39,7 +39,7 @@ export function statsCsv(rows: readonly ServiceStats[], rules: JudgeRules, pastR
     ...SIDE_HEAD.map(h => `기준 ${h}`),
     ...pastHead,
     '과거 건수(합계)',
-    '평균 과거 대비(%)', 'p90 과거 대비(%)', 'p99 과거 대비(%)', '에러율 과거 대비(%p)', 'TPS 과거 대비(%)',
+    '평균 과거 대비(%)', 'p50 과거 대비(%)', 'p90 과거 대비(%)', 'p99 과거 대비(%)', '에러율 과거 대비(%p)', 'TPS 과거 대비(%)',
   ];
   const lines = [head.map(csvCell).join(',')];
   for (const orig of rows) {
@@ -54,6 +54,7 @@ export function statsCsv(rows: readonly ServiceStats[], rules: JudgeRules, pastR
       ...side(r.baseline),
       orig.baseline ? orig.baseline.count : null,
       pct(c?.avg_ms, b?.avg_ms),
+      pct(c?.p50_ms, b?.p50_ms),
       pct(c?.p90_ms, b?.p90_ms),
       pct(c?.p99_ms, b?.p99_ms),
       c && b ? r3((c.error_rate - b.error_rate) * 100) : null,

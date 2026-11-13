@@ -157,4 +157,21 @@ describe('StatsTab', () => {
     fireEvent.click(screen.getByRole('button', { name: '지우기' }));
     await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_delete', { id: '1-0' }));
   });
+
+  it('시각 칸 — 연도를 치는 중의 값(0002-…)·빈 값이 1970 년으로 떨어지지 않는다', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => (cmd === 'stats_jobs' ? [] : null));
+    const view = render(<StatsTab connected groups={[]} servers={[]} onOpenTxid={() => {}} />);
+    const el = () => view.container.querySelector<HTMLInputElement>('input[type="datetime-local"]');
+    await waitFor(() => expect(el()).toBeTruthy());
+    const input = el();
+    if (!input) throw new Error('시각 칸이 없다');
+    for (const v of ['0002-11-13T10:20', '0020-11-13T10:20', '0202-11-13T10:20']) {
+      fireEvent.change(input, { target: { value: v } });
+      expect(input.value).toBe(v);
+    }
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input.value).not.toMatch(/^1970/);
+    fireEvent.change(input, { target: { value: '2025-11-13T10:20' } });
+    expect(input.value).toBe('2025-11-13T10:20');
+  });
 });
