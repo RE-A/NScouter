@@ -137,4 +137,24 @@ describe('StatsTab', () => {
     fireEvent.click(await screen.findByText('shop 오전'));
     expect((await screen.findByText(/데이터가 하나도 없는 구간/)).textContent).toContain('과거');
   });
+
+  it('목록에서 지우기 — 확인 창을 거쳐 지운다, 모두 지우기도', async () => {
+    const other: JobInfo = { ...job, id: '0-0', title: '어제 것' };
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'stats_jobs') return [job, other];
+      return null;
+    });
+    render(<StatsTab connected groups={[]} servers={[]} onOpenTxid={() => {}} />);
+    await screen.findByText('어제 것');
+    fireEvent.click(screen.getAllByLabelText('이 결과 지우기')[1]);
+    expect(await screen.findByText('이 결과를 지울까요?')).toBeTruthy();
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('stats_delete', expect.anything());
+    fireEvent.click(screen.getByRole('button', { name: '지우기' }));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_delete', { id: '0-0' }));
+
+    fireEvent.click(screen.getByText(/지난 결과 모두 지우기/));
+    expect(await screen.findByText('지난 결과 2개를 지울까요?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '지우기' }));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_delete', { id: '1-0' }));
+  });
 });

@@ -1269,4 +1269,9 @@ export const EN: Record<string, string> = {
   '두 조건을 묶는 법': 'How to combine the two conditions',
   '그리고: 둘 다 넘어야 · 또는: 하나만 넘어도': 'and: both must be met · or: either is enough',
   '체크한 조건만 봅니다. 둘 다 체크하면 가운데에서 «그리고»(둘 다 넘어야) / «또는»(하나만 넘어도)를 고릅니다. 적어도 하나는 체크해야 합니다.': 'Only checked conditions apply. With both checked, pick «and» (both) or «or» (either) in the middle. Check at least one.',
+  '이 결과 지우기': 'Delete this result',
+  '지난 결과 모두 지우기': 'Delete all past results',
+  '이 결과를 지울까요?': 'Delete this result?',
+  '개를 지울까요?': ' — delete?',
+  '되돌릴 수 없습니다. 저장된 통계 결과 파일만 지우고, 내보낸 CSV·HTML 은 그대로 둡니다.': 'This cannot be undone. Only the saved statistics results are deleted; exported CSV and HTML files stay.',
 };
