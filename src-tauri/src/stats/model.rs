@@ -1,8 +1,8 @@
 // 통계 비교 — 요청과 서비스별 집계, 결과의 모양
 //
-// **무엇을 비교하나:** 서비스 묶음(또는 서버) 하나의 **현재 구간**과 **기준 구간들**(평소). 기준 구간이 여럿이거나
+// **무엇을 비교하나:** 서비스 묶음(또는 서버) 하나의 **기준 구간**과 **기준 구간들**(과거). 기준 구간이 여럿이거나
 // 그 사이에 서버(Task)가 여럿이었어도 서버·구간별로 나누지 않고 **하나의 기준 통계로 합친다** — 알고 싶은 것은
-// «평소보다 느린가·에러가 많은가» 이지 어느 Task 였나가 아니다.
+// «과거보다 느린가·에러가 많은가» 이지 어느 Task 였나가 아니다.
 //
 // 판정(느려짐·에러 증가 등)은 화면이 한다(`statsJudge.ts`) — 기준값을 바꿔 가며 다시 볼 수 있게 여기서는
 // 숫자만 낸다.
@@ -45,11 +45,11 @@ pub struct StatsRequest {
     /// 대상 — Task 이름 규칙. `*` 가 있으면 그 모양 그대로(대소문자 무시), 없으면 «포함».
     /// 서비스 묶음 규칙(태그)이 지난 Task 에는 안 걸려서(그날 목록에 태그가 없다) 이름으로 묶는 길을 둔다
     pub task_patterns: Vec<String>,
-    /// 현재 구간
+    /// 기준 구간
     pub current: StatsRange,
-    /// 기준(평소) 구간들 — 하나의 기준 통계로 합친다
+    /// 기준(과거) 구간들 — 하나의 기준 통계로 합친다
     pub baselines: Vec<StatsRange>,
-    /// 직접 지정한 서비스 이름(완전 일치, 대소문자 무시). **비면 현재 구간에 찍힌 서비스 전부**
+    /// 직접 지정한 서비스 이름(완전 일치, 대소문자 무시). **비면 기준 구간에 찍힌 서비스 전부**
     pub services: Vec<String>,
     /// 서비스 이름에 든 글자 — 포함(OR) · 제외(하나라도 맞으면 뺀다). XLog 화면 필터와 같은 규칙
     pub service_include: Vec<String>,
@@ -71,13 +71,13 @@ impl StatsRequest {
             return Err("대상(서비스 묶음 또는 서버)을 고르세요".into());
         }
         if self.baselines.is_empty() {
-            return Err("비교할 기준 구간을 하나 이상 넣으세요".into());
+            return Err("비교할 과거 구간을 하나 이상 넣으세요".into());
         }
         if self.baselines.len() > MAX_BASELINES {
-            return Err(format!("기준 구간은 {MAX_BASELINES}개까지입니다"));
+            return Err(format!("과거 구간은 {MAX_BASELINES}개까지입니다"));
         }
         for (i, r) in std::iter::once(&self.current).chain(&self.baselines).enumerate() {
-            let what = if i == 0 { "현재 구간".to_string() } else { format!("기준 구간 {i}") };
+            let what = if i == 0 { "기준 구간".to_string() } else { format!("과거 구간 {i}") };
             if r.etime <= r.stime {
                 return Err(format!("{what}: 끝이 시작보다 앞섭니다"));
             }
@@ -289,7 +289,7 @@ pub struct Summary {
     pub errored: Vec<Sample>,
 }
 
-/// 서비스 하나 — 현재와 기준. 한쪽에만 있으면 다른 쪽은 None (신규 · 사라짐)
+/// 서비스 하나 — 현재와 기준. 한쪽에만 있으면 다른 쪽은 None (신규 · 과거에만 있음)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServiceStats {
     pub service: String,

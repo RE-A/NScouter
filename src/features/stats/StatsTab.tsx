@@ -1,4 +1,4 @@
-// 통계 탭 — 대상 하나의 URL 서비스를 «현재» 와 «평소(기준)» 로 나눠 비교한다
+// 통계 탭 — 대상 하나의 URL 서비스를 «기준»(살펴볼 시점) 과 «과거»(견줄 지난 시점) 로 나눠 비교한다
 //
 // 작업은 Rust 가 백그라운드에서 돌린다(`stats` 모듈) — 하루치를 훑으면 몇 분이 걸릴 수 있어서
 // 화면을 떠나도, 다른 탭을 봐도 계속 돈다. 끝난 결과는 파일로 남아 다시 열 수 있다.
@@ -275,7 +275,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
     if (!result) return;
     const r = result.request;
     const name = `stats-${r.groups[0] ?? r.task_patterns?.[0] ?? r.servers[0] ?? 'target'}`;
-    saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsCsv(result.services, judgeRules) })
+    saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsCsv(result.services, judgeRules, result.request.baselines.length, t) })
       .then(path => setNotice(path))
       .catch(e => setError(String(e)));
   }, [result, judgeRules]);
@@ -406,7 +406,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               <h2 className="text-title font-medium text-fg">{openJob?.title ?? result?.request.title}</h2>
               {req && (
                 <span className="tnum text-small text-fg-dim">
-                  {t('현재')} {rangeLabel(req.current)} · {t('평소')} {req.baselines.length}
+                  {t('기준')} {rangeLabel(req.current)} · {t('과거')} {req.baselines.length}
                   {t('개 구간')}
                 </span>
               )}
@@ -418,7 +418,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                 </Button>
               )}
               {result && (
-                <Button size="sm" onClick={exportCsv} disabled={result.services.length === 0} title={t('서비스 한 줄에 현재·평소·변화')}>
+                <Button size="sm" onClick={exportCsv} disabled={result.services.length === 0} title={t('서비스 한 줄에 기준·과거·과거 대비')}>
                   {t('요약 CSV')}
                 </Button>
               )}
@@ -489,13 +489,14 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                 <StatsTable
                   rows={result.services}
                   rules={judgeRules}
+                  pastRanges={result.request.baselines.length}
                   selected={service}
                   onSelect={setService}
                   detail={renderDetail}
                 />
                 <p className="text-small text-fg-faint">
                   <button type="button" className="underline decoration-dotted hover:text-fg" title={rulesText(judgeRules)} onClick={() => setShowSettings(true)}>
-                    {t('판정 기준')} ⓘ
+                    {t('판정 규칙')} ⓘ
                   </button>{' '}
                   · {t('수집')} {result.collectors.join(' + ')} · {duration(result.finished_at - result.started_at)}
                 </p>
@@ -551,16 +552,16 @@ function ServerCount({ ranges }: { ranges: StatsResult['ranges'] }) {
   return (
     <span
       className="tnum cursor-help text-small text-fg-dim underline decoration-dotted"
-      title={`${t('현재')}:\n${cur.join('\n')}\n\n${t('평소')}:\n${base.join('\n')}`}
+      title={`${t('기준')}:\n${cur.join('\n')}\n\n${t('과거')}:\n${base.join('\n')}`}
     >
-      {t('서버')} {t('현재')} {cur.length}{t('대')} · {t('평소')} {base.length}{t('대')}
+      {t('서버')} {t('기준')} {cur.length}{t('대')} · {t('과거')} {base.length}{t('대')}
     </span>
   );
 }
 
 /**
  * 한 건도 못 받은 구간 — 콜렉터 보관 기간(기본 90일)이 지났거나, 그때 대상 서버가 없었거나,
- * 콜렉터 시간대와 이 PC 시간대가 달라 날짜 폴더가 어긋났다(F-18). 평소가 비면 모든 서비스가 «신규» 로 뜬다
+ * 콜렉터 시간대와 이 PC 시간대가 달라 날짜 폴더가 어긋났다(F-18). 과거가 비면 모든 서비스가 «신규» 로 뜬다
  */
 function EmptyRanges({ result }: { result: StatsResult }) {
   if (result.status === 'failed') return null;
@@ -568,7 +569,7 @@ function EmptyRanges({ result }: { result: StatsResult }) {
   const noServer = result.ranges.filter(r => r.servers.length === 0);
   const list = [...new Set([...empty, ...noServer])];
   if (list.length === 0) return null;
-  const fmtR = (r: StatsResult['ranges'][number]) => `${r.kind === 'current' ? t('현재') : t('평소')} ${rangeLabel(r)}`;
+  const fmtR = (r: StatsResult['ranges'][number]) => `${r.kind === 'current' ? t('기준') : t('과거')} ${rangeLabel(r)}`;
   return (
     <Warn>
       {t('데이터가 하나도 없는 구간')}: {list.map(fmtR).join(', ')} —{' '}
@@ -584,7 +585,7 @@ function NoData({ result }: { result: StatsResult }) {
   if (none.length === 0 || result.status === 'failed') return null;
   return (
     <Warn>
-      {t('지정한 서비스 중 현재·평소 모두 0건인 것')} ({none.length}): <span className="font-mono">{none.slice(0, 5).join(', ')}{none.length > 5 ? ' …' : ''}</span>
+      {t('지정한 서비스 중 기준·과거 모두 0건인 것')} ({none.length}): <span className="font-mono">{none.slice(0, 5).join(', ')}{none.length > 5 ? ' …' : ''}</span>
       {' — '}
       {t('이름(대소문자 무시, 완전 일치)을 확인하세요')}
     </Warn>
@@ -592,7 +593,7 @@ function NoData({ result }: { result: StatsResult }) {
 }
 
 /**
- * 서비스 묶음으로 골랐는데 평소 구간 어딘가의 서버가 현재보다 적다 (9).
+ * 서비스 묶음으로 골랐는데 과거 구간 어딘가의 서버가 현재보다 적다 (9).
  * 묶음이 태그로 정해지면 지난 Task 는 그날 목록에 태그가 없어 빠질 수 있다 — 축소일 수도 있으니 «확인» 으로 알린다
  */
 function FewerServers({ result }: { result: StatsResult }) {
@@ -605,7 +606,7 @@ function FewerServers({ result }: { result: StatsResult }) {
   if (minN >= curN) return null;
   return (
     <Warn>
-      {t('평소 구간 중 서버가 현재보다 적은 구간이 있습니다')} ({t('현재')} {curN}{t('대')} · {t('평소 최소')} {minN}{t('대')}) —{' '}
+      {t('과거 구간 중 서버가 기준보다 적은 구간이 있습니다')} ({t('기준')} {curN}{t('대')} · {t('과거 최소')} {minN}{t('대')}) —{' '}
       {t('묶음이 태그로 정해지면 내려간 지난 Task 가 빠질 수 있습니다. 실제로 줄인 게 아니라면 Task 이름 규칙으로 다시 돌려 보세요')}
     </Warn>
   );

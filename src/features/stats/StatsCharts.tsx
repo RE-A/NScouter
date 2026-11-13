@@ -1,7 +1,7 @@
-// 서비스 하나의 차트 — 5분 추이(현재 vs 평소)와 응답시간 누적 분포
+// 서비스 하나의 차트 — 5분 추이(현재 vs 과거)와 응답시간 누적 분포
 //
 // Canvas 2D 로 직접 그린다(다른 카운터 차트와 같은 방식 — 라이브러리 없이 독립망에서도 그대로 돈다).
-// 색은 테마 토큰(`CANVAS`)을 쓴다: 현재 = accent, 평소 = 흐린 글자색(점선)과 그 최소~최대 띠.
+// 색은 테마 토큰(`CANVAS`)을 쓴다: 현재 = accent, 과거 = 흐린 글자색(점선)과 그 최소~최대 띠.
 
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { t } from '../../i18n';
@@ -187,7 +187,7 @@ export const StatsCharts = memo(function StatsCharts({ current, baseline, range,
         <Chart title={t('응답시간 누적 분포 — 오른쪽일수록 느림')} plot={plots.dist} />
       </div>
       <p className="text-micro text-fg-faint">
-        <span className="text-accent-bright">━</span> {t('현재')} · <span>┅</span> {t('평소 (띠: 평소 구간들의 최소~최대)')}
+        <span className="text-accent-bright">━</span> {t('기준')} · <span>┅</span> {t('과거 (띠: 과거 구간들의 최소~최대)')}
       </p>
     </div>
   );

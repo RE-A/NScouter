@@ -1,8 +1,8 @@
-// 통계 비교 조건 — 대상 하나 · 현재 구간 · 기준 구간 여럿 · 서비스 · 수집 조건
+// 통계 비교 조건 — 대상 하나 · 기준 구간 · 기준 구간 여럿 · 서비스 · 수집 조건
 //
 // **대상은 하나다.** 서비스 묶음(같은 서비스의 Task 여럿)이나 서버 이름 하나를 고른다. 여러 대를 한 번에
 // 비교하면 어느 서버가 나빠졌는지가 평균에 묻힌다.
-// **기준은 여럿을 합친다.** 지난 며칠의 같은 시각을 넣으면 그 전체가 «평소» 다 — 하루하루와 따로 비교하지 않는다.
+// **기준은 여럿을 합친다.** 지난 며칠의 같은 시각을 넣으면 그 전체가 «과거» 다 — 하루하루와 따로 비교하지 않는다.
 
 import { memo, useMemo, useState } from 'react';
 import { t } from '../../i18n';
@@ -30,7 +30,7 @@ export interface StatsDraft {
   ruleName: string;
   current: StatsRange;
   baselines: StatsRange[];
-  /** 한 줄에 하나 — 비면 현재 구간에 찍힌 서비스 전부 */
+  /** 한 줄에 하나 — 비면 기준 구간에 찍힌 서비스 전부 */
   services: string;
   serviceInclude: string;
   serviceExclude: string;
@@ -78,12 +78,12 @@ function rangeError(r: StatsRange): string | null {
 export function draftError(d: StatsDraft): string | null {
   if (d.targetKind === 'group' ? d.target.trim() === '' : splitList(d.rule).length === 0) return t('대상을 고르세요');
   const cur = rangeError(d.current);
-  if (cur) return `${t('현재 구간')}: ${cur}`;
-  if (d.baselines.length === 0) return t('기준 구간을 하나 이상 넣으세요');
-  if (d.baselines.length > MAX_BASELINES) return t('기준 구간이 너무 많습니다 (최대 14)');
+  if (cur) return `${t('기준 구간')}: ${cur}`;
+  if (d.baselines.length === 0) return t('과거 구간을 하나 이상 넣으세요');
+  if (d.baselines.length > MAX_BASELINES) return t('과거 구간이 너무 많습니다 (최대 14)');
   for (const b of d.baselines) {
     const e = rangeError(b);
-    if (e) return `${t('기준 구간')}: ${e}`;
+    if (e) return `${t('과거 구간')}: ${e}`;
   }
   return null;
 }
@@ -196,7 +196,7 @@ export const StatsForm = memo(function StatsForm({
 
   return (
     <div className="flex max-w-4xl flex-col gap-4">
-      {/* 조건 묶음 — 대상·서비스·수집 조건·평소 구간 잡는 법. 현재 구간은 그대로 두고 채운다 */}
+      {/* 조건 묶음 — 대상·서비스·수집 조건·과거 구간 잡는 법. 기준 구간은 그대로 두고 채운다 */}
       <div className="flex flex-wrap items-center gap-2 rounded bg-raised px-2 py-1.5">
         <span className="text-small text-fg-dim">{t('조건 묶음')}</span>
         <select
@@ -231,7 +231,7 @@ export const StatsForm = memo(function StatsForm({
           size="sm"
           disabled={presetName.trim() === ''}
           onClick={() => onSavePresets([toPreset(presetName, d), ...presets.filter(p => p.name !== presetName.trim())])}
-          title={t('평소 구간은 현재 구간에서 떨어진 만큼으로 남깁니다 — 불러오면 그날의 현재 구간에 맞춰 다시 만듭니다')}
+          title={t('과거 구간은 기준 구간에서 떨어진 만큼으로 남깁니다 — 불러오면 그날의 기준 구간에 맞춰 다시 만듭니다')}
         >
           {presets.some(p => p.name === presetName.trim()) ? t('고쳐 저장') : t('지금 조건 저장')}
         </Button>
@@ -326,11 +326,11 @@ export const StatsForm = memo(function StatsForm({
         )}
       </Section>
 
-      <Section title={t('현재 구간')} hint={t('최대 하루')}>
+      <Section title={t('기준 구간')} hint={t('살펴볼 시점 · 최대 하루')}>
         <RangeInput value={d.current} onChange={v => set('current', v)} />
       </Section>
 
-      <Section title={t('평소 (기준 구간)')} hint={t('여러 개를 넣으면 하나로 합쳐 «평소» 로 봅니다')}>
+      <Section title={t('과거 구간')} hint={t('견줄 지난 시점 · 여러 개를 넣으면 하나로 합칩니다')}>
         <div className="flex flex-wrap items-center gap-1.5">
           <Button size="sm" onClick={() => addBase(yesterday(d.current))}>{t('+ 어제 같은 시각')}</Button>
           <Button size="sm" onClick={() => addBase(lastWeek(d.current))}>{t('+ 지난주 같은 요일')}</Button>
@@ -365,7 +365,7 @@ export const StatsForm = memo(function StatsForm({
                   className={`tnum inline-flex items-center gap-1 rounded border px-2 py-0.5 text-small ${
                     odd ? 'border-warn/50 text-warn' : 'border-line-control text-fg'
                   }`}
-                  title={odd ? t('현재 구간과 시각·길이가 달라 피크가 섞일 수 있습니다') : undefined}
+                  title={odd ? t('기준 구간과 시각·길이가 달라 피크가 섞일 수 있습니다') : undefined}
                 >
                   {rangeLabel(b)}
                   <button
@@ -386,15 +386,15 @@ export const StatsForm = memo(function StatsForm({
         )}
         {d.baselines.some(b => overlaps(b, d.current)) && (
           <p className="mt-1.5 text-small text-warn">
-            {t('현재 구간과 겹치는 평소 구간이 있습니다 — 같은 트랜잭션이 양쪽에 들어가 차이가 작게 나옵니다')}
+            {t('기준 구간과 겹치는 과거 구간이 있습니다 — 같은 트랜잭션이 양쪽에 들어가 차이가 작게 나옵니다')}
           </p>
         )}
         {d.current.etime > Date.now() + 60_000 && (
-          <p className="mt-1.5 text-small text-warn">{t('현재 구간 끝이 지금보다 뒤입니다 — 아직 오지 않은 시간은 0건으로 셉니다')}</p>
+          <p className="mt-1.5 text-small text-warn">{t('기준 구간 끝이 지금보다 뒤입니다 — 아직 오지 않은 시간은 0건으로 셉니다')}</p>
         )}
         {off && (
           <p className="mt-1.5 text-small text-warn">
-            {t('현재 구간과 시각·길이가 다른 기준이 있습니다 — 피크·한가한 시간이 섞이면 «느려짐» 이 잘못 뜰 수 있습니다')}
+            {t('기준 구간과 시각·길이가 다른 과거 구간이 있습니다 — 피크·한가한 시간이 섞이면 «느려짐» 이 잘못 뜰 수 있습니다')}
           </p>
         )}
       </Section>
@@ -417,7 +417,7 @@ export const StatsForm = memo(function StatsForm({
                 value={d.services}
                 spellCheck={false}
                 rows={3}
-                placeholder={t('비우면 현재 구간에 찍힌 서비스 전부. 직접 고르려면 한 줄에 하나')}
+                placeholder={t('비우면 기준 구간에 찍힌 서비스 전부. 직접 고르려면 한 줄에 하나')}
                 onChange={e => set('services', e.target.value)}
                 className={`${inputCls} min-w-0 flex-1 font-mono`}
               />

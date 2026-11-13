@@ -19,21 +19,37 @@ const r: StatsResult = {
   },
   services: [
     { service: '/ok', current: s(), baseline: s() },
-    { service: '/slow<x>', current: s({ avg_ms: 900 }), baseline: s() },
+    { service: '/x/cj.com.SlowService.get<x>', current: s({ avg_ms: 900 }), baseline: s() },
+    { service: '/err', current: s({ error_rate: 0.19, avg_ms: 900 }), baseline: s({ error_rate: 0.05 }) },
     { service: '/gone', current: null, baseline: s() },
   ],
 };
 
 describe('statsReport', () => {
-  it('바깥 자원 없이 한 장 — 특이사항이 위에, 글자는 이스케이프', () => {
-    const series = [{ t: 10 * H, count: 10, errors: 0, avg_ms: 900, max_ms: 1000 }, { t: 10 * H + 300_000, count: 10, errors: 0, avg_ms: 950, max_ms: 1000 }];
-    const html = statsReport(r, DEFAULT_RULES, new Map([['/slow<x>', { ...r.services[1], current: s({ avg_ms: 900, series }) }]]), x => x);
+  const series = [{ t: 10 * H, count: 10, errors: 0, avg_ms: 900, max_ms: 1000 }, { t: 10 * H + 300_000, count: 10, errors: 0, avg_ms: 950, max_ms: 1000 }];
+  const html = statsReport(r, DEFAULT_RULES, new Map([['/x/cj.com.SlowService.get<x>', { ...r.services[1], current: s({ avg_ms: 900, series }) }]]), x => x);
+
+  it('바깥 자원 없이 한 장, 글자는 이스케이프', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(html).not.toMatch(/<script|<link|src=|https?:/);
     expect(html).toContain('&lt;b&gt;보고서&lt;/b&gt;');
-    expect(html).toContain('/slow&lt;x&gt;');
     expect(html).toContain('<svg');
-    expect(html).toContain('특이사항 (1)');
+  });
+
+  it('용어는 기준·과거, 머리글 두 줄, 서비스 끝부분은 진하게', () => {
+    expect(html).not.toMatch(/현재|평소/);
+    expect(html).toContain('<span class="tag cur">기준</span>');
+    expect(html).toContain('<span class="tag past">과거</span>');
+    expect(html).toContain('<th class="g cur">기준</th><th>과거</th><th>과거 대비</th>');
+    expect(html).toContain('<b>SlowService.get&lt;x&gt;</b>');
+  });
+
+  it('판정별로 묶고 더 나쁜 쪽에만 — 에러 증가가 먼저, 이유와 배수·%p', () => {
+    expect(html.indexOf('<h2>에러 증가 (1)</h2>')).toBeGreaterThan(-1);
+    expect(html.indexOf('<h2>느려짐 (1)</h2>')).toBeGreaterThan(html.indexOf('<h2>에러 증가 (1)</h2>'));
+    expect(html).toContain('+14.0%p');
+    expect(html).toContain('×4.5');
+    expect(html).toContain('class="n vs bad"');
     expect(html).not.toContain('/gone');
   });
 

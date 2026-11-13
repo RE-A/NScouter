@@ -1,4 +1,4 @@
-// 특이사항 판정 — «평소보다 느리다 · 에러가 많다» 를 숫자로 가린다
+// 특이사항 판정 — «과거보다 느리다 · 에러가 많다» 를 숫자로 가린다
 //
 // Rust 는 숫자만 낸다. 판정은 여기서 한다 — 기준값을 바꿔 가며 같은 결과를 다시 볼 수 있게.
 // 몇 건 안 되는 서비스는 한 건만 느려도 경보가 되므로 `minCount` 보다 적으면 판정하지 않고 «표본 적음» 으로 둔다.
@@ -64,8 +64,8 @@ export type Flag = 'slow' | 'errors' | 'new' | 'gone' | 'volume' | 'few';
 export const FLAG_LABEL: Record<Flag, string> = {
   slow: '느려짐',
   errors: '에러 증가',
-  new: '신규',
-  gone: '사라짐',
+  new: '기준에만 있음',
+  gone: '과거에만 있음',
   volume: '호출량 급변',
   few: '표본 적음',
 };

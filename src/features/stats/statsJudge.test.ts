@@ -29,7 +29,7 @@ const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
 const row = (current: StatsSummary | null, baseline: StatsSummary | null): ServiceStats => ({ service: '/a', current, baseline });
 
 describe('judge', () => {
-  it('평소와 같으면 깃발이 없다', () => {
+  it('과거와 같으면 깃발이 없다', () => {
     expect(judge(row(s(), s()))).toEqual([]);
   });
 
@@ -68,7 +68,7 @@ describe('judge', () => {
     expect(judge(row(s({ tps: 16 }), s()))).toEqual(['volume']);
   });
 
-  it('한쪽에만 있으면 신규·사라짐, 건수가 적으면 판정하지 않는다', () => {
+  it('한쪽에만 있으면 신규·과거에만 있음, 건수가 적으면 판정하지 않는다', () => {
     expect(judge(row(s(), null))).toEqual(['new']);
     expect(judge(row(null, s()))).toEqual(['gone']);
     expect(judge(row(s({ count: 10, avg_ms: 5000 }), s()))).toEqual(['few']);
@@ -81,7 +81,7 @@ describe('change · severity', () => {
     expect(change(1, 0)).toBeNull();
   });
 
-  it('에러 증가가 느려짐보다, 느려짐이 평소보다 나쁘다', () => {
+  it('에러 증가가 느려짐보다, 느려짐이 과거보다 나쁘다', () => {
     const err = severity(row(s({ error_rate: 0.05 }), s()));
     const slow = severity(row(s({ avg_ms: 400 }), s()));
     const same = severity(row(s(), s()));

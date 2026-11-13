@@ -1,18 +1,22 @@
-// 비교 표 — 서비스 한 줄에 현재 값과 변화, 그 아래 평소(기준) 값
+// 비교 표 — 서비스 한 줄에 지표마다 «기준 | 과거 | 과거 대비»
 //
-// 숫자는 다섯 가지만 둔다(건수·평균·p90·p99·에러율). 나머지는 줄을 눌러 상세에서 본다.
+// 용어: **기준** = 살펴보는 시점, **과거** = 견줄 지난 시점. 머리글을 두 줄로 두어 어느 숫자가 무엇인지 칸마다 밝힌다.
+// 과거 건수는 구간당 평균(과거 구간이 여럿이면 합계로는 견줄 수 없다). 빨간색은 판정에 걸린 칸만.
 // 수백 줄이라 DOM 표로 충분하다. 정렬·거르기는 `useMemo` 로 한 번만.
 
 import { Fragment, memo, useMemo, useState, type ReactNode } from 'react';
 import { t } from '../../i18n';
-import type { ServiceStats, StatsSummary } from './statsApi';
-import { change, FLAG_LABEL, FLAG_ORDER, judge, severity, type Flag, type JudgeRules } from './statsJudge';
+import type { ServiceStats } from './statsApi';
+import { FLAG_LABEL, FLAG_ORDER, judge, severity, type Flag, type JudgeRules } from './statsJudge';
+import { flagReason, fmtMetric, fmtMetricVs, metricBad, metricValue, METRICS, splitService, type MetricKey } from './statsFormat';
 
-type SortKey = 'worst' | 'service' | 'count' | 'avg' | 'p90' | 'p99' | 'err';
+type SortKey = 'worst' | 'service' | MetricKey;
 
 interface StatsTableProps {
   rows: ServiceStats[];
   rules: JudgeRules;
+  /** 과거 구간 수 — 과거 건수를 구간당 평균으로 */
+  pastRanges: number;
   selected: string | null;
   /** 같은 줄을 다시 누르면 null — 접는다 */
   onSelect: (service: string | null) => void;
@@ -29,67 +33,37 @@ export const FLAG_CLS: Record<Flag, string> = {
   few: 'text-fg-faint',
 };
 
-const int = (v: number) => Math.round(v).toLocaleString();
-const rate = (v: number) => `${(v * 100).toFixed(2)}%`;
-
-/** 숫자 칸 하나 — 위: 현재 + 변화, 아래: 평소 */
-function Metric({
-  cur,
-  base,
-  fmt,
-  tone = 'up-bad',
-  diff,
-}: {
-  cur: number | undefined;
-  base: number | undefined;
-  fmt: (v: number) => string;
-  /** up-bad: 늘면 나쁨(빨강) · neutral: 색 없음 */
-  tone?: 'up-bad' | 'neutral';
-  /** 변화를 비율 대신 차이로 적을 때 (에러율 %p) */
-  diff?: (c: number, b: number) => string;
-}) {
-  let delta = '';
-  let cls = 'text-fg-faint';
-  if (cur !== undefined && base !== undefined) {
-    if (diff) {
-      delta = diff(cur, base);
-      if (tone === 'up-bad' && cur - base > 0.005) cls = 'text-danger';
-    } else {
-      const c = change(cur, base);
-      if (c !== null) {
-        const p = Math.round(c * 100);
-        // 10% 안쪽 흔들림은 적지 않는다 — 다 적으면 정작 큰 변화가 묻힌다
-        delta = Math.abs(p) < 10 ? '' : `${p > 0 ? '▲' : '▼'}${Math.abs(p)}%`;
-        if (tone === 'up-bad' && c >= 0.5) cls = 'text-danger';
-        else if (tone === 'up-bad' && c <= -0.2) cls = 'text-ok';
-      }
-    }
+/** 지표 머리 — 함수라 언어를 바꿔도 따라온다 */
+function metricLabel(k: MetricKey, pastRanges: number): string {
+  switch (k) {
+    case 'count':
+      return pastRanges > 1 ? t('건수 (과거는 구간당 평균)') : t('건수');
+    case 'avg':
+      return t('평균(ms)');
+    case 'p90':
+      return 'p90(ms)';
+    case 'p99':
+      return 'p99(ms)';
+    case 'err':
+      return t('에러율');
   }
+}
+
+/** 서비스 이름 — 앞부분은 흐리게(넘치면 잘림), 끝부분은 진하게(늘 보임) */
+export function ServiceName({ name }: { name: string }) {
+  const { head, tail } = splitService(name);
   return (
-    <td className="tnum whitespace-nowrap px-2 py-1 text-right align-top">
-      <div className="text-body text-fg">
-        {cur === undefined ? '–' : fmt(cur)}
-        <span className={`ml-1.5 inline-block min-w-[2.9rem] text-left text-micro ${cls}`}>{delta}</span>
-      </div>
-      <div className="text-micro text-fg-faint">
-        {t('평소')} {base === undefined ? '–' : fmt(base)}
-        <span className="ml-1.5 inline-block min-w-[2.9rem]" />
-      </div>
-    </td>
+    <span className="flex min-w-0 max-w-[22rem] font-mono" title={name}>
+      <span className="min-w-0 truncate text-fg-faint">{head}</span>
+      {/* 끝부분이 칸보다 길면 끝부분도 잘린다 — 넘쳐서 옆 칸을 덮지 않게 */}
+      <span className="min-w-0 max-w-full shrink-0 truncate font-semibold text-fg">{tail}</span>
+    </span>
   );
 }
 
-const pick: Record<Exclude<SortKey, 'worst' | 'service'>, (s: StatsSummary) => number> = {
-  count: s => s.count,
-  avg: s => s.avg_ms,
-  p90: s => s.p90_ms,
-  p99: s => s.p99_ms,
-  err: s => s.error_rate,
-};
-
-export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSelect, detail }: StatsTableProps) {
+export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, selected, onSelect, detail }: StatsTableProps) {
   const [sort, setSort] = useState<SortKey>('worst');
-  /** 고른 판정만. null 이면 전부 */
+  /** 고른 판정만. null 이면 기준에 있는 것 전부 */
   const [only, setOnly] = useState<Flag | 'any' | null>(null);
   const [query, setQuery] = useState('');
 
@@ -102,8 +76,7 @@ export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSe
     for (const j of judged) for (const f of j.flags) m.set(f, (m.get(f) ?? 0) + 1);
     return m;
   }, [judged]);
-  // **평소에만 있던 서비스(사라짐)는 기본으로 숨긴다** — 비교 대상은 현재 구간에 찍힌 서비스다.
-  // «사라짐» 칩을 눌렀을 때만 보인다
+  // **과거에만 있던 서비스는 기본으로 숨긴다** — 비교 대상은 기준 시점에 찍힌 서비스다. «과거에만» 칩을 눌렀을 때만 보인다
   const notable = (f: Flag) => f !== 'few' && f !== 'gone';
   const flaggedCount = useMemo(() => judged.filter(j => j.flags.some(notable)).length, [judged]);
   const currentCount = useMemo(() => judged.filter(j => j.row.current !== null).length, [judged]);
@@ -121,22 +94,21 @@ export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSe
     );
     if (sort === 'worst') return list.sort((a, b) => b.score - a.score);
     if (sort === 'service') return list.sort((a, b) => a.row.service.localeCompare(b.row.service));
-    const get = pick[sort];
-    return list.sort((a, b) => (b.row.current ? get(b.row.current) : -1) - (a.row.current ? get(a.row.current) : -1));
+    const get = (j: (typeof list)[number]) => metricValue(j.row.current, sort) ?? -1;
+    return list.sort((a, b) => get(b) - get(a));
   }, [judged, only, query, sort]);
 
-  const Th = ({ k, label, left }: { k: SortKey; label: string; left?: boolean }) => (
-    <th className={`px-2 py-1.5 font-normal ${left ? 'text-left' : 'text-right'}`}>
-      <button
-        type="button"
-        onClick={() => setSort(k)}
-        className={`hover:text-fg ${sort === k ? 'text-fg' : ''}`}
-        aria-pressed={sort === k}
-      >
-        {label}
-        {sort === k && ' ↓'}
-      </button>
-    </th>
+  const SortBtn = ({ k, label, left }: { k: SortKey; label: string; left?: boolean }) => (
+    <button
+      type="button"
+      onClick={() => setSort(k)}
+      className={`hover:text-fg ${sort === k ? 'text-fg' : ''} ${left ? '' : 'w-full text-center'}`}
+      aria-pressed={sort === k}
+      title={k === 'worst' || k === 'service' ? undefined : t('기준 값으로 줄 세웁니다')}
+    >
+      {label}
+      {sort === k && ' ↓'}
+    </button>
   );
 
   const Chip = ({ value, label, n }: { value: Flag | 'any' | null; label: string; n: number }) => (
@@ -151,6 +123,9 @@ export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSe
       {label} <span className="tnum">{n}</span>
     </button>
   );
+
+  // 지표 묶음 사이 세로줄 — 어느 칸이 어느 지표인지 눈으로 가른다
+  const groupEdge = 'border-l border-line';
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5">
@@ -174,58 +149,75 @@ export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSe
         <table className="w-full border-collapse">
           <thead className="sticky top-0 z-10 bg-raised text-small text-fg-dim">
             <tr>
-              <Th k="service" label={t('서비스')} left />
-              <Th k="worst" label={t('판정')} left />
-              <Th k="count" label={t('건수')} />
-              <Th k="avg" label={t('평균(ms)')} />
-              <Th k="p90" label="p90(ms)" />
-              <Th k="p99" label="p99(ms)" />
-              <Th k="err" label={t('에러율')} />
+              <th rowSpan={2} className="px-2 py-1 text-left font-normal align-bottom">
+                <SortBtn k="service" label={t('서비스')} left />
+              </th>
+              <th rowSpan={2} className="px-2 py-1 text-left font-normal align-bottom">
+                <SortBtn k="worst" label={t('판정')} left />
+              </th>
+              {METRICS.map(k => (
+                <th key={k} colSpan={3} className={`${groupEdge} px-2 pt-1 font-medium text-fg-muted`}>
+                  <SortBtn k={k} label={metricLabel(k, pastRanges)} />
+                </th>
+              ))}
+            </tr>
+            <tr className="text-micro">
+              {METRICS.map(k => (
+                <Fragment key={k}>
+                  <th className={`${groupEdge} whitespace-nowrap px-2 pb-1 text-right font-normal text-fg`}>{t('기준')}</th>
+                  <th className="whitespace-nowrap px-2 pb-1 text-right font-normal">{t('과거')}</th>
+                  <th className="whitespace-nowrap px-2 pb-1 text-right font-normal">{t('과거 대비')}</th>
+                </Fragment>
+              ))}
             </tr>
           </thead>
           <tbody>
             {shown.map(({ row: r, flags }) => {
-              const c = r.current ?? undefined;
-              const b = r.baseline ?? undefined;
               const on = r.service === selected;
               return (
                 <Fragment key={r.service}>
-                <tr
-                  onClick={() => onSelect(on ? null : r.service)}
-                  aria-expanded={on}
-                  className={`cursor-pointer border-t border-line ${on ? 'bg-accent/15' : 'hover:bg-hover'}`}
-                >
-                  <td className="max-w-[22rem] truncate px-2 py-1 align-top font-mono text-body text-fg" title={r.service}>
-                    {r.service}
-                  </td>
-                  <td className="whitespace-nowrap px-2 py-1 align-top">
-                    {flags.map(f => (
-                      <span key={f} className={`mr-1 rounded px-1.5 py-px text-micro ${FLAG_CLS[f]}`}>
-                        {t(FLAG_LABEL[f])}
-                      </span>
-                    ))}
-                  </td>
-                  <Metric cur={c?.count} base={b?.count} fmt={int} tone="neutral" />
-                  <Metric cur={c?.avg_ms} base={b?.avg_ms} fmt={int} />
-                  <Metric cur={c?.p90_ms} base={b?.p90_ms} fmt={int} />
-                  <Metric cur={c?.p99_ms} base={b?.p99_ms} fmt={int} />
-                  <Metric
-                    cur={c?.error_rate}
-                    base={b?.error_rate}
-                    fmt={rate}
-                    diff={(x, y) => {
-                      const d = (x - y) * 100;
-                      return Math.abs(d) < 0.1 ? '' : `${d > 0 ? '+' : ''}${d.toFixed(2)}%p`;
-                    }}
-                  />
-                </tr>
-                {on && (
-                  <tr className="bg-raised">
-                    <td colSpan={7} className="px-3 py-3">
-                      {detail(r.service)}
+                  <tr
+                    onClick={() => onSelect(on ? null : r.service)}
+                    aria-expanded={on}
+                    className={`cursor-pointer border-t border-line text-body ${on ? 'bg-accent/15' : 'hover:bg-hover'}`}
+                  >
+                    <td className="px-2 py-1">
+                      <ServiceName name={r.service} />
                     </td>
+                    <td className="whitespace-nowrap px-2 py-1">
+                      {flags.map(f => {
+                        const why = flagReason(f, r, rules, t);
+                        return (
+                          <span key={f} className="mr-1.5 inline-flex items-center gap-1">
+                            <span className={`rounded px-1.5 py-px text-micro ${FLAG_CLS[f]}`}>{t(FLAG_LABEL[f])}</span>
+                            {why && <span className="tnum text-micro text-fg-dim">{why}</span>}
+                          </span>
+                        );
+                      })}
+                    </td>
+                    {METRICS.map(k => {
+                      const c = metricValue(r.current, k);
+                      const b = metricValue(r.baseline, k, pastRanges);
+                      const vs = fmtMetricVs(k, c, b);
+                      const bad = metricBad(k, r, rules);
+                      return (
+                        <Fragment key={k}>
+                          <td className={`${groupEdge} tnum whitespace-nowrap px-2 py-1 text-right text-fg`}>{fmtMetric(k, c)}</td>
+                          <td className="tnum whitespace-nowrap px-2 py-1 text-right text-fg-dim">{fmtMetric(k, b)}</td>
+                          <td className={`tnum whitespace-nowrap px-2 py-1 text-right text-small ${bad ? 'font-semibold text-danger' : 'text-fg-faint'}`}>
+                            {vs}
+                          </td>
+                        </Fragment>
+                      );
+                    })}
                   </tr>
-                )}
+                  {on && (
+                    <tr className="bg-raised">
+                      <td colSpan={2 + METRICS.length * 3} className="px-3 py-3">
+                        {detail(r.service)}
+                      </td>
+                    </tr>
+                  )}
                 </Fragment>
               );
             })}

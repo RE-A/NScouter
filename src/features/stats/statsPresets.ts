@@ -1,7 +1,7 @@
-// 조건 묶음 — 대상·서비스·수집 조건·평소 구간 잡는 법을 이름 붙여 남긴다
+// 조건 묶음 — 대상·서비스·수집 조건·과거 구간 잡는 법을 이름 붙여 남긴다
 //
-// **구간 시각은 남기지 않는다.** 어제의 «오전 10~11시» 를 그대로 다시 쓸 일은 없다. 대신 평소 구간을
-// **현재 구간에서 얼마나 떨어졌나**(시작·끝 차이)로 남겨, 불러오면 지금 넣은 현재 구간에 맞춰 다시 만든다 —
+// **구간 시각은 남기지 않는다.** 어제의 «오전 10~11시» 를 그대로 다시 쓸 일은 없다. 대신 과거 구간을
+// **기준 구간에서 얼마나 떨어졌나**(시작·끝 차이)로 남겨, 불러오면 지금 넣은 기준 구간에 맞춰 다시 만든다 —
 // «지난 7일 같은 시각» 을 담아 두면 어느 날 불러도 그날의 지난 7일이 된다.
 
 import type { StatsRange } from './statsApi';
@@ -19,7 +19,7 @@ export interface StatsPreset {
   ipInclude: string;
   ipExclude: string;
   raw: boolean;
-  /** 평소 구간 — (시작 − 현재 시작, 끝 − 현재 끝) ms */
+  /** 과거 구간 — (시작 − 현재 시작, 끝 − 현재 끝) ms */
   baselineOffsets: [number, number][];
 }
 
@@ -40,7 +40,7 @@ export function toPreset(name: string, d: StatsDraft): StatsPreset {
   };
 }
 
-/** 지금 폼의 현재 구간은 그대로 두고 나머지를 묶음으로 채운다 */
+/** 지금 폼의 기준 구간은 그대로 두고 나머지를 묶음으로 채운다 */
 export function applyPreset(d: StatsDraft, p: StatsPreset): StatsDraft {
   const baselines: StatsRange[] = p.baselineOffsets.map(([s, e]) => ({ stime: d.current.stime + s, etime: d.current.etime + e }));
   return {

@@ -19,9 +19,9 @@ export interface StatsRequest {
   /** Task 이름 규칙. `*` 가 있으면 그 모양 그대로, 없으면 «포함» (대소문자 무시) */
   task_patterns: string[];
   current: StatsRange;
-  /** 기준(평소) 구간들 — 하나의 기준으로 합친다 */
+  /** 기준(과거) 구간들 — 하나의 기준으로 합친다 */
   baselines: StatsRange[];
-  /** 직접 지정한 서비스. 비면 현재 구간에 찍힌 서비스 전부 */
+  /** 직접 지정한 서비스. 비면 기준 구간에 찍힌 서비스 전부 */
   services: string[];
   service_include: string[];
   service_exclude: string[];

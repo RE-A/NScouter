@@ -69,7 +69,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
       footer={
         <>
           <Button size="md" variant="ghost" onClick={reset} className="mr-auto">
-            {t('판정 기준 기본값')}
+            {t('판정 규칙 기본값')}
           </Button>
           <Button size="md" onClick={onClose}>
             {t('취소')}
@@ -82,9 +82,9 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
     >
       <div className="flex flex-col gap-4 text-body">
         <section className="flex flex-col gap-2">
-          <h3 className="font-medium text-fg">{t('판정 기준')}</h3>
+          <h3 className="font-medium text-fg">{t('판정 규칙')}</h3>
           <Row label={t('느려짐')}>
-            {t('평균·p90 이 평소의')} <input className={inputCls} value={v.slowRatio} onChange={set('slowRatio')} /> {t('배 이상')},{' '}
+            {t('평균·p90 이 과거의')} <input className={inputCls} value={v.slowRatio} onChange={set('slowRatio')} /> {t('배 이상')},{' '}
             <input className={inputCls} value={v.slowMinMs} onChange={set('slowMinMs')} /> ms {t('이상 늘면')}
           </Row>
           <Row label="">
@@ -94,7 +94,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
             </label>
           </Row>
           <Row label={t('에러 증가')}>
-            {t('에러율이 평소의')} <input className={inputCls} value={v.errorRatio} onChange={set('errorRatio')} /> {t('배 이상')},{' '}
+            {t('에러율이 과거의')} <input className={inputCls} value={v.errorRatio} onChange={set('errorRatio')} /> {t('배 이상')},{' '}
             <input className={inputCls} value={v.errorMinPp} onChange={set('errorMinPp')} /> %p {t('이상 늘면')}
           </Row>
           <Row label={t('호출량 급변')}>

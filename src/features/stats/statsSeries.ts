@@ -1,17 +1,17 @@
-// 차트용 데이터 — 현재 구간의 5분 칸마다 «평소» 를 겹쳐 놓는다
+// 차트용 데이터 — 기준 구간의 5분 칸마다 «과거» 를 겹쳐 놓는다
 //
-// 평소 구간들은 날짜가 다르다(어제·그제 같은 시각). 그래서 **구간 시작에서 얼마나 지났나**로 맞춘다 —
-// 현재 10:05 칸에는 각 평소 구간의 «시작 + 5분» 칸이 온다. 여러 평소 구간은
+// 과거 구간들은 날짜가 다르다(어제·그제 같은 시각). 그래서 **구간 시작에서 얼마나 지났나**로 맞춘다 —
+// 현재 10:05 칸에는 각 과거 구간의 «시작 + 5분» 칸이 온다. 여러 과거 구간은
 //   · 평균 응답시간: 건수로 가중한 평균(선) 과 구간별 최소~최대(띠)
 //   · 건수: 구간당 평균(선)
-// 으로 줄인다. 평소 구간 길이가 현재와 다르면 겹치는 칸까지만 쓴다.
+// 으로 줄인다. 과거 구간 길이가 현재와 다르면 겹치는 칸까지만 쓴다.
 
 import type { SeriesPoint, StatsRange } from './statsApi';
 
 export const STEP_MS = 5 * 60 * 1000;
 
 export interface OverlaySlot {
-  /** 현재 구간 기준 칸 시작 시각 */
+  /** 기준 구간 기준 칸 시작 시각 */
   t: number;
   cur: { count: number; errors: number; avg: number | null; max: number | null };
   base: { avg: number | null; lo: number | null; hi: number | null; count: number | null };
@@ -42,7 +42,7 @@ export function overlay(
     c.max = Math.max(c.max ?? 0, p.max_ms);
   }
 
-  // 칸마다 평소 구간별 (건수, 평균) 을 모은다
+  // 칸마다 과거 구간별 (건수, 평균) 을 모은다
   const per: { count: number; sum: number }[][] = Array.from({ length: n }, () => []);
   const covering: number[] = new Array(n).fill(0);
   bases.forEach((b, bi) => {
