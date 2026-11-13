@@ -454,6 +454,10 @@ fn scan_slice(
                     let server = r.names.get(&x.obj_hash).map(String::as_str).unwrap_or("");
                     lines.push(super::raw::line(current, x, name, server, r.tz));
                 }
+                if !current {
+                    // 과거 구간 순번 = 범위 순번 − 1 (0 번이 기준)
+                    book.add_day(name, task.range - 1, x);
+                }
                 let entry = book.by_service.entry(name.clone()).or_default();
                 let agg = if current { &mut entry.0 } else { &mut entry.1 };
                 agg.add(x, || Sample {

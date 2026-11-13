@@ -65,7 +65,8 @@ pub fn file_stamp(ms: i64, tz_offset_ms: i64) -> String {
 pub fn line(current: bool, x: &XLogPack, service: &str, server: &str, tz_offset_ms: i64) -> String {
     format!(
         "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\r\n",
-        if current { "현재" } else { "기준" },
+        // 기준 = 살펴본 시점, 과거 = 견준 지난 시점 (0.9.3 까지는 «현재 / 기준» 이었다)
+        if current { "기준" } else { "과거" },
         local_time(x.end_time, tz_offset_ms),
         cell(service),
         cell(server),
@@ -196,7 +197,7 @@ mod tests {
     fn 머리글_칸_수와_줄_칸_수가_같고_조각_단위로_붙는다() {
         let x = XLogPack { end_time: 1_794_441_600_123, elapsed: 120, error: 1, ipaddr: "10.0.0.1".into(), txid: 42, ..XLogPack::default() };
         let l = line(true, &x, "/a,b", "shop-1", 0);
-        assert!(l.starts_with("현재,2026-11-12 00:00:00.123,\"/a,b\",shop-1,120,1,10.0.0.1,"));
+        assert!(l.starts_with("기준,2026-11-12 00:00:00.123,\"/a,b\",shop-1,120,1,10.0.0.1,"));
         assert!(l.ends_with(",42\r\n"));
         assert_eq!(HEADER.split(',').count(), l.replace("\"/a,b\"", "s").trim_end().split(',').count());
 

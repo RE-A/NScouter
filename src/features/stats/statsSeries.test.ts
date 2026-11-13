@@ -10,7 +10,7 @@ describe('overlay', () => {
   const b1 = { stime: 9 * D, etime: 9 * D + 3 * STEP_MS };
   const b2 = { stime: 8 * D, etime: 8 * D + 3 * STEP_MS };
 
-  it('평소 구간들을 «시작에서 지난 시간» 으로 맞춰 겹친다 — 평균은 건수 가중, 띠는 최소~최대', () => {
+  it('과거 구간들을 «시작에서 지난 시간» 으로 맞춰 겹친다 — 평균은 건수 가중, 띠는 최소~최대', () => {
     const s = overlay(
       [pt(cur.stime, 10, 100), pt(cur.stime + STEP_MS, 20, 300)],
       [pt(b1.stime, 10, 100), pt(b2.stime, 30, 200), pt(b1.stime + STEP_MS, 10, 100)],
@@ -26,7 +26,7 @@ describe('overlay', () => {
     expect(s[2].base.count).toBe(0);
   });
 
-  it('평소 구간이 짧으면 겹치는 칸까지만', () => {
+  it('과거 구간이 짧으면 겹치는 칸까지만', () => {
     const short = { stime: 9 * D, etime: 9 * D + STEP_MS };
     const s = overlay([], [pt(short.stime, 4, 50)], cur, [short]);
     expect(s[0].base.count).toBe(4);

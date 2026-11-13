@@ -1,9 +1,9 @@
-// 특이사항 판정 — «평소보다 느리다 · 에러가 많다» 를 숫자로 가린다
+// 특이사항 판정 — «과거보다 느리다 · 에러가 많다» 를 숫자로 가린다
 //
 // Rust 는 숫자만 낸다. 판정은 여기서 한다 — 기준값을 바꿔 가며 같은 결과를 다시 볼 수 있게.
 // 몇 건 안 되는 서비스는 한 건만 느려도 경보가 되므로 `minCount` 보다 적으면 판정하지 않고 «표본 적음» 으로 둔다.
 
-import type { ServiceStats, StatsJudgePrefs, StatsSummary } from './statsApi';
+import type { DaySummary, ServiceStats, StatsJudgePrefs, StatsSummary } from './statsApi';
 
 export interface JudgeRules {
   /** 평균 또는 p90 이 기준의 몇 배 넘게 늘면 «느려짐» */
@@ -18,8 +18,19 @@ export interface JudgeRules {
   volumeRatio: number;
   /** 한쪽 건수가 이보다 적으면 판정하지 않는다 */
   minCount: number;
-  /** «느려짐» 에 p99 도 본다 */
-  useP99: boolean;
+  /** «느려짐» 을 볼 지표 — 하나라도 걸리면 느려짐 */
+  slowOn: SlowMetric[];
+  /** 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가 — 날마다 들쭉날쭉한 서비스가 늘 뜨지 않게 */
+  beyondWorst: boolean;
+}
+
+/** «느려짐» 을 볼 수 있는 지표 */
+export type SlowMetric = 'avg' | 'p50' | 'p90' | 'p99';
+export const SLOW_METRICS: SlowMetric[] = ['avg', 'p50', 'p90', 'p99'];
+
+/** 지표의 응답시간 */
+export function slowValue(s: StatsSummary, m: SlowMetric): number {
+  return m === 'avg' ? s.avg_ms : m === 'p50' ? s.p50_ms : m === 'p90' ? s.p90_ms : s.p99_ms;
 }
 
 export const DEFAULT_RULES: JudgeRules = {
@@ -29,8 +40,16 @@ export const DEFAULT_RULES: JudgeRules = {
   errorMinDelta: 0.01,
   volumeRatio: 0.5,
   minCount: 30,
-  useP99: false,
+  slowOn: ['avg', 'p90'],
+  beyondWorst: true,
 };
+
+/** 설정의 «느려짐» 지표 — 없으면 예전 설정(평균·p90, use_p99 면 p99 도) */
+function slowFromPrefs(p: StatsJudgePrefs): SlowMetric[] {
+  const picked = (p.slow_metrics ?? []).filter((m): m is SlowMetric => (SLOW_METRICS as string[]).includes(m));
+  if (picked.length > 0) return SLOW_METRICS.filter(m => picked.includes(m));
+  return p.use_p99 === true ? ['avg', 'p90', 'p99'] : ['avg', 'p90'];
+}
 
 /** 설정 파일(`config.stats.judge`)의 값 → 판정 기준. 못 쓸 값은 기본값으로 */
 export function rulesFromPrefs(p: StatsJudgePrefs | undefined): JudgeRules {
@@ -43,7 +62,8 @@ export function rulesFromPrefs(p: StatsJudgePrefs | undefined): JudgeRules {
     errorMinDelta: Number.isFinite(p.error_min_pp) && p.error_min_pp >= 0 ? p.error_min_pp / 100 : DEFAULT_RULES.errorMinDelta,
     volumeRatio: pos(p.volume_pct, DEFAULT_RULES.volumeRatio * 100) / 100,
     minCount: Number.isFinite(p.min_count) && p.min_count >= 0 ? Math.round(p.min_count) : DEFAULT_RULES.minCount,
-    useP99: p.use_p99 === true,
+    slowOn: slowFromPrefs(p),
+    beyondWorst: p.beyond_worst !== false,
   };
 }
 
@@ -55,7 +75,9 @@ export function prefsFromRules(r: JudgeRules): StatsJudgePrefs {
     error_min_pp: r.errorMinDelta * 100,
     volume_pct: r.volumeRatio * 100,
     min_count: r.minCount,
-    use_p99: r.useP99,
+    use_p99: r.slowOn.includes('p99'),
+    slow_metrics: [...r.slowOn],
+    beyond_worst: r.beyondWorst,
   };
 }
 
@@ -64,14 +86,51 @@ export type Flag = 'slow' | 'errors' | 'new' | 'gone' | 'volume' | 'few';
 export const FLAG_LABEL: Record<Flag, string> = {
   slow: '느려짐',
   errors: '에러 증가',
-  new: '신규',
-  gone: '사라짐',
+  new: '기준에만 있음',
+  gone: '과거에만 있음',
   volume: '호출량 급변',
   few: '표본 적음',
 };
 
 /** 위쪽 것이 더 나쁜 일 — 표의 «특이사항» 칸과 정렬에 쓴다 */
 export const FLAG_ORDER: Flag[] = ['errors', 'slow', 'volume', 'gone', 'new', 'few'];
+
+/** 날마다 따로 센 과거 중 건수가 있는 날 */
+function pastDays(row: ServiceStats): DaySummary[] {
+  return (row.baseline_days ?? []).filter(d => d.count > 0);
+}
+
+/** 그날의 지표 값 */
+export function dayValue(d: DaySummary, m: SlowMetric | 'err'): number {
+  return m === 'err' ? d.error_rate : m === 'avg' ? d.avg_ms : m === 'p50' ? d.p50_ms : m === 'p90' ? d.p90_ms : d.p99_ms;
+}
+
+/** 과거 날들 중 가장 나빴던 날의 값 — 날이 둘 이상일 때만(하나면 «최악» 이 평균과 같다) */
+export function worstDay(row: ServiceStats, m: SlowMetric | 'err'): number | null {
+  const ds = pastDays(row);
+  return ds.length >= 2 ? Math.max(...ds.map(d => dayValue(d, m))) : null;
+}
+
+/** 이 지표로 느려졌나 — 비율·차이 조건, 그리고 켜져 있으면 과거 최악보다도 나쁜가 */
+export function slowHit(row: ServiceStats, m: SlowMetric, r: JudgeRules): boolean {
+  const c = row.current;
+  const b = row.baseline;
+  if (!c || !b) return false;
+  if (!slower(slowValue(c, m), slowValue(b, m), r)) return false;
+  const w = r.beyondWorst ? worstDay(row, m) : null;
+  return w === null || slowValue(c, m) > w;
+}
+
+/** 에러가 늘었나 — 같은 방식 */
+export function errHit(row: ServiceStats, r: JudgeRules): boolean {
+  const c = row.current;
+  const b = row.baseline;
+  if (!c || !b) return false;
+  const up = c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio);
+  if (!up) return false;
+  const w = r.beyondWorst ? worstDay(row, 'err') : null;
+  return w === null || c.error_rate > w;
+}
 
 function slower(cur: number, base: number, r: JudgeRules): boolean {
   return cur - base >= r.slowMinMs && cur >= base * r.slowRatio;
@@ -84,12 +143,8 @@ export function judge(row: ServiceStats, r: JudgeRules = DEFAULT_RULES): Flag[] 
   if (!c || !b) return [];
   if (c.count < r.minCount || b.count < r.minCount) return ['few'];
   const out: Flag[] = [];
-  if (c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio)) {
-    out.push('errors');
-  }
-  if (slower(c.avg_ms, b.avg_ms, r) || slower(c.p90_ms, b.p90_ms, r) || (r.useP99 && slower(c.p99_ms, b.p99_ms, r))) {
-    out.push('slow');
-  }
+  if (errHit(row, r)) out.push('errors');
+  if (r.slowOn.some(m => slowHit(row, m, r))) out.push('slow');
   if (b.tps > 0 && Math.abs(c.tps / b.tps - 1) > r.volumeRatio) out.push('volume');
   return out;
 }
@@ -112,9 +167,7 @@ export function severity(row: ServiceStats, r: JudgeRules = DEFAULT_RULES): numb
   if (c && b && !flags.includes('few')) {
     score = Math.max(
       (c.error_rate - b.error_rate) * 1000,
-      change(c.avg_ms, b.avg_ms) ?? 0,
-      change(c.p90_ms, b.p90_ms) ?? 0,
-      r.useP99 ? (change(c.p99_ms, b.p99_ms) ?? 0) : 0,
+      ...r.slowOn.map(m => change(slowValue(c, m), slowValue(b, m)) ?? 0),
     );
   }
   const bonus = flags.includes('errors') ? 2000 : flags.includes('slow') ? 1000 : flags.includes('volume') ? 500 : 0;

@@ -61,9 +61,10 @@ describe('StatsTab', () => {
   it('지난 결과를 열면 나빠진 것이 위로, 줄을 누르면 펼친다', async () => {
     render(<StatsTab connected groups={['shop-app']} servers={[]} onOpenTxid={() => {}} />);
     fireEvent.click(await screen.findByText('shop 오전'));
-    await screen.findByText('/slow');
-    const rows = screen.getAllByRole('row').slice(1);
-    // 평소에만 있던 서비스는 기본으로 숨기고 «사라짐» 칩을 눌러야 보인다
+    await screen.findByTitle('/slow');
+    // 머리글이 두 줄이다
+    const rows = screen.getAllByRole('row').slice(2);
+    // 과거에만 있던 서비스는 기본으로 숨기고 «과거에만 있음» 칩을 눌러야 보인다
     expect(rows.length).toBe(2);
     expect(screen.queryByText('/old')).toBeNull();
     expect(rows[0].textContent).toContain('/slow');
@@ -74,12 +75,12 @@ describe('StatsTab', () => {
     await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_service', { id: '1-0', service: '/slow' }));
   });
 
-  it('대상과 기준 구간이 없으면 시작하지 못한다', async () => {
+  it('대상과 과거 구간이 없으면 시작하지 못한다', async () => {
     render(<StatsTab connected groups={['shop-app']} servers={[]} onOpenTxid={() => {}} />);
     expect(screen.getByText('대상을 고르세요')).toBeTruthy();
     expect((screen.getByText('통계 시작') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByPlaceholderText('묶음 이름'), { target: { value: 'shop-app' } });
-    expect(screen.getByText('기준 구간을 하나 이상 넣으세요')).toBeTruthy();
+    expect(screen.getByText('과거 구간을 하나 이상 넣으세요')).toBeTruthy();
     fireEvent.click(screen.getByText('+ 어제 같은 시각'));
     expect((screen.getByText('통계 시작') as HTMLButtonElement).disabled).toBe(false);
   });
@@ -119,7 +120,7 @@ describe('StatsTab', () => {
     expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_shutdown');
   });
 
-  it('한 건도 못 받은 평소 구간은 알린다 — 보관 기간이 지나면 모든 서비스가 «신규» 로 뜬다', async () => {
+  it('한 건도 못 받은 과거 구간은 알린다 — 보관 기간이 지나면 모든 서비스가 «기준에만 있음» 으로 뜬다', async () => {
     const empty: StatsResult = {
       ...result,
       ranges: [
@@ -134,6 +135,6 @@ describe('StatsTab', () => {
     });
     render(<StatsTab connected groups={[]} servers={[]} onOpenTxid={() => {}} />);
     fireEvent.click(await screen.findByText('shop 오전'));
-    expect((await screen.findByText(/데이터가 하나도 없는 구간/)).textContent).toContain('평소');
+    expect((await screen.findByText(/데이터가 하나도 없는 구간/)).textContent).toContain('과거');
   });
 });

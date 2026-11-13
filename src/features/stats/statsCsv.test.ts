@@ -10,20 +10,29 @@ const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
 });
 
 describe('statsCsv', () => {
-  it('머리글 한 줄 + 서비스마다 한 줄, 칸 수가 같다', () => {
+  it('머리글은 기준·과거 — 과거가 여럿이면 과거는 일평균, 건수 합계도 따로', () => {
     const csv = statsCsv(
       [
-        { service: '/a,b', current: s({ avg_ms: 400 }), baseline: s() },
+        { service: '/a,b', current: s({ avg_ms: 400 }), baseline: s({ count: 7000, errors: 70 }) },
         { service: '/new', current: s(), baseline: null },
       ],
       DEFAULT_RULES,
+      7,
     );
     const lines = csv.split('\r\n');
+    const head = lines[0].split(',');
+    expect(head).toContain('기준 건수');
+    expect(head).toContain('과거 일평균 건수');
+    expect(head).toContain('과거 건수(합계)');
+    expect(head.some(h => h.startsWith('현재') || h.includes('평소'))).toBe(false);
     expect(lines.length).toBe(3);
-    expect(lines[1].startsWith('"/a,b",느려짐,')).toBe(true);
-    expect(lines[1].endsWith(',100,0,0,0')).toBe(true);
-    expect(lines[2].startsWith('/new,신규,')).toBe(true);
-    // 쉼표가 든 이름은 감싸므로 단순 split 으로 칸 수를 세지 않는다 — 신규 줄로 센다
-    expect(lines[2].split(',').length).toBe(lines[0].split(',').length);
+    expect(lines[1].startsWith('"/a,b",느려짐,1000,10,')).toBe(true);
+    // 과거 일평균 1000, 합계 7000
+    const cells = lines[1].replace('"/a,b"', 's').split(',');
+    expect(cells[head.indexOf('과거 일평균 건수')]).toBe('1000');
+    expect(cells[head.indexOf('과거 건수(합계)')]).toBe('7000');
+    expect(cells[head.indexOf('평균 과거 대비(%)')]).toBe('100');
+    expect(lines[2].startsWith('/new,기준에만 있음,')).toBe(true);
+    expect(lines[2].split(',').length).toBe(head.length);
   });
 });

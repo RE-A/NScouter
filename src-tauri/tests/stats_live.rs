@@ -74,7 +74,7 @@ async fn go(st: &Arc<AppState>, req: StatsRequest) -> (Vec<ServiceStats>, usize,
             cov.iter().map(|c| c.slices).sum::<usize>(),
             t0.elapsed()
         );
-        (book.finish(req.current.secs(), req.baselines.iter().map(|b| b.secs()).sum()), missing, collectors)
+        (book.finish(req.current.secs(), req.baselines.iter().map(|b| b.secs()).sum(), &req.baselines.iter().map(|b| b.secs()).collect::<Vec<_>>()), missing, collectors)
     })
     .await
     .unwrap()
@@ -173,7 +173,7 @@ async fn 콜렉터_둘에서_현재와_기준을_훑어_서비스별로_비교�
         })
     };
     let (_, rows_raw, _, err) = sink.finish();
-    let counted: u64 = book.finish(1.0, 1.0).iter().map(|r| r.current.as_ref().map_or(0, |s| s.count) + r.baseline.as_ref().map_or(0, |s| s.count)).sum();
+    let counted: u64 = book.finish(1.0, 1.0, &[1.0]).iter().map(|r| r.current.as_ref().map_or(0, |s| s.count) + r.baseline.as_ref().map_or(0, |s| s.count)).sum();
     let body = std::fs::read_to_string(&path).unwrap();
     println!("  원본 CSV {rows_raw}줄 · 집계 {counted}건 · 빠진 조각 {}", cov.iter().map(|c| c.missing.len()).sum::<usize>());
     println!("    {}", body.lines().nth(1).unwrap_or(""));

@@ -281,3 +281,112 @@
     background: var(--text-faint);
   }
 }
+
+/* ── 통계 탭 ────────────────────────────────────────────────
+ * 색은 전부 토큰에서 — 라이트·다크 테마를 그대로 따른다. `color-mix` 로 옅은 바탕을 만든다.
+ *   .st-card   카드(패널 안의 묶음)
+ *   .st-pill   «기준»·«과거» 표식 — 숫자가 어느 쪽인지 화면 어디서나 같은 색으로 읽힌다
+ *   .st-ref    표의 기준 칸 — 옅게 물들여 «이 줄이 지금 보는 값» 을 세로로 이어 준다
+ *   .st-bad    판정에 걸린 변화 — 알약 모양
+ *   .st-help   용어 설명이 붙은 말 — 점선 밑줄과 작은 «?»
+ */
+@layer components {
+  .st-card {
+    background-color: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
+  }
+
+  .st-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    padding: 1px 8px;
+    font-size: var(--fs-micro);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .st-pill-ref {
+    background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--accent-bright);
+  }
+  .st-pill-past {
+    background-color: color-mix(in srgb, var(--text-dim) 18%, transparent);
+    color: var(--text-muted);
+  }
+
+  .st-ref {
+    background-color: color-mix(in srgb, var(--accent) 7%, transparent);
+  }
+
+  .st-bad {
+    display: inline-block;
+    border-radius: 9999px;
+    padding: 0 7px;
+    background-color: color-mix(in srgb, var(--error) 16%, transparent);
+    color: var(--error);
+    font-weight: 600;
+  }
+
+  .st-help {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-decoration-color: var(--text-faint);
+    text-underline-offset: 3px;
+  }
+  /* 반복되는 자리(하위 머리글)는 밑줄만 — «?» 가 줄줄이 서면 어수선하다 */
+  .st-help-soft {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-decoration-color: var(--text-faint);
+    text-underline-offset: 3px;
+  }
+  .st-help::after {
+    content: '?';
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15em;
+    height: 1.15em;
+    margin-left: 3px;
+    border-radius: 9999px;
+    border: 1px solid var(--text-faint);
+    color: var(--text-faint);
+    font-size: 0.72em;
+    font-weight: 600;
+    vertical-align: 0.1em;
+  }
+
+  /* 요약 카드(=거르기) — 누른 것은 테두리가 accent */
+  .st-kpi {
+    display: flex;
+    min-width: 7.5rem;
+    flex-direction: column;
+    gap: 2px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-strong);
+    background-color: var(--bg-raised);
+    padding: 6px 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 120ms, background-color 120ms;
+  }
+  .st-kpi:hover {
+    border-color: var(--border-control-hover);
+  }
+  .st-kpi[aria-pressed='true'] {
+    border-color: var(--accent);
+    background-color: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+  }
+
+  /* 상태 점 */
+  .st-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+  }
+}

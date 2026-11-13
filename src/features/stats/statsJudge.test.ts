@@ -29,7 +29,7 @@ const s = (over: Partial<StatsSummary> = {}): StatsSummary => ({
 const row = (current: StatsSummary | null, baseline: StatsSummary | null): ServiceStats => ({ service: '/a', current, baseline });
 
 describe('judge', () => {
-  it('평소와 같으면 깃발이 없다', () => {
+  it('과거와 같으면 깃발이 없다', () => {
     expect(judge(row(s(), s()))).toEqual([]);
   });
 
@@ -41,16 +41,39 @@ describe('judge', () => {
     expect(judge(row(s({ p90_ms: 700 }), s()))).toEqual(['slow']);
   });
 
-  it('p99 는 켰을 때만 본다', () => {
+  it('느려짐은 고른 지표로만 본다 — p50·p90·p99·평균', () => {
     const r = row(s({ p99_ms: 3000 }), s());
+    // 기본은 평균·p90
     expect(judge(r)).toEqual([]);
-    expect(judge(r, { ...DEFAULT_RULES, useP99: true })).toEqual(['slow']);
+    expect(judge(r, { ...DEFAULT_RULES, slowOn: ['p99'] })).toEqual(['slow']);
+    const mid = row(s({ p50_ms: 500 }), s());
+    expect(judge(mid)).toEqual([]);
+    expect(judge(mid, { ...DEFAULT_RULES, slowOn: ['p50'] })).toEqual(['slow']);
+    // 평균을 빼면 평균만 늘어난 것은 안 걸린다
+    expect(judge(row(s({ avg_ms: 900 }), s()), { ...DEFAULT_RULES, slowOn: ['p90'] })).toEqual([]);
   });
 
-  it('설정 값을 판정 기준으로 — 못 쓸 값은 기본값', () => {
+  it('설정 값을 판정 기준으로 — 못 쓸 값은 기본값, 예전 use_p99 도 읽는다', () => {
     const r = rulesFromPrefs({ slow_ratio: 2, slow_min_ms: 0, error_ratio: -1, error_min_pp: 0.5, volume_pct: 30, min_count: 10, use_p99: true });
-    expect(r).toEqual({ ...DEFAULT_RULES, slowRatio: 2, slowMinMs: 0, errorMinDelta: 0.005, volumeRatio: 0.3, minCount: 10, useP99: true });
+    expect(r).toEqual({ ...DEFAULT_RULES, slowRatio: 2, slowMinMs: 0, errorMinDelta: 0.005, volumeRatio: 0.3, minCount: 10, slowOn: ['avg', 'p90', 'p99'], beyondWorst: true });
+    expect(rulesFromPrefs({ ...prefsFromRules(DEFAULT_RULES), slow_metrics: ['p99', 'p50', 'bogus'] }).slowOn).toEqual(['p50', 'p99']);
     expect(rulesFromPrefs(prefsFromRules(DEFAULT_RULES))).toEqual(DEFAULT_RULES);
+  });
+
+  it('과거가 여럿이면 과거 최악의 날보다도 나쁠 때만 — 끄면 평균만 본다', () => {
+    const d = (p90: number, err = 0) => ({ count: 500, errors: 0, error_rate: err, tps: 1, avg_ms: 100, p50_ms: 80, p90_ms: p90, p99_ms: 900, max_ms: 1000 });
+    // 평소 p90 은 400 이지만 날마다 200~1000 으로 들쭉날쭉 — 기준 700 은 최악(1000)보다 낫다
+    const base = s({ p90_ms: 400 });
+    const r: ServiceStats = { service: '/a', current: s({ p90_ms: 700 }), baseline: base, baseline_days: [d(200), d(1000)] };
+    expect(judge(r)).toEqual([]);
+    expect(judge(r, { ...DEFAULT_RULES, beyondWorst: false })).toEqual(['slow']);
+    expect(judge({ ...r, current: s({ p90_ms: 1200 }) })).toEqual(['slow']);
+    // 하루뿐이면 쓰지 않는다
+    expect(judge({ ...r, baseline_days: [d(1000)] })).toEqual(['slow']);
+    // 에러도 같다
+    const e: ServiceStats = { service: '/e', current: s({ error_rate: 0.05 }), baseline: s({ error_rate: 0.01 }), baseline_days: [d(400, 0.001), d(400, 0.08)] };
+    expect(judge(e)).toEqual([]);
+    expect(judge({ ...e, current: s({ error_rate: 0.09 }) })).toEqual(['errors']);
   });
 
   it('두 배여도 차이가 100ms 미만이면 아니다 — 3ms → 6ms', () => {
@@ -68,7 +91,7 @@ describe('judge', () => {
     expect(judge(row(s({ tps: 16 }), s()))).toEqual(['volume']);
   });
 
-  it('한쪽에만 있으면 신규·사라짐, 건수가 적으면 판정하지 않는다', () => {
+  it('한쪽에만 있으면 신규·과거에만 있음, 건수가 적으면 판정하지 않는다', () => {
     expect(judge(row(s(), null))).toEqual(['new']);
     expect(judge(row(null, s()))).toEqual(['gone']);
     expect(judge(row(s({ count: 10, avg_ms: 5000 }), s()))).toEqual(['few']);
@@ -81,7 +104,7 @@ describe('change · severity', () => {
     expect(change(1, 0)).toBeNull();
   });
 
-  it('에러 증가가 느려짐보다, 느려짐이 평소보다 나쁘다', () => {
+  it('에러 증가가 느려짐보다, 느려짐이 과거보다 나쁘다', () => {
     const err = severity(row(s({ error_rate: 0.05 }), s()));
     const slow = severity(row(s({ avg_ms: 400 }), s()));
     const same = severity(row(s(), s()));

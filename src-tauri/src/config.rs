@@ -145,11 +145,13 @@ pub struct StatsPrefs {
     pub keep_days: u32,
     /// 이름 붙여 저장한 조건 묶음. 모양은 화면이 정한다(`statsPresets.ts`) — 여기서는 그대로 들고 있기만 한다
     pub presets: Vec<serde_json::Value>,
+    /// 비교 표의 열 너비(px) — 끌어서 정한 것만. 열 이름은 화면이 정한다(`service`, `avg.cur` …)
+    pub col_widths: std::collections::BTreeMap<String, u32>,
 }
 
 impl Default for StatsPrefs {
     fn default() -> Self {
-        Self { judge: StatsJudgePrefs::default(), keep_days: 90, presets: Vec::new() }
+        Self { judge: StatsJudgePrefs::default(), keep_days: 90, presets: Vec::new(), col_widths: Default::default() }
     }
 }
 
@@ -169,13 +171,17 @@ pub struct StatsJudgePrefs {
     pub volume_pct: f64,
     /// 한쪽 건수가 이보다 적으면 판정하지 않는다
     pub min_count: u32,
-    /// «느려짐» 에 p99 도 본다
+    /// «느려짐» 에 p99 도 본다 — 예전 설정. `slow_metrics` 가 비었을 때만 읽는다
     pub use_p99: bool,
+    /// «느려짐» 을 볼 지표(`avg`·`p50`·`p90`·`p99`) — 하나라도 걸리면 느려짐. 비면 평균·p90(+ use_p99)
+    pub slow_metrics: Vec<String>,
+    /// 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가로 본다
+    pub beyond_worst: bool,
 }
 
 impl Default for StatsJudgePrefs {
     fn default() -> Self {
-        Self { slow_ratio: 1.5, slow_min_ms: 100.0, error_ratio: 2.0, error_min_pp: 1.0, volume_pct: 50.0, min_count: 30, use_p99: false }
+        Self { slow_ratio: 1.5, slow_min_ms: 100.0, error_ratio: 2.0, error_min_pp: 1.0, volume_pct: 50.0, min_count: 30, use_p99: false, slow_metrics: Vec::new(), beyond_worst: true }
     }
 }
 
