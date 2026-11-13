@@ -44,16 +44,19 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
     v.slowOn.length > 0 &&
     (v.slowUseRatio || v.slowUseMs) &&
     (v.errorUseRatio || v.errorUsePp) &&
-    ok(v.slowRatio, 1) && ok(v.slowMinMs, 0) && ok(v.errorRatio, 1) && ok(v.errorMinPp, 0) && ok(v.volumePct, 1) && ok(v.minCount, 0) && ok(v.keepDays, 0);
+    (!v.slowUseRatio || ok(v.slowRatio, 1)) && (!v.slowUseMs || ok(v.slowMinMs, 0)) &&
+    (!v.errorUseRatio || ok(v.errorRatio, 1)) && (!v.errorUsePp || ok(v.errorMinPp, 0)) && ok(v.volumePct, 1) && ok(v.minCount, 0) && ok(v.keepDays, 0);
+  /** 꺼 둔 칸은 검사하지 않으므로, 숫자가 아니면 지금 값을 그대로 둔다 */
+  const keep = (s: string, min: number, prev: number) => (ok(s, min) ? num(s) : prev);
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
   const save = () => {
     if (!valid) return;
     onSave(
       {
-        slowRatio: num(v.slowRatio),
-        slowMinMs: num(v.slowMinMs),
-        errorRatio: num(v.errorRatio),
-        errorMinDelta: num(v.errorMinPp) / 100,
+        slowRatio: keep(v.slowRatio, 1, rules.slowRatio),
+        slowMinMs: keep(v.slowMinMs, 0, rules.slowMinMs),
+        errorRatio: keep(v.errorRatio, 1, rules.errorRatio),
+        errorMinDelta: keep(v.errorMinPp, 0, rules.errorMinDelta * 100) / 100,
         volumeRatio: num(v.volumePct) / 100,
         minCount: Math.round(num(v.minCount)),
         slowOn: v.slowOn,

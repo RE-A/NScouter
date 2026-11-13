@@ -177,7 +177,7 @@ pub struct StatsJudgePrefs {
     pub slow_metrics: Vec<String>,
     /// 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가로 본다
     pub beyond_worst: bool,
-    /// 느려짐에 배율(`slow_ratio`)을 쓰나 · 차이(`slow_min_ms`)를 쓰나 — 둘 다 켜면 둘 다 넘어야 한다
+    /// 느려짐에 배율(`slow_ratio`)을 쓰나 · 차이(`slow_min_ms`)를 쓰나 — 둘 다 켜면 `slow_combine` 으로 묶는다
     pub slow_use_ratio: bool,
     pub slow_use_ms: bool,
     /// 에러 증가에 배율(`error_ratio`)을 쓰나 · 차이(`error_min_pp`)를 쓰나

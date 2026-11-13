@@ -44,7 +44,7 @@ export function termHelp(k: Term): string {
   }
 }
 
-/** 느려짐 조건 — 켠 것만, 둘이면 «그리고» */
+/** 느려짐 조건 — 켠 것만, 둘이면 «그리고»/«또는»(slowCombine) */
 export function slowCondText(r: JudgeRules): string {
   const parts = [
     ...(r.slowUseRatio ? [`${t('과거의')} ${r.slowRatio}${t('배 이상')}`] : []),

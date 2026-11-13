@@ -22,7 +22,7 @@ export interface JudgeRules {
   slowOn: SlowMetric[];
   /** 과거 구간이 여럿이면 **과거 날들 중 가장 나빴던 날보다도 나쁠 때만** 느려짐·에러 증가 — 날마다 들쭉날쭉한 서비스가 늘 뜨지 않게 */
   beyondWorst: boolean;
-  /** 느려짐에 배율·차이를 쓰나 — 둘 다 켜면 둘 다 넘어야 한다(AND). 적어도 하나는 켠다 */
+  /** 느려짐에 배율·차이를 쓰나 — 둘 다 켜면 `slowCombine` 으로 묶는다. 적어도 하나는 켠다 */
   slowUseRatio: boolean;
   slowUseMs: boolean;
   /** 에러 증가에 배율·차이를 쓰나 — 같은 방식 */
