@@ -6,6 +6,7 @@ import type { Sample, ServiceStats, StatsRange, StatsSummary } from './statsApi'
 import { StatsCharts } from './StatsCharts';
 import { statsService } from './statsApi';
 import { fmtVs } from './statsFormat';
+import { termHelp } from './statsGlossary';
 
 interface StatsDetailProps {
   jobId: string;
@@ -16,18 +17,18 @@ interface StatsDetailProps {
   baselines: StatsRange[];
 }
 
-type Field = { label: string; get: (s: StatsSummary) => number; fmt: (v: number) => string };
+type Field = { label: string; get: (s: StatsSummary) => number; fmt: (v: number) => string; help: string };
 
 const int = (v: number) => Math.round(v).toLocaleString();
 
 /** 표에 없는 것만 — 건수·평균·p90·p99·에러율은 위 표에 있다 */
 function fields(): Field[] {
   return [
-    { label: 'TPS', get: s => s.tps, fmt: v => v.toFixed(2) },
-    { label: t('최대(ms)'), get: s => s.max_ms, fmt: int },
-    { label: t('SQL 시간(ms, 건당)'), get: s => s.sql_ms_avg, fmt: int },
-    { label: t('API 시간(ms, 건당)'), get: s => s.api_ms_avg, fmt: int },
-    { label: t('CPU(ms, 건당)'), get: s => s.cpu_ms_avg, fmt: int },
+    { label: 'TPS', get: s => s.tps, fmt: v => v.toFixed(2), help: termHelp('tps') },
+    { label: t('최대(ms)'), get: s => s.max_ms, fmt: int, help: termHelp('max') },
+    { label: t('SQL 시간(ms, 건당)'), get: s => s.sql_ms_avg, fmt: int, help: termHelp('sql') },
+    { label: t('API 시간(ms, 건당)'), get: s => s.api_ms_avg, fmt: int, help: termHelp('api') },
+    { label: t('CPU(ms, 건당)'), get: s => s.cpu_ms_avg, fmt: int, help: termHelp('cpu') },
   ];
 }
 
@@ -56,12 +57,12 @@ export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxi
     <div className="flex flex-col gap-4">
     <StatsCharts current={c} baseline={b} range={range} baselines={baselines} />
     <div className="flex flex-wrap items-start gap-x-10 gap-y-3">
-      <table className="tnum w-80 text-body">
+      <table className="st-card tnum w-[22rem] border-separate border-spacing-x-3 border-spacing-y-0 p-2 text-body">
         <thead className="text-small text-fg-dim">
           <tr>
             <th className="pb-1 text-left font-normal" />
-            <th className="pb-1 text-right font-normal text-fg">{t('기준')}</th>
-            <th className="pb-1 text-right font-normal">{t('과거')}</th>
+            <th className="pb-1.5 text-right font-normal"><span className="st-pill st-pill-ref">{t('기준')}</span></th>
+            <th className="pb-1.5 text-right font-normal"><span className="st-pill st-pill-past">{t('과거')}</span></th>
             <th className="w-16 pb-1 text-right font-normal">{t('과거 대비')}</th>
           </tr>
         </thead>
@@ -71,7 +72,9 @@ export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxi
             const bv = b ? f.get(b) : undefined;
             return (
               <tr key={f.label}>
-                <td className="py-0.5 text-small text-fg-dim">{f.label}</td>
+                <td className="py-1 text-small text-fg-dim" title={f.help}>
+                  <span className="st-help">{f.label}</span>
+                </td>
                 <td className="text-right text-fg">{cv === undefined ? '–' : f.fmt(cv)}</td>
                 <td className="text-right text-fg-dim">{bv === undefined ? '–' : f.fmt(bv)}</td>
                 <td className="text-right text-micro text-fg-faint">{fmtVs(cv, bv)}</td>

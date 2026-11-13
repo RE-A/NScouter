@@ -10,6 +10,7 @@ import { Button } from '../../components/Button';
 import { fromLocalInput, toLocalInput } from '../xlog/types/timeRange';
 import type { Estimate, StatsRange, StatsRequest, StatsTaskRule } from './statsApi';
 import { picksByRule } from './taskRule';
+import { termHelp } from './statsGlossary';
 import { applyPreset, toPreset, type StatsPreset } from './statsPresets';
 import { addRanges, lastWeek, offHours, overlaps, recentDays, yesterday } from './statsRanges';
 
@@ -197,7 +198,7 @@ export const StatsForm = memo(function StatsForm({
   return (
     <div className="flex max-w-4xl flex-col gap-4">
       {/* 조건 묶음 — 대상·서비스·수집 조건·과거 구간 잡는 법. 기준 구간은 그대로 두고 채운다 */}
-      <div className="flex flex-wrap items-center gap-2 rounded bg-raised px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-2">
         <span className="text-small text-fg-dim">{t('조건 묶음')}</span>
         <select
           value=""
@@ -326,11 +327,11 @@ export const StatsForm = memo(function StatsForm({
         )}
       </Section>
 
-      <Section title={t('기준 구간')} hint={t('살펴볼 시점 · 최대 하루')}>
+      <Section title={t('기준 구간')} hint={t('살펴볼 시점 · 최대 하루')} tag="ref" help={termHelp('ref')}>
         <RangeInput value={d.current} onChange={v => set('current', v)} />
       </Section>
 
-      <Section title={t('과거 구간')} hint={t('견줄 지난 시점 · 여러 개를 넣으면 하나로 합칩니다')}>
+      <Section title={t('과거 구간')} hint={t('견줄 지난 시점 · 여러 개를 넣으면 하나로 합칩니다')} tag="past" help={termHelp('past')}>
         <div className="flex flex-wrap items-center gap-1.5">
           <Button size="sm" onClick={() => addBase(yesterday(d.current))}>{t('+ 어제 같은 시각')}</Button>
           <Button size="sm" onClick={() => addBase(lastWeek(d.current))}>{t('+ 지난주 같은 요일')}</Button>
@@ -480,11 +481,14 @@ function shiftOneDay(r: StatsRange): StatsRange {
   return { stime: r.stime - DAY, etime: r.etime - DAY };
 }
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function Section({ title, hint, tag, help, children }: { title: string; hint?: string; tag?: 'ref' | 'past'; help?: string; children: React.ReactNode }) {
   return (
-    <section>
-      <div className="mb-1.5 flex items-baseline gap-2">
-        <h3 className="text-body font-medium text-fg">{title}</h3>
+    <section className="rounded-lg border border-line bg-surface/60 px-4 py-3">
+      <div className="mb-2 flex items-center gap-2">
+        {tag && <span className={`st-pill ${tag === 'ref' ? 'st-pill-ref' : 'st-pill-past'}`}>{tag === 'ref' ? t('기준') : t('과거')}</span>}
+        <h3 className="text-body font-semibold text-fg" title={help}>
+          <span className={help ? 'st-help' : ''}>{title}</span>
+        </h3>
         {hint && <span className="text-small text-fg-faint">{hint}</span>}
       </div>
       {children}

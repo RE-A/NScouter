@@ -9,6 +9,7 @@ import { CANVAS } from '../../styles/tokens';
 import { useThemeEpoch } from '../../styles/useThemeEpoch';
 import type { StatsRange, StatsSummary } from './statsApi';
 import { cdf, overlay } from './statsSeries';
+import { termHelp } from './statsGlossary';
 
 /** 선 하나 — x 는 0~1, y 는 값(null 이면 끊는다) */
 interface Line {
@@ -101,7 +102,7 @@ function draw(canvas: HTMLCanvasElement, p: Plot): void {
   ctx.setLineDash([]);
 }
 
-function Chart({ title, plot }: { title: string; plot: Plot }) {
+function Chart({ title, plot, help }: { title: string; plot: Plot; help?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const epoch = useThemeEpoch();
   useEffect(() => {
@@ -114,9 +115,11 @@ function Chart({ title, plot }: { title: string; plot: Plot }) {
     return () => ro.disconnect();
   }, [plot, epoch]);
   return (
-    <figure className="min-w-[18rem] flex-1">
-      <figcaption className="mb-1 text-small text-fg-dim">{title}</figcaption>
-      <canvas ref={ref} className="block w-full rounded border border-line" style={{ height: H }} />
+    <figure className="st-card min-w-[18rem] flex-1 p-2.5">
+      <figcaption className="mb-1.5 text-small text-fg-muted" title={help}>
+        <span className={help ? 'st-help' : ''}>{title}</span>
+      </figcaption>
+      <canvas ref={ref} className="block w-full rounded" style={{ height: H }} />
     </figure>
   );
 }
@@ -182,12 +185,17 @@ export const StatsCharts = memo(function StatsCharts({ current, baseline, range,
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap gap-3">
-        <Chart title={t('평균 응답시간(ms) — 5분')} plot={plots.avg} />
-        <Chart title={t('건수 — 5분')} plot={plots.count} />
-        <Chart title={t('응답시간 누적 분포 — 오른쪽일수록 느림')} plot={plots.dist} />
+        <Chart title={t('평균 응답시간(ms) — 5분')} plot={plots.avg} help={termHelp('avg')} />
+        <Chart title={t('건수 — 5분')} plot={plots.count} help={termHelp('count')} />
+        <Chart
+          title={t('응답시간 누적 분포 — 오른쪽일수록 느림')}
+          plot={plots.dist}
+          help={t('가로는 응답시간(로그 눈금), 세로는 그 시간 안에 끝난 비율입니다. 기준 선이 과거 선보다 오른쪽에 있으면 전체가 느려진 것입니다. 50% 선이 중앙값, 90% 선이 p90 입니다.')}
+        />
       </div>
       <p className="text-micro text-fg-faint">
-        <span className="text-accent-bright">━</span> {t('기준')} · <span>┅</span> {t('과거 (띠: 과거 구간들의 최소~최대)')}
+        <span className="st-pill st-pill-ref">━ {t('기준')}</span> <span className="st-pill st-pill-past">┅ {t('과거')}</span>{' '}
+        {t('띠: 과거 구간들의 최소~최대')}
       </p>
     </div>
   );

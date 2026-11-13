@@ -38,19 +38,27 @@ describe('statsReport', () => {
 
   it('용어는 기준·과거, 머리글 두 줄, 서비스 끝부분은 진하게', () => {
     expect(html).not.toMatch(/현재|평소/);
-    expect(html).toContain('<span class="tag cur">기준</span>');
-    expect(html).toContain('<span class="tag past">과거</span>');
-    expect(html).toContain('<th class="g cur">기준</th><th>과거</th><th>과거 대비</th>');
+    expect(html).toContain('<span class="pill ref"');
+    expect(html).toContain('<span class="pill past"');
+    expect(html).toMatch(/<th class="g cur" title="[^"]+"><span class="pill ref">기준<\/span><\/th><th title="[^"]+"><span class="pill past">과거<\/span><\/th><th title="[^"]+">과거 대비<\/th>/);
     expect(html).toContain('<b>SlowService.get&lt;x&gt;</b>');
   });
 
   it('판정별로 묶고 더 나쁜 쪽에만 — 에러 증가가 먼저, 이유와 배수·%p', () => {
-    expect(html.indexOf('<h2>에러 증가 (1)</h2>')).toBeGreaterThan(-1);
-    expect(html.indexOf('<h2>느려짐 (1)</h2>')).toBeGreaterThan(html.indexOf('<h2>에러 증가 (1)</h2>'));
+    const e = html.indexOf('<h2>에러 증가 <span class="count">1</span></h2>');
+    expect(e).toBeGreaterThan(-1);
+    expect(html.indexOf('<h2>느려짐 <span class="count">1</span></h2>')).toBeGreaterThan(e);
     expect(html).toContain('+14.0%p');
     expect(html).toContain('×4.5');
-    expect(html).toContain('class="n vs bad"');
+    expect(html).toContain('<span class="bad">×4.5</span>');
     expect(html).not.toContain('/gone');
+  });
+
+  it('용어 설명 — 머리글 툴팁과 끝의 용어 상자', () => {
+    expect(html).toMatch(/<th colspan="3" class="g" title="p90 \(90번째 백분위\)/);
+    expect(html).toContain('<div class="gloss">');
+    expect(html).toContain('<dt>p99 (99번째 백분위)</dt>');
+    expect(html).toContain('<dt>느려짐</dt>');
   });
 
   it('esc', () => {

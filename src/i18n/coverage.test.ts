@@ -83,6 +83,24 @@ describe('간접 호출', () => {
     expect(missing).toEqual([]);
   });
 
+  it('통계 탭의 .ts 모듈(용어 설명·판정 설명)이 쓰는 문구도 사전에 있다', () => {
+    // 위의 스캔은 .tsx 만 본다 — 용어 설명(statsGlossary.ts)처럼 .ts 에서 t() 를 부르는 곳을 따로 본다
+    const dir = 'src/features/stats';
+    const missing: string[] = [];
+    let seen = 0;
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
+      const src = readFileSync(join(dir, name), 'utf-8');
+      for (const m of src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'\)/g)) {
+        const k = m[1].replace(/\\n/g, '\n');
+        seen += 1;
+        if (!(k in EN)) missing.push(k);
+      }
+    }
+    expect(seen).toBeGreaterThan(20);
+    expect(missing).toEqual([]);
+  });
+
   it('모든 단축키 동작에 설명이 붙어 있다', () => {
     // 동작을 새로 넣고 설명을 안 붙이면 설정 창에 빈칸이 뜬다.
     for (const row of SHORTCUT_HELP) {

@@ -37,6 +37,7 @@ import {
 } from './statsApi';
 import { statsCsv } from './statsCsv';
 import { DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, type JudgeRules } from './statsJudge';
+import { termHelp } from './statsGlossary';
 import { StatsSettingsDialog } from './StatsSettingsDialog';
 import { parsePresets, type StatsPreset } from './statsPresets';
 import { statsReport } from './statsReport';
@@ -70,6 +71,14 @@ function duration(ms: number): string {
 function statusText(j: JobInfo, p: StatsProgress | null | undefined): string {
   return j.status === 'running' && p?.phase === 'queue' ? t('대기') : t(STATUS_LABEL[j.status]);
 }
+
+/** 상태 점의 색 */
+const STATUS_DOT: Record<JobInfo['status'], string> = {
+  running: 'bg-accent',
+  done: 'bg-ok',
+  cancelled: 'bg-fg-faint',
+  failed: 'bg-danger',
+};
 
 export const STATUS_LABEL: Record<JobInfo['status'], string> = {
   running: '도는 중',
@@ -318,10 +327,11 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   return (
     <div className="flex h-full min-h-0 gap-2 p-2">
       {/* ── 작업 목록 ── */}
-      <aside className="flex w-64 shrink-0 flex-col gap-1 overflow-auto rounded border border-line p-1">
-        <Button variant={showForm ? 'default' : 'primary'} size="sm" onClick={() => setShowForm(true)}>
+      <aside className="st-card flex w-64 shrink-0 flex-col gap-1 overflow-auto p-2">
+        <Button variant={showForm ? 'default' : 'primary'} size="md" onClick={() => setShowForm(true)}>
           {t('+ 새 비교')}
         </Button>
+        <div className="mt-2 px-1 text-micro font-medium tracking-wide text-fg-faint uppercase">{t('지난 결과')}</div>
         {jobs.length === 0 && <p className="p-2 text-small text-fg-dim">{t('지난 결과가 없습니다')}</p>}
         {jobs.map(j => {
           const p = progress[j.id] ?? j.progress;
@@ -341,12 +351,15 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
               onKeyDown={e => {
                 if (e.key === 'Enter') openResult(j.id);
               }}
-              className={`cursor-pointer rounded px-2 py-1.5 text-small ${on ? 'bg-accent/15' : 'hover:bg-hover'}`}
+              className={`cursor-pointer rounded-md px-2.5 py-2 text-small transition-colors ${
+                on ? 'bg-accent/12 shadow-[inset_3px_0_0_var(--accent)]' : 'hover:bg-hover'
+              }`}
             >
-              <div className="truncate text-body text-fg" title={j.title}>
+              <div className="truncate text-body font-medium text-fg" title={j.title}>
                 {j.title}
               </div>
-              <div className="flex items-center gap-1 text-fg-dim">
+              <div className="mt-0.5 flex items-center gap-1.5 text-fg-dim">
+                <span className={`st-dot ${STATUS_DOT[j.status]} ${j.status === 'running' ? 'animate-pulse' : ''}`} />
                 <span className={j.status === 'failed' ? 'text-danger' : j.status === 'running' ? 'text-accent-bright' : ''}>
                   {statusText(j, p)}
                 </span>
@@ -378,7 +391,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
         )}
 
         {showForm ? (
-          <div className="overflow-auto rounded border border-line p-4">
+          <div className="st-card overflow-auto p-5">
             <StatsForm
               draft={draft}
               onChange={setDraft}
@@ -402,50 +415,63 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
         ) : (
           <>
             {/* 머리 — 조건 요약과 할 일 */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h2 className="text-title font-medium text-fg">{openJob?.title ?? result?.request.title}</h2>
-              {req && (
-                <span className="tnum text-small text-fg-dim">
-                  {t('기준')} {rangeLabel(req.current)} · {t('과거')} {req.baselines.length}
-                  {t('개 구간')}
-                </span>
-              )}
-              {result && result.ranges.length > 0 && <ServerCount ranges={result.ranges} />}
+            <div className="st-card flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+              <div className="flex min-w-0 flex-col gap-1">
+                <h2 className="truncate text-title font-semibold text-fg">{openJob?.title ?? result?.request.title}</h2>
+                {req && (
+                  <div className="tnum flex flex-wrap items-center gap-x-3 gap-y-1 text-small text-fg-muted">
+                    <span className="inline-flex items-center gap-1.5" title={termHelp('ref')}>
+                      <span className="st-pill st-pill-ref">{t('기준')}</span>
+                      {rangeLabel(req.current)}
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1.5"
+                      title={`${termHelp('past')}\n\n${req.baselines.map(rangeLabel).join('\n')}`}
+                    >
+                      <span className="st-pill st-pill-past">{t('과거')}</span>
+                      {req.baselines.length === 1 ? rangeLabel(req.baselines[0]) : `${req.baselines.length}${t('개 구간')}`}
+                    </span>
+                    {result && result.ranges.length > 0 && <ServerCount ranges={result.ranges} />}
+                  </div>
+                )}
+              </div>
               <span className="flex-1" />
-              {openJob && (
-                <Button size="sm" onClick={() => reuse(openJob)}>
-                  {t('조건 다시 쓰기')}
-                </Button>
-              )}
-              {result && (
-                <Button size="sm" onClick={exportCsv} disabled={result.services.length === 0} title={t('서비스 한 줄에 기준·과거·과거 대비')}>
-                  {t('요약 CSV')}
-                </Button>
-              )}
-              {result && (
-                <Button size="sm" onClick={exportReport} disabled={result.services.length === 0 || reporting} title={t('남에게 넘길 HTML 한 장 — 특이사항과 추이 차트')}>
-                  {reporting ? t('만드는 중…') : t('HTML 보고서')}
-                </Button>
-              )}
-              {result?.raw_path && (
-                <Button
-                  size="sm"
-                  onClick={() => void revealItemInDir(result.raw_path ?? '').catch(() => {})}
-                  title={result.raw_path}
-                >
-                  {t('원본 CSV')}{' '}
-                  <span className="tnum text-fg-faint">
-                    {result.raw_rows.toLocaleString()}
-                    {t('건')}
-                    {result.raw_files > 1 ? ` · ${t('파일')} ${result.raw_files}${t('개')}` : ''}
-                  </span>
-                </Button>
-              )}
-              {openJob && openJob.status !== 'running' && (
-                <Button variant="danger" size="sm" onClick={() => onDelete(openJob.id)}>
-                  {t('지우기')}
-                </Button>
-              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {openJob && (
+                  <Button size="sm" variant="ghost" onClick={() => reuse(openJob)}>
+                    {t('조건 다시 쓰기')}
+                  </Button>
+                )}
+                {result && (
+                  <Button size="sm" onClick={exportCsv} disabled={result.services.length === 0} title={t('서비스 한 줄에 기준·과거·과거 대비')}>
+                    {t('요약 CSV')}
+                  </Button>
+                )}
+                {result && (
+                  <Button size="sm" onClick={exportReport} disabled={result.services.length === 0 || reporting} title={t('남에게 넘길 HTML 한 장 — 특이사항과 추이 차트')}>
+                    {reporting ? t('만드는 중…') : t('HTML 보고서')}
+                  </Button>
+                )}
+                {result?.raw_path && (
+                  <Button
+                    size="sm"
+                    onClick={() => void revealItemInDir(result.raw_path ?? '').catch(() => {})}
+                    title={result.raw_path}
+                  >
+                    {t('원본 CSV')}{' '}
+                    <span className="tnum text-fg-faint">
+                      {result.raw_rows.toLocaleString()}
+                      {t('건')}
+                      {result.raw_files > 1 ? ` · ${t('파일')} ${result.raw_files}${t('개')}` : ''}
+                    </span>
+                  </Button>
+                )}
+                {openJob && openJob.status !== 'running' && (
+                  <Button variant="danger" size="sm" onClick={() => onDelete(openJob.id)}>
+                    {t('지우기')}
+                  </Button>
+                )}
+              </div>
             </div>
             {notice && (
               <p className="text-small text-fg-dim">
@@ -494,9 +520,9 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   onSelect={setService}
                   detail={renderDetail}
                 />
-                <p className="text-small text-fg-faint">
-                  <button type="button" className="underline decoration-dotted hover:text-fg" title={rulesText(judgeRules)} onClick={() => setShowSettings(true)}>
-                    {t('판정 규칙')} ⓘ
+                <p className="px-1 text-small text-fg-faint">
+                  <button type="button" className="st-help hover:text-fg" title={rulesText(judgeRules)} onClick={() => setShowSettings(true)}>
+                    {t('판정 규칙')}
                   </button>{' '}
                   · {t('수집')} {result.collectors.join(' + ')} · {duration(result.finished_at - result.started_at)}
                 </p>
@@ -551,8 +577,8 @@ function ServerCount({ ranges }: { ranges: StatsResult['ranges'] }) {
   const base = of('baseline');
   return (
     <span
-      className="tnum cursor-help text-small text-fg-dim underline decoration-dotted"
-      title={`${t('기준')}:\n${cur.join('\n')}\n\n${t('과거')}:\n${base.join('\n')}`}
+      className="tnum st-help text-small text-fg-dim"
+      title={`${t('실제로 훑은 서버')}\n\n${t('기준')}:\n${cur.join('\n')}\n\n${t('과거')}:\n${base.join('\n')}`}
     >
       {t('서버')} {t('기준')} {cur.length}{t('대')} · {t('과거')} {base.length}{t('대')}
     </span>
@@ -613,7 +639,7 @@ function FewerServers({ result }: { result: StatsResult }) {
 }
 
 function Warn({ children }: { children: React.ReactNode }) {
-  return <p className="rounded border-l-2 border-warn bg-warn/10 px-2 py-1 text-small text-warn">{children}</p>;
+  return <p className="rounded-md border border-warn/30 bg-warn/10 px-3 py-1.5 text-small text-warn">⚠ {children}</p>;
 }
 
 /** 판정 기준 — 표 아래 ⓘ 에 마우스를 올리면 보인다 */
@@ -628,13 +654,17 @@ function rulesText(r: JudgeRules): string {
 
 function ProgressBox({ id, progress: p }: { id: string; progress: StatsProgress | null }) {
   const ratio = p && p.slices_total > 0 ? p.slices_done / p.slices_total : 0;
+  const pct = Math.round(ratio * 100);
+  const Stat = ({ label, value }: { label: string; value: string }) => (
+    <span className="flex flex-col">
+      <span className="text-micro text-fg-faint">{label}</span>
+      <span className="tnum text-body text-fg">{value}</span>
+    </span>
+  );
   return (
-    <div className="flex flex-col gap-1 rounded border border-line p-2 text-small text-fg-dim" role="status">
-      <div className="h-1.5 overflow-hidden rounded bg-hover">
-        <div className="h-full bg-accent" style={{ width: `${Math.round(ratio * 100)}%` }} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span>
+    <div className="st-card flex flex-col gap-3 px-4 py-3" role="status">
+      <div className="flex items-center gap-3">
+        <span className="text-body font-medium text-fg">
           {p?.phase === 'queue'
             ? t('대기 중 — 앞 작업이 끝나면 시작합니다 (한 번에 하나씩 돕니다)')
             : !p || p.phase === 'plan'
@@ -643,27 +673,35 @@ function ProgressBox({ id, progress: p }: { id: string; progress: StatsProgress 
                 ? t('잠시 멈춤')
                 : t('훑는 중…')}
         </span>
-        {p && p.slices_total > 0 && (
-          <span className="tnum">
-            {p.slices_done.toLocaleString()} / {p.slices_total.toLocaleString()} {t('조각')} · {t('받은 것')}{' '}
-            {p.scanned.toLocaleString()} · {t('맞는 것')} {p.matched.toLocaleString()}
-            {p.eta_ms !== null && !p.paused ? ` · ${t('남은 시간')} ~${duration(p.eta_ms)}` : ''}
-          </span>
-        )}
+        <span className="tnum text-title font-semibold text-accent-bright">{p && p.slices_total > 0 ? `${pct}%` : ''}</span>
         <span className="flex-1" />
         {p?.paused ? (
-          <Button size="xs" onClick={() => void statsControl(id, 'resume')}>
+          <Button size="sm" onClick={() => void statsControl(id, 'resume')}>
             {t('계속')}
           </Button>
         ) : (
-          <Button size="xs" onClick={() => void statsControl(id, 'pause')}>
+          <Button size="sm" onClick={() => void statsControl(id, 'pause')}>
             {t('잠시 멈춤')}
           </Button>
         )}
-        <Button variant="danger" size="xs" onClick={() => void statsControl(id, 'cancel')}>
+        <Button variant="danger" size="sm" onClick={() => void statsControl(id, 'cancel')}>
           {t('취소')}
         </Button>
       </div>
+      <div className="h-2 overflow-hidden rounded-full bg-hover">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-accent to-accent-bright transition-[width] duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {p && p.slices_total > 0 && (
+        <div className="flex flex-wrap gap-6">
+          <Stat label={t('조각')} value={`${p.slices_done.toLocaleString()} / ${p.slices_total.toLocaleString()}`} />
+          <Stat label={t('받은 것')} value={p.scanned.toLocaleString()} />
+          <Stat label={t('맞는 것')} value={p.matched.toLocaleString()} />
+          {p.eta_ms !== null && !p.paused && <Stat label={t('남은 시간')} value={`~${duration(p.eta_ms)}`} />}
+        </div>
+      )}
     </div>
   );
 }

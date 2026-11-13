@@ -8,6 +8,7 @@ import type { ServiceStats, StatsResult } from './statsApi';
 import { FLAG_LABEL, FLAG_ORDER, judge, severity, type Flag, type JudgeRules } from './statsJudge';
 import { flagReason, fmtMetric, fmtMetricVs, metricBad, metricValue, METRICS, splitService, type MetricKey } from './statsFormat';
 import { overlay } from './statsSeries';
+import { flagHelp, termHelp, type Term } from './statsGlossary';
 
 type Tr = (s: string) => string;
 
@@ -93,10 +94,11 @@ export function statsReport(
   const pats = r.request.task_patterns ?? [];
   const target = r.request.groups[0] ?? (pats.length > 0 ? pats : r.request.servers).join(', ');
 
-  const head = `<thead><tr><th rowspan="2" class="l">${esc(tr('서비스'))}</th><th rowspan="2" class="l">${esc(tr('판정'))}</th>${METRICS.map(
-    k => `<th colspan="3" class="g">${esc(metricHead(k, tr, pastRanges))}</th>`,
+  const tip = (k: Term) => ` title="${esc(termHelp(k))}"`;
+  const head = `<thead><tr><th rowspan="2" class="l">${esc(tr('서비스'))}</th><th rowspan="2" class="l"${tip('verdict')}><span class="help">${esc(tr('판정'))}</span></th>${METRICS.map(
+    k => `<th colspan="3" class="g"${tip(k)}><span class="help">${esc(metricHead(k, tr, pastRanges))}</span></th>`,
   ).join('')}</tr><tr class="sub">${METRICS.map(
-    () => `<th class="g cur">${esc(tr('기준'))}</th><th>${esc(tr('과거'))}</th><th>${esc(tr('과거 대비'))}</th>`,
+    () => `<th class="g cur"${tip('ref')}><span class="pill ref">${esc(tr('기준'))}</span></th><th${tip('past')}><span class="pill past">${esc(tr('과거'))}</span></th><th${tip('vs')}>${esc(tr('과거 대비'))}</th>`,
   ).join('')}</tr></thead>`;
 
   const svc = (name: string) => {
@@ -108,12 +110,13 @@ export function statsReport(
       const c = metricValue(s.current, k);
       const b = metricValue(s.baseline, k, pastRanges);
       const bad = metricBad(k, s, rules);
-      return `<td class="n g cur">${fmtMetric(k, c)}</td><td class="n past">${fmtMetric(k, b)}</td><td class="n vs${bad ? ' bad' : ''}">${esc(fmtMetricVs(k, c, b))}</td>`;
+      const vs = fmtMetricVs(k, c, b);
+      return `<td class="n g cur">${fmtMetric(k, c)}</td><td class="n past">${fmtMetric(k, b)}</td><td class="n vs">${vs ? (bad ? `<span class="bad">${esc(vs)}</span>` : esc(vs)) : ''}</td>`;
     }).join('');
     const verdict = flags
       .map(f => {
         const why = flagReason(f, s, rules, tr);
-        return `<span class="flag ${f}">${esc(tr(FLAG_LABEL[f]))}</span>${why ? ` <span class="why">${esc(why)}</span>` : ''}`;
+        return `<span class="flag ${f}" title="${esc(flagHelp(f, rules))}">${esc(tr(FLAG_LABEL[f]))}</span>${why ? ` <span class="why">${esc(why)}</span>` : ''}`;
       })
       .join('<br>');
     return `<tr><td class="svc">${svc(s.service)}</td><td class="v">${verdict}</td>${cells}</tr>`;
@@ -124,7 +127,7 @@ export function statsReport(
   const sections = FLAG_ORDER.filter(notable)
     .map(f => ({ f, list: flagged.filter(x => primary(x.flags) === f) }))
     .filter(x => x.list.length > 0);
-  const summary = sections.map(x => `${esc(tr(FLAG_LABEL[x.f]))} ${x.list.length}`).join(' · ');
+  
 
   const detail = flagged
     .map(({ s }) => {
@@ -138,37 +141,68 @@ export function statsReport(
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>${esc(r.request.title)}</title>
 <style>
-body{font-family:system-ui,"Malgun Gothic",sans-serif;margin:24px;color:#1d1d2b;background:#fff}
-h1{font-size:20px;margin:0 0 8px}h2{font-size:16px;margin:28px 0 6px}h3{font-size:13px;font-family:monospace;font-weight:normal;margin:16px 0 4px}
-.meta{font-size:13px;color:#555;border-collapse:collapse}.meta td{padding:1px 12px 1px 0;border:0}.meta .k{color:#888}
-.tag{display:inline-block;border-radius:3px;padding:0 6px;font-size:12px;font-weight:600}.tag.cur{background:#e3e9ff;color:#2f4fd1}.tag.past{background:#eee;color:#555}
-.legend{font-size:12px;color:#666;margin:6px 0 0}
-table.t{border-collapse:collapse;font-size:13px;margin-top:8px}
-.t th,.t td{border-bottom:1px solid #e3e3ea;padding:4px 8px;vertical-align:top;text-align:right;white-space:nowrap}
-.t th{background:#f5f5f8;font-weight:600}.t tr:first-child th.g{text-align:center}.t tr.sub th{font-weight:normal;font-size:11px;color:#666}.t th.l{text-align:left;vertical-align:bottom}
-.t .g{border-left:1px solid #d5d5de}.t th.cur,.t td.cur{color:#1d1d2b}.t td.past{color:#888}.t td.vs{color:#999;font-size:12px}.t td.vs.bad{color:#d4380d;font-weight:600}
-td.svc{text-align:left;font-family:monospace;white-space:normal;max-width:520px;overflow-wrap:anywhere}td.svc .h{display:block;color:#999;font-size:11px}td.svc b{color:#111}
-td.v{text-align:left}.why{font-size:11px;color:#666}
-.flag{border-radius:3px;padding:1px 6px;font-size:11px;white-space:nowrap}.flag.errors{background:#ffe1e0;color:#b4231b}
-.flag.slow{background:#fff1d6;color:#a35c00}.flag.volume,.flag.new{background:#e3e9ff;color:#2f4fd1}.flag.few{color:#999}
-svg .ax{stroke:#e3e3ea}svg .lb{font-size:10px;fill:#888}svg .cur{fill:none;stroke:#3b5bdb;stroke-width:1.8}
+:root{--ink:#1d1d2b;--muted:#5d6472;--faint:#8a90a0;--line:#e4e6ee;--soft:#f6f7fb;--accent:#3b5bdb;--accent-soft:#e7ecff;--bad:#c92a2a;--bad-soft:#ffe3e3;--warn:#a35c00;--warn-soft:#fff1d6}
+*{box-sizing:border-box}
+body{font-family:system-ui,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;margin:0;padding:32px 40px;color:var(--ink);background:#fff;line-height:1.45}
+h1{font-size:22px;margin:0 0 14px;letter-spacing:-0.01em}h2{font-size:16px;margin:32px 0 8px;display:flex;align-items:center;gap:8px}
+h2 .count{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);border-radius:999px;padding:1px 9px}
+h3{font-size:13px;font-family:ui-monospace,Consolas,monospace;font-weight:normal;margin:18px 0 4px}
+.head{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:16px 20px;background:var(--soft)}
+.meta{font-size:13px;color:var(--muted);border-collapse:collapse}.meta td{padding:2px 14px 2px 0;border:0;vertical-align:top}.meta .k{color:var(--faint)}
+.kpis{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
+.kpi{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 14px;min-width:96px}.kpi .l{font-size:11px;color:var(--muted)}.kpi .v{font-size:20px;font-weight:700}
+.kpi.errors .v{color:var(--bad)}.kpi.slow .v{color:var(--warn)}.kpi.volume .v,.kpi.new .v{color:var(--accent)}
+.pill{display:inline-block;border-radius:999px;padding:0 8px;font-size:11px;font-weight:600}.pill.ref{background:var(--accent-soft);color:var(--accent)}.pill.past{background:#eceef3;color:var(--muted)}
+.legend{font-size:12px;color:var(--muted);margin:10px 2px 0}
+.help{text-decoration:underline dotted var(--faint);text-underline-offset:3px;cursor:help}
+.wrap{border:1px solid var(--line);border-radius:10px;overflow:hidden;display:inline-block;max-width:100%}
+table.t{border-collapse:collapse;font-size:13px}
+.t th,.t td{border-bottom:1px solid var(--line);padding:6px 9px;vertical-align:top;text-align:right;white-space:nowrap}
+.t thead th{background:var(--soft);font-weight:600;color:var(--muted)}.t tr.sub th{font-weight:normal;font-size:11px}.t th.l{text-align:left;vertical-align:bottom}
+.t tr:first-child th.g{text-align:center;color:var(--ink)}
+.t tbody tr:nth-child(even){background:#fbfbfd}.t tbody tr:last-child td{border-bottom:0}
+.t .g{border-left:1px solid var(--line)}.t td.cur{background:rgba(59,91,219,.05);font-weight:600}.t td.past{color:var(--faint)}.t td.vs{color:var(--faint);font-size:12px}
+.t .bad{display:inline-block;border-radius:999px;padding:0 7px;background:var(--bad-soft);color:var(--bad);font-weight:700}
+td.svc{text-align:left;font-family:ui-monospace,Consolas,monospace;white-space:normal;max-width:520px;overflow-wrap:anywhere}td.svc .h{display:block;color:var(--faint);font-size:11px}td.svc b{color:#111}
+td.v{text-align:left}.why{font-size:11px;color:var(--muted)}
+.flag{border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap;cursor:help}.flag.errors{background:var(--bad-soft);color:var(--bad)}
+.flag.slow{background:var(--warn-soft);color:var(--warn)}.flag.volume,.flag.new{background:var(--accent-soft);color:var(--accent)}.flag.few{color:var(--faint)}
+.gloss{margin-top:36px;border:1px solid var(--line);border-radius:10px;padding:14px 20px;background:var(--soft);font-size:12px;color:var(--muted)}
+.gloss dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:8px 0 0}.gloss dt{font-weight:700;color:var(--ink)}.gloss dd{margin:0;white-space:pre-line}
+svg .ax{stroke:var(--line)}svg .lb{font-size:10px;fill:var(--faint)}svg .cur{fill:none;stroke:var(--accent);stroke-width:1.8}
 svg .base{fill:none;stroke:#999;stroke-width:1.3;stroke-dasharray:4 3}
+@media print{body{padding:12px}.wrap{overflow:visible}}
 </style></head><body>
 <h1>${esc(r.request.title)}</h1>
+<div class="head">
 <table class="meta">
 <tr><td class="k">${esc(tr('대상'))}</td><td>${esc(target)}</td></tr>
-<tr><td><span class="tag cur">${esc(tr('기준'))}</span></td><td>${span(r.request.current.stime, r.request.current.etime)}</td></tr>
-<tr><td><span class="tag past">${esc(tr('과거'))}</span></td><td>${r.request.baselines.map(b => span(b.stime, b.etime)).join('<br>')}${pastRanges > 1 ? ` <span class="k">(${pastRanges}${esc(tr('개 구간을 합침'))})</span>` : ''}</td></tr>
-<tr><td class="k">${esc(tr('서비스'))}</td><td>${rows.length} · ${esc(tr('특이사항'))} ${flagged.length}${summary ? ` (${summary})` : ''}</td></tr>
+<tr><td><span class="pill ref" title="${esc(termHelp('ref'))}">${esc(tr('기준'))}</span></td><td>${span(r.request.current.stime, r.request.current.etime)}</td></tr>
+<tr><td><span class="pill past" title="${esc(termHelp('past'))}">${esc(tr('과거'))}</span></td><td>${r.request.baselines.map(b => span(b.stime, b.etime)).join('<br>')}${pastRanges > 1 ? ` <span class="k">(${pastRanges}${esc(tr('개 구간을 합침'))})</span>` : ''}</td></tr>
 <tr><td class="k">${esc(tr('수집'))}</td><td>${esc(r.collectors.join(' + '))} · ${esc(tr('만든 시각'))} ${when(Date.now())}</td></tr>
 </table>
+<div class="kpis">
+<div class="kpi"><div class="l">${esc(tr('서비스'))}</div><div class="v">${rows.length}</div></div>
+<div class="kpi"><div class="l">${esc(tr('특이사항'))}</div><div class="v">${flagged.length}</div></div>
+${sections.map(x => `<div class="kpi ${x.f}" title="${esc(flagHelp(x.f, rules))}"><div class="l">${esc(tr(FLAG_LABEL[x.f]))}</div><div class="v">${x.list.length}</div></div>`).join('')}
+</div>
+</div>
 <p class="legend">${esc(tr('지표마다 세 칸: 기준 값 | 과거 값 | 과거 대비 (2배 이상은 ×배수, 에러율은 %p 차이). 빨간 칸은 판정에 걸린 것.'))}</p>
 ${sections
-  .map(x => `<h2>${esc(tr(FLAG_LABEL[x.f]))} (${x.list.length})</h2><table class="t">${head}<tbody>${x.list.map(tableRow).join('\n')}</tbody></table>`)
+  .map(x => `<h2>${esc(tr(FLAG_LABEL[x.f]))} <span class="count">${x.list.length}</span></h2><div class="wrap"><table class="t">${head}<tbody>${x.list.map(tableRow).join('\n')}</tbody></table></div>`)
   .join('\n')}
 ${flagged.length === 0 ? `<h2>${esc(tr('특이사항'))}</h2><p class="legend">${esc(tr('특이사항이 없습니다'))}</p>` : ''}
 ${detail ? `<h2>${esc(tr('5분 평균 응답시간 — 실선 기준, 점선 과거'))}</h2>${detail}` : ''}
-<h2>${esc(tr('전체 서비스'))} (${rows.length})</h2>
-<table class="t">${head}<tbody>${rows.map(tableRow).join('\n')}</tbody></table>
+<h2>${esc(tr('전체 서비스'))} <span class="count">${rows.length}</span></h2>
+<div class="wrap"><table class="t">${head}<tbody>${rows.map(tableRow).join('\n')}</tbody></table></div>
+<div class="gloss"><b>${esc(tr('용어 설명'))}</b><dl>
+${(['ref', 'past', 'vs', 'count', 'avg', 'p90', 'p99', 'err'] as Term[])
+  .map(k => {
+    const [name, ...rest] = termHelp(k).split(' — ');
+    return `<dt>${esc(name)}</dt><dd>${esc(rest.join(' — '))}</dd>`;
+  })
+  .join('\n')}
+${FLAG_ORDER.filter(notable).map(f => `<dt>${esc(tr(FLAG_LABEL[f]))}</dt><dd>${esc(flagHelp(f, rules).split(' — ').slice(1).join(' — '))}</dd>`).join('\n')}
+</dl></div>
 </body></html>`;
 }

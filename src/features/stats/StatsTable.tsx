@@ -9,6 +9,7 @@ import { t } from '../../i18n';
 import type { ServiceStats } from './statsApi';
 import { FLAG_LABEL, FLAG_ORDER, judge, severity, type Flag, type JudgeRules } from './statsJudge';
 import { flagReason, fmtMetric, fmtMetricVs, metricBad, metricValue, METRICS, splitService, type MetricKey } from './statsFormat';
+import { flagHelp, termHelp } from './statsGlossary';
 
 type SortKey = 'worst' | 'service' | MetricKey;
 
@@ -98,42 +99,44 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
     return list.sort((a, b) => get(b) - get(a));
   }, [judged, only, query, sort]);
 
-  const SortBtn = ({ k, label, left }: { k: SortKey; label: string; left?: boolean }) => (
+  const SortBtn = ({ k, label, left, help }: { k: SortKey; label: string; left?: boolean; help?: string }) => (
     <button
       type="button"
       onClick={() => setSort(k)}
       className={`hover:text-fg ${sort === k ? 'text-fg' : ''} ${left ? '' : 'w-full text-center'}`}
       aria-pressed={sort === k}
-      title={k === 'worst' || k === 'service' ? undefined : t('기준 값으로 줄 세웁니다')}
+      title={help ? `${help}\n\n${t('누르면 기준 값으로 줄 세웁니다')}` : undefined}
     >
-      {label}
+      <span className={help ? 'st-help' : ''}>{label}</span>
       {sort === k && ' ↓'}
     </button>
   );
 
-  const Chip = ({ value, label, n }: { value: Flag | 'any' | null; label: string; n: number }) => (
+  /** 요약 카드 — 누르면 그것만 남긴다(다시 누르면 전체) */
+  const Kpi = ({ value, label, n, tone, help }: { value: Flag | 'any' | null; label: string; n: number; tone?: string; help?: string }) => (
     <button
       type="button"
-      onClick={() => setOnly(value)}
+      onClick={() => setOnly(only === value ? null : value)}
       aria-pressed={only === value}
-      className={`rounded px-2 py-0.5 text-small ${
-        only === value ? 'bg-accent/20 text-accent-bright' : 'text-fg-muted hover:bg-hover'
-      }`}
+      className="st-kpi"
+      title={help}
     >
-      {label} <span className="tnum">{n}</span>
+      <span className="text-micro text-fg-dim">{label}</span>
+      <span className={`tnum text-title font-semibold leading-none ${tone ?? 'text-fg'}`}>{n.toLocaleString()}</span>
     </button>
   );
+  const FLAG_TONE: Partial<Record<Flag, string>> = { errors: 'text-danger', slow: 'text-warn', volume: 'text-accent-bright', new: 'text-accent-bright' };
 
   // 지표 묶음 사이 세로줄 — 어느 칸이 어느 지표인지 눈으로 가른다
   const groupEdge = 'border-l border-line';
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-1">
-        <Chip value={null} label={t('전체')} n={currentCount} />
-        <Chip value="any" label={t('특이사항')} n={flaggedCount} />
+      <div className="flex flex-wrap items-end gap-2">
+        <Kpi value={null} label={t('서비스')} n={currentCount} help={t('기준 구간에 찍힌 서비스')} />
+        <Kpi value="any" label={t('특이사항')} n={flaggedCount} tone={flaggedCount > 0 ? 'text-warn' : 'text-fg'} help={termHelp('verdict')} />
         {FLAG_ORDER.filter(f => f !== 'few' && counts.get(f)).map(f => (
-          <Chip key={f} value={f} label={t(FLAG_LABEL[f])} n={counts.get(f) ?? 0} />
+          <Kpi key={f} value={f} label={t(FLAG_LABEL[f])} n={counts.get(f) ?? 0} tone={FLAG_TONE[f]} help={flagHelp(f, rules)} />
         ))}
         <span className="flex-1" />
         <input
@@ -145,28 +148,34 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
           className="search-field w-56 rounded py-0.5 pr-2 text-small"
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-auto rounded border border-line">
+      <div className="st-card min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse">
-          <thead className="sticky top-0 z-10 bg-raised text-small text-fg-dim">
+          <thead className="sticky top-0 z-10 bg-overlay text-small text-fg-dim shadow-[0_1px_0_var(--border-strong)]">
             <tr>
-              <th rowSpan={2} className="px-2 py-1 text-left font-normal align-bottom">
+              <th rowSpan={2} className="px-3 py-1.5 text-left font-normal align-bottom">
                 <SortBtn k="service" label={t('서비스')} left />
               </th>
               <th rowSpan={2} className="px-2 py-1 text-left font-normal align-bottom">
-                <SortBtn k="worst" label={t('판정')} left />
+                <SortBtn k="worst" label={t('판정')} left help={termHelp('verdict')} />
               </th>
               {METRICS.map(k => (
                 <th key={k} colSpan={3} className={`${groupEdge} px-2 pt-1 font-medium text-fg-muted`}>
-                  <SortBtn k={k} label={metricLabel(k, pastRanges)} />
+                  <SortBtn k={k} label={metricLabel(k, pastRanges)} help={termHelp(k)} />
                 </th>
               ))}
             </tr>
             <tr className="text-micro">
               {METRICS.map(k => (
                 <Fragment key={k}>
-                  <th className={`${groupEdge} whitespace-nowrap px-2 pb-1 text-right font-normal text-fg`}>{t('기준')}</th>
-                  <th className="whitespace-nowrap px-2 pb-1 text-right font-normal">{t('과거')}</th>
-                  <th className="whitespace-nowrap px-2 pb-1 text-right font-normal">{t('과거 대비')}</th>
+                  <th className={`${groupEdge} st-ref whitespace-nowrap px-2 pb-1.5 text-right font-medium`} title={termHelp('ref')}>
+                    <span className="st-pill st-pill-ref">{t('기준')}</span>
+                  </th>
+                  <th className="whitespace-nowrap px-2 pb-1.5 text-right font-normal" title={termHelp('past')}>
+                    <span className="st-pill st-pill-past">{t('과거')}</span>
+                  </th>
+                  <th className="whitespace-nowrap px-2 pb-1.5 text-right font-normal" title={termHelp('vs')}>
+                    <span className="st-help-soft">{t('과거 대비')}</span>
+                  </th>
                 </Fragment>
               ))}
             </tr>
@@ -179,17 +188,19 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
                   <tr
                     onClick={() => onSelect(on ? null : r.service)}
                     aria-expanded={on}
-                    className={`cursor-pointer border-t border-line text-body ${on ? 'bg-accent/15' : 'hover:bg-hover'}`}
+                    className={`cursor-pointer border-t border-line text-body transition-colors ${
+                      on ? 'bg-accent/12 shadow-[inset_3px_0_0_var(--accent)]' : 'hover:bg-hover/70'
+                    }`}
                   >
-                    <td className="px-2 py-1">
+                    <td className="px-3 py-1.5">
                       <ServiceName name={r.service} />
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1">
+                    <td className="whitespace-nowrap px-2 py-1.5">
                       {flags.map(f => {
                         const why = flagReason(f, r, rules, t);
                         return (
-                          <span key={f} className="mr-1.5 inline-flex items-center gap-1">
-                            <span className={`rounded px-1.5 py-px text-micro ${FLAG_CLS[f]}`}>{t(FLAG_LABEL[f])}</span>
+                          <span key={f} className="mr-2 inline-flex items-center gap-1" title={flagHelp(f, rules)}>
+                            <span className={`rounded-full px-2 py-px text-micro font-medium ${FLAG_CLS[f]}`}>{t(FLAG_LABEL[f])}</span>
                             {why && <span className="tnum text-micro text-fg-dim">{why}</span>}
                           </span>
                         );
@@ -202,18 +213,18 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
                       const bad = metricBad(k, r, rules);
                       return (
                         <Fragment key={k}>
-                          <td className={`${groupEdge} tnum whitespace-nowrap px-2 py-1 text-right text-fg`}>{fmtMetric(k, c)}</td>
-                          <td className="tnum whitespace-nowrap px-2 py-1 text-right text-fg-dim">{fmtMetric(k, b)}</td>
-                          <td className={`tnum whitespace-nowrap px-2 py-1 text-right text-small ${bad ? 'font-semibold text-danger' : 'text-fg-faint'}`}>
-                            {vs}
+                          <td className={`${groupEdge} st-ref tnum whitespace-nowrap px-2 py-1.5 text-right font-medium text-fg`}>{fmtMetric(k, c)}</td>
+                          <td className="tnum whitespace-nowrap px-2 py-1.5 text-right text-fg-dim">{fmtMetric(k, b)}</td>
+                          <td className="tnum whitespace-nowrap px-2 py-1.5 text-right text-small">
+                            {vs && (bad ? <span className="st-bad">{vs}</span> : <span className="text-fg-faint">{vs}</span>)}
                           </td>
                         </Fragment>
                       );
                     })}
                   </tr>
                   {on && (
-                    <tr className="bg-raised">
-                      <td colSpan={2 + METRICS.length * 3} className="px-3 py-3">
+                    <tr className="bg-surface">
+                      <td colSpan={2 + METRICS.length * 3} className="px-4 py-4 shadow-[inset_3px_0_0_var(--accent)]">
                         {detail(r.service)}
                       </td>
                     </tr>
