@@ -24,6 +24,7 @@ const int = (v: number) => Math.round(v).toLocaleString();
 /** 표에 없는 것만 — 건수·평균·p90·p99·에러율은 위 표에 있다 */
 function fields(): Field[] {
   return [
+    { label: 'p50(ms)', get: s => s.p50_ms, fmt: int, help: termHelp('p50') },
     { label: 'TPS', get: s => s.tps, fmt: v => v.toFixed(2), help: termHelp('tps') },
     { label: t('최대(ms)'), get: s => s.max_ms, fmt: int, help: termHelp('max') },
     { label: t('SQL 시간(ms, 건당)'), get: s => s.sql_ms_avg, fmt: int, help: termHelp('sql') },

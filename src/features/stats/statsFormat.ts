@@ -4,7 +4,12 @@
 // 과거 구간이 여럿이면 건수는 **구간당 평균**으로 적는다 — 합계를 그대로 견주면 과거 7개일 때 «▼86%» 처럼 거꾸로 읽힌다.
 
 import type { ServiceStats, StatsSummary } from './statsApi';
-import { change, type Flag, type JudgeRules } from './statsJudge';
+import { change, slowValue, type Flag, type JudgeRules, type SlowMetric } from './statsJudge';
+
+/** «느려짐» 지표의 이름 */
+export function slowName(m: SlowMetric, tr: (s: string) => string = x => x): string {
+  return m === 'avg' ? tr('평균') : m;
+}
 
 /** 표에 두는 지표 */
 export type MetricKey = 'count' | 'avg' | 'p90' | 'p99' | 'err';
@@ -72,11 +77,9 @@ export function metricBad(k: MetricKey, row: ServiceStats, r: JudgeRules): boole
   const slower = (x: number, y: number) => x - y >= r.slowMinMs && x >= y * r.slowRatio;
   switch (k) {
     case 'avg':
-      return slower(c.avg_ms, b.avg_ms);
     case 'p90':
-      return slower(c.p90_ms, b.p90_ms);
     case 'p99':
-      return r.useP99 && slower(c.p99_ms, b.p99_ms);
+      return r.slowOn.includes(k) && slower(slowValue(c, k), slowValue(b, k));
     case 'err':
       return c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio);
     case 'count':
@@ -84,7 +87,7 @@ export function metricBad(k: MetricKey, row: ServiceStats, r: JudgeRules): boole
   }
 }
 
-/** 판정 이유 — 칩 옆에 짧게. 걸린 지표 중 가장 크게 변한 것 */
+/** 판정 이유 — 칩 옆에 짧게. 걸린 지표 중 가장 크게 변한 것 (p50 처럼 표에 없는 지표도 적는다) */
 export function flagReason(f: Flag, row: ServiceStats, r: JudgeRules, tr: (s: string) => string = x => x): string {
   const c = row.current;
   const b = row.baseline;
@@ -92,11 +95,11 @@ export function flagReason(f: Flag, row: ServiceStats, r: JudgeRules, tr: (s: st
   if (f === 'errors') return `${fmtPp(c.error_rate, b.error_rate)}`;
   if (f === 'volume') return `TPS ${fmtVs(c.tps, b.tps) || `${Math.round((c.tps / b.tps - 1) * 100)}%`}`;
   if (f === 'slow') {
-    const hits = (['avg', 'p90', 'p99'] as const).filter(k => metricBad(k, row, r));
-    const best = hits.sort((x, y) => (change(metricValue(c, y), metricValue(b, y)) ?? 0) - (change(metricValue(c, x), metricValue(b, x)) ?? 0))[0];
+    const slower = (x: number, y: number) => x - y >= r.slowMinMs && x >= y * r.slowRatio;
+    const hits = r.slowOn.filter(m => slower(slowValue(c, m), slowValue(b, m)));
+    const best = hits.sort((x, y) => (change(slowValue(c, y), slowValue(b, y)) ?? 0) - (change(slowValue(c, x), slowValue(b, x)) ?? 0))[0];
     if (!best) return '';
-    const name = best === 'avg' ? tr('평균') : best;
-    return `${name} ${fmtVs(metricValue(c, best), metricValue(b, best))}`;
+    return `${slowName(best, tr)} ${fmtVs(slowValue(c, best), slowValue(b, best))}`;
   }
   return '';
 }

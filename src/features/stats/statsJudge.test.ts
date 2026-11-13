@@ -41,15 +41,22 @@ describe('judge', () => {
     expect(judge(row(s({ p90_ms: 700 }), s()))).toEqual(['slow']);
   });
 
-  it('p99 는 켰을 때만 본다', () => {
+  it('느려짐은 고른 지표로만 본다 — p50·p90·p99·평균', () => {
     const r = row(s({ p99_ms: 3000 }), s());
+    // 기본은 평균·p90
     expect(judge(r)).toEqual([]);
-    expect(judge(r, { ...DEFAULT_RULES, useP99: true })).toEqual(['slow']);
+    expect(judge(r, { ...DEFAULT_RULES, slowOn: ['p99'] })).toEqual(['slow']);
+    const mid = row(s({ p50_ms: 500 }), s());
+    expect(judge(mid)).toEqual([]);
+    expect(judge(mid, { ...DEFAULT_RULES, slowOn: ['p50'] })).toEqual(['slow']);
+    // 평균을 빼면 평균만 늘어난 것은 안 걸린다
+    expect(judge(row(s({ avg_ms: 900 }), s()), { ...DEFAULT_RULES, slowOn: ['p90'] })).toEqual([]);
   });
 
-  it('설정 값을 판정 기준으로 — 못 쓸 값은 기본값', () => {
+  it('설정 값을 판정 기준으로 — 못 쓸 값은 기본값, 예전 use_p99 도 읽는다', () => {
     const r = rulesFromPrefs({ slow_ratio: 2, slow_min_ms: 0, error_ratio: -1, error_min_pp: 0.5, volume_pct: 30, min_count: 10, use_p99: true });
-    expect(r).toEqual({ ...DEFAULT_RULES, slowRatio: 2, slowMinMs: 0, errorMinDelta: 0.005, volumeRatio: 0.3, minCount: 10, useP99: true });
+    expect(r).toEqual({ ...DEFAULT_RULES, slowRatio: 2, slowMinMs: 0, errorMinDelta: 0.005, volumeRatio: 0.3, minCount: 10, slowOn: ['avg', 'p90', 'p99'] });
+    expect(rulesFromPrefs({ ...prefsFromRules(DEFAULT_RULES), slow_metrics: ['p99', 'p50', 'bogus'] }).slowOn).toEqual(['p50', 'p99']);
     expect(rulesFromPrefs(prefsFromRules(DEFAULT_RULES))).toEqual(DEFAULT_RULES);
   });
 

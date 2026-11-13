@@ -33,12 +33,14 @@ describe('표기', () => {
     expect(fmtMetric('err', 0.0123)).toBe('1.23%');
   });
 
-  it('빨간색은 판정에 걸린 지표만 — 건수는 안 칠한다, p99 는 켰을 때만', () => {
+  it('빨간색은 판정에 걸린 지표만 — 건수는 안 칠한다, 고른 지표만', () => {
     const r = row(s({ avg_ms: 900, p99_ms: 9000, count: 2000 }), s());
     expect(metricBad('avg', r, DEFAULT_RULES)).toBe(true);
     expect(metricBad('p90', r, DEFAULT_RULES)).toBe(false);
     expect(metricBad('p99', r, DEFAULT_RULES)).toBe(false);
-    expect(metricBad('p99', r, { ...DEFAULT_RULES, useP99: true })).toBe(true);
+    expect(metricBad('p99', r, { ...DEFAULT_RULES, slowOn: ['p99'] })).toBe(true);
+    // 고르지 않은 지표는 안 칠한다
+    expect(metricBad('avg', r, { ...DEFAULT_RULES, slowOn: ['p99'] })).toBe(false);
     expect(metricBad('count', r, DEFAULT_RULES)).toBe(false);
   });
 

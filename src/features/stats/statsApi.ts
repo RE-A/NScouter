@@ -192,6 +192,8 @@ export interface StatsJudgePrefs {
   volume_pct: number;
   min_count: number;
   use_p99: boolean;
+  /** «느려짐» 을 볼 지표. 비면 평균·p90(+use_p99) — 예전 설정 */
+  slow_metrics?: string[];
 }
 
 /** 통계 탭 설정 — Rust `StatsPrefs` */
@@ -201,6 +203,8 @@ export interface StatsPrefs {
   keep_days: number;
   /** 조건 묶음 (`statsPresets.ts` 모양) */
   presets: unknown[];
+  /** 비교 표의 열 너비(px) — 끌어서 정한 것만 */
+  col_widths?: Record<string, number>;
 }
 
 export function statsSavePrefs(prefs: StatsPrefs): Promise<void> {

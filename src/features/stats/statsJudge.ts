@@ -18,8 +18,17 @@ export interface JudgeRules {
   volumeRatio: number;
   /** 한쪽 건수가 이보다 적으면 판정하지 않는다 */
   minCount: number;
-  /** «느려짐» 에 p99 도 본다 */
-  useP99: boolean;
+  /** «느려짐» 을 볼 지표 — 하나라도 걸리면 느려짐 */
+  slowOn: SlowMetric[];
+}
+
+/** «느려짐» 을 볼 수 있는 지표 */
+export type SlowMetric = 'avg' | 'p50' | 'p90' | 'p99';
+export const SLOW_METRICS: SlowMetric[] = ['avg', 'p50', 'p90', 'p99'];
+
+/** 지표의 응답시간 */
+export function slowValue(s: StatsSummary, m: SlowMetric): number {
+  return m === 'avg' ? s.avg_ms : m === 'p50' ? s.p50_ms : m === 'p90' ? s.p90_ms : s.p99_ms;
 }
 
 export const DEFAULT_RULES: JudgeRules = {
@@ -29,8 +38,15 @@ export const DEFAULT_RULES: JudgeRules = {
   errorMinDelta: 0.01,
   volumeRatio: 0.5,
   minCount: 30,
-  useP99: false,
+  slowOn: ['avg', 'p90'],
 };
+
+/** 설정의 «느려짐» 지표 — 없으면 예전 설정(평균·p90, use_p99 면 p99 도) */
+function slowFromPrefs(p: StatsJudgePrefs): SlowMetric[] {
+  const picked = (p.slow_metrics ?? []).filter((m): m is SlowMetric => (SLOW_METRICS as string[]).includes(m));
+  if (picked.length > 0) return SLOW_METRICS.filter(m => picked.includes(m));
+  return p.use_p99 === true ? ['avg', 'p90', 'p99'] : ['avg', 'p90'];
+}
 
 /** 설정 파일(`config.stats.judge`)의 값 → 판정 기준. 못 쓸 값은 기본값으로 */
 export function rulesFromPrefs(p: StatsJudgePrefs | undefined): JudgeRules {
@@ -43,7 +59,7 @@ export function rulesFromPrefs(p: StatsJudgePrefs | undefined): JudgeRules {
     errorMinDelta: Number.isFinite(p.error_min_pp) && p.error_min_pp >= 0 ? p.error_min_pp / 100 : DEFAULT_RULES.errorMinDelta,
     volumeRatio: pos(p.volume_pct, DEFAULT_RULES.volumeRatio * 100) / 100,
     minCount: Number.isFinite(p.min_count) && p.min_count >= 0 ? Math.round(p.min_count) : DEFAULT_RULES.minCount,
-    useP99: p.use_p99 === true,
+    slowOn: slowFromPrefs(p),
   };
 }
 
@@ -55,7 +71,8 @@ export function prefsFromRules(r: JudgeRules): StatsJudgePrefs {
     error_min_pp: r.errorMinDelta * 100,
     volume_pct: r.volumeRatio * 100,
     min_count: r.minCount,
-    use_p99: r.useP99,
+    use_p99: r.slowOn.includes('p99'),
+    slow_metrics: [...r.slowOn],
   };
 }
 
@@ -87,9 +104,7 @@ export function judge(row: ServiceStats, r: JudgeRules = DEFAULT_RULES): Flag[] 
   if (c.error_rate - b.error_rate >= r.errorMinDelta && (b.error_rate === 0 || c.error_rate >= b.error_rate * r.errorRatio)) {
     out.push('errors');
   }
-  if (slower(c.avg_ms, b.avg_ms, r) || slower(c.p90_ms, b.p90_ms, r) || (r.useP99 && slower(c.p99_ms, b.p99_ms, r))) {
-    out.push('slow');
-  }
+  if (r.slowOn.some(m => slower(slowValue(c, m), slowValue(b, m), r))) out.push('slow');
   if (b.tps > 0 && Math.abs(c.tps / b.tps - 1) > r.volumeRatio) out.push('volume');
   return out;
 }
@@ -112,9 +127,7 @@ export function severity(row: ServiceStats, r: JudgeRules = DEFAULT_RULES): numb
   if (c && b && !flags.includes('few')) {
     score = Math.max(
       (c.error_rate - b.error_rate) * 1000,
-      change(c.avg_ms, b.avg_ms) ?? 0,
-      change(c.p90_ms, b.p90_ms) ?? 0,
-      r.useP99 ? (change(c.p99_ms, b.p99_ms) ?? 0) : 0,
+      ...r.slowOn.map(m => change(slowValue(c, m), slowValue(b, m)) ?? 0),
     );
   }
   const bonus = flags.includes('errors') ? 2000 : flags.includes('slow') ? 1000 : flags.includes('volume') ? 500 : 0;

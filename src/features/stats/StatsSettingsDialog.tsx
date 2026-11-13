@@ -6,7 +6,9 @@ import { memo, useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../../components/Button';
 import { Dialog } from '../../components/Dialog';
-import { DEFAULT_RULES, type JudgeRules } from './statsJudge';
+import { DEFAULT_RULES, SLOW_METRICS, type JudgeRules } from './statsJudge';
+import { slowName } from './statsFormat';
+import { termHelp } from './statsGlossary';
 
 interface Props {
   rules: JudgeRules;
@@ -26,12 +28,13 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
     errorMinPp: String(rules.errorMinDelta * 100),
     volumePct: String(rules.volumeRatio * 100),
     minCount: String(rules.minCount),
-    useP99: rules.useP99,
+    slowOn: rules.slowOn,
     keepDays: String(keepDays),
   });
   const num = (s: string) => Number(s.trim());
   const ok = (s: string, min: number) => s.trim() !== '' && Number.isFinite(num(s)) && num(s) >= min;
   const valid =
+    v.slowOn.length > 0 &&
     ok(v.slowRatio, 1) && ok(v.slowMinMs, 0) && ok(v.errorRatio, 1) && ok(v.errorMinPp, 0) && ok(v.volumePct, 1) && ok(v.minCount, 0) && ok(v.keepDays, 0);
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
   const save = () => {
@@ -44,7 +47,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
         errorMinDelta: num(v.errorMinPp) / 100,
         volumeRatio: num(v.volumePct) / 100,
         minCount: Math.round(num(v.minCount)),
-        useP99: v.useP99,
+        slowOn: v.slowOn,
       },
       Math.round(num(v.keepDays)),
     );
@@ -58,7 +61,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
       errorMinPp: String(DEFAULT_RULES.errorMinDelta * 100),
       volumePct: String(DEFAULT_RULES.volumeRatio * 100),
       minCount: String(DEFAULT_RULES.minCount),
-      useP99: DEFAULT_RULES.useP99,
+      slowOn: DEFAULT_RULES.slowOn,
     });
 
   return (
@@ -84,15 +87,27 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
         <section className="flex flex-col gap-2">
           <h3 className="font-medium text-fg">{t('판정 규칙')}</h3>
           <Row label={t('느려짐')}>
-            {t('평균·p90 이 과거의')} <input className={inputCls} value={v.slowRatio} onChange={set('slowRatio')} /> {t('배 이상')},{' '}
-            <input className={inputCls} value={v.slowMinMs} onChange={set('slowMinMs')} /> ms {t('이상 늘면')}
+            <span title={t('여기서 고른 지표 중 하나라도 아래 조건에 걸리면 «느려짐» 입니다')}>{t('볼 지표')}</span>
+            {SLOW_METRICS.map(m => (
+              <label key={m} className="flex items-center gap-1 rounded border border-line px-2 py-0.5" title={termHelp(m)}>
+                <input
+                  type="checkbox"
+                  checked={v.slowOn.includes(m)}
+                  onChange={e =>
+                    setV({ ...v, slowOn: SLOW_METRICS.filter(x => (x === m ? e.target.checked : v.slowOn.includes(x))) })
+                  }
+                />
+                {slowName(m, t)}
+              </label>
+            ))}
           </Row>
           <Row label="">
-            <label className="flex items-center gap-2 text-fg-muted">
-              <input type="checkbox" checked={v.useP99} onChange={e => setV({ ...v, useP99: e.target.checked })} />
-              {t('p99 도 본다 (드문 느린 요청까지 잡는다 — 흔들림이 커서 경보가 늘 수 있다)')}
-            </label>
+            {t('이 과거의')} <input className={inputCls} value={v.slowRatio} onChange={set('slowRatio')} /> {t('배 이상')},{' '}
+            <input className={inputCls} value={v.slowMinMs} onChange={set('slowMinMs')} /> ms {t('이상 늘면')}
           </Row>
+          <p className="pl-[6.5rem] text-small text-fg-faint">
+            {t('p50 은 보통 요청, p90 은 대부분의 사용자, p99 는 드문 느린 요청(흔들림이 커서 경보가 늘 수 있다)을 봅니다.')}
+          </p>
           <Row label={t('에러 증가')}>
             {t('에러율이 과거의')} <input className={inputCls} value={v.errorRatio} onChange={set('errorRatio')} /> {t('배 이상')},{' '}
             <input className={inputCls} value={v.errorMinPp} onChange={set('errorMinPp')} /> %p {t('이상 늘면')}
@@ -111,7 +126,7 @@ export const StatsSettingsDialog = memo(function StatsSettingsDialog({ rules, ke
             <input className={inputCls} value={v.keepDays} onChange={set('keepDays')} /> {t('일 — 지난 결과는 목록을 열 때 지웁니다 (0 이면 지우지 않음)')}
           </Row>
         </section>
-        {!valid && <p className="text-small text-danger">{t('숫자를 확인하세요 (배수는 1 이상)')}</p>}
+        {!valid && <p className="text-small text-danger">{v.slowOn.length === 0 ? t('느려짐을 볼 지표를 하나 이상 고르세요') : t('숫자를 확인하세요 (배수는 1 이상)')}</p>}
       </div>
     </Dialog>
   );

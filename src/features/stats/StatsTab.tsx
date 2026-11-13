@@ -38,9 +38,11 @@ import {
 import { statsCsv } from './statsCsv';
 import { DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, type JudgeRules } from './statsJudge';
 import { termHelp } from './statsGlossary';
+import { slowName } from './statsFormat';
 import { StatsSettingsDialog } from './StatsSettingsDialog';
 import { parsePresets, type StatsPreset } from './statsPresets';
 import { statsReport } from './statsReport';
+import { parseWidths, type ColId } from './statsTableModel';
 import { draftError, initialDraft, rangeLabel, StatsForm, toRequest, type StatsDraft } from './StatsForm';
 import { StatsTable } from './StatsTable';
 import { StatsDetail } from './StatsDetail';
@@ -105,6 +107,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   const [judgeRules, setJudgeRules] = useState<JudgeRules>(DEFAULT_RULES);
   const [keepDays, setKeepDays] = useState(90);
   const [presets, setPresets] = useState<StatsPreset[]>([]);
+  const [colWidths, setColWidths] = useState<Partial<Record<ColId, number>>>({});
   const [showSettings, setShowSettings] = useState(false);
   const [reporting, setReporting] = useState(false);
   /** 돌던 작업이 있는데 창을 닫으려 했다 */
@@ -162,17 +165,21 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
         setJudgeRules(rulesFromPrefs(p?.judge));
         if (typeof p?.keep_days === 'number') setKeepDays(p.keep_days);
         setPresets(parsePresets(p?.presets));
+        setColWidths(parseWidths(p?.col_widths));
       })
       .catch(() => {});
   }, []);
 
   /** 설정 한 벌을 통째로 저장한다 — 바꾼 것만 넘기면 나머지를 옛 값으로 덮는다 */
   const savePrefs = useCallback(
-    (next: { rules?: JudgeRules; keepDays?: number; presets?: StatsPreset[] }) => {
+    (next: { rules?: JudgeRules; keepDays?: number; presets?: StatsPreset[]; colWidths?: Partial<Record<ColId, number>> }) => {
       const r = next.rules ?? judgeRules;
       const k = next.keepDays ?? keepDays;
       const ps = next.presets ?? presets;
-      statsSavePrefs({ judge: prefsFromRules(r), keep_days: k, presets: ps })
+      const cw = next.colWidths ?? colWidths;
+      // 너비는 화면에 바로 — 저장이 끝나기를 기다리면 놓는 순간 열이 튄다
+      if (next.colWidths) setColWidths(cw);
+      statsSavePrefs({ judge: prefsFromRules(r), keep_days: k, presets: ps, col_widths: cw as Record<string, number> })
         .then(() => {
           setJudgeRules(r);
           setKeepDays(k);
@@ -180,7 +187,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
         })
         .catch(e => setError(String(e)));
     },
-    [judgeRules, keepDays, presets],
+    [judgeRules, keepDays, presets, colWidths],
   );
 
   const saveRules = useCallback((next: StatsTaskRule[]) => {
@@ -519,6 +526,8 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   selected={service}
                   onSelect={setService}
                   detail={renderDetail}
+                  widths={colWidths}
+                  onWidthsChange={w => savePrefs({ colWidths: w })}
                 />
                 <p className="px-1 text-small text-fg-faint">
                   <button type="button" className="st-help hover:text-fg" title={rulesText(judgeRules)} onClick={() => setShowSettings(true)}>
@@ -646,7 +655,7 @@ function Warn({ children }: { children: React.ReactNode }) {
 function rulesText(r: JudgeRules): string {
   return [
     `${t('에러 증가')}: ${t('에러율')} ×${r.errorRatio} · +${r.errorMinDelta * 100}%p`,
-    `${t('느려짐')}: ${r.useP99 ? t('평균·p90·p99 중 하나가') : t('평균 또는 p90 이')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
+    `${t('느려짐')}: ${r.slowOn.map(m => slowName(m, t)).join('·')} ×${r.slowRatio} · +${r.slowMinMs}ms`,
     `${t('호출량 급변')}: TPS ±${r.volumeRatio * 100}%`,
     `${t('표본 적음')}: < ${r.minCount}${t('건')} (${t('판정하지 않음')})`,
   ].join('\n');

@@ -5,9 +5,9 @@
 
 import { t } from '../../i18n';
 import type { Flag, JudgeRules } from './statsJudge';
-import type { MetricKey } from './statsFormat';
+import { slowName, type MetricKey } from './statsFormat';
 
-export type Term = MetricKey | 'ref' | 'past' | 'vs' | 'tps' | 'max' | 'sql' | 'api' | 'cpu' | 'verdict';
+export type Term = MetricKey | 'p50' | 'ref' | 'past' | 'vs' | 'tps' | 'max' | 'sql' | 'api' | 'cpu' | 'verdict';
 
 export function termHelp(k: Term): string {
   switch (k) {
@@ -21,6 +21,8 @@ export function termHelp(k: Term): string {
       return t('건수 — 그 구간에 끝난 트랜잭션 수.\n과거 구간이 여럿이면 과거 쪽은 구간당 평균입니다.');
     case 'avg':
       return t('평균 응답시간 — 응답시간 합 ÷ 건수.\n아주 느린 몇 건에 끌려 올라갈 수 있어 p90 과 함께 봅니다.');
+    case 'p50':
+      return t('p50 (중앙값) — 빠른 순으로 늘어놓았을 때 한가운데 응답시간.\n절반은 이보다 빠르고 절반은 느립니다. «보통 요청» 이 느려졌는지 봅니다.');
     case 'p90':
       return t('p90 (90번째 백분위) — 빠른 순으로 늘어놓았을 때 90% 지점의 응답시간.\n10건 중 1건은 이보다 느립니다. «대부분의 사용자가 겪는 느림» 을 봅니다.');
     case 'p99':
@@ -48,7 +50,7 @@ export function flagHelp(f: Flag, r: JudgeRules): string {
     case 'errors':
       return `${t('에러 증가 — 에러율이 과거의')} ${r.errorRatio}${t('배 이상이고')} ${(r.errorMinDelta * 100).toFixed(1)}%p ${t('이상 늘었습니다.')}`;
     case 'slow':
-      return `${t('느려짐 — 평균·p90')}${r.useP99 ? '·p99' : ''} ${t('중 하나가 과거의')} ${r.slowRatio}${t('배 이상이고')} ${r.slowMinMs}ms ${t('이상 늘었습니다.')}`;
+      return `${t('느려짐 —')} ${r.slowOn.map(m => slowName(m, t)).join('·')} ${t('중 하나가 과거의')} ${r.slowRatio}${t('배 이상이고')} ${r.slowMinMs}ms ${t('이상 늘었습니다.')}`;
     case 'volume':
       return `${t('호출량 급변 — TPS 가 과거에서')} ±${Math.round(r.volumeRatio * 100)}% ${t('넘게 변했습니다.')}`;
     case 'new':

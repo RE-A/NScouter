@@ -4,14 +4,14 @@
 // 과거 건수는 구간당 평균(과거 구간이 여럿이면 합계로는 견줄 수 없다). 빨간색은 판정에 걸린 칸만.
 // 수백 줄이라 DOM 표로 충분하다. 정렬·거르기는 `useMemo` 로 한 번만.
 
-import { Fragment, memo, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, memo, useMemo, useRef, useState, type ReactNode } from 'react';
 import { t } from '../../i18n';
 import type { ServiceStats } from './statsApi';
 import { FLAG_LABEL, FLAG_ORDER, judge, severity, type Flag, type JudgeRules } from './statsJudge';
 import { flagReason, fmtMetric, fmtMetricVs, metricBad, metricValue, METRICS, splitService, type MetricKey } from './statsFormat';
 import { flagHelp, termHelp } from './statsGlossary';
+import { clampWidth, COLS, DEFAULT_SORT, defaultWidth, nextSort, SIDES, sortRows, type ColId, type SortState } from './statsTableModel';
 
-type SortKey = 'worst' | 'service' | MetricKey;
 
 interface StatsTableProps {
   rows: ServiceStats[];
@@ -23,6 +23,51 @@ interface StatsTableProps {
   onSelect: (service: string | null) => void;
   /** 고른 줄 바로 아래에 펼칠 내용 */
   detail: (service: string) => ReactNode;
+  /** 끌어서 정한 열 너비 */
+  widths: Partial<Record<ColId, number>>;
+  /** 너비를 바꿨다 — 끌기를 놓을 때 한 번 */
+  onWidthsChange: (w: Partial<Record<ColId, number>>) => void;
+}
+
+/**
+ * 열 경계 손잡이 — 끌면 그 열이 넓어지고 좁아진다. 두 번 누르면 기본 너비.
+ * 끄는 동안은 화면 안에서만 바꾸고(`onLive`), 놓을 때 한 번 남긴다(`onDone`) — 끌 때마다 설정 파일을 쓰지 않게
+ */
+function Resizer({ width, onLive, onDone, onReset }: { width: number; onLive: (w: number) => void; onDone: () => void; onReset: () => void }) {
+  const start = useRef<{ x: number; w: number } | null>(null);
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('열 너비')}
+      title={t('끌어서 열 너비를 바꿉니다 · 두 번 누르면 기본 너비')}
+      className="group absolute inset-y-0 -right-[4px] z-20 w-[8px] cursor-col-resize touch-none"
+      onClick={e => e.stopPropagation()}
+      onPointerDown={e => {
+        e.preventDefault();
+        e.stopPropagation();
+        start.current = { x: e.clientX, w: width };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={e => {
+        const st = start.current;
+        if (!st || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
+        onLive(st.w + e.clientX - st.x);
+      }}
+      onPointerUp={e => {
+        if (!start.current) return;
+        start.current = null;
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+        onDone();
+      }}
+      onDoubleClick={e => {
+        e.stopPropagation();
+        onReset();
+      }}
+    >
+      <span className="absolute inset-y-1 left-1/2 w-[2px] -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-accent/70" />
+    </span>
+  );
 }
 
 export const FLAG_CLS: Record<Flag, string> = {
@@ -54,7 +99,7 @@ function metricLabel(k: MetricKey, pastRanges: number): string {
 export function ServiceName({ name }: { name: string }) {
   const { head, tail } = splitService(name);
   return (
-    <span className="flex min-w-0 max-w-[22rem] font-mono" title={name}>
+    <span className="flex min-w-0 font-mono" title={name}>
       <span className="min-w-0 truncate text-fg-faint">{head}</span>
       {/* 끝부분이 칸보다 길면 끝부분도 잘린다 — 넘쳐서 옆 칸을 덮지 않게 */}
       <span className="min-w-0 max-w-full shrink-0 truncate font-semibold text-fg">{tail}</span>
@@ -62,8 +107,31 @@ export function ServiceName({ name }: { name: string }) {
   );
 }
 
-export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, selected, onSelect, detail }: StatsTableProps) {
-  const [sort, setSort] = useState<SortKey>('worst');
+export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, selected, onSelect, detail, widths, onWidthsChange }: StatsTableProps) {
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
+  // 끄는 동안의 너비 — 놓으면 설정으로 넘긴다
+  const [live, setLive] = useState<Partial<Record<ColId, number>>>({});
+  const width = (c: ColId) => live[c] ?? widths[c] ?? defaultWidth(c);
+  const totalWidth = COLS.reduce((n, c) => n + width(c), 0);
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const resizer = (c: ColId) => (
+    <Resizer
+      width={width(c)}
+      onLive={w => setLive(prev => ({ ...prev, [c]: clampWidth(c, w) }))}
+      onDone={() => {
+        const next = { ...widths, ...liveRef.current };
+        setLive({});
+        onWidthsChange(next);
+      }}
+      onReset={() => {
+        const next = { ...widths };
+        delete next[c];
+        setLive({});
+        onWidthsChange(next);
+      }}
+    />
+  );
   /** 고른 판정만. null 이면 기준에 있는 것 전부 */
   const [only, setOnly] = useState<Flag | 'any' | null>(null);
   const [query, setQuery] = useState('');
@@ -93,28 +161,30 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
             : j.flags.includes(only)) &&
         (q === '' || j.row.service.toLowerCase().includes(q)),
     );
-    if (sort === 'worst') return list.sort((a, b) => b.score - a.score);
-    if (sort === 'service') return list.sort((a, b) => a.row.service.localeCompare(b.row.service));
-    const get = (j: (typeof list)[number]) => metricValue(j.row.current, sort) ?? -1;
-    return list.sort((a, b) => get(b) - get(a));
-  }, [judged, only, query, sort]);
+    return sortRows(list, sort, pastRanges);
+  }, [judged, only, query, sort, pastRanges]);
 
-  const SortBtn = ({ k, label, left, help }: { k: SortKey; label: string; left?: boolean; help?: string }) => (
-    <button
-      type="button"
-      onClick={() => setSort(k)}
-      className={`hover:text-fg ${sort === k ? 'text-fg' : ''} ${left ? '' : 'w-full text-center'}`}
-      aria-pressed={sort === k}
-      title={help ? `${help}\n\n${t('누르면 기준 값으로 줄 세웁니다')}` : undefined}
-    >
-      <span className={help ? 'st-help' : ''}>{label}</span>
-      {sort === k && ' ↓'}
-    </button>
-  );
+  /** 정렬 머리 — 누르면 그 열로, 다시 누르면 반대로 */
+  const sortBtn = ({ col, label, help, className = '' }: { col: ColId; label: ReactNode; help?: string; className?: string }) => {
+    const on = sort.col === col;
+    return (
+      <button
+        type="button"
+        onClick={() => setSort(prev => nextSort(prev, col))}
+        className={`inline-flex max-w-full items-center gap-0.5 truncate hover:text-fg ${on ? 'text-fg' : ''} ${className}`}
+        aria-sort={on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+        title={help ? `${help}\n\n${t('누르면 이 열로 줄 세웁니다 (다시 누르면 반대로)')}` : t('누르면 이 열로 줄 세웁니다 (다시 누르면 반대로)')}
+      >
+        {label}
+        <span className={`text-micro ${on ? 'text-accent-bright' : 'text-transparent'}`}>{on && sort.dir === 'asc' ? '▲' : '▼'}</span>
+      </button>
+    );
+  };
 
   /** 요약 카드 — 누르면 그것만 남긴다(다시 누르면 전체) */
-  const Kpi = ({ value, label, n, tone, help }: { value: Flag | 'any' | null; label: string; n: number; tone?: string; help?: string }) => (
+  const kpi = ({ key, value, label, n, tone, help }: { key?: string; value: Flag | 'any' | null; label: string; n: number; tone?: string; help?: string }) => (
     <button
+      key={key}
       type="button"
       onClick={() => setOnly(only === value ? null : value)}
       aria-pressed={only === value}
@@ -133,11 +203,11 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5">
       <div className="flex flex-wrap items-end gap-2">
-        <Kpi value={null} label={t('서비스')} n={currentCount} help={t('기준 구간에 찍힌 서비스')} />
-        <Kpi value="any" label={t('특이사항')} n={flaggedCount} tone={flaggedCount > 0 ? 'text-warn' : 'text-fg'} help={termHelp('verdict')} />
-        {FLAG_ORDER.filter(f => f !== 'few' && counts.get(f)).map(f => (
-          <Kpi key={f} value={f} label={t(FLAG_LABEL[f])} n={counts.get(f) ?? 0} tone={FLAG_TONE[f]} help={flagHelp(f, rules)} />
-        ))}
+        {kpi({ value: null, label: t('서비스'), n: currentCount, help: t('기준 구간에 찍힌 서비스') })}
+        {kpi({ value: 'any', label: t('특이사항'), n: flaggedCount, tone: flaggedCount > 0 ? 'text-warn' : 'text-fg', help: termHelp('verdict') })}
+        {FLAG_ORDER.filter(f => f !== 'few' && counts.get(f)).map(f =>
+          kpi({ key: f, value: f, label: t(FLAG_LABEL[f]), n: counts.get(f) ?? 0, tone: FLAG_TONE[f], help: flagHelp(f, rules) }),
+        )}
         <span className="flex-1" />
         <input
           type="text"
@@ -149,33 +219,52 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
         />
       </div>
       <div className="st-card min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse">
+        <table className="table-fixed border-collapse" style={{ width: totalWidth }}>
+          <colgroup>
+            {COLS.map(c => (
+              <col key={c} style={{ width: width(c) }} />
+            ))}
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-overlay text-small text-fg-dim shadow-[0_1px_0_var(--border-strong)]">
             <tr>
-              <th rowSpan={2} className="px-3 py-1.5 text-left font-normal align-bottom">
-                <SortBtn k="service" label={t('서비스')} left />
+              <th rowSpan={2} className="relative px-3 py-1.5 text-left font-normal align-bottom">
+                {sortBtn({ col: 'service', label: t('서비스') })}
+                {resizer('service')}
               </th>
-              <th rowSpan={2} className="px-2 py-1 text-left font-normal align-bottom">
-                <SortBtn k="worst" label={t('판정')} left help={termHelp('verdict')} />
+              <th rowSpan={2} className="relative px-2 py-1.5 text-left font-normal align-bottom">
+                {sortBtn({ col: 'verdict', label: <span className="st-help">{t('판정')}</span>, help: termHelp('verdict') })}
+                {resizer('verdict')}
               </th>
               {METRICS.map(k => (
-                <th key={k} colSpan={3} className={`${groupEdge} px-2 pt-1 font-medium text-fg-muted`}>
-                  <SortBtn k={k} label={metricLabel(k, pastRanges)} help={termHelp(k)} />
+                <th key={k} colSpan={3} className={`${groupEdge} truncate px-2 pt-1.5 text-center font-medium text-fg-muted`} title={termHelp(k)}>
+                  <span className="st-help">{metricLabel(k, pastRanges)}</span>
                 </th>
               ))}
             </tr>
             <tr className="text-micro">
               {METRICS.map(k => (
                 <Fragment key={k}>
-                  <th className={`${groupEdge} st-ref whitespace-nowrap px-2 pb-1.5 text-right font-medium`} title={termHelp('ref')}>
-                    <span className="st-pill st-pill-ref">{t('기준')}</span>
-                  </th>
-                  <th className="whitespace-nowrap px-2 pb-1.5 text-right font-normal" title={termHelp('past')}>
-                    <span className="st-pill st-pill-past">{t('과거')}</span>
-                  </th>
-                  <th className="whitespace-nowrap px-2 pb-1.5 text-right font-normal" title={termHelp('vs')}>
-                    <span className="st-help-soft">{t('과거 대비')}</span>
-                  </th>
+                  {SIDES.map(side => {
+                    const col = `${k}.${side}` as ColId;
+                    const label =
+                      side === 'cur' ? (
+                        <span className="st-pill st-pill-ref">{t('기준')}</span>
+                      ) : side === 'past' ? (
+                        <span className="st-pill st-pill-past">{t('과거')}</span>
+                      ) : (
+                        <span className="st-help-soft">{t('과거 대비')}</span>
+                      );
+                    const help = side === 'cur' ? termHelp('ref') : side === 'past' ? termHelp('past') : termHelp('vs');
+                    return (
+                      <th
+                        key={side}
+                        className={`relative px-2 pb-1.5 text-right font-normal ${side === 'cur' ? `${groupEdge} st-ref` : ''}`}
+                      >
+                        {sortBtn({ col, label, help, className: 'justify-end' })}
+                        {resizer(col)}
+                      </th>
+                    );
+                  })}
                 </Fragment>
               ))}
             </tr>
@@ -192,10 +281,10 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
                       on ? 'bg-accent/12 shadow-[inset_3px_0_0_var(--accent)]' : 'hover:bg-hover/70'
                     }`}
                   >
-                    <td className="px-3 py-1.5">
+                    <td className="overflow-hidden px-3 py-1.5">
                       <ServiceName name={r.service} />
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
+                    <td className="overflow-hidden px-2 py-1.5">
                       {flags.map(f => {
                         const why = flagReason(f, r, rules, t);
                         return (
@@ -213,9 +302,9 @@ export const StatsTable = memo(function StatsTable({ rows, rules, pastRanges, se
                       const bad = metricBad(k, r, rules);
                       return (
                         <Fragment key={k}>
-                          <td className={`${groupEdge} st-ref tnum whitespace-nowrap px-2 py-1.5 text-right font-medium text-fg`}>{fmtMetric(k, c)}</td>
-                          <td className="tnum whitespace-nowrap px-2 py-1.5 text-right text-fg-dim">{fmtMetric(k, b)}</td>
-                          <td className="tnum whitespace-nowrap px-2 py-1.5 text-right text-small">
+                          <td className={`${groupEdge} st-ref tnum truncate px-2 py-1.5 text-right font-medium text-fg`}>{fmtMetric(k, c)}</td>
+                          <td className="tnum truncate px-2 py-1.5 text-right text-fg-dim">{fmtMetric(k, b)}</td>
+                          <td className="tnum truncate px-2 py-1.5 text-right text-small">
                             {vs && (bad ? <span className="st-bad">{vs}</span> : <span className="text-fg-faint">{vs}</span>)}
                           </td>
                         </Fragment>
