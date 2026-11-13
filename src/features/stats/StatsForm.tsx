@@ -7,7 +7,8 @@
 import { memo, useMemo, useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../../components/Button';
-import { fromLocalInput, toLocalInput } from '../xlog/types/timeRange';
+import { TimeInput } from '../../components/TimeInput';
+import { toLocalInput } from '../xlog/types/timeRange';
 import type { Estimate, StatsRange, StatsRequest, StatsTaskRule } from './statsApi';
 import { picksByRule } from './taskRule';
 import { termHelp } from './statsGlossary';
@@ -499,46 +500,10 @@ function Section({ title, hint, tag, help, children }: { title: string; hint?: s
 function RangeInput({ value, onChange }: { value: StatsRange; onChange: (r: StatsRange) => void }) {
   return (
     <span className="flex items-center gap-1.5">
-      <TimeInput ms={value.stime} onChange={stime => onChange({ ...value, stime })} />
+      <TimeInput ms={value.stime} onChange={stime => onChange({ ...value, stime })} className={inputCls} />
       <span className="text-fg-faint">–</span>
-      <TimeInput ms={value.etime} onChange={etime => onChange({ ...value, etime })} />
+      <TimeInput ms={value.etime} onChange={etime => onChange({ ...value, etime })} className={inputCls} />
     </span>
-  );
-}
-
-/** 입력 중인 값은 받지 않는다 — 1970 년 전(연도를 치는 중의 `0002-…` 등)·빈 값 */
-function parseTime(s: string): number | null {
-  const v = fromLocalInput(s);
-  return v !== null && new Date(v).getFullYear() >= 1970 ? v : null;
-}
-
-/**
- * 시각 칸 하나 — 치는 중의 글자는 이 칸이 들고 있고, 온전한 시각일 때만 위로 올린다.
- * 연도를 한 자리씩 치면 브라우저가 `0002-…` → `0020-…` 을 넘기는데, 이를 시각으로 바꿔 다시 써 넣으면
- * 4자리가 아닌 연도가 되어 칸이 비고 1970 년으로 떨어졌다
- */
-function TimeInput({ ms, onChange }: { ms: number; onChange: (ms: number) => void }) {
-  const [text, setText] = useState(() => toLocalInput(ms));
-  const [seen, setSeen] = useState(ms);
-  // 밖에서 바뀐 값(빠른 선택·조건 묶음 등)은 칸에 다시 쓴다
-  if (ms !== seen) {
-    setSeen(ms);
-    setText(toLocalInput(ms));
-  }
-  return (
-    <input
-      type="datetime-local"
-      value={text}
-      onChange={e => {
-        setText(e.target.value);
-        const v = parseTime(e.target.value);
-        if (v !== null && v !== ms) {
-          setSeen(v);
-          onChange(v);
-        }
-      }}
-      className={inputCls}
-    />
   );
 }
 

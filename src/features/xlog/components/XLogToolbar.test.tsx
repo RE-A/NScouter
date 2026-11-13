@@ -142,4 +142,17 @@ describe('과거 구간 칸', () => {
     expect(from.value).toBe(toLocalInput(later - 10 * 60_000));
     expect(to.value).toBe(toLocalInput(later));
   });
+
+  it('과거 시각 칸 — 연도를 치는 중의 값(0002-…)·빈 값에 칸이 비거나 1970 년이 되지 않는다', () => {
+    const view = render(toolbar('past'));
+    const [from] = Array.from(view.container.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]'));
+    for (const v of ['0002-11-13T10:20', '0020-11-13T10:20', '0202-11-13T10:20']) {
+      fireEvent.change(from, { target: { value: v } });
+      expect(from.value).toBe(v);
+    }
+    fireEvent.change(from, { target: { value: '' } });
+    expect(from.value).not.toMatch(/^1970/);
+    fireEvent.change(from, { target: { value: '2025-11-13T10:20' } });
+    expect(from.value).toBe('2025-11-13T10:20');
+  });
 });

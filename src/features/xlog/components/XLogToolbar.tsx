@@ -4,12 +4,8 @@ import React, { useEffect, useState } from 'react';
 import type { TextFilter, XLogFilterState } from '../types/xlog';
 import { firstRule, setFirstRule } from '../types/xlog';
 import type { PastRange, XLogMode } from '../types/timeRange';
-import {
-  checkRange,
-  defaultPastRange,
-  fromLocalInput,
-  toLocalInput,
-} from '../types/timeRange';
+import { checkRange, defaultPastRange } from '../types/timeRange';
+import { TimeInput } from '../../../components/TimeInput';
 import { t } from '../../../i18n';
 import { serverNow } from '../utils/serverClock';
 
@@ -113,25 +109,9 @@ export function XLogToolbar({
 
       {mode === 'past' && (
         <>
-          <input
-            type="datetime-local"
-            value={toLocalInput(draft.stime)}
-            onChange={e => {
-              const v = fromLocalInput(e.target.value);
-              if (v !== null) setDraft(d => ({ ...d, stime: v }));
-            }}
-            className={CONTROL}
-          />
+          <TimeInput ms={draft.stime} onChange={v => setDraft(d => ({ ...d, stime: v }))} className={CONTROL} />
           <span className="text-micro text-fg-faint">→</span>
-          <input
-            type="datetime-local"
-            value={toLocalInput(draft.etime)}
-            onChange={e => {
-              const v = fromLocalInput(e.target.value);
-              if (v !== null) setDraft(d => ({ ...d, etime: v }));
-            }}
-            className={CONTROL}
-          />
+          <TimeInput ms={draft.etime} onChange={v => setDraft(d => ({ ...d, etime: v }))} className={CONTROL} />
           <button
             onClick={() => onPastRangeChange({ ...draft })}
             disabled={!check.ok}
