@@ -35,7 +35,7 @@ import {
   type StatsResult,
   type StatsTaskRule,
 } from './statsApi';
-import { statsCsv } from './statsCsv';
+import { statsCsv, statsViewCsv } from './statsCsv';
 import { DEFAULT_RULES, judge, prefsFromRules, rulesFromPrefs, type JudgeRules } from './statsJudge';
 import { errCondText, slowCondText, termHelp } from './statsGlossary';
 import { slowName, withPastView } from './statsFormat';
@@ -308,6 +308,19 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
       .catch(e => setError(String(e)));
   }, [result, judgeRules]);
 
+  /** 화면 그대로 CSV — 표에 보이는 줄(칩·거르기·정렬)과 칸만 */
+  const exportView = useCallback(
+    (rows: ServiceStats[]) => {
+      if (!result) return;
+      const r = result.request;
+      const name = `stats-view-${r.groups[0] ?? r.task_patterns?.[0] ?? r.servers[0] ?? 'target'}`;
+      saveCsvExport({ name, stamp: toFileStamp(result.started_at), csv: statsViewCsv(rows, judgeRules, r.baselines.length, t) })
+        .then(path => setNotice(path))
+        .catch(e => setError(String(e)));
+    },
+    [result, judgeRules],
+  );
+
   /** HTML 보고서 — 특이사항 서비스는 추이까지 받아 차트를 넣는다(많으면 앞의 30개) */
   const exportReport = useCallback(() => {
     if (!result) return;
@@ -566,6 +579,7 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
                   detail={renderDetail}
                   widths={colWidths}
                   onWidthsChange={w => savePrefs({ colWidths: w })}
+                  onExportView={exportView}
                 />
                 <p className="px-1 text-small text-fg-faint">
                   <button type="button" className="st-help hover:text-fg" title={rulesText(judgeRules)} onClick={() => setShowSettings(true)}>

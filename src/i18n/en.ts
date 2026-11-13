@@ -1274,4 +1274,6 @@ export const EN: Record<string, string> = {
   '이 결과를 지울까요?': 'Delete this result?',
   '개를 지울까요?': ' — delete?',
   '되돌릴 수 없습니다. 저장된 통계 결과 파일만 지우고, 내보낸 CSV·HTML 은 그대로 둡니다.': 'This cannot be undone. Only the saved statistics results are deleted; exported CSV and HTML files stay.',
+  '화면 그대로 CSV': 'CSV as shown',
+  '지금 표에 보이는 줄과 칸 그대로 — 고른 칩·거르기·정렬을 따른다': 'Exactly the rows and columns now in the table — follows the chosen chip, filter and sort',
 };

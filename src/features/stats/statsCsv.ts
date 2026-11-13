@@ -7,7 +7,7 @@
 import { csvCell } from '../xlog/components/summaryCsv';
 import type { ServiceStats, StatsSummary } from './statsApi';
 import { change, FLAG_LABEL, judge, type JudgeRules } from './statsJudge';
-import { pastView } from './statsFormat';
+import { flagReason, fmtMetricVs, metricValue, METRICS, pastView, type MetricKey } from './statsFormat';
 
 type Cell = string | number | null;
 
@@ -59,6 +59,46 @@ export function statsCsv(rows: readonly ServiceStats[], rules: JudgeRules, pastR
       pct(c?.p99_ms, b?.p99_ms),
       c && b ? r3((c.error_rate - b.error_rate) * 100) : null,
       pct(c?.tps, b?.tps),
+    ];
+    lines.push(cells.map(csvCell).join(','));
+  }
+  return lines.join('\r\n');
+}
+
+const VIEW_HEAD: Record<MetricKey, string> = { count: '건수', avg: '평균(ms)', p50: 'p50(ms)', p90: 'p90(ms)', p99: 'p99(ms)', err: '에러율(%)' };
+
+/** 화면 칸의 값 — 표와 같은 반올림, 엑셀이 숫자로 읽게 천 단위 쉼표는 뺀다 */
+function viewValue(k: MetricKey, v: number | undefined): Cell {
+  if (v === undefined) return null;
+  if (k === 'err') return Math.round(v * 10000) / 100;
+  if (k === 'count') return r1(v);
+  return Math.round(v);
+}
+
+/**
+ * 화면 그대로 — 표에 보이는 줄(고른 칩·거르기·정렬 그대로)과 칸만.
+ * 판정은 칩과 옆의 이유를 글로(`느려짐 평균 ×31`), 과거 대비는 화면 표기 그대로(`×31`, `+78%`, `+1.3%p`. 작은 변화는 빈 칸).
+ * `rows` 는 이미 일자별 평균을 거친 줄(`withPastView`)
+ */
+export function statsViewCsv(rows: readonly ServiceStats[], rules: JudgeRules, pastRanges = 1, tr: (s: string) => string = x => x): string {
+  const past = pastRanges > 1 ? '과거 일평균' : '과거';
+  const head = ['서비스', '판정', ...METRICS.flatMap(k => [`${VIEW_HEAD[k]} 기준`, `${VIEW_HEAD[k]} ${past}`, `${VIEW_HEAD[k]} 과거 대비`])];
+  const lines = [head.map(csvCell).join(',')];
+  for (const r of rows) {
+    const verdict = judge(r, rules)
+      .map(f => {
+        const why = flagReason(f, r, rules, tr);
+        return why ? `${tr(FLAG_LABEL[f])} ${why}` : tr(FLAG_LABEL[f]);
+      })
+      .join(' · ');
+    const cells: Cell[] = [
+      r.service,
+      verdict,
+      ...METRICS.flatMap(k => {
+        const c = metricValue(r.current, k);
+        const b = metricValue(r.baseline, k);
+        return [viewValue(k, c), viewValue(k, b), fmtMetricVs(k, c, b) || null];
+      }),
     ];
     lines.push(cells.map(csvCell).join(','));
   }

@@ -6,6 +6,7 @@
 
 import { Fragment, memo, useMemo, useRef, useState, type ReactNode } from 'react';
 import { t } from '../../i18n';
+import { Button } from '../../components/Button';
 import type { ServiceStats } from './statsApi';
 import { FLAG_LABEL, FLAG_ORDER, judge, severity, type Flag, type JudgeRules } from './statsJudge';
 import { flagReason, fmtMetric, fmtMetricVs, metricBad, metricValue, METRICS, splitService, type MetricKey } from './statsFormat';
@@ -26,6 +27,8 @@ interface StatsTableProps {
   widths: Partial<Record<ColId, number>>;
   /** 너비를 바꿨다 — 끌기를 놓을 때 한 번 */
   onWidthsChange: (w: Partial<Record<ColId, number>>) => void;
+  /** 지금 보이는 줄(고른 칩·거르기·정렬 그대로)을 내보낸다 */
+  onExportView?: (rows: ServiceStats[]) => void;
 }
 
 /**
@@ -108,7 +111,7 @@ export function ServiceName({ name }: { name: string }) {
   );
 }
 
-export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSelect, detail, widths, onWidthsChange }: StatsTableProps) {
+export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSelect, detail, widths, onWidthsChange, onExportView }: StatsTableProps) {
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   // 끄는 동안의 너비 — 놓으면 설정으로 넘긴다
   const [live, setLive] = useState<Partial<Record<ColId, number>>>({});
@@ -218,6 +221,11 @@ export const StatsTable = memo(function StatsTable({ rows, rules, selected, onSe
           onChange={e => setQuery(e.target.value)}
           className="search-field w-56 rounded py-0.5 pr-2 text-small"
         />
+        {onExportView && (
+          <Button size="sm" onClick={() => onExportView(shown.map(j => j.row))} disabled={shown.length === 0} title={t('지금 표에 보이는 줄과 칸 그대로 — 고른 칩·거르기·정렬을 따른다')}>
+            {t('화면 그대로 CSV')}
+          </Button>
+        )}
       </div>
       <div className="st-card min-h-0 flex-1 overflow-auto">
         <table className="table-fixed border-collapse" style={{ width: totalWidth }}>
