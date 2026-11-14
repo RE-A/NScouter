@@ -1277,4 +1277,6 @@ export const EN: Record<string, string> = {
   '화면 그대로 CSV': 'CSV as shown',
   '지금 표에 보이는 줄과 칸 그대로 — 고른 칩·거르기·정렬을 따른다': 'Exactly the rows and columns now in the table — follows the chosen chip, filter and sort',
   '찾지 못했습니다': 'Search failed',
+  '멈출 때까지 모은 것을 다 담았습니다. 그 시각 뒤는 일부만 찾았으니, 빠짐없이 보려면 구간을 그 뒤로 잡아 다시 찾으십시오.': 'Everything gathered before stopping is listed. After that time only part was searched — to see all of it, search again from that time.',
+  '까지 빠짐없이, 그 뒤는 일부': ' fully searched, partial after',
 };

@@ -63,7 +63,7 @@ export interface WideResult<T = XLogPack> {
   /**
    * 다 못 찾았을 때 그 까닭.
    *   · `cap`   — 다 모은 것이 상한(`cap`)에 닿아 멈췄다. `stoppedAt` 뒤는 안 훑었다
-   *   · `cancelled` — 멈춤을 눌렀다
+   *   · `cancelled` — 멈춤을 눌렀다. 모은 것은 다 담는다 — `stoppedAt` 뒤의 것은 일부다
    */
   cut: 'none' | 'cap' | 'cancelled';
   /** `cap`·`cancelled` 일 때 **빈틈없이** 어디까지 훑었나 (epoch ms) */
@@ -178,8 +178,10 @@ export async function searchAll<T = XLogPack>(
   return finish(stop, stoppedAt);
 
   function finish(cut: WideResult<T>['cut'], stoppedAt: number | null): WideResult<T> {
-    // 멈췄으면 **빈틈없이 훑은 데까지만** 담는다 — 그 뒤의 것까지 두면 «어디까지 찾았나» 가 거짓이 된다
-    const kept = stoppedAt === null ? out : out.filter(o => o.t <= stoppedAt);
+    // 상한이면 **빈틈없이 훑은 데까지만** 담는다 — 그 뒤의 것까지 두면 «어디까지 찾았나» 가 거짓이 된다.
+    // 멈춤은 **모은 것을 다** 담는다 — 조각들이 다 덜 끝난 채 멈추면 빈틈없이 훑은 데가 시작 시각이라
+    // 모은 것이 다 버려진다. 대신 화면이 «그 시각까지는 빠짐없이, 그 뒤는 일부» 라고 말한다
+    const kept = stoppedAt === null || cut === 'cancelled' ? out : out.filter(o => o.t <= stoppedAt);
     kept.sort((a, b) => a.t - b.t);
     return { xlogs: kept.map(o => o.v), cut, stoppedAt, requests };
   }

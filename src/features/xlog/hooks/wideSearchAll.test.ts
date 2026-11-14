@@ -144,6 +144,23 @@ describe('searchAll', () => {
     expect(res.stoppedAt).toBe(5 * MIN);
   });
 
+  it('조각들이 다 덜 끝난 채 멈춰도 모은 것을 다 담는다 — 멈춘 시각은 빈틈없이 훑은 데까지', async () => {
+    const times = spread(40_000, 0, 60 * MIN);
+    const srv = server(times, 100);
+    let pages = 0;
+    const res = await searchAll({ ...BASE, stime: 0, etime: 60 * MIN }, srv.fn, objectsOf, {
+      parallel: 4,
+      isCancelled: () => ++pages > 12,
+    });
+    expect(res.cut).toBe('cancelled');
+    // 어느 조각도 끝나지 않았다 — 빈틈없이 훑은 데는 시작
+    expect(res.stoppedAt).toBe(0);
+    // 그래도 모은 것은 다 — 페이지 12개 × 100건
+    expect(res.xlogs.length).toBe(1_200);
+    const ts = res.xlogs.map(x => x.end_time);
+    expect([...ts].sort((x, y) => x - y)).toEqual(ts);
+  });
+
   it('진행은 0 에서 1 로 가고, 받은 것은 페이지마다 바로 화면 모양으로 바꾼다', async () => {
     const srv = server(spread(300, 0, 15 * MIN));
     const done: number[] = [];

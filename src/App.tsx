@@ -2469,11 +2469,13 @@ export default function App({ windowLabel }: {
                       {wideTruncated && (
                         <span
                           className="shrink-0 whitespace-nowrap rounded border border-warn/50 px-1 text-micro normal-case text-warn"
-                          title={t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')}
+                          title={wideTruncated.kind === 'cap'
+                            ? t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')
+                            : t('멈출 때까지 모은 것을 다 담았습니다. 그 시각 뒤는 일부만 찾았으니, 빠짐없이 보려면 구간을 그 뒤로 잡아 다시 찾으십시오.')}
                         >
-                          {`${wideTruncated.kind === 'cap'
-                            ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')}`
-                            : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
+                          {wideTruncated.kind === 'cap'
+                            ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`
+                            : `${t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 빠짐없이, 그 뒤는 일부')}`}
                         </span>
                       )}
                       <Button
