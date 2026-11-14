@@ -174,4 +174,23 @@ describe('StatsTab', () => {
     fireEvent.change(input, { target: { value: '2025-11-13T10:20' } });
     expect(input.value).toBe('2025-11-13T10:20');
   });
+
+  it('펼친 서비스 — 트랜잭션 CSV 는 Rust 에 맡기고 남긴 경로를 알린다', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case 'stats_jobs': return [job];
+        case 'stats_result': return result;
+        case 'stats_service': return result.services[1];
+        case 'stats_service_rows': return { path: '/x/exports/rows.csv', rows: 3, files: 1, source: 'raw' };
+        default: return null;
+      }
+    });
+    render(<StatsTab connected groups={[]} servers={[]} onOpenTxid={() => {}} />);
+    fireEvent.click(await screen.findByText('shop 오전'));
+    fireEvent.click((await screen.findByTitle('/slow')).closest('tr') as HTMLElement);
+    fireEvent.click(await screen.findByText('트랜잭션 CSV'));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('stats_service_rows', { id: '1-0', service: '/slow' }));
+    expect(await screen.findByText('/x/exports/rows.csv')).toBeTruthy();
+    expect(screen.getByText('분포 CSV')).toBeTruthy();
+  });
 });

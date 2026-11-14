@@ -496,6 +496,73 @@ pub async fn stats_service(app: AppHandle, id: String, service: String) -> Resul
     r.services.iter().find(|s| s.service == service).cloned().ok_or_else(|| format!("결과에 없는 서비스: {service}"))
 }
 
+/// 서비스 하나의 트랜잭션 CSV — 어디서 꺼냈나
+#[derive(Debug, Clone, Serialize)]
+pub struct RowsExport {
+    /// 첫 파일 경로 (100만 줄이 넘으면 `_2.csv` … 로 이어진다)
+    pub path: String,
+    pub rows: u64,
+    pub files: u32,
+    /// `raw` = 통계 때 남긴 원본 CSV 에서 뽑음 · `collector` = 콜렉터에 다시 물음
+    pub source: String,
+}
+
+/// 결과의 서비스 하나를 **트랜잭션 한 건 한 줄**로 내보낸다 (열은 원본 CSV 와 같다).
+///
+/// 통계 결과에는 건마다의 값이 없다(분포·표본만). 그래서
+///   · 시작할 때 원본 CSV 를 남겼으면 그 파일에서 이 서비스 줄만 옮긴다 — 연결이 없어도 된다
+///   · 없으면 **같은 조건으로 이 서비스만** 콜렉터에 다시 묻는다 — 통계를 돌린 콜렉터에 붙어 있어야 한다
+#[tauri::command]
+pub async fn stats_service_rows(app: AppHandle, id: String, service: String) -> Result<RowsExport, String> {
+    let r = result_of(&app, &id).await?;
+    if service == model::OTHER_SERVICE {
+        return Err("여러 서비스를 합친 줄이라 트랜잭션을 가려낼 수 없습니다".into());
+    }
+    if !r.services.iter().any(|s| s.service == service) {
+        return Err(format!("결과에 없는 서비스: {service}"));
+    }
+    let state = app.state::<AppState>();
+    let export_dir = state.export_dir().await;
+    let stamp = raw::file_stamp(local_now_ms(), r.request.tz_offset_ms);
+    let out = export_dir.join(format!("{stamp}_{}.csv", crate::profile_store::sanitize(&format!("stats-rows-{service}"))));
+
+    // 1) 원본 CSV 가 있으면 거기서
+    if let Some(first) = r.raw_path.as_deref().map(PathBuf::from).filter(|p| p.exists()) {
+        let (files, svc, out2) = (r.raw_files, service.clone(), out.clone());
+        let rows = tokio::task::spawn_blocking(move || raw::extract_service(&first, files, &svc, &out2))
+            .await
+            .map_err(|e| e.to_string())??;
+        return Ok(RowsExport { path: out.to_string_lossy().to_string(), rows, files: 1, source: "raw".into() });
+    }
+
+    // 2) 없으면 콜렉터에 — 다른 콜렉터에 붙어 있으면 엉뚱한 것을 받는다
+    let now: Vec<String> = state.links().iter().map(|l| l.name.clone()).collect();
+    if now.is_empty() {
+        return Err("원본 CSV 가 없는 결과라 콜렉터에 다시 물어야 합니다 — 먼저 연결하세요".into());
+    }
+    if let Some(miss) = r.collectors.iter().find(|c| !now.contains(c)) {
+        return Err(format!("통계를 돌린 콜렉터({miss})에 붙어 있지 않습니다 — 그 콜렉터에 연결한 뒤 다시 받으세요"));
+    }
+    let mut req = r.request.clone();
+    req.services = vec![service];
+    req.raw = true;
+    let sink = Arc::new(raw::RawSink::create(&out)?);
+    let sink2 = sink.clone();
+    let app2 = app.clone();
+    let run = tokio::task::spawn_blocking(move || {
+        let state = app2.state::<AppState>();
+        engine::run(&state, &req, &Control::default(), Some(&sink2), &|_p: Progress| {}).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let (path, rows, files, err) = sink.finish();
+    run?;
+    if let Some(e) = err {
+        return Err(e);
+    }
+    Ok(RowsExport { path, rows, files, source: "collector".into() })
+}
+
 /// 남긴 결과를 지운다 (돌고 있는 작업은 지우지 않는다 — 먼저 취소한다)
 #[tauri::command]
 pub async fn stats_delete(app: AppHandle, id: String) -> Result<(), String> {

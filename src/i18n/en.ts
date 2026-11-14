@@ -1279,4 +1279,8 @@ export const EN: Record<string, string> = {
   '찾지 못했습니다': 'Search failed',
   '멈출 때까지 모은 것을 다 담았습니다. 그 시각 뒤는 일부만 찾았으니, 빠짐없이 보려면 구간을 그 뒤로 잡아 다시 찾으십시오.': 'Everything gathered before stopping is listed. After that time only part was searched — to see all of it, search again from that time.',
   '까지 빠짐없이, 그 뒤는 일부': ' fully searched, partial after',
+  '트랜잭션 CSV': 'Transactions CSV',
+  '분포 CSV': 'Distribution CSV',
+  '이 서비스의 트랜잭션을 한 건 한 줄로 — 원본 CSV 를 남긴 결과는 거기서 뽑고, 아니면 콜렉터에 다시 묻습니다': 'This service\'s transactions, one per line — taken from the raw CSV if the run kept one, otherwise asked from the collector again',
+  '응답시간 칸마다 기준·과거 건수와 누적 % — 결과에 든 분포 그대로': 'Reference and past counts with cumulative % per response-time bucket — the distribution stored in the result',
 };

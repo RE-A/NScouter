@@ -352,7 +352,15 @@ export const StatsTab = memo(function StatsTab({ connected, groups, servers, onO
   const renderDetail = useCallback(
     (svc: string) =>
       resultId && resultReq ? (
-        <StatsDetail jobId={resultId} service={svc} onOpenTxid={onOpenTxid} range={resultReq.current} baselines={resultReq.baselines} />
+        <StatsDetail
+          jobId={resultId}
+          service={svc}
+          onOpenTxid={onOpenTxid}
+          range={resultReq.current}
+          baselines={resultReq.baselines}
+          onSaved={setNotice}
+          onError={setError}
+        />
       ) : null,
     [resultId, resultReq, onOpenTxid],
   );

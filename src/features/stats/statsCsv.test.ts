@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StatsSummary } from './statsApi';
-import { statsCsv, statsViewCsv } from './statsCsv';
+import { statsCsv, statsDistCsv, statsViewCsv } from './statsCsv';
 import { DEFAULT_RULES as D } from './statsJudge';
 
 // 판정 논리 시험 — 고정한 규칙으로(기본값 1.3배·1000ms 와 상관없이)
@@ -83,5 +83,19 @@ describe('statsViewCsv', () => {
     expect(cells[head.indexOf('에러율(%) 과거 대비')]).toBe('▲2.0%p');
     expect(cells[head.indexOf('p90(ms) 과거 대비')]).toBe('−25%');
     expect(cells.slice(2).some(c => c.startsWith('+'))).toBe(false);
+  });
+});
+
+describe('statsDistCsv', () => {
+  it('기준·과거 칸을 합쳐 오름차순, 건수와 누적 % 를 나란히', () => {
+    const csv = statsDistCsv(s({ dist: [[10, 1], [100, 3]] }), s({ dist: [[50, 2], [100, 2]] }));
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe('응답시간(ms 이하),기준 건수,기준 누적(%),과거 건수(합계),과거 누적(%)');
+    expect(lines.slice(1)).toEqual(['10,1,25,0,0', '50,0,25,2,50', '100,3,100,2,100']);
+  });
+
+  it('한쪽이 없으면 그쪽 누적은 빈 칸', () => {
+    const csv = statsDistCsv(s({ dist: [[10, 2]] }), null);
+    expect(csv.split('\r\n')[1]).toBe('10,2,100,0,');
   });
 });

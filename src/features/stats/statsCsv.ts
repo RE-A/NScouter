@@ -108,3 +108,28 @@ export function statsViewCsv(rows: readonly ServiceStats[], rules: JudgeRules, p
   }
   return lines.join('\r\n');
 }
+
+/**
+ * 응답시간 분포 — 결과에 든 1% 폭 칸 그대로(칸의 위쪽 끝 ms). 기준과 과거를 같은 칸에 나란히 둔다.
+ * 과거는 모든 과거 구간을 **합친** 건수다(일평균이 아니다) — 모양을 보려는 것이라 누적 % 로 견준다
+ */
+export function statsDistCsv(current: StatsSummary | null, baseline: StatsSummary | null): string {
+  const cur = new Map(current?.dist ?? []);
+  const past = new Map(baseline?.dist ?? []);
+  const edges = [...new Set([...cur.keys(), ...past.keys()])].sort((a, b) => a - b);
+  const total = (m: Map<number, number>) => [...m.values()].reduce((n, v) => n + v, 0);
+  const tc = total(cur);
+  const tp = total(past);
+  const head = ['응답시간(ms 이하)', '기준 건수', '기준 누적(%)', '과거 건수(합계)', '과거 누적(%)'];
+  const lines = [head.map(csvCell).join(',')];
+  let ac = 0;
+  let ap = 0;
+  for (const e of edges) {
+    const c = cur.get(e) ?? 0;
+    const p = past.get(e) ?? 0;
+    ac += c;
+    ap += p;
+    lines.push([e, c, tc > 0 ? r1((ac / tc) * 100) : null, p, tp > 0 ? r1((ap / tp) * 100) : null].map(csvCell).join(','));
+  }
+  return lines.join('\r\n');
+}
