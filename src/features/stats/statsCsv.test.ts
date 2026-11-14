@@ -37,6 +37,11 @@ describe('statsCsv', () => {
     expect(cells[head.indexOf('평균 과거 대비(%)')]).toBe('100');
     expect(lines[2].startsWith('/new,기준에만 있음,')).toBe(true);
     expect(lines[2].split(',').length).toBe(head.length);
+    // 화면에서 쓰지 않는 열은 뺐다 — 기준·과거 11열씩, 39 → 31열
+    for (const gone of ['p95', 'CPU', 'SQL 횟수', 'API 횟수']) expect(head.some(h => h.includes(gone))).toBe(false);
+    expect(head).toContain('기준 SQL(ms)');
+    expect(head).toContain('과거 일평균 API(ms)');
+    expect(head.length).toBe(31);
   });
 });
 

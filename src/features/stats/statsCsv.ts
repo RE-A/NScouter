@@ -11,7 +11,8 @@ import { flagReason, fmtMetricVs, metricValue, METRICS, pastView, type MetricKey
 
 type Cell = string | number | null;
 
-const SIDE_HEAD = ['건수', '에러', '에러율(%)', 'TPS', '평균(ms)', 'p50(ms)', 'p90(ms)', 'p95(ms)', 'p99(ms)', '최대(ms)', 'SQL 횟수', 'SQL(ms)', 'API 횟수', 'API(ms)', 'CPU(ms)'];
+// 화면에서 쓰지 않는 p95·CPU·SQL/API 횟수는 뺐다(원본 CSV 에는 건마다 있다)
+const SIDE_HEAD = ['건수', '에러', '에러율(%)', 'TPS', '평균(ms)', 'p50(ms)', 'p90(ms)', 'p99(ms)', '최대(ms)', 'SQL(ms)', 'API(ms)'];
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -20,8 +21,8 @@ const r3 = (v: number) => Math.round(v * 1000) / 1000;
 function side(s: StatsSummary | null): Cell[] {
   if (!s) return SIDE_HEAD.map(() => null);
   return [
-    r1(s.count), r1(s.errors), r3(s.error_rate * 100), r3(s.tps), r1(s.avg_ms), s.p50_ms, s.p90_ms, s.p95_ms, s.p99_ms, s.max_ms,
-    r1(s.sql_count_avg), r1(s.sql_ms_avg), r1(s.api_count_avg), r1(s.api_ms_avg), r1(s.cpu_ms_avg),
+    r1(s.count), r1(s.errors), r3(s.error_rate * 100), r3(s.tps), r1(s.avg_ms), s.p50_ms, s.p90_ms, s.p99_ms, s.max_ms,
+    r1(s.sql_ms_avg), r1(s.api_ms_avg),
   ];
 }
 
