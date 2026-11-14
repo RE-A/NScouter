@@ -142,7 +142,10 @@ export async function searchAll<T = XLogPack>(
       let cursor: PastCursor | null = null;
       for (;;) {
         if (opts.isCancelled?.()) stop ??= 'cancelled';
-        if (stop !== null) return;
+        if (stop === 'cancelled') return;
+        // 상한에 닿으면 **가장 이른 덜 끝난 조각만** 끝까지 받는다. 다 같이 멈추면 조각 넷이 모두 덜 끝난 채라
+        // «빈틈없이 찾은 데» 가 시작 시각이 되어 모은 것을 전부 버린다(트래픽이 많을 때 결과가 비던 까닭)
+        if (stop === 'cap' && i !== finished.indexOf(false)) return;
         const res = await page({ ...filter, stime: pc.s, etime: pc.e }, pc.date, hashes, cursor);
         requests++;
         // 조각 경계의 같은 시각은 양쪽에서 다 온다 — txid 로 한 번만 담는다
@@ -155,7 +158,7 @@ export async function searchAll<T = XLogPack>(
         if (out.length >= cap) {
           stop ??= 'cap';
           report();
-          return;
+          if (i !== finished.indexOf(false)) return;
         }
         cursor = res.cursor;
       }

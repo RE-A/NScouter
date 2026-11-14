@@ -118,6 +118,18 @@ describe('searchAll', () => {
     expect(res.xlogs.length).toBe(expected);
   });
 
+  it('트래픽이 많아 조각 넷이 다 덜 끝난 채 상한에 닿아도 — 가장 이른 조각은 끝까지 받아 결과가 비지 않는다', async () => {
+    // 5분 조각 하나에 3,000건 남짓 — 상한 1,000 은 조각 넷을 같이 받는 동안 어느 하나도 끝나기 전에 닿는다
+    const times = spread(40_000, 0, 60 * MIN);
+    const srv = server(times, 100);
+    const res = await searchAll({ ...BASE, stime: 0, etime: 60 * MIN }, srv.fn, objectsOf, { cap: 1_000, parallel: 4 });
+    expect(res.cut).toBe('cap');
+    expect(res.stoppedAt).toBeGreaterThanOrEqual(5 * MIN);
+    const expected = times.filter(t => t <= res.stoppedAt!).length;
+    expect(res.xlogs.length).toBe(expected);
+    expect(res.xlogs.length).toBeGreaterThan(1_000);
+  });
+
   it('멈추면 다음 페이지를 부르지 않는다', async () => {
     const srv = server(spread(5_000, 0, 60 * MIN), 100);
     let cancel = false;

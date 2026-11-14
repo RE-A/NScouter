@@ -130,3 +130,21 @@ describe('WideSearchDialog — 넘기는 값', () => {
     expect(onCancel).toHaveBeenCalled();
   });
 });
+
+describe('WideSearchDialog — 오류', () => {
+  it('찾다가 난 오류를 창에 띄운다 — 말없이 끝나지 않게', () => {
+    render(
+      <WideSearchDialog
+        agents={AGENTS}
+        running={false}
+        progress={null}
+        error="트랜잭션 찾기: 시간 초과"
+        onCancel={vi.fn()}
+        cap={300_000}
+        onSearch={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('alert').textContent).toContain('시간 초과');
+  });
+});

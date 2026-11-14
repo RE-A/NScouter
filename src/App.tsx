@@ -1535,11 +1535,14 @@ export default function App({ windowLabel }: {
     stoppedAt: number | null;
   } | null>(null);
   const [wideProgress, setWideProgress] = useState<WideProgress | null>(null);
+  /** 찾다가 난 오류 — 창에 띄운다(말없이 끝나면 «결과가 안 나온다» 로만 보인다) */
+  const [wideError, setWideError] = useState<string | null>(null);
   const wideCancelRef = useRef(false);
 
   const runWideSearch = useCallback(
     (v: WideSearchValues) => {
       setWideRunning(true);
+      setWideError(null);
       wideCancelRef.current = false;
       setWideProgress({ found: 0, done: 0, requests: 0 });
       // 그날 붙었던 오브젝트 + 지금 붙어 있는 것. 지난 Task(ECS)는 지금 목록에 없다
@@ -1567,7 +1570,7 @@ export default function App({ windowLabel }: {
             res.cut === 'none' ? null : { kind: res.cut, stoppedAt: res.stoppedAt },
           );
         })
-        .catch(() => {})
+        .catch(e => setWideError(String(e)))
         .finally(() => {
           setWideRunning(false);
           setWideProgress(null);
@@ -2318,10 +2321,11 @@ export default function App({ windowLabel }: {
           agents={[...agentMap].map(([obj_hash, obj_name]) => ({ obj_hash, obj_name }) as AgentObject)}
           running={wideRunning}
           progress={wideProgress}
+          error={wideError}
           cap={wideSearchMax}
           onCancel={() => { wideCancelRef.current = true; }}
           onSearch={runWideSearch}
-          onClose={() => setShowWideSearch(false)}
+          onClose={() => { setShowWideSearch(false); setWideError(null); }}
         />
       )}
 
