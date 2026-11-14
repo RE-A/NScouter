@@ -78,7 +78,8 @@ function viewValue(k: MetricKey, v: number | undefined): Cell {
 
 /**
  * 화면 그대로 — 표에 보이는 줄(고른 칩·거르기·정렬 그대로)과 칸만.
- * 판정은 칩과 옆의 이유를 글로(`느려짐 평균 ×31`), 과거 대비는 화면 표기 그대로(`×31`, `+78%`, `+1.3%p`. 작은 변화는 빈 칸).
+ * 판정은 칩과 옆의 이유를 글로(`느려짐 평균 ×31`), 과거 대비는 화면 표기(`×31`, `−31%`. 작은 변화는 빈 칸) —
+ * 다만 늘어난 쪽 `+` 는 `▲` 로 쓴다(`▲78%`, `▲1.3%p`). 엑셀이 `+` 로 시작하는 칸을 수식으로 읽어서다.
  * `rows` 는 이미 일자별 평균을 거친 줄(`withPastView`)
  */
 export function statsViewCsv(rows: readonly ServiceStats[], rules: JudgeRules, pastRanges = 1, tr: (s: string) => string = x => x): string {
@@ -98,7 +99,9 @@ export function statsViewCsv(rows: readonly ServiceStats[], rules: JudgeRules, p
       ...METRICS.flatMap(k => {
         const c = metricValue(r.current, k);
         const b = metricValue(r.baseline, k);
-        return [viewValue(k, c), viewValue(k, b), fmtMetricVs(k, c, b) || null];
+        // 엑셀은 `+` 로 시작하는 칸을 수식으로 읽는다(`+1.3%p` → #NAME?) — 늘어난 쪽은 ▲ 로
+        const vs = fmtMetricVs(k, c, b).replace(/^\+/, '▲');
+        return [viewValue(k, c), viewValue(k, b), vs || null];
       }),
     ];
     lines.push(cells.map(csvCell).join(','));

@@ -73,4 +73,15 @@ describe('statsViewCsv', () => {
     expect(cells[head.indexOf('p90(ms) 과거 대비')]).toBe('');
     expect(cells.length).toBe(head.length);
   });
+
+  it('늘어난 쪽 + 는 ▲ — 엑셀이 + 로 시작하는 칸을 수식으로 읽지 않게', () => {
+    const csv = statsViewCsv([{ service: '/up', current: s({ p50_ms: 225, error_rate: 0.03, p90_ms: 300 }), baseline: s() }], DEFAULT_RULES);
+    const [h, line] = csv.split('\r\n');
+    const head = h.split(',');
+    const cells = line.split(',');
+    expect(cells[head.indexOf('p50(ms) 과거 대비')]).toBe('▲50%');
+    expect(cells[head.indexOf('에러율(%) 과거 대비')]).toBe('▲2.0%p');
+    expect(cells[head.indexOf('p90(ms) 과거 대비')]).toBe('−25%');
+    expect(cells.slice(2).some(c => c.startsWith('+'))).toBe(false);
+  });
 });
