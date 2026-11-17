@@ -878,6 +878,11 @@ export interface XLogSplitPrefs {
   active?: number;
   dir?: string;
   ratio?: number;
+  /**
+   * 판 배치(dockview JSON). 판 이름은 `xlog_tabs` 의 순번(`t0`…)이다 (`dockLayout.ts`).
+   * 없거나 탭과 안 맞으면 위 `panes`·`dir` 로 다시 짠다
+   */
+  dock?: unknown;
 }
 
 /** 탭 하나의 조건. Rust `XLogTabPrefs` 와 짝이다 */

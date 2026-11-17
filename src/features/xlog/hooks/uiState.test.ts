@@ -353,3 +353,31 @@ describe('XLog 탭', () => {
     expect(s.activeKey).toBe(s.tabs[0].key);
   });
 });
+
+describe('판 배치(dock) 저장·복원', () => {
+  it('지금 배치를 순번으로 적고, 다음 실행의 키로 되살린다', () => {
+    const s = toTabs([{ stime: 0, etime: 0 }, { title: 'B', stime: 0, etime: 0 }], undefined, undefined);
+    const [a, b] = s.tabs.map(t => t.key);
+    const dock = {
+      grid: {
+        root: { type: 'leaf', data: { views: [a, b], activeView: b, id: 'g1' }, size: 100 },
+        width: 800,
+        height: 600,
+        orientation: 'HORIZONTAL',
+      },
+      panels: { [a]: { id: a, contentComponent: 'xlog' }, [b]: { id: b, contentComponent: 'xlog' } },
+    } as unknown as Parameters<typeof fromSplit>[1];
+    const saved = fromSplit(s, dock);
+    expect(JSON.stringify(saved.dock)).toContain('"t1"');
+
+    const again = toTabs([{ stime: 0, etime: 0 }, { title: 'B', stime: 0, etime: 0 }], undefined, undefined, saved);
+    const keys = again.tabs.map(t => t.key);
+    expect(Object.keys(again.dock?.panels ?? {})).toEqual(keys);
+  });
+
+  it('배치가 없거나 탭과 안 맞으면 null — 예전 분할로 다시 짠다', () => {
+    const s = toTabs([{ stime: 0, etime: 0 }], undefined, undefined, { panes: [0], dock: { grid: {}, panels: { t5: {} } } });
+    expect(s.dock).toBeNull();
+    expect(fromSplit(s).dock).toBeUndefined();
+  });
+});

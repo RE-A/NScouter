@@ -18,6 +18,8 @@ import { normalizeColWidths, type XLogColWidths } from '../components/xlogColumn
 import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
 import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTab, type XLogTabsState } from './xlogTabs';
 import type { XLogMode } from '../types/timeRange';
+import type { SerializedDockview } from 'dockview-react';
+import { decodeDock, encodeDock } from './dockLayout';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
 export type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert' | 'stats';
@@ -246,14 +248,20 @@ export function tabToPrefs(t: XLogTab): XLogTabPrefs {
  * **빈 목록이면 옛 한 벌로 탭 하나를 만든다.** 판이 올라가기 전 파일에는 `xlog_tabs`
  * 가 없는데, 그때 빈 화면으로 시작하면 «설정이 날아갔다» 로 읽힌다.
  */
-/** 분할 → 저장할 값. 탭은 순번으로 적는다 — 키는 켤 때마다 새로 만든다 */
-export function fromSplit(s: XLogTabsState): XLogSplitPrefs {
+/**
+ * 분할 → 저장할 값. 탭은 순번으로 적는다 — 키는 켤 때마다 새로 만든다.
+ * `dock` 은 지금 판 배치(dockview JSON, 판 이름 = 탭 키) — 순번으로 바꿔 함께 적는다.
+ * 탭과 안 맞으면(배치에 없는 탭 등) 빼고 적는다 — 읽을 때 `panes`·`dir` 로 다시 짠다
+ */
+export function fromSplit(s: XLogTabsState, dock?: SerializedDockview | null): XLogSplitPrefs {
   const index = (key: string) => s.tabs.findIndex(t => t.key === key);
+  const encoded = dock ? encodeDock(dock, s.tabs.map(t => t.key)) : null;
   return {
     panes: s.panes.map(index).filter(i => i >= 0),
     active: Math.max(0, index(s.activeKey)),
     dir: s.dir,
     ratio: s.ratio,
+    ...(encoded ? { dock: encoded } : {}),
   };
 }
 
@@ -310,6 +318,8 @@ function withSplit(s: XLogTabsState, split: XLogSplitPrefs | undefined): XLogTab
     panes,
     activeKey: active !== null && panes.includes(active) ? active : panes[0],
     dir: split.dir === 'column' ? 'column' : 'row',
+    // 판 배치 — 탭과 딱 맞을 때만 되살린다(`decodeDock`). 아니면 null 이고 `panes`·`dir` 로 짠다
+    dock: decodeDock(split.dock, s.tabs.map(t => t.key)),
   };
   return typeof split.ratio === 'number' ? setRatio(out, split.ratio) : out;
 }

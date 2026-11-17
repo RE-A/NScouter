@@ -550,11 +550,15 @@ pub struct XLogSplitPrefs {
     pub dir: String,
     /// 두 판일 때 첫 판의 몫
     pub ratio: f32,
+    /// 판 배치(dockview JSON) — 판 이름은 `xlog_tabs` 의 순번(`t0`…). 화면이 쓰고 읽는다(`dockLayout.ts`).
+    /// 없으면 위 `panes`·`dir` 로 다시 짠다
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dock: Option<serde_json::Value>,
 }
 
 impl Default for XLogSplitPrefs {
     fn default() -> Self {
-        Self { panes: Vec::new(), active: 0, dir: "row".to_string(), ratio: 0.5 }
+        Self { panes: Vec::new(), active: 0, dir: "row".to_string(), ratio: 0.5, dock: None }
     }
 }
 

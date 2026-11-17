@@ -25,6 +25,7 @@ import {
   type XLogChartConfig,
   type XLogFilterState,
 } from '../types/xlog';
+import type { SerializedDockview } from 'dockview-react';
 import type { PastRange, XLogMode } from '../types/timeRange';
 import { EMPTY_SELECTION, type GroupSelection } from './groupSelection';
 
@@ -54,6 +55,12 @@ export interface XLogTabsState {
   dir: SplitDir;
   /** 두 판일 때 첫 판이 차지하는 몫 */
   ratio: number;
+  /**
+   * 되살릴 판 배치(dockview JSON, 판 이름 = 탭 키). **처음 띄울 때만** 쓴다 — 띄운 뒤의 배치는 dockview 가 들고,
+   * 바뀔 때마다 App 이 따로 받아 둔다(그때마다 이 상태를 고치면 경계를 끄는 동안 App 이 통째로 다시 그린다).
+   * 없으면 `panes`·`dir` 로 짠다(`opsFromSplit`).
+   */
+  dock?: SerializedDockview | null;
 }
 
 /** 한 화면에 나란히 둘 수 있는 판 수. 넷을 넘기면 판 하나가 엽서만 해져 점을 못 읽는다 */
@@ -220,41 +227,6 @@ export function activate(s: XLogTabsState, key: string): XLogTabsState {
   return { ...s, activeKey: key, panes: s.panes.map(k => (k === s.activeKey ? key : k)) };
 }
 
-export type DropSide = 'left' | 'right' | 'top' | 'bottom' | 'center';
-
-/**
- * 탭을 판 위에 끌어 놓는다.
- *
- *   · 가장자리(left/right/top/bottom) — 그 판 옆에 새 판으로 세운다
- *   · 가운데 — 그 판을 이 탭으로 바꾼다
- *
- * 판이 이미 `MAX_PANES` 면 가장자리에 놓아도 **그 판을 바꾼다** — 더 쪼개지 않는다.
- * 이미 떠 있는 탭을 끌면 자리만 옮긴다(둘로 보이지 않는다).
- */
-export function dropTab(s: XLogTabsState, key: string, target: string, side: DropSide): XLogTabsState {
-  if (!s.tabs.some(t => t.key === key) || !s.panes.includes(target)) return s;
-  if (key === target) return { ...s, activeKey: key };
-
-  if (side === 'center' || (s.panes.length >= MAX_PANES && !s.panes.includes(key))) {
-    // 떠 있던 탭을 다른 판에 놓으면 두 판이 자리를 바꾼다
-    const from = s.panes.indexOf(key);
-    const panes = s.panes.map((k, i) => (k === target ? key : i === from ? target : k));
-    return { ...s, panes, activeKey: key };
-  }
-
-  const rest = s.panes.filter(k => k !== key);
-  const at = rest.indexOf(target);
-  const before = side === 'left' || side === 'top';
-  rest.splice(before ? at : at + 1, 0, key);
-  return {
-    ...s,
-    panes: rest,
-    activeKey: key,
-    // 두 판의 방향은 놓은 쪽이 정한다. 셋 이상은 격자라 방향이 없다
-    dir: side === 'left' || side === 'right' ? 'row' : 'column',
-  };
-}
-
 /**
  * 다른 창에서 온 탭들을 들인다 (뗀 창을 합치거나 탭 하나를 보내 왔을 때).
  *
@@ -266,15 +238,6 @@ export function importTabs(s: XLogTabsState, incoming: readonly XLogTab[]): XLog
   if (incoming.length === 0) return s;
   const added = incoming.map(t => ({ ...t, key: nextKey() }));
   return activate({ ...s, tabs: [...s.tabs, ...added] }, added[0].key);
-}
-
-/** 판 하나를 내린다 — **탭은 남는다.** 마지막 판은 못 내린다 */
-export function closePane(s: XLogTabsState, key: string): XLogTabsState {
-  if (s.panes.length <= 1 || !s.panes.includes(key)) return s;
-  const panes = s.panes.filter(k => k !== key);
-  if (key !== s.activeKey) return { ...s, panes };
-  const i = Math.min(s.panes.indexOf(key), panes.length - 1);
-  return { ...s, panes, activeKey: panes[i] };
 }
 
 export function setRatio(s: XLogTabsState, ratio: number): XLogTabsState {
