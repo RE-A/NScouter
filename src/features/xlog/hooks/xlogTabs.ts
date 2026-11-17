@@ -25,8 +25,29 @@ import {
   type XLogChartConfig,
   type XLogFilterState,
 } from '../types/xlog';
+import type { SerializedDockview } from 'dockview-react';
 import type { PastRange, XLogMode } from '../types/timeRange';
 import { EMPTY_SELECTION, type GroupSelection } from './groupSelection';
+
+/**
+ * 판 종류. 탭 하나가 판 하나이고, 판은 XLog 말고도 된다 — 원본 스카우터처럼 XLog·EQ·카운터를 한 화면에.
+ * 대상(고르기·트리 따라감/고정)·이름·배치는 종류와 상관없이 같다. XLog 전용 칸(모드·구간·차트 설정·거름)은
+ * XLog 판만 쓴다 — 다른 판에서는 `filter.objHashSet`(풀린 해시)만 쓴다.
+ */
+export type PanelKind = 'xlog' | 'counter' | 'eq' | 'active' | 'summary' | 'serviceGroup' | 'alert';
+
+export const PANEL_KINDS: readonly PanelKind[] = ['xlog', 'counter', 'eq', 'active', 'summary', 'serviceGroup', 'alert'];
+
+/** 판 종류 이름 — 탭 이름의 기본값 */
+export const PANEL_KIND_LABEL: Record<PanelKind, string> = {
+  xlog: 'XLog',
+  counter: '카운터',
+  eq: 'Active Service EQ',
+  active: 'Active 목록',
+  summary: '요약',
+  serviceGroup: '서비스 그룹',
+  alert: 'Alert',
+};
 
 /** 탭 하나가 쥐는 것 */
 export interface XLogTab {
@@ -40,6 +61,21 @@ export interface XLogTab {
   filter: XLogFilterState;
   /** 왼쪽 목록에서 고른 것 — 서비스 이름과 낱개 Task. 해시는 `filter.objHashSet` 에 풀려 있다 */
   selection: GroupSelection;
+  /**
+   * **대상 고정(📌).** 거짓(기본)이면 «트리 따라감(🔗)» — 따라감 판들은 고르기를 함께 쓴다: 따라감 판에서
+   * 트리를 고치면 따라감 판 **전부**가 바뀐다. 고정 판은 제 고르기를 지키고, 그 판을 눌렀을 때만 트리가 그 판을 고친다.
+   * 원본 스카우터의 «대상이 박힌 창»(`XLog - PRD-FSCPS`) 이 고정 판이다.
+   */
+  pinned?: boolean;
+  /** 판 종류. 없으면 XLog (이 칸이 생기기 전 탭은 모두 XLog 다) */
+  kind?: PanelKind;
+  /** (카운터 판) 그릴 카운터 — counters.xml 표기 그대로 (`TPS`, `ElapsedTime` …) */
+  counter?: string;
+}
+
+/** 판 종류 — 없으면 XLog */
+export function kindOf(tab: XLogTab): PanelKind {
+  return tab.kind ?? 'xlog';
 }
 
 /** 두 판을 놓는 방향. `row` 는 좌우, `column` 은 위아래. 셋 이상은 2×2 격자다 */
@@ -54,21 +90,27 @@ export interface XLogTabsState {
   dir: SplitDir;
   /** 두 판일 때 첫 판이 차지하는 몫 */
   ratio: number;
+  /**
+   * 되살릴 판 배치(dockview JSON, 판 이름 = 탭 키). **처음 띄울 때만** 쓴다 — 띄운 뒤의 배치는 dockview 가 들고,
+   * 바뀔 때마다 App 이 따로 받아 둔다(그때마다 이 상태를 고치면 경계를 끄는 동안 App 이 통째로 다시 그린다).
+   * 없으면 `panes`·`dir` 로 짠다(`opsFromSplit`).
+   */
+  dock?: SerializedDockview | null;
 }
 
-/** 한 화면에 나란히 둘 수 있는 판 수. 넷을 넘기면 판 하나가 엽서만 해져 점을 못 읽는다 */
+/** (예전 분할) 나란히 둘 수 있던 판 수 — 예전 설정(`xlog_split.panes`)을 읽을 때만 쓴다. 지금 판 수는 탭 수까지다 */
 export const MAX_PANES = 4;
 export const MIN_RATIO = 0.2;
 export const MAX_RATIO = 0.8;
 
 /**
- * 한 번에 둘 수 있는 탭 수.
+ * 한 번에 둘 수 있는 탭(판) 수.
  *
- * **버퍼가 탭마다 따로다.** 과거 조회 한 탭이 수십만 건을 들 수 있으니
- * 무제한으로 두면 조용히 메모리를 먹는다. 비교는 둘셋을 견주는 일이지
- * 열몇 개를 늘어놓는 일이 아니다.
+ * 원본 스카우터처럼 서비스마다 XLog 를 한 화면에 늘어놓으려면 넉넉해야 한다(16). 메모리는 탭 수가 아니라
+ * **앱 전체 점 예산**이 묶는다(`XLogDataStore` `enforceBudget`) — 판이 늘면 판마다 남는 시간이 짧아질 뿐이다.
+ * 판 하나가 엽서만 해지는 것은 사용자가 정할 일이다.
  */
-export const MAX_XLOG_TABS = 6;
+export const MAX_XLOG_TABS = 16;
 
 let seq = 0;
 function nextKey(): string {
@@ -108,6 +150,9 @@ export function tabTitle(tab: XLogTab): string {
 }
 
 function autoTitle(tab: XLogTab): string {
+  const kind = kindOf(tab);
+  if (kind === 'counter') return tab.counter ? (counterLabel?.(tab.counter) ?? tab.counter) : PANEL_KIND_LABEL.counter;
+  if (kind !== 'xlog') return PANEL_KIND_LABEL[kind];
   if (tab.mode === 'live') return '실시간';
   if (!tab.pastRange) return '과거';
 
@@ -172,6 +217,8 @@ export function addTab(s: XLogTabsState): XLogTabsState {
     filter: { ...src.filter, objHashSet: new Set(src.filter.objHashSet) },
     // 고른 서버도 복제한다 — 비교하려고 여는 것이니 서버를 처음부터 다시 고르게 하지 않는다
     selection: src.selection,
+    // 따라감을 복제하면 따라감, 고정을 복제하면 같은 대상으로 고정 — 비교하려고 여는 것이다
+    ...(src.pinned ? { pinned: true } : {}),
   };
   const at = s.tabs.findIndex(t => t.key === s.activeKey);
   const tabs = [...s.tabs];
@@ -220,41 +267,6 @@ export function activate(s: XLogTabsState, key: string): XLogTabsState {
   return { ...s, activeKey: key, panes: s.panes.map(k => (k === s.activeKey ? key : k)) };
 }
 
-export type DropSide = 'left' | 'right' | 'top' | 'bottom' | 'center';
-
-/**
- * 탭을 판 위에 끌어 놓는다.
- *
- *   · 가장자리(left/right/top/bottom) — 그 판 옆에 새 판으로 세운다
- *   · 가운데 — 그 판을 이 탭으로 바꾼다
- *
- * 판이 이미 `MAX_PANES` 면 가장자리에 놓아도 **그 판을 바꾼다** — 더 쪼개지 않는다.
- * 이미 떠 있는 탭을 끌면 자리만 옮긴다(둘로 보이지 않는다).
- */
-export function dropTab(s: XLogTabsState, key: string, target: string, side: DropSide): XLogTabsState {
-  if (!s.tabs.some(t => t.key === key) || !s.panes.includes(target)) return s;
-  if (key === target) return { ...s, activeKey: key };
-
-  if (side === 'center' || (s.panes.length >= MAX_PANES && !s.panes.includes(key))) {
-    // 떠 있던 탭을 다른 판에 놓으면 두 판이 자리를 바꾼다
-    const from = s.panes.indexOf(key);
-    const panes = s.panes.map((k, i) => (k === target ? key : i === from ? target : k));
-    return { ...s, panes, activeKey: key };
-  }
-
-  const rest = s.panes.filter(k => k !== key);
-  const at = rest.indexOf(target);
-  const before = side === 'left' || side === 'top';
-  rest.splice(before ? at : at + 1, 0, key);
-  return {
-    ...s,
-    panes: rest,
-    activeKey: key,
-    // 두 판의 방향은 놓은 쪽이 정한다. 셋 이상은 격자라 방향이 없다
-    dir: side === 'left' || side === 'right' ? 'row' : 'column',
-  };
-}
-
 /**
  * 다른 창에서 온 탭들을 들인다 (뗀 창을 합치거나 탭 하나를 보내 왔을 때).
  *
@@ -266,15 +278,6 @@ export function importTabs(s: XLogTabsState, incoming: readonly XLogTab[]): XLog
   if (incoming.length === 0) return s;
   const added = incoming.map(t => ({ ...t, key: nextKey() }));
   return activate({ ...s, tabs: [...s.tabs, ...added] }, added[0].key);
-}
-
-/** 판 하나를 내린다 — **탭은 남는다.** 마지막 판은 못 내린다 */
-export function closePane(s: XLogTabsState, key: string): XLogTabsState {
-  if (s.panes.length <= 1 || !s.panes.includes(key)) return s;
-  const panes = s.panes.filter(k => k !== key);
-  if (key !== s.activeKey) return { ...s, panes };
-  const i = Math.min(s.panes.indexOf(key), panes.length - 1);
-  return { ...s, panes, activeKey: panes[i] };
 }
 
 export function setRatio(s: XLogTabsState, ratio: number): XLogTabsState {
@@ -334,3 +337,74 @@ function sameSet(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
   for (const v of a) if (!b.has(v)) return false;
   return true;
 }
+
+// ─── 트리 따라감 / 고정 ─────────────────────────────────────────
+
+/**
+ * 트리에서 고른 것을 넣는다 — **지금 판 기준**이다. 지금 판이 따라감이면 따라감 판 **전부**가,
+ * 고정이면 그 판만 바뀐다. 해시는 App 이 판마다 다시 푼다(`setResolved`).
+ */
+export function setSelection(s: XLogTabsState, sel: GroupSelection): XLogTabsState {
+  const cur = activeTab(s);
+  if (cur.pinned) return patchTab(s, cur.key, () => ({ selection: sel }));
+  return { ...s, tabs: s.tabs.map(t => (t.pinned ? t : { ...t, selection: sel })) };
+}
+
+/** 따라감 판들이 함께 쓰는 고르기. 따라감 판이 없으면 null */
+export function linkedSelection(s: XLogTabsState): GroupSelection | null {
+  return s.tabs.find(t => !t.pinned)?.selection ?? null;
+}
+
+/**
+ * 판을 고정하거나 따라감으로 푼다.
+ *
+ *   · 고정 — **지금 고른 것 그대로** 고정한다(트리에서 고른 뒤 📌 를 누르는 손버릇)
+ *   · 풀기 — 다른 따라감 판의 고르기를 받는다. 따라감 판이 하나도 없으면 제 것을 그대로 둔다
+ *     (그 고르기가 이제 따라감 고르기가 된다)
+ */
+export function setPinned(s: XLogTabsState, key: string, pinned: boolean): XLogTabsState {
+  const tab = s.tabs.find(t => t.key === key);
+  if (!tab || !!tab.pinned === pinned) return s;
+  if (pinned) return patchTab(s, key, () => ({ pinned: true }));
+  const shared = s.tabs.find(t => t.key !== key && !t.pinned)?.selection;
+  return {
+    ...s,
+    tabs: s.tabs.map(t => {
+      if (t.key !== key) return t;
+      const { pinned: _drop, ...rest } = t;
+      return shared ? { ...rest, selection: shared } : rest;
+    }),
+  };
+}
+
+// ─── XLog 말고 다른 판 ─────────────────────────────────────────
+
+/** 카운터 이름 → 표시명. 화면이 심는다(`counterMeta`) — 이 파일이 카운터 표를 몰라도 되게 */
+let counterLabel: ((name: string) => string) | null = null;
+export function setCounterLabel(fn: (name: string) => string): void {
+  counterLabel = fn;
+}
+
+/**
+ * 판을 하나 연다 — XLog 가 아닌 것도. 대상은 **따라감**으로 시작한다(따라감 판들의 고르기를 받는다 —
+ * 따라감 판이 없으면 지금 판의 것). 지금 판 옆(같은 묶음)에 열리고 지금 판이 된다.
+ */
+export function addPanel(s: XLogTabsState, kind: PanelKind, counter?: string): XLogTabsState {
+  if (s.tabs.length >= MAX_XLOG_TABS) return s;
+  const sel = linkedSelection(s) ?? activeTab(s).selection;
+  const tab: XLogTab = {
+    key: nextKey(),
+    mode: 'live',
+    pastRange: null,
+    config: DEFAULT_CHART_CONFIG,
+    filter: DEFAULT_FILTER,
+    selection: sel,
+    ...(kind === 'xlog' ? {} : { kind }),
+    ...(kind === 'counter' && counter ? { counter } : {}),
+  };
+  const at = s.tabs.findIndex(t => t.key === s.activeKey);
+  const tabs = [...s.tabs];
+  tabs.splice(at < 0 ? tabs.length : at + 1, 0, tab);
+  return { ...s, tabs, activeKey: tab.key, panes: s.panes.map(k => (k === s.activeKey ? tab.key : k)) };
+}
+

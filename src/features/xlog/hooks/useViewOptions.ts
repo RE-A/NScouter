@@ -13,8 +13,9 @@ import { DEFAULT_PERF } from '../api/perfDefaults';
 import { setPastParallel } from '../api/pastXLog';
 import { setLang, toLang, type Lang } from '../../../i18n';
 import { applyTheme, toTheme, DEFAULT_THEME, type ThemeId } from '../../../styles/theme';
+import { setCanvasFontScale } from '../../../styles/tokens';
 import { DEFAULT_GROUP_RULE, type GroupRule } from '../components/instanceGroup';
-import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../store/XLogDataStore';
+import { clampMaxItems, DEFAULT_MAX_ITEMS, setPointBudget } from '../store/XLogDataStore';
 
 export interface ViewOptions {
   /** SQL 바인딩 파라미터를 문장에 채워 보여줄지 */
@@ -23,7 +24,7 @@ export interface ViewOptions {
   fontScale: number;
   /** 화면 언어 */
   lang: Lang;
-  /** XLog 버퍼에 담아 둘 최대 건수 */
+  /** XLog 점 **앱 전체 예산** — 떠 있는 판들이 나눠 쓴다(`enforceBudget`) */
   bufferMax: number;
   /** 트랜잭션 찾기로 모두 모을 최대 건수 */
   wideSearchMax: number;
@@ -92,6 +93,10 @@ const listeners = new Set<(v: ViewOptions) => void>();
 
 function emit(): void {
   applyFontScale(current.fontScale);
+  // Canvas 는 `--fs-scale` 을 못 읽는다 — 숫자로 심는다. 다시 그리기는 바로 아래 applyTheme 이 알린다
+  setCanvasFontScale(current.fontScale);
+  // 점 예산 — 저장소들이 모듈 하나를 함께 본다
+  setPointBudget(current.bufferMax);
   // 테마는 **문서 뿌리에 걸고 Canvas 색까지 갈아 끼우는 일**이라 한 자리에서 부른다.
   applyTheme(current.theme);
   // t() 는 모듈 함수라 여기서 언어를 심어 둔다. 컴포넌트마다 넘기면 빠뜨리는 자리가 생긴다.
@@ -106,7 +111,8 @@ function fromConfig(cfg: AppConfig): ViewOptions {
     sqlBindInline: cfg.sql_bind_inline ?? DEFAULTS.sqlBindInline,
     fontScale: clampFontScale(cfg.ui_font_scale ?? DEFAULTS.fontScale),
     lang: toLang(cfg.ui_language),
-    bufferMax: clampMaxItems(cfg.xlog_buffer_max ?? DEFAULTS.bufferMax),
+    // 예전 `xlog_buffer_max` 는 탭마다 상한이라 뜻이 달라 옮기지 않는다
+    bufferMax: clampMaxItems(cfg.xlog_point_budget ?? DEFAULTS.bufferMax),
     wideSearchMax: clampWideMax(cfg.wide_search_max ?? DEFAULTS.wideSearchMax),
     theme: toTheme(cfg.ui_theme),
     groupRule: {
@@ -162,7 +168,7 @@ export async function setViewOption<K extends keyof ViewOptions>(
       sql_bind_inline: current.sqlBindInline,
       ui_font_scale: current.fontScale,
       ui_language: current.lang,
-      xlog_buffer_max: current.bufferMax,
+      xlog_point_budget: current.bufferMax,
       wide_search_max: current.wideSearchMax,
       ui_theme: current.theme,
       group_rule: { tag_key: current.groupRule.tagKey, pattern: current.groupRule.pattern },

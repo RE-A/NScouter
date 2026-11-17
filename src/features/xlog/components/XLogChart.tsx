@@ -21,6 +21,7 @@ import { panRange, pastRangeLabel, zoomRange } from '../types/timeRange';
 import { stepYMax } from '../engine/yScale';
 import { T, F } from '../../../styles/tokens';
 import { t } from '../../../i18n';
+import { pointBudget } from '../store/XLogDataStore';
 import { Button } from '../../../components/Button';
 import { XLogChartSettings } from './XLogChartSettings';
 import { CLOCK_NOTICE_MS, serverClockOffset, serverNow, setServerClockOffset } from '../utils/serverClock';
@@ -334,7 +335,8 @@ export const XLogChart = memo(function XLogChart({
     // **지금 걸려 있는 값**을 적는다. 설정에서 바꿀 수 있으므로 상수를 적으면 거짓이 된다.
     // **받은 것 기준**이라고 밝힌다. 화면 필터(서비스·IP·응답시간)는 그리기 직전에 걸리므로,
     // «화면에 4천 건인데 왜 10만이 넘느냐» 가 나온다 — 버퍼에는 거르기 전의 것이 들어 있다.
-    return `${t('버퍼 상한')} ${store.maxItemCount.toLocaleString()}${t('건(화면 필터 이전, 받은 것 기준) — 오래된 점부터 지웁니다. 왼쪽에서 서버를 좁히거나 설정에서 상한을 올리면 다 보입니다')}`;
+    // 상한은 **앱 전체 점 예산**이다 — 판 여럿이 나눠 쓰므로 판을 줄여도 늘어난다
+    return `${t('점 예산')} ${pointBudget().toLocaleString()}${t('건(모든 판 합계, 화면 필터 이전) — 오래된 점부터 지웁니다. 판이나 서버를 줄이거나 설정에서 예산을 올리면 더 남습니다')}`;
   })();
 
   /** 왼쪽을 다 못 채웠을 때 할 말. 채우는 중이거나 다 찼으면 없다 */

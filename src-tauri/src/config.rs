@@ -44,6 +44,11 @@ pub struct AppConfig {
     /// 화면 쪽에서 1만~100만으로 자른다.
     #[serde(default = "default_buffer_max")]
     pub xlog_buffer_max: u32,
+    /// XLog 점 **앱 전체 예산** — 떠 있는 판들이 나눠 쓰고, 넘치면 판 상관없이 가장 오래된 점부터 버린다.
+    /// 기본 1,000,000(≈370MB). 화면이 10만~300만으로 자른다. 위 `xlog_buffer_max`(탭마다 상한)는 이것으로 바뀌어
+    /// 더 쓰지 않는다 — 뜻이 달라(탭당 → 전체) 값을 옮기지 않는다
+    #[serde(default = "default_point_budget")]
+    pub xlog_point_budget: u32,
     /// 트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수. 기본 300,000.
     /// 화면 쪽에서 1만~100만으로 자른다.
     #[serde(default = "default_wide_search_max")]
@@ -61,7 +66,7 @@ pub struct AppConfig {
     /// 바뀌는 건 우리가 붙인 설명과 레이블이다.
     #[serde(default = "default_lang")]
     pub ui_language: String,
-    /// 색 벌. `"dark"`(기본) · `"light"` · `"slate"` · `"warm"` · `"contrast"`.
+    /// 색 벌. `"light"`(기본) · `"dark"` · `"slate"` · `"warm"` · `"contrast"`.
     ///
     /// **모르는 값은 화면이 기본으로 되돌린다**(`toTheme`). 여기서 막지 않는 것은
     /// 테마가 늘어날 때마다 양쪽을 고쳐야 하면 한쪽을 빼먹기 때문이다.
@@ -550,11 +555,15 @@ pub struct XLogSplitPrefs {
     pub dir: String,
     /// 두 판일 때 첫 판의 몫
     pub ratio: f32,
+    /// 판 배치(dockview JSON) — 판 이름은 `xlog_tabs` 의 순번(`t0`…). 화면이 쓰고 읽는다(`dockLayout.ts`).
+    /// 없으면 위 `panes`·`dir` 로 다시 짠다
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dock: Option<serde_json::Value>,
 }
 
 impl Default for XLogSplitPrefs {
     fn default() -> Self {
-        Self { panes: Vec::new(), active: 0, dir: "row".to_string(), ratio: 0.5 }
+        Self { panes: Vec::new(), active: 0, dir: "row".to_string(), ratio: 0.5, dock: None }
     }
 }
 
@@ -574,6 +583,15 @@ pub struct XLogTabPrefs {
     /// 실시간인지는 `filter.mode` 가 따로 말한다.
     pub stime: i64,
     pub etime: i64,
+    /// 대상 고정(📌). **없으면 이 칸이 생기기 전 파일**이다 — 화면이 고르기를 보고 따라감/고정을 정한다
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
+    /// 판 종류(`xlog`·`counter`·`eq` …). 없으면 XLog — 화면이 모르는 값도 XLog 로 읽는다
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// (카운터 판) 그릴 카운터 이름
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counter: Option<String>,
 }
 
 impl Default for XLogFilterPrefs {
@@ -667,6 +685,10 @@ fn default_wide_search_max() -> u32 {
     300_000
 }
 
+fn default_point_budget() -> u32 {
+    1_000_000
+}
+
 fn default_buffer_max() -> u32 {
     // 화면 쪽 DEFAULT_MAX_ITEMS 와 같은 수여야 한다. 갈리면 설정 창이 «기본값» 이라고
     // 보여주는 값과 실제로 도는 값이 달라진다.
@@ -680,7 +702,7 @@ fn default_lang() -> String {
 
 /// 기본 테마. 지금까지 쓰던 색이라, 올리는 사람은 아무것도 달라지지 않아야 한다.
 fn default_theme() -> String {
-    "dark".to_string()
+    "light".to_string()
 }
 
 /// **파생 Default 를 쓰면 안 된다.** bool 의 파생 기본값은 false 라
@@ -697,6 +719,7 @@ impl Default for AppConfig {
             sql_bind_inline: true,
             ui_font_scale: 1.0,
             xlog_buffer_max: default_buffer_max(),
+            xlog_point_budget: default_point_budget(),
             wide_search_max: default_wide_search_max(),
             cache_max_mb: default_cache_max_mb(),
             perf: PerfPrefs::default(),
@@ -759,6 +782,24 @@ impl AppConfig {
     }
 }
 
+
+#[cfg(test)]
+mod theme_default_tests {
+    use super::*;
+
+    #[test]
+    fn 설정_파일이_없으면_흰_테마다() {
+        assert_eq!(AppConfig::default().ui_theme, "light");
+        let cfg: AppConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(cfg.ui_theme, "light");
+    }
+
+    #[test]
+    fn 저장된_테마는_그대로_둔다() {
+        let cfg: AppConfig = serde_json::from_str(r#"{"ui_theme":"dark"}"#).unwrap();
+        assert_eq!(cfg.ui_theme, "dark");
+    }
+}
 
 #[cfg(test)]
 mod bind_default_tests {

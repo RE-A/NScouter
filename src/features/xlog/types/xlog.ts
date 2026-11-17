@@ -261,13 +261,18 @@ export interface ChartLayout {
   plotAreaHeight: number;
 }
 
-export function buildLayout(w: number, h: number): ChartLayout {
+/**
+ * @param unit 여백에 곱할 값 — 글자가 들어갈 자리라 **글자 크기를 따라** 커져야 한다.
+ *             XLog 차트는 `devicePixelRatio × 글자 배율` 을 넘긴다(장치 px 로 그리므로). 시험은 1.
+ */
+export function buildLayout(w: number, h: number, unit = 1): ChartLayout {
   // 위 여백은 Y축 맨 윗눈금(지금 축의 최대값) 글자가 잘리지 않을 만큼만. `멈춤` 단추가 차트 위에
   // 떠 있던 때는 그 아래로 34 까지 내렸는데, 단추가 판 머리로 올라가 그 자리가 비어 있었다.
-  const paddingTop = 14;
-  const paddingRight = 10;
-  const paddingBottom = 30;
-  const paddingLeft = 60;
+  const u = Number.isFinite(unit) && unit > 0 ? unit : 1;
+  const paddingTop = Math.round(14 * u);
+  const paddingRight = Math.round(10 * u);
+  const paddingBottom = Math.round(30 * u);
+  const paddingLeft = Math.round(60 * u);
   return {
     canvasWidth: w,
     canvasHeight: h,

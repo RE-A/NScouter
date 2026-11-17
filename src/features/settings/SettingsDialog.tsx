@@ -56,7 +56,7 @@ interface SettingsDialogProps {
  * 고를 수 있는 상한. 값을 자유로 받지 않는 이유는 글자 크기와 같다 —
  * 손으로 친 수(0, 10억)가 그대로 들어오면 화면이 비거나 앱이 무거워진다.
  */
-const BUFFER_CHOICES = [100_000, 300_000, 500_000, 1_000_000] as const;
+const BUFFER_CHOICES = [300_000, 500_000, 1_000_000, 2_000_000, 3_000_000] as const;
 
 /** 로컬 캐시 상한으로 고를 수 있는 값(MB). 기본 2GB */
 const CACHE_CHOICES = [1024, 2048, 3072, 5120] as const;
@@ -156,7 +156,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         pattern: cfg.group_rule?.pattern ?? DEFAULT_GROUP_RULE.pattern,
       });
       savedTheme.current = th;
-      setBufferMax(clampMaxItems(cfg.xlog_buffer_max ?? DEFAULT_MAX_ITEMS));
+      setBufferMax(clampMaxItems(cfg.xlog_point_budget ?? DEFAULT_MAX_ITEMS));
       setWideMax(clampWideMax(cfg.wide_search_max ?? WIDE_TOTAL_CAP));
       setCacheMb(cfg.cache_max_mb ?? DEFAULT_CACHE_MB);
       setPerf({ ...DEFAULT_PERF, ...cfg.perf });
@@ -185,7 +185,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         ui_theme: theme,
         group_rule: { tag_key: groupRule.tagKey, pattern: groupRule.pattern },
         auto_remove_inactive_min: cleanupMin,
-        xlog_buffer_max: bufferMax,
+        xlog_point_budget: bufferMax,
         wide_search_max: wideMax,
         cache_max_mb: cacheMb,
         perf,
@@ -383,9 +383,9 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
 
       {/* 버퍼 상한 */}
       <div style={sectionStyle}>
-        <div style={sectionTitleStyle}>{t('XLog 버퍼 상한')}</div>
+        <div style={sectionTitleStyle}>{t('XLog 점 예산 (앱 전체)')}</div>
         <div style={sectionDescStyle}>
-          {t('차트가 들고 있을 최대 건수입니다. 넘으면 오래된 점부터 버립니다 — 창(범위)은 30분인데 화면에는 그보다 짧은 구간만 남는다면 이 값이 먼저 걸린 것입니다. 올릴수록 메모리를 씁니다.')}
+          {t('떠 있는 XLog 판 전부가 나눠 쓰는 최대 건수입니다. 넘으면 판 상관없이 가장 오래된 점부터 버립니다 — 판이 많을수록 판마다 남는 시간이 짧아집니다. 창(범위)은 30분인데 화면에는 그보다 짧은 구간만 남는다면 이 값이 먼저 걸린 것입니다. 올릴수록 메모리를 씁니다.')}
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
           {BUFFER_CHOICES.map(v => {
@@ -408,6 +408,7 @@ export const SettingsDialog = memo(function SettingsDialog({ onClose }: Settings
         <div style={{ ...sectionDescStyle, marginTop: 6 }}>
           {t('선택한 값의 대략적인 메모리:')} {estimatedMb(bufferMax)}MB
           {bufferMax > DEFAULT_MAX_ITEMS ? ` · ${t('기본값보다 큽니다')}` : ''}
+          {bufferMax >= 3_000_000 ? ` · ${t('메모리가 넉넉한 PC 에서만 쓰세요')}` : ''}
         </div>
       </div>
 

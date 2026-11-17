@@ -10,7 +10,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { getTodayCounter, type CounterSeries } from '../api/scouterApi';
 import { counterMeta, type CounterName } from '../types/counter';
 import { hasAnyValue, seriesMax, trimAll, type TrimmedSeries } from './fiveMinSeries';
-import { CANVAS } from '../../../styles/tokens';
+import { CANVAS, canvasFont, canvasFontScale } from '../../../styles/tokens';
 import { getAgentColor } from '../utils/colorPalette';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
@@ -172,7 +172,7 @@ function draw(
   });
 
   ctx.fillStyle = CANVAS.textDim;
-  ctx.font = '9px monospace';
+  ctx.font = canvasFont(11);
   ctx.fillText(String(Math.round(max)), 2, 12);
   ctx.fillText('0', 2, usable + 4);
 
@@ -187,11 +187,12 @@ function draw(
   // 범례는 오브젝트가 둘 이상일 때만. 하나뿐인데 이름을 적으면
   // 좁은 차트에서 시간축 글씨와 겹친다.
   if (list.length > 1) {
+    const step = Math.round(90 * canvasFontScale());
     list.forEach((s, i) => {
       ctx.fillStyle = getAgentColor(s.obj_hash);
-      ctx.fillRect(60 + i * 90, h - 8, 10, 2);
+      ctx.fillRect(60 + i * step, h - 8, 10, 2);
       ctx.fillStyle = CANVAS.textMuted;
-      ctx.fillText(label(s.obj_hash).substring(0, 10), 74 + i * 90, h - 4);
+      ctx.fillText(label(s.obj_hash).substring(0, 10), 74 + i * step, h - 4);
     });
   }
 }

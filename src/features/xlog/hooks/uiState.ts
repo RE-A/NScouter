@@ -16,8 +16,11 @@ import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
 import { normalizeColWidths, type XLogColWidths } from '../components/xlogColumns';
 import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
-import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTab, type XLogTabsState } from './xlogTabs';
+import { initialTabs, MAX_PANES, MAX_XLOG_TABS, PANEL_KINDS, setRatio, type PanelKind, type XLogTab, type XLogTabsState } from './xlogTabs';
 import type { XLogMode } from '../types/timeRange';
+import type { SerializedDockview } from 'dockview-react';
+import { decodeDock, encodeDock } from './dockLayout';
+import type { GroupSelection } from './groupSelection';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
 export type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert' | 'stats';
@@ -237,6 +240,9 @@ export function tabToPrefs(t: XLogTab): XLogTabPrefs {
     // 구간이 없으면 0 으로 적는다. 읽는 쪽이 «안 정했다» 로 되돌린다.
     stime: t.pastRange?.stime ?? 0,
     etime: t.pastRange?.etime ?? 0,
+    pinned: !!t.pinned,
+    ...(t.kind && t.kind !== 'xlog' ? { kind: t.kind } : {}),
+    ...(t.counter ? { counter: t.counter } : {}),
   };
 }
 
@@ -246,14 +252,20 @@ export function tabToPrefs(t: XLogTab): XLogTabPrefs {
  * **빈 목록이면 옛 한 벌로 탭 하나를 만든다.** 판이 올라가기 전 파일에는 `xlog_tabs`
  * 가 없는데, 그때 빈 화면으로 시작하면 «설정이 날아갔다» 로 읽힌다.
  */
-/** 분할 → 저장할 값. 탭은 순번으로 적는다 — 키는 켤 때마다 새로 만든다 */
-export function fromSplit(s: XLogTabsState): XLogSplitPrefs {
+/**
+ * 분할 → 저장할 값. 탭은 순번으로 적는다 — 키는 켤 때마다 새로 만든다.
+ * `dock` 은 지금 판 배치(dockview JSON, 판 이름 = 탭 키) — 순번으로 바꿔 함께 적는다.
+ * 탭과 안 맞으면(배치에 없는 탭 등) 빼고 적는다 — 읽을 때 `panes`·`dir` 로 다시 짠다
+ */
+export function fromSplit(s: XLogTabsState, dock?: SerializedDockview | null): XLogSplitPrefs {
   const index = (key: string) => s.tabs.findIndex(t => t.key === key);
+  const encoded = dock ? encodeDock(dock, s.tabs.map(t => t.key)) : null;
   return {
     panes: s.panes.map(index).filter(i => i >= 0),
     active: Math.max(0, index(s.activeKey)),
     dir: s.dir,
     ratio: s.ratio,
+    ...(encoded ? { dock: encoded } : {}),
   };
 }
 
@@ -285,9 +297,25 @@ export function toTabs(
       config: toChartConfig(row.chart),
       filter: f.filter,
       selection: { services: new Set(services), hashes: new Set(legacy) },
+      ...(row.pinned === true ? { pinned: true } : {}),
+      // 모르는 종류는 XLog 로 — 깨진 판으로 뜨는 것보다 낫다
+      ...(PANEL_KINDS.includes(tab.kind as PanelKind) && tab.kind !== 'xlog' ? { kind: tab.kind as PanelKind } : {}),
+      ...(typeof tab.counter === 'string' && tab.counter !== '' ? { counter: tab.counter } : {}),
     };
   });
-  return withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key] }, split);
+  const out = withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key] }, split);
+  // 고정 칸이 생기기 전 파일 — 예전에는 탭마다 서버를 따로 골랐다. 껐다 켰다고 고른 서버가 바뀌면 안 되므로
+  // **지금 판과 같은 것을 고른 탭은 따라감, 다른 것을 고른 탭은 고정**으로 옮긴다
+  if (rows.some(r => (r as XLogTabPrefs).pinned === undefined)) {
+    const cur = out.tabs.find(t => t.key === out.activeKey) ?? out.tabs[0];
+    return { ...out, tabs: out.tabs.map(t => (sameSelection(t.selection, cur.selection) ? t : { ...t, pinned: true })) };
+  }
+  return out;
+}
+
+function sameSelection(a: GroupSelection, b: GroupSelection): boolean {
+  const eq = <T,>(x: ReadonlySet<T>, y: ReadonlySet<T>) => x.size === y.size && [...x].every(v => y.has(v));
+  return eq(a.services, b.services) && eq(a.hashes, b.hashes);
 }
 
 /**
@@ -310,6 +338,8 @@ function withSplit(s: XLogTabsState, split: XLogSplitPrefs | undefined): XLogTab
     panes,
     activeKey: active !== null && panes.includes(active) ? active : panes[0],
     dir: split.dir === 'column' ? 'column' : 'row',
+    // 판 배치 — 탭과 딱 맞을 때만 되살린다(`decodeDock`). 아니면 null 이고 `panes`·`dir` 로 짠다
+    dock: decodeDock(split.dock, s.tabs.map(t => t.key)),
   };
   return typeof split.ratio === 'number' ? setRatio(out, split.ratio) : out;
 }

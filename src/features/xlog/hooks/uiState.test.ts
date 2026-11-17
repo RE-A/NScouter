@@ -353,3 +353,78 @@ describe('XLog 탭', () => {
     expect(s.activeKey).toBe(s.tabs[0].key);
   });
 });
+
+describe('판 배치(dock) 저장·복원', () => {
+  it('지금 배치를 순번으로 적고, 다음 실행의 키로 되살린다', () => {
+    const s = toTabs([{ stime: 0, etime: 0 }, { title: 'B', stime: 0, etime: 0 }], undefined, undefined);
+    const [a, b] = s.tabs.map(t => t.key);
+    const dock = {
+      grid: {
+        root: { type: 'leaf', data: { views: [a, b], activeView: b, id: 'g1' }, size: 100 },
+        width: 800,
+        height: 600,
+        orientation: 'HORIZONTAL',
+      },
+      panels: { [a]: { id: a, contentComponent: 'xlog' }, [b]: { id: b, contentComponent: 'xlog' } },
+    } as unknown as Parameters<typeof fromSplit>[1];
+    const saved = fromSplit(s, dock);
+    expect(JSON.stringify(saved.dock)).toContain('"t1"');
+
+    const again = toTabs([{ stime: 0, etime: 0 }, { title: 'B', stime: 0, etime: 0 }], undefined, undefined, saved);
+    const keys = again.tabs.map(t => t.key);
+    expect(Object.keys(again.dock?.panels ?? {})).toEqual(keys);
+  });
+
+  it('배치가 없거나 탭과 안 맞으면 null — 예전 분할로 다시 짠다', () => {
+    const s = toTabs([{ stime: 0, etime: 0 }], undefined, undefined, { panes: [0], dock: { grid: {}, panels: { t5: {} } } });
+    expect(s.dock).toBeNull();
+    expect(fromSplit(s).dock).toBeUndefined();
+  });
+});
+
+describe('트리 따라감 / 고정 저장', () => {
+  it('고정 여부를 적고 되살린다', () => {
+    const s = toTabs(
+      [{ sel_services: ['pay'], stime: 0, etime: 0, pinned: false }, { sel_services: ['order'], stime: 0, etime: 0, pinned: true }],
+      undefined,
+      undefined,
+    );
+    expect(s.tabs.map(t => !!t.pinned)).toEqual([false, true]);
+    expect(fromTabs(s).map(p => p.pinned)).toEqual([false, true]);
+  });
+
+  it('고정 칸이 없는 예전 파일 — 지금 판과 같은 것을 고른 탭은 따라감, 다른 것은 고정 (고른 서버가 바뀌지 않게)', () => {
+    const s = toTabs(
+      [
+        { sel_services: ['pay'], stime: 0, etime: 0 },
+        { sel_services: ['order'], stime: 0, etime: 0 },
+        { sel_services: ['pay'], stime: 0, etime: 0 },
+      ],
+      undefined,
+      undefined,
+      { panes: [0, 1], active: 0 },
+    );
+    expect(s.tabs.map(t => !!t.pinned)).toEqual([false, true, false]);
+    expect(s.tabs.map(t => [...t.selection.services].join())).toEqual(['pay', 'order', 'pay']);
+  });
+});
+
+describe('판 종류 저장', () => {
+  it('종류·카운터를 적고 되살린다. 모르는 종류는 XLog', () => {
+    const s = toTabs(
+      [
+        { stime: 0, etime: 0, pinned: false },
+        { stime: 0, etime: 0, pinned: false, kind: 'counter', counter: 'TPS' },
+        { stime: 0, etime: 0, pinned: false, kind: 'eq' },
+        { stime: 0, etime: 0, pinned: false, kind: 'zzz' },
+      ],
+      undefined,
+      undefined,
+    );
+    expect(s.tabs.map(t => t.kind ?? 'xlog')).toEqual(['xlog', 'counter', 'eq', 'xlog']);
+    expect(s.tabs[1].counter).toBe('TPS');
+    const back = fromTabs(s);
+    expect(back.map(p => p.kind)).toEqual([undefined, 'counter', 'eq', undefined]);
+    expect(back[1].counter).toBe('TPS');
+  });
+});

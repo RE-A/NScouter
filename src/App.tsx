@@ -1,6 +1,6 @@
 // src/App.tsx
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pane } from './components/Pane';
 import { TooltipLayer } from './components/TooltipLayer';
 import { setServerClockOffset } from './features/xlog/utils/serverClock';
@@ -128,21 +128,24 @@ import {
   initialTabs,
   patchActive as patchActiveTab,
   renameTab as renameXLogTab,
+  setSelection as setTabSelection,
+  setPinned as setTabPinned,
+  kindOf,
+  addPanel as addXLogPanel,
+  setCounterLabel,
+  type PanelKind,
   setResolved as setTabResolved,
   clearSelections as clearTabSelections,
-  dropTab as dropXLogTab,
-  closePane as closeXLogPane,
-  setRatio as setXLogRatio,
   patchTab as patchXLogTab,
   importTabs as importXLogTabs,
   tabTitle,
   tabLabels as xlogTabLabelsOf,
-  type DropSide,
   type XLogTab,
   type XLogTabsState,
 } from './features/xlog/hooks/xlogTabs';
-import { XLogTabBar } from './features/xlog/components/XLogTabBar';
-import { XLogSplit } from './features/xlog/components/XLogSplit';
+import { XLogDock } from './features/xlog/components/XLogDock';
+import { CounterPanelView } from './features/xlog/components/CounterPanelView';
+import type { SerializedDockview } from 'dockview-react';
 import {
   EV_DETACH,
   EV_HELLO,
@@ -298,6 +301,12 @@ const ALL_CHART_COUNTERS: CounterName[] = [
   ...DATASOURCE_CHART_COUNTERS,
 ];
 
+/** 판 이름에 쓸 카운터 표시명 — 판 상태 쪽(`xlogTabs`)은 카운터 표를 모른다 */
+setCounterLabel(name => t(counterMeta(name as CounterName).disp));
+
+/** `+` 메뉴의 카운터 판 — Counter 탭에 그리는 것과 같은 목록 */
+const COUNTER_PANEL_CHOICES = ALL_CHART_COUNTERS.map(c => ({ name: c as string, label: counterMeta(c).disp }));
+
 /** 함께 붙은 콜렉터끼리 시계가 이보다 많이 어긋나면 헤더에 알린다 (ms) */
 const CLOCK_SKEW_WARN_MS = 2_000;
 
@@ -434,15 +443,24 @@ export default function App({ windowLabel }: {
    * 아래로 내려보내는 것은 여전히 **해시 집합 하나**라 네 화면의 계약은 그대로다.
    */
   const groupSel = curTab.selection;
+  /**
+   * 트리에서 고른 것 — **지금 판 기준**이다(`setSelection`). 지금 판이 따라감(🔗)이면 따라감 판 전부가,
+   * 고정(📌)이면 그 판만 바뀐다.
+   */
   const setGroupSel = useCallback(
     (v: GroupSelection | ((p: GroupSelection) => GroupSelection)) =>
-      setXLogTabs(s =>
-        patchActiveTab(s, {
-          selection: typeof v === 'function' ? v(activeXLogTab(s).selection) : v,
-        }),
-      ),
+      setXLogTabs(s => setTabSelection(s, typeof v === 'function' ? v(activeXLogTab(s).selection) : v)),
     [],
   );
+  /** 판을 하나 연다 — `+` 메뉴. XLog 는 지금 판을 복제하고, 나머지는 그 종류의 새 판(트리 따라감) */
+  const handleAddPanel = useCallback((kind: PanelKind, counter?: string) => {
+    setXLogTabs(s => (kind === 'xlog' ? addXLogTab(s) : addXLogPanel(s, kind, counter)));
+    setSelectedXLogs([]);
+  }, []);
+  /** 판을 고정하거나 따라감으로 푼다 (판 머리 🔗/📌 · 탭 오른쪽 클릭) */
+  const handleXLogPin = useCallback((key: string, pinned: boolean) => {
+    setXLogTabs(s => setTabPinned(s, key, pinned));
+  }, []);
   /** 카운터 요청 대상. Family 별로 나눠 둔다 — 화면도 Family 로 나눈다 */
   const [counterHashes, setCounterHashes] = useState<{
     javaee: number[];
@@ -575,6 +593,14 @@ export default function App({ windowLabel }: {
    * 어제 맞춰 둔 것이 사라진다 — 그러고 나면 되돌릴 방법이 없다.
    */
   const [hydrated, setHydrated] = useState(false);
+  /**
+   * XLog 판 배치(dockview JSON, 판 이름 = 탭 키). 띄운 뒤의 배치는 dockview 가 들고, 바뀔 때마다 여기 받아 둔다 —
+   * 저장할 때와 XLog 화면을 다시 띄울 때(다른 탭에 갔다 오면 판을 새로 세운다) 쓴다.
+   * `dockEpoch` 는 탭을 통째로 갈아 끼웠을 때(설정 읽기·뗀 창 받기) 판을 처음부터 다시 세우게 한다
+   */
+  const dockRef = useRef<SerializedDockview | null>(null);
+  const [dockEpoch, setDockEpoch] = useState(0);
+  const [dockTick, setDockTick] = useState(0);
   useEffect(() => {
     let cancelled = false;
     getConfig()
@@ -593,7 +619,11 @@ export default function App({ windowLabel }: {
         setXLogWindows(windowsFromConfig(cfg.xlog_windows));
         // 조회 조건도 되살린다. **껐다 켜면 다 날아간다** 가 현장에서 가장 많이 나온 말이다.
         // 탭은 **조건만** 되살린다 — 받아 둔 것은 열면 이미 지나간 것이라 다시 조회한다.
-        setXLogTabs(toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter, cfg.xlog_split));
+        const loaded = toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter, cfg.xlog_split);
+        setXLogTabs(loaded);
+        // 판 배치도 함께 — 판을 처음부터 다시 띄운다(탭 키가 통째로 바뀌었다)
+        dockRef.current = loaded.dock ?? null;
+        setDockEpoch(n => n + 1);
         // 프로필 목록이 없으면 **예전 설정에서 하나 만든다** — 앱을 올리자마자
         // «어제까지 붙던 서버» 를 다시 쳐야 하는 것은 퇴보다.
         const list = normalize(cfg.servers);
@@ -629,7 +659,10 @@ export default function App({ windowLabel }: {
     const un = listen<InitMessage>(EV_INIT, e => {
       if (e.payload.label !== windowLabel || got) return;
       got = true;
-      setXLogTabs(toXLogTabs(e.payload.tabs, undefined, undefined, e.payload.split));
+      const received = toXLogTabs(e.payload.tabs, undefined, undefined, e.payload.split);
+      setXLogTabs(received);
+      dockRef.current = received.dock ?? null;
+      setDockEpoch(n => n + 1);
       setHydrated(true);
     });
     const hello = () => { if (!got) void emit(EV_HELLO, { label: windowLabel }); };
@@ -691,7 +724,7 @@ export default function App({ windowLabel }: {
           const msg: SnapshotMessage = {
             label: windowLabel ?? '',
             tabs: xlogTabsToPrefs(xlogTabs),
-            split: xlogSplitToPrefs(xlogTabs),
+            split: xlogSplitToPrefs(xlogTabs, dockRef.current),
             bounds: await currentWindowBounds(),
           };
           void emit(EV_SNAPSHOT, msg);
@@ -713,7 +746,7 @@ export default function App({ windowLabel }: {
             ...cfg,
             open_details: detailsFromTabs(detail.tabs, toDateString),
             xlog_tabs: xlogTabsToPrefs(xlogTabs),
-            xlog_split: xlogSplitToPrefs(xlogTabs),
+            xlog_split: xlogSplitToPrefs(xlogTabs, dockRef.current),
             xlog_windows: windowsToConfig(xlogWindowsRef.current),
           });
         } catch {
@@ -737,6 +770,8 @@ export default function App({ windowLabel }: {
     // **탭 전부를 지켜본다.** 지금 탭의 조건만 보면 이름 바꾸기·화면 분할·옆 판의 조건이
     // 다른 무엇이 바뀔 때까지 저장되지 않아, 껐다 켜면 사라졌다
     xlogTabs,
+    // 판 배치는 상태가 아니라 ref 에 있다(경계를 끄는 동안 App 을 다시 그리지 않게) — 멎으면 이 번호가 오른다
+    dockTick,
     xlogWindows,
     boundsTick,
   ]);
@@ -1207,19 +1242,22 @@ export default function App({ windowLabel }: {
     const msg: MergeMessage = { label: windowLabel, tabs: xlogTabsToPrefs(xlogTabsRef.current), close: true };
     void emit(EV_MERGE, msg).then(() => getCurrentWindow().destroy());
   }, [windowLabel]);
-  const handleXLogTabDrop = useCallback((key: string, target: string, side: DropSide) => {
-    setXLogTabs(s => dropXLogTab(s, key, target, side));
-    if (key !== activeXLogKeyRef.current) {
-      setSelectedXLogs([]);
-      setClearSignal(n => n + 1);
-    }
+  /**
+   * 판 배치가 바뀌었다(dockview). **상태에 넣지 않고 ref 에 둔다** — 경계를 끄는 동안 쉬지 않고 오는데,
+   * 그때마다 App 을 다시 그리면 판 넷이 통째로 출렁인다. 멎은 뒤 한 번 저장하게 번호만 올린다.
+   */
+  const dockSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleDockLayout = useCallback((json: SerializedDockview) => {
+    dockRef.current = json;
+    if (dockSaveTimerRef.current) clearTimeout(dockSaveTimerRef.current);
+    dockSaveTimerRef.current = setTimeout(() => setDockTick(n => n + 1), 400);
   }, []);
-  const handleXLogPaneClose = useCallback((key: string) => {
-    if (key === activeXLogKeyRef.current) setSelectedXLogs([]);
-    setXLogTabs(s => closeXLogPane(s, key));
-  }, []);
-  const handleXLogRatioDelta = useCallback((d: number) => {
-    setXLogTabs(s => setXLogRatio(s, s.ratio + d));
+  /** 보이는 판들 — 실시간 스트림을 이 판들의 서버로 연다(`liveVisible`) */
+  const handleDockVisible = useCallback((keys: string[]) => {
+    setXLogTabs(s => {
+      const same = keys.length === s.panes.length && keys.every(k => s.panes.includes(k));
+      return same ? s : { ...s, panes: keys };
+    });
   }, []);
   const handleXLogTabAdd = useCallback(() => {
     setXLogTabs(addXLogTab);
@@ -1728,7 +1766,10 @@ export default function App({ windowLabel }: {
    * 스트림은 하나라 지금 탭 것만 받으면, 나눠 띄운 옆 판은 지금 탭과 겹치는 서버의 점만 받았다.
    * 판마다 제 서버만 그리므로(`filter.objHashSet`) 합쳐 받아도 섞이지 않는다.
    */
-  const liveVisible = xlogTabs.tabs.filter(t => xlogTabs.panes.includes(t.key) && t.mode === 'live');
+  // 실시간 XLog 판과 **Active 목록 판**(트래픽 차트가 이 스트림을 쓴다) — 다른 종류의 판은 이 스트림을 안 쓴다
+  const liveVisible = xlogTabs.tabs.filter(
+    t => xlogTabs.panes.includes(t.key) && t.mode === 'live' && (kindOf(t) === 'xlog' || kindOf(t) === 'active'),
+  );
   const streamKey = (() => {
     const set = new Set<number>(filter.objHashSet);
     for (const tab of liveVisible) for (const h of tab.filter.objHashSet) set.add(h);
@@ -1850,6 +1891,16 @@ export default function App({ windowLabel }: {
    * (F-41) 안 더하면 값이 영영 안 온다. 늘어나는 것은 한 요청에 담기는 objHash 몇
    * 개뿐이고, 요청 수는 그대로다.
    */
+  /** 보이는 카운터 판들이 그릴 서버 — 카운터 스트림에 합친다 */
+  const counterPanelSig = xlogTabs.tabs
+    .filter(tb => kindOf(tb) === 'counter' && xlogTabs.panes.includes(tb.key))
+    .flatMap(tb => [...tb.filter.objHashSet])
+    .sort((a, b) => a - b)
+    .join(',');
+  const counterPanelHashes = useMemo(
+    () => (counterPanelSig === '' ? [] : [...new Set(counterPanelSig.split(',').map(Number))]),
+    [counterPanelSig],
+  );
   const counterStreamRef = useRef<string>('');
   /** XLog 쪽과 같은 이유 — 이름이 같으면 해시도 같아서 «같은 목록» 으로 보인다 */
   const counterEpochRef = useRef(connectionEpoch);
@@ -1860,7 +1911,8 @@ export default function App({ windowLabel }: {
       counterEpochRef.current = connectionEpoch;
       counterStreamRef.current = '';
     }
-    const hashes = [...new Set([...filter.objHashSet, ...poolHashes])];
+    // 보이는 카운터 판들의 서버도 합쳐 받는다 — 스트림은 하나, 판마다 제 서버만 그린다(`CounterPanelView`)
+    const hashes = [...new Set([...filter.objHashSet, ...poolHashes, ...counterPanelHashes])];
 
     if (hashes.length === 0) {
       if (counterStreamRef.current !== '') {
@@ -1874,7 +1926,7 @@ export default function App({ windowLabel }: {
     if (key === counterStreamRef.current) return;
     counterStreamRef.current = key;
     startCounterStream(hashes, ALL_CHART_COUNTERS).catch(() => {});
-  }, [isConnected, isMain, filter.objHashSet, poolHashes, connectionEpoch]);
+  }, [isConnected, isMain, filter.objHashSet, poolHashes, counterPanelHashes, connectionEpoch]);
 
   /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
   const nothingPicked = filter.objHashSet.size === 0;
@@ -1897,7 +1949,7 @@ export default function App({ windowLabel }: {
   const xlogTabLabels = useMemo(() => xlogTabLabelsOf(xlogTabs.tabs), [xlogTabs.tabs]);
   /**
    * 고른 점은 **지금 판의 것만** 목록으로 받는다. 판을 누르는 순간 지금 판이 바뀌므로
-   * (XLogSplit) 끌어서 고른 판이 곧 지금 판이지만, 옆 판이 늦게 알려 오는 것은 버린다.
+   * (XLogDock) 끌어서 고른 판이 곧 지금 판이지만, 옆 판이 늦게 알려 오는 것은 버린다.
    */
   const handleXLogSelectRef = useRef(handleXLogSelect);
   handleXLogSelectRef.current = handleXLogSelect;
@@ -1976,12 +2028,81 @@ export default function App({ windowLabel }: {
   }, [isConnected]);
 
   /**
-   * 탭 줄 오른쪽 빈자리 — 판이 하나일 때 그 판의 머리(모드·멈춤·차트 설정)가 얹힌다.
-   * 차트 위에 머리줄을 따로 쌓지 않으려는 것이다 (XLogChart `headerSlot`).
+   * XLog 가 아닌 판 — 카운터 · EQ · Active 목록 · 요약 · 서비스 그룹 · Alert.
+   *
+   * 판마다 **제 고르기를 푼 해시**(`filter.objHashSet`)로 그린다(트리 따라감이면 따라감 판들의 것, 고정이면 제 것).
+   * Counter·Active 탭의 컴포넌트를 그대로 쓰고, 묻기는 **보이는 판만** 한다(`enabled`).
+   * 매 렌더 새로 심는 ref 라 판 컴포넌트를 다시 세우지 않고 최신 값을 읽는다.
    */
-  const [tabRowSlot, setTabRowSlot] = useState<HTMLDivElement | null>(null);
+  const renderOtherPanelRef = useRef<(tab: XLogTab, visible: boolean) => ReactNode>(() => null);
+  renderOtherPanelRef.current = (tab: XLogTab, visible: boolean) => {
+    const kind = kindOf(tab);
+    const picked = tab.filter.objHashSet;
+    if (kind === 'alert') {
+      return (
+        <AlertFullView
+          alerts={alertStream.alerts}
+          rows={alertRows}
+          since={alertStream.since}
+          connected={isStreaming}
+          onClear={alertStream.clear}
+          agentMap={agentMap}
+        />
+      );
+    }
+    if (!isConnected) return <EmptyState text={t('연결 후 사용 가능합니다.')} />;
+    if (picked.size === 0) {
+      return (
+        <EmptyState
+          text={tab.key === xlogTabs.activeKey ? emptyPickText : t('이 판을 누르고 왼쪽에서 볼 서버를 고르세요.')}
+        />
+      );
+    }
+    const javaee = counterHashes.javaee.filter(h => picked.has(h));
+    const javaeeTypes = typesOf(javaee, objTypeOf);
+    const on = visible && isConnected;
+    const body = (() => {
+      switch (kind) {
+        case 'counter':
+          return (
+            <CounterPanelView
+              counter={(tab.counter ?? 'TPS') as CounterName}
+              isStreaming={isStreaming}
+              agentMap={agentMap}
+              serviceOf={serviceOf}
+              hashes={picked}
+            />
+          );
+        case 'eq':
+          return <ActiveServicePanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} agentMap={agentMap} />;
+        case 'summary':
+          return <SummaryPanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} onOpenTxid={openSummaryTxid} />;
+        case 'serviceGroup':
+          return <ServiceGroupPanel objHashes={javaee} enabled={on && javaee.length > 0} />;
+        case 'active':
+          return (
+            <ActiveTab
+              enabled={on}
+              javaeeTypes={javaeeTypes}
+              picked={picked}
+              expectedHashes={javaee}
+              agentMap={agentMap}
+              poolHashes={poolHashes}
+              anyDatasource={counterHashes.datasource.length > 0}
+              connectionEpoch={connectionEpoch}
+              refreshSignal={refreshSignal}
+            />
+          );
+        default:
+          return null;
+      }
+    })();
+    return <div key={`${kind}-${refreshSignal}`} className="h-full min-h-0 overflow-auto">{body}</div>;
+  };
+
   const renderXLogTab = useCallback(
     (tab: XLogTab, visible: boolean, paneSlot: HTMLElement | null) => {
+      if (kindOf(tab) !== 'xlog') return renderOtherPanelRef.current(tab, visible);
       // **안 골랐으면 그리지 않는다.** 차트에 «0 dots» 만 떠 있으면
       // 트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다.
       // 지금 판이 아니면 그 판의 고르기 사정을 따로 풀지 않는다 — 고르라는 말만 한다.
@@ -2006,8 +2127,8 @@ export default function App({ windowLabel }: {
           onConfigChange={paneHandlers(tab.key).config}
           onPastRangeChange={paneHandlers(tab.key).range}
           active={visible}
-          // 나눴으면 그 판의 머리, 하나면 탭 줄 오른쪽
-          headerSlot={paneSlot ?? (visible && xlogTabs.panes.length === 1 ? tabRowSlot : null)}
+          // 판 묶음 머리 오른쪽 — 그 판이 묶음의 앞 탭일 때만 (XLogDock)
+          headerSlot={paneSlot}
           onRefresh={handleReload}
           refreshBusy={refreshing.busy}
           refreshError={refreshing.error}
@@ -2016,7 +2137,7 @@ export default function App({ windowLabel }: {
     },
     // paneHandlers·hashArray 는 ref 위의 캐시라 deps 가 아니다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, tabRowSlot, xlogTabs.panes.length, handleReload, refreshing],
+    [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, handleReload, refreshing],
   );
 
   /**
@@ -2053,7 +2174,7 @@ export default function App({ windowLabel }: {
    */
   const drillToXLog = useCallback((objHash: number) => {
     // 고르기를 그 한 대로 바꾼다 — 해시만 적으면 다음 명단 갱신 때 고르기에서 다시 풀려 사라진다
-    setXLogTabs(s => patchActiveTab(s, { selection: { services: new Set(), hashes: new Set([objHash]) } }));
+    setXLogTabs(s => setTabSelection(s, { services: new Set(), hashes: new Set([objHash]) }));
     setActiveTab('xlog');
   }, []);
 
@@ -2378,32 +2499,27 @@ export default function App({ windowLabel }: {
       {/* ── XLog 탭 ── */}
       {activeTab === 'xlog' && (
         <div style={tabBodyStyle}>
-          {/* 탭 줄은 툴바 **위**다 — 툴바는 «지금 탭의 조건» 이라 그 안에 들어가야 한다 */}
-          <XLogTabBar
-            tabs={xlogTabs.tabs}
-            activeKey={xlogTabs.activeKey}
-            panes={xlogTabs.panes}
-            onDetach={handleXLogTabDetach}
-            onSendToMain={isMain ? undefined : handleSendTabToMain}
-            onActivate={handleXLogTabActivate}
-            onClose={handleXLogTabClose}
-            onAdd={handleXLogTabAdd}
-            onRename={handleXLogTabRename}
-            slotRef={setTabRowSlot}
-          />
           {/* 탭마다 따로 세운다 — 툴바가 쥔 입력 중인 과거 구간이 탭을 옮겨도 남아,
               다른 탭의 날짜가 칸에 떠 있었다 */}
-          <XLogToolbar
-            key={xlogTabs.activeKey}
-            filter={filter}
-            onFilterChange={handleFilterChange}
-            mode={xlogMode}
-            onModeChange={setXLogMode}
-            pastRange={pastRange}
-            onPastRangeChange={handlePastRangeChange}
-            onWideSearch={() => setShowWideSearch(true)}
-            onOpenFilters={() => setShowFilters(true)}
-          />
+          {/* 툴바는 **지금 XLog 판**의 조건이다 — 지금 판이 카운터·EQ 같은 판이면 쓸 것이 없어 내린다 */}
+          {kindOf(curTab) === 'xlog' ? (
+            <XLogToolbar
+              key={xlogTabs.activeKey}
+              filter={filter}
+              onFilterChange={handleFilterChange}
+              mode={xlogMode}
+              onModeChange={setXLogMode}
+              pastRange={pastRange}
+              onPastRangeChange={handlePastRangeChange}
+              onWideSearch={() => setShowWideSearch(true)}
+              onOpenFilters={() => setShowFilters(true)}
+            />
+          ) : (
+            <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-micro text-fg-dim">
+              {t('지금 판')}: <span className="text-fg-muted">{xlogTabLabels[xlogTabs.tabs.findIndex(tb => tb.key === xlogTabs.activeKey)]}</span>
+              <span className="text-fg-faint">— {t('XLog 조건(모드·구간·거름)은 XLog 판을 누르면 여기 나옵니다')}</span>
+            </div>
+          )}
           {/* 분할 배치.
               이전에는 워크스페이스를 재서 패널을 절대 좌표로 놓았다. 측정값이 실제
               가용 공간과 어긋나면 패널 아래가 창 밖으로 나가 **하단 목록이 잘렸다.**
@@ -2413,22 +2529,29 @@ export default function App({ windowLabel }: {
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* 제목 줄은 없다 — 탭 줄이 이 판의 머리다(«XLOG» 가 탭 줄 바로 밑에 한 줄 더 있었다) */}
               <Pane className="min-h-0 flex-1">
-                {/* 탭을 전부 띄워 두고 판에 놓인 것만 보인다 (XLogSplit).
-                    받고 그리는 것은 **보이는 판만** 한다(`active`) — 안 그러면 탭 수만큼
-                    같은 스트림이 쌓이고 숨겨둔 판에 매 프레임 헛돈을 쓴다. */}
-                <XLogSplit
+                {/* 탭 하나가 판 하나다 (XLogDock, dockview). 판 머리 탭으로 고르고, 끌어 나란히 두고,
+                    창 밖으로 끌어 뗀다. 받고 그리는 것은 **보이는 판만** 한다(`active`) — 판 묶음 뒤쪽 탭은
+                    받지도 그리지도 않는다. 판은 옮겨도 다시 세우지 않는다(받아 둔 점이 남는다). */}
+                <XLogDock
+                  key={dockEpoch}
                   tabs={xlogTabs.tabs}
                   labels={xlogTabLabels}
-                  panes={xlogTabs.panes}
                   activeKey={xlogTabs.activeKey}
+                  initialDock={dockRef.current ?? xlogTabs.dock ?? null}
+                  panes={xlogTabs.panes}
                   dir={xlogTabs.dir}
-                  ratio={xlogTabs.ratio}
                   renderTab={renderXLogTab}
-                  onFocus={handleXLogTabActivate}
-                  onDrop={handleXLogTabDrop}
-                  onClosePane={handleXLogPaneClose}
+                  onActivate={handleXLogTabActivate}
+                  onClose={handleXLogTabClose}
+                  onAdd={handleXLogTabAdd}
+                  onRename={handleXLogTabRename}
                   onDetach={handleXLogTabDetach}
-                  onRatioDelta={handleXLogRatioDelta}
+                  onSendToMain={isMain ? undefined : handleSendTabToMain}
+                  onPin={handleXLogPin}
+                  onAddPanel={handleAddPanel}
+                  counterChoices={COUNTER_PANEL_CHOICES}
+                  onLayoutChange={handleDockLayout}
+                  onVisibleChange={handleDockVisible}
                 />
               </Pane>
 

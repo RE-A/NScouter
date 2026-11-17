@@ -772,6 +772,8 @@ export interface AppConfig {
   auto_remove_inactive_min?: number;
   /** XLog 버퍼 최대 건수. 없으면 300,000 */
   xlog_buffer_max?: number;
+  /** XLog 점 앱 전체 예산 (판들이 나눠 쓴다). `xlog_buffer_max`(탭마다)를 대신한다 */
+  xlog_point_budget?: number;
   /** 트랜잭션 찾기로 모두 모을 최대 건수. 없으면 300,000 */
   wide_search_max?: number;
   /** 로컬 캐시 전체 상한(MB) — 콜렉터 여럿을 합친 것. 없으면 2048 */
@@ -878,6 +880,11 @@ export interface XLogSplitPrefs {
   active?: number;
   dir?: string;
   ratio?: number;
+  /**
+   * 판 배치(dockview JSON). 판 이름은 `xlog_tabs` 의 순번(`t0`…)이다 (`dockLayout.ts`).
+   * 없거나 탭과 안 맞으면 위 `panes`·`dir` 로 다시 짠다
+   */
+  dock?: unknown;
 }
 
 /** 탭 하나의 조건. Rust `XLogTabPrefs` 와 짝이다 */
@@ -892,6 +899,12 @@ export interface XLogTabPrefs {
   /** 과거 구간(epoch ms). 둘 다 0 이면 구간을 정하지 않은 것이다 */
   stime?: number;
   etime?: number;
+  /** 대상 고정(📌). 없으면 이 칸이 생기기 전 파일 — 고르기를 보고 정한다(`toTabs`) */
+  pinned?: boolean;
+  /** 판 종류. 없으면 XLog (`PanelKind`) */
+  kind?: string;
+  /** (카운터 판) 그릴 카운터 이름 */
+  counter?: string;
 }
 
 export interface XLogChartPrefs {

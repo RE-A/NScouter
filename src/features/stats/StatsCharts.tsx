@@ -5,7 +5,7 @@
 
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { t } from '../../i18n';
-import { CANVAS } from '../../styles/tokens';
+import { CANVAS, canvasFont, canvasFontScale } from '../../styles/tokens';
 import { useThemeEpoch } from '../../styles/useThemeEpoch';
 import type { StatsRange, StatsSummary } from './statsApi';
 import { cdf, overlay } from './statsSeries';
@@ -29,7 +29,11 @@ interface Plot {
 }
 
 const H = 130;
-const PAD = { l: 44, r: 8, t: 8, b: 18 };
+/** 여백 — 왼쪽(눈금 글자)·아래(시각 글자)는 글자 크기를 따라 넓힌다 */
+const padOf = () => {
+  const k = canvasFontScale();
+  return { l: Math.round(44 * k), r: 8, t: 8, b: Math.round(18 * k) };
+};
 
 function draw(canvas: HTMLCanvasElement, p: Plot): void {
   const dpr = window.devicePixelRatio || 1;
@@ -45,6 +49,7 @@ function draw(canvas: HTMLCanvasElement, p: Plot): void {
   ctx.fillStyle = CANVAS.bgSurface;
   ctx.fillRect(0, 0, w, H);
 
+  const PAD = padOf();
   const pw = w - PAD.l - PAD.r;
   const ph = H - PAD.t - PAD.b;
   const max = p.yMax > 0 ? p.yMax : 1;
@@ -55,7 +60,7 @@ function draw(canvas: HTMLCanvasElement, p: Plot): void {
   ctx.strokeStyle = CANVAS.border;
   ctx.lineWidth = 1;
   ctx.fillStyle = CANVAS.textDim;
-  ctx.font = '10px sans-serif';
+  ctx.font = canvasFont(11, 'sans');
   for (const f of [0, 0.5, 1]) {
     const y = Math.round(Y(max * f)) + 0.5;
     ctx.beginPath();

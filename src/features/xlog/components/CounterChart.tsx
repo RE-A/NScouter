@@ -10,7 +10,7 @@ import { deriveStreamStatus } from '../utils/streamStatus';
 import { axisLabel, minuteTicks, sampleX, totalLineVisible } from './counterGeometry';
 import { totalMode } from './counterTotal';
 import { foldSeries, legendLabel, shownObjectCount, type DrawSeries, type FoldMode } from './counterSeries';
-import { CANVAS, SERIES } from '../../../styles/tokens';
+import { CANVAS, SERIES, canvasFont, canvasFontScale } from '../../../styles/tokens';
 import { formatTime } from '../utils/colorPalette';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { t } from '../../../i18n';
@@ -183,7 +183,7 @@ export const CounterChart = memo(function CounterChart({
           staleAfterMs: STALE_AFTER_MS,
         });
         ctx.fillStyle = st.kind === 'stale' ? CANVAS.error : CANVAS.textDim;
-        ctx.font = '11px sans-serif';
+        ctx.font = canvasFont(12, 'sans');
         ctx.fillText(st.message, 8, 20);
         rafId = requestAnimationFrame(render);
         return;
@@ -193,13 +193,15 @@ export const CounterChart = memo(function CounterChart({
 
       // 범례. 합계 선에는 이름 대신 접는 방식을 적는다 —
       // 여기서 "합계인가 평균인가"를 말해 주지 않으면 두 배로 읽거나 절반으로 읽는다.
+      // 글자가 커지면 범례 칸도 넓힌다 — 이름끼리 겹치지 않게
+      const step = Math.round(90 * canvasFontScale());
       lines.forEach((s, i) => {
         ctx.fillStyle = s.color ?? PALETTE[0];
-        ctx.fillRect(8 + i * 90, h - 16, 10, 2);
+        ctx.fillRect(8 + i * step, h - 16, 10, 2);
         ctx.fillStyle = CANVAS.textMuted;
-        ctx.font = '9px monospace';
+        ctx.font = canvasFont(11);
         const label = s.color === null ? (mode === 'avg' ? t('평균') : t('합계')) : s.label;
-        ctx.fillText(legendLabel(label), 22 + i * 90, h - 8);
+        ctx.fillText(legendLabel(label), 22 + i * step, h - 8);
       });
 
       rafId = requestAnimationFrame(render);
@@ -316,7 +318,7 @@ function drawLines(
   });
 
   ctx.fillStyle = CANVAS.textDim;
-  ctx.font = '9px monospace';
+  ctx.font = canvasFont(11);
   ctx.fillText(String(Math.round(maxVal)), 2, 12);
   ctx.fillText(axisLabel(maxVal / 2), 2, midY - 2);
   ctx.fillText('0', 2, usable + 4);
