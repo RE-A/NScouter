@@ -41,6 +41,12 @@ export interface XLogTab {
   filter: XLogFilterState;
   /** 왼쪽 목록에서 고른 것 — 서비스 이름과 낱개 Task. 해시는 `filter.objHashSet` 에 풀려 있다 */
   selection: GroupSelection;
+  /**
+   * **대상 고정(📌).** 거짓(기본)이면 «트리 따라감(🔗)» — 따라감 판들은 고르기를 함께 쓴다: 따라감 판에서
+   * 트리를 고치면 따라감 판 **전부**가 바뀐다. 고정 판은 제 고르기를 지키고, 그 판을 눌렀을 때만 트리가 그 판을 고친다.
+   * 원본 스카우터의 «대상이 박힌 창»(`XLog - PRD-FSCPS`) 이 고정 판이다.
+   */
+  pinned?: boolean;
 }
 
 /** 두 판을 놓는 방향. `row` 는 좌우, `column` 은 위아래. 셋 이상은 2×2 격자다 */
@@ -179,6 +185,8 @@ export function addTab(s: XLogTabsState): XLogTabsState {
     filter: { ...src.filter, objHashSet: new Set(src.filter.objHashSet) },
     // 고른 서버도 복제한다 — 비교하려고 여는 것이니 서버를 처음부터 다시 고르게 하지 않는다
     selection: src.selection,
+    // 따라감을 복제하면 따라감, 고정을 복제하면 같은 대상으로 고정 — 비교하려고 여는 것이다
+    ...(src.pinned ? { pinned: true } : {}),
   };
   const at = s.tabs.findIndex(t => t.key === s.activeKey);
   const tabs = [...s.tabs];
@@ -297,3 +305,43 @@ function sameSet(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
   for (const v of a) if (!b.has(v)) return false;
   return true;
 }
+
+// ─── 트리 따라감 / 고정 ─────────────────────────────────────────
+
+/**
+ * 트리에서 고른 것을 넣는다 — **지금 판 기준**이다. 지금 판이 따라감이면 따라감 판 **전부**가,
+ * 고정이면 그 판만 바뀐다. 해시는 App 이 판마다 다시 푼다(`setResolved`).
+ */
+export function setSelection(s: XLogTabsState, sel: GroupSelection): XLogTabsState {
+  const cur = activeTab(s);
+  if (cur.pinned) return patchTab(s, cur.key, () => ({ selection: sel }));
+  return { ...s, tabs: s.tabs.map(t => (t.pinned ? t : { ...t, selection: sel })) };
+}
+
+/** 따라감 판들이 함께 쓰는 고르기. 따라감 판이 없으면 null */
+export function linkedSelection(s: XLogTabsState): GroupSelection | null {
+  return s.tabs.find(t => !t.pinned)?.selection ?? null;
+}
+
+/**
+ * 판을 고정하거나 따라감으로 푼다.
+ *
+ *   · 고정 — **지금 고른 것 그대로** 고정한다(트리에서 고른 뒤 📌 를 누르는 손버릇)
+ *   · 풀기 — 다른 따라감 판의 고르기를 받는다. 따라감 판이 하나도 없으면 제 것을 그대로 둔다
+ *     (그 고르기가 이제 따라감 고르기가 된다)
+ */
+export function setPinned(s: XLogTabsState, key: string, pinned: boolean): XLogTabsState {
+  const tab = s.tabs.find(t => t.key === key);
+  if (!tab || !!tab.pinned === pinned) return s;
+  if (pinned) return patchTab(s, key, () => ({ pinned: true }));
+  const shared = s.tabs.find(t => t.key !== key && !t.pinned)?.selection;
+  return {
+    ...s,
+    tabs: s.tabs.map(t => {
+      if (t.key !== key) return t;
+      const { pinned: _drop, ...rest } = t;
+      return shared ? { ...rest, selection: shared } : rest;
+    }),
+  };
+}
+

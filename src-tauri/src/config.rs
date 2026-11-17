@@ -578,6 +578,9 @@ pub struct XLogTabPrefs {
     /// 실시간인지는 `filter.mode` 가 따로 말한다.
     pub stime: i64,
     pub etime: i64,
+    /// 대상 고정(📌). **없으면 이 칸이 생기기 전 파일**이다 — 화면이 고르기를 보고 따라감/고정을 정한다
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
 }
 
 impl Default for XLogFilterPrefs {

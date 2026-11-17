@@ -63,6 +63,8 @@ interface XLogDockProps {
   onDetach: (key: string, at?: ScreenPoint) => void;
   /** (뗀 창에서만) 탭을 메인 창으로 보낸다 */
   onSendToMain?: (key: string) => void;
+  /** 판을 고정(📌)하거나 트리 따라감(🔗)으로 푼다 */
+  onPin: (key: string, pinned: boolean) => void;
   /** 배치가 바뀌었다 (판 이름 = 탭 키) */
   onLayoutChange: (dock: SerializedDockview) => void;
   /** 보이는 판들 — 판 묶음의 앞 탭들 */
@@ -84,6 +86,7 @@ export interface DockCtx {
   onRename: (key: string, title: string) => void;
   onDetach: (key: string, at?: ScreenPoint) => void;
   onSendToMain?: (key: string) => void;
+  onPin: (key: string, pinned: boolean) => void;
 }
 
 export const DockContext = createContext<DockCtx | null>(null);
@@ -179,7 +182,13 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
           className="w-32 rounded border border-line-control bg-input px-1.5 py-0.5 text-micro text-fg"
         />
       ) : (
-        <span className="max-w-[14rem] truncate">{label}</span>
+        <span className="max-w-[14rem] truncate">
+          {/* 고정 판은 이름 앞에 표시 — 트리를 고쳐도 이 판은 안 바뀐다 */}
+          {ctx.tabs.get(api.id)?.pinned && (
+            <span aria-label={t('대상 고정')} className="mr-1">📌</span>
+          )}
+          {label}
+        </span>
       )}
       <button
         type="button"
@@ -208,6 +217,9 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
               ...(ctx.onSendToMain
                 ? [{ label: t('메인 창으로 보내기'), onSelect: () => ctx.onSendToMain?.(api.id) }]
                 : []),
+              ctx.tabs.get(api.id)?.pinned
+                ? { label: t('트리 따라가기로 풀기'), onSelect: () => ctx.onPin(api.id, false) }
+                : { label: t('지금 대상으로 고정'), onSelect: () => ctx.onPin(api.id, true) },
               { label: t('이름 바꾸기'), onSelect: startEdit },
               {
                 label: t('탭 닫기'),
@@ -251,9 +263,26 @@ function GroupActions({ activePanel, group }: IDockviewHeaderActionsProps) {
   const key = activePanel?.id;
   const { setSlot } = ctx;
   const ref = useCallback((el: HTMLDivElement | null) => setSlot(group.id, key, el), [setSlot, group.id, key]);
+  const pinned = key !== undefined && ctx.tabs.get(key)?.pinned === true;
   return (
     <div className="flex h-full min-w-0 items-center gap-1 pr-1">
       <div ref={ref} className="flex min-w-0 items-center" />
+      {key && (
+        // **이 판이 트리를 따라가나.** 원본 스카우터의 «대상이 박힌 창» 이 고정 판이다
+        <button
+          type="button"
+          onClick={() => ctx.onPin(key, !pinned)}
+          aria-pressed={pinned}
+          title={
+            pinned
+              ? t('대상 고정 — 트리를 고쳐도 이 판은 안 바뀝니다. 이 판을 누른 채 트리를 고치면 이 판만 바뀝니다. 누르면 트리 따라가기로 풉니다')
+              : t('트리 따라감 — 트리에서 고르면 따라감 판이 모두 함께 바뀝니다. 누르면 지금 고른 대상으로 고정합니다')
+          }
+          className={`flex h-5 items-center rounded px-1 text-micro ${pinned ? 'bg-accent/15 text-fg' : 'text-fg-faint hover:bg-hover hover:text-fg'}`}
+        >
+          {pinned ? `📌 ${t('고정')}` : `🔗 ${t('따라감')}`}
+        </button>
+      )}
       {key && (
         <button
           type="button"
@@ -312,7 +341,7 @@ export function watchDragOut(onOut: (at: ScreenPoint | null) => void): void {
 }
 
 export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
-  const { tabs, labels, activeKey, renderTab, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain } = props;
+  const { tabs, labels, activeKey, renderTab, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain, onPin } = props;
   const apiRef = useRef<DockviewApi | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -458,8 +487,9 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
       onRename,
       onDetach,
       onSendToMain,
+      onPin,
     }),
-    [tabMap, labelMap, renderTab, slotOf, setSlot, tabs.length, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain],
+    [tabMap, labelMap, renderTab, slotOf, setSlot, tabs.length, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain, onPin],
   );
 
   return (

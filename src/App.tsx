@@ -128,6 +128,8 @@ import {
   initialTabs,
   patchActive as patchActiveTab,
   renameTab as renameXLogTab,
+  setSelection as setTabSelection,
+  setPinned as setTabPinned,
   setResolved as setTabResolved,
   clearSelections as clearTabSelections,
   patchTab as patchXLogTab,
@@ -430,15 +432,19 @@ export default function App({ windowLabel }: {
    * 아래로 내려보내는 것은 여전히 **해시 집합 하나**라 네 화면의 계약은 그대로다.
    */
   const groupSel = curTab.selection;
+  /**
+   * 트리에서 고른 것 — **지금 판 기준**이다(`setSelection`). 지금 판이 따라감(🔗)이면 따라감 판 전부가,
+   * 고정(📌)이면 그 판만 바뀐다.
+   */
   const setGroupSel = useCallback(
     (v: GroupSelection | ((p: GroupSelection) => GroupSelection)) =>
-      setXLogTabs(s =>
-        patchActiveTab(s, {
-          selection: typeof v === 'function' ? v(activeXLogTab(s).selection) : v,
-        }),
-      ),
+      setXLogTabs(s => setTabSelection(s, typeof v === 'function' ? v(activeXLogTab(s).selection) : v)),
     [],
   );
+  /** 판을 고정하거나 따라감으로 푼다 (판 머리 🔗/📌 · 탭 오른쪽 클릭) */
+  const handleXLogPin = useCallback((key: string, pinned: boolean) => {
+    setXLogTabs(s => setTabPinned(s, key, pinned));
+  }, []);
   /** 카운터 요청 대상. Family 별로 나눠 둔다 — 화면도 Family 로 나눈다 */
   const [counterHashes, setCounterHashes] = useState<{
     javaee: number[];
@@ -2064,7 +2070,7 @@ export default function App({ windowLabel }: {
    */
   const drillToXLog = useCallback((objHash: number) => {
     // 고르기를 그 한 대로 바꾼다 — 해시만 적으면 다음 명단 갱신 때 고르기에서 다시 풀려 사라진다
-    setXLogTabs(s => patchActiveTab(s, { selection: { services: new Set(), hashes: new Set([objHash]) } }));
+    setXLogTabs(s => setTabSelection(s, { services: new Set(), hashes: new Set([objHash]) }));
     setActiveTab('xlog');
   }, []);
 
@@ -2429,6 +2435,7 @@ export default function App({ windowLabel }: {
                   onRename={handleXLogTabRename}
                   onDetach={handleXLogTabDetach}
                   onSendToMain={isMain ? undefined : handleSendTabToMain}
+                  onPin={handleXLogPin}
                   onLayoutChange={handleDockLayout}
                   onVisibleChange={handleDockVisible}
                 />

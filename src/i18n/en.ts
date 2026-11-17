@@ -1284,4 +1284,11 @@ export const EN: Record<string, string> = {
   '이 서비스의 트랜잭션을 한 건 한 줄로 — 원본 CSV 를 남긴 결과는 거기서 뽑고, 아니면 콜렉터에 다시 묻습니다': 'This service\'s transactions, one per line — taken from the raw CSV if the run kept one, otherwise asked from the collector again',
   '응답시간 칸마다 기준·과거 건수와 누적 % — 결과에 든 분포 그대로': 'Reference and past counts with cumulative % per response-time bucket — the distribution stored in the result',
   '두 번 눌러 이름 바꾸기 · 다른 판 가장자리로 끌어 나란히 보기 · 창 밖으로 끌어 새 창': 'Double-click to rename · drag to another pane\'s edge to place side by side · drag out of the window for a new window',
+  '대상 고정': 'Pinned target',
+  '트리 따라가기로 풀기': 'Unpin — follow the tree',
+  '지금 대상으로 고정': 'Pin to the current target',
+  '대상 고정 — 트리를 고쳐도 이 판은 안 바뀝니다. 이 판을 누른 채 트리를 고치면 이 판만 바뀝니다. 누르면 트리 따라가기로 풉니다': 'Pinned — changing the tree does not change this pane. With this pane selected, the tree changes only this pane. Click to follow the tree again',
+  '트리 따라감 — 트리에서 고르면 따라감 판이 모두 함께 바뀝니다. 누르면 지금 고른 대상으로 고정합니다': 'Following the tree — picking in the tree changes all following panes together. Click to pin the current target',
+  '고정': 'Pinned',
+  '따라감': 'Following',
 };

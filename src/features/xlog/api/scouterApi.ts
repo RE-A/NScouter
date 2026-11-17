@@ -897,6 +897,8 @@ export interface XLogTabPrefs {
   /** 과거 구간(epoch ms). 둘 다 0 이면 구간을 정하지 않은 것이다 */
   stime?: number;
   etime?: number;
+  /** 대상 고정(📌). 없으면 이 칸이 생기기 전 파일 — 고르기를 보고 정한다(`toTabs`) */
+  pinned?: boolean;
 }
 
 export interface XLogChartPrefs {

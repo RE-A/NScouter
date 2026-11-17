@@ -381,3 +381,30 @@ describe('판 배치(dock) 저장·복원', () => {
     expect(fromSplit(s).dock).toBeUndefined();
   });
 });
+
+describe('트리 따라감 / 고정 저장', () => {
+  it('고정 여부를 적고 되살린다', () => {
+    const s = toTabs(
+      [{ sel_services: ['pay'], stime: 0, etime: 0, pinned: false }, { sel_services: ['order'], stime: 0, etime: 0, pinned: true }],
+      undefined,
+      undefined,
+    );
+    expect(s.tabs.map(t => !!t.pinned)).toEqual([false, true]);
+    expect(fromTabs(s).map(p => p.pinned)).toEqual([false, true]);
+  });
+
+  it('고정 칸이 없는 예전 파일 — 지금 판과 같은 것을 고른 탭은 따라감, 다른 것은 고정 (고른 서버가 바뀌지 않게)', () => {
+    const s = toTabs(
+      [
+        { sel_services: ['pay'], stime: 0, etime: 0 },
+        { sel_services: ['order'], stime: 0, etime: 0 },
+        { sel_services: ['pay'], stime: 0, etime: 0 },
+      ],
+      undefined,
+      undefined,
+      { panes: [0, 1], active: 0 },
+    );
+    expect(s.tabs.map(t => !!t.pinned)).toEqual([false, true, false]);
+    expect(s.tabs.map(t => [...t.selection.services].join())).toEqual(['pay', 'order', 'pay']);
+  });
+});

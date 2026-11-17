@@ -24,6 +24,9 @@ import {
   renameTab,
   setRatio,
   setResolved,
+  setPinned,
+  setSelection,
+  linkedSelection,
   tabLabels,
   tabTitle,
 } from './xlogTabs';
@@ -346,3 +349,53 @@ describe('다른 창의 탭 들이기', () => {
     expect(importTabs(s, [])).toBe(s);
   });
 });
+
+describe('트리 따라감 / 고정', () => {
+  const sel = (...names: string[]) => ({ services: new Set(names), hashes: new Set<number>() });
+  /** 탭 셋 — 모두 따라감 */
+  const three = () => addTab(addTab(initialTabs()));
+
+  it('따라감 판에서 고르면 따라감 판 전부가 바뀐다', () => {
+    const s = setSelection(three(), sel('pay'));
+    expect(s.tabs.every(t => [...t.selection.services].join() === 'pay')).toBe(true);
+  });
+
+  it('고정 판은 제 고르기를 지키고, 그 판에서 고르면 그 판만 바뀐다', () => {
+    let s = setSelection(three(), sel('pay'));
+    const [a, b] = s.tabs.map(t => t.key);
+    s = setPinned(s, a, true);
+    s = activate(s, b);
+    s = setSelection(s, sel('order'));
+    expect([...s.tabs[0].selection.services]).toEqual(['pay']);
+    expect([...s.tabs[1].selection.services]).toEqual(['order']);
+    expect([...s.tabs[2].selection.services]).toEqual(['order']);
+
+    s = activate(s, a);
+    s = setSelection(s, sel('batch'));
+    expect([...s.tabs[0].selection.services]).toEqual(['batch']);
+    expect([...s.tabs[1].selection.services]).toEqual(['order']);
+  });
+
+  it('고정을 풀면 따라감 고르기를 받는다 — 따라감 판이 없으면 제 것을 그대로', () => {
+    let s = setSelection(three(), sel('pay'));
+    const [a, b, c] = s.tabs.map(t => t.key);
+    s = setPinned(s, a, true);
+    s = activate(s, b);
+    s = setSelection(s, sel('order'));
+    s = setPinned(s, a, false);
+    expect(s.tabs[0].pinned).toBeUndefined();
+    expect([...s.tabs[0].selection.services]).toEqual(['order']);
+
+    s = setPinned(setPinned(setPinned(s, a, true), b, true), c, true);
+    expect(linkedSelection(s)).toBeNull();
+    s = setPinned(s, c, false);
+    expect([...s.tabs[2].selection.services]).toEqual(['order']);
+  });
+
+  it('복제는 고정 여부를 물려받는다', () => {
+    const base = initialTabs();
+    expect(addTab(setPinned(base, base.activeKey, true)).tabs.map(t => !!t.pinned)).toEqual([true, true]);
+    expect(addTab(initialTabs()).tabs.map(t => !!t.pinned)).toEqual([false, false]);
+  });
+});
+
