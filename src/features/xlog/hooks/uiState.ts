@@ -20,7 +20,7 @@ import { initialTabs, MAX_PANES, MAX_XLOG_TABS, PANEL_KINDS, setRatio, type Pane
 import type { XLogMode } from '../types/timeRange';
 import type { SerializedDockview } from 'dockview-react';
 import { decodeDock, encodeDock } from './dockLayout';
-import type { GroupSelection } from './groupSelection';
+import { sameSelection } from './groupSelection';
 import { DEFAULT_CHART_CONFIG, Y_AXIS_CONFIGS } from '../types/xlog';
 
 export type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert' | 'stats';
@@ -311,11 +311,6 @@ export function toTabs(
     return { ...out, tabs: out.tabs.map(t => (sameSelection(t.selection, cur.selection) ? t : { ...t, pinned: true })) };
   }
   return out;
-}
-
-function sameSelection(a: GroupSelection, b: GroupSelection): boolean {
-  const eq = <T,>(x: ReadonlySet<T>, y: ReadonlySet<T>) => x.size === y.size && [...x].every(v => y.has(v));
-  return eq(a.services, b.services) && eq(a.hashes, b.hashes);
 }
 
 /**

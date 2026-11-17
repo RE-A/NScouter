@@ -6,7 +6,10 @@ import type { AgentObject } from '../types/xlog';
 import { agentRowState, groupCheck, toggleGroupPick } from './agentFilter';
 import { displayNames, groupAgents, type GroupBy } from './agentTree';
 import { shouldShowTypes, typeCounts, typeLabel, typeTone } from './objectTypes';
-import { ContextMenu } from '../../../components/ContextMenu';
+import { ContextMenu, type MenuItem } from '../../../components/ContextMenu';
+import { panelMenuItems } from './panelMenu';
+import type { GroupSelection } from '../hooks/groupSelection';
+import type { PanelKind } from '../hooks/xlogTabs';
 import { ObjectInspector, type InspectKind } from './ObjectInspector';
 import { ConfigSettingsDialog } from '../../config/ConfigSettingsDialog';
 import { isDatasourceObjectType, isJavaeeObjectType, learnFamiliesFromObjects } from '../types/counter';
@@ -30,6 +33,15 @@ interface AgentSelectorPanelProps {
   onToggleService?: (name: string) => void;
   /** 펼쳐서 낱개를 누를 때. 그룹이 켜져 있으면 그걸 푸는 일까지 한다 */
   onPickTask?: (agent: AgentObject) => void;
+  /**
+   * 이 대상으로 판을 연다 — 오른쪽 클릭 «XLog 열기 · EQ 열기 · 카운터 …». 판은 대상 고정이다.
+   * 없으면 메뉴에 이 항목들을 안 단다
+   */
+  onOpenPanel?: (target: GroupSelection, kind: PanelKind, counter?: string) => void;
+  /** 고른 서비스(없으면 고른 서버)마다 XLog 판을 하나씩 열고 격자로 정렬한다 */
+  onOpenEach?: () => void;
+  /** 에이전트를 두 번 눌렀다 — 그것만 보기(원본의 더블클릭). 다시 두 번 누르면 되돌린다 */
+  onSoloAgent?: (agent: AgentObject) => void;
   /** 비활성 오브젝트를 콜렉터에서 지운다. 없으면 버튼을 안 그린다 */
   onCleanup?: () => Promise<void>;
   onAgentsLoaded?: (agents: AgentObject[]) => void;
@@ -45,6 +57,9 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   selectedServices,
   onToggleService,
   onPickTask,
+  onOpenPanel,
+  onOpenEach,
+  onSoloAgent,
   onCleanup,
   onAgentsLoaded,
   groupBy,
@@ -240,6 +255,12 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
     e.preventDefault();
     setMenu({ agent, x: e.clientX, y: e.clientY });
   }, []);
+  /** 묶음 머리 오른쪽 클릭 — 그 묶음으로 판 열기 */
+  const [groupMenu, setGroupMenu] = useState<{ items: MenuItem[]; x: number; y: number } | null>(null);
+  /** 고른 것 각각 XLog — 여러 곳에서 같은 항목 */
+  const eachItem: MenuItem[] = onOpenEach
+    ? [{ label: t('고른 것 각각 XLog 로 열기 (격자)'), onSelect: onOpenEach }]
+    : [];
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-raised">
@@ -395,7 +416,29 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               {/* 묶음 머리 — 접혀 있어도 **살아 있는 수**는 보여야 한다.
                   체크와 접기는 **다른 버튼**이다. 한 버튼에 묶으면 목록을 펼치려다
                   100대가 통째로 켜진다. */}
-              <div className="flex items-center gap-1.5 border-b border-line/60 bg-surface/60 px-2 py-1">
+              <div
+                className="flex items-center gap-1.5 border-b border-line/60 bg-surface/60 px-2 py-1"
+                onContextMenu={
+                  onOpenPanel
+                    ? e => {
+                        e.preventDefault();
+                        // 서비스 마디는 이름으로(Task 가 갈려도 따라간다), 나머지는 그 묶음의 서버들로
+                        const target: GroupSelection = isService
+                          ? { services: new Set([group.type]), hashes: new Set() }
+                          : { services: new Set(), hashes: new Set(groupHashes) };
+                        const types = [...new Set(group.agents.map(a => a.obj_type))];
+                        setGroupMenu({
+                          items: [
+                            ...panelMenuItems((k, c) => onOpenPanel(target, k, c), types.length === 1 ? types[0] : null),
+                            ...eachItem,
+                          ],
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
+                      }
+                    : undefined
+                }
+              >
                 <input
                   type="checkbox"
                   checked={
@@ -460,6 +503,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
             <div
               key={agent.obj_hash}
               onClick={() => handleToggle(agent.obj_hash)}
+              onDoubleClick={onSoloAgent ? () => onSoloAgent(agent) : undefined}
               onContextMenu={e => handleContextMenu(e, agent)}
               // 메뉴가 떠 있는 동안에는 풍선 도움말을 거둔다 — 오른쪽 클릭 자리에 그대로 남아
               // 메뉴 항목 위를 덮었다.
@@ -531,12 +575,23 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         })}
       </div>
 
+      {groupMenu && (
+        <ContextMenu x={groupMenu.x} y={groupMenu.y} onClose={() => setGroupMenu(null)} items={groupMenu.items} />
+      )}
       {menu && (
         <ContextMenu
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
+            // 원본의 Performance Counter — 이 서버 하나로 판을 연다(대상 고정)
+            ...(onOpenPanel
+              ? panelMenuItems(
+                  (k, c) => onOpenPanel({ services: new Set(), hashes: new Set([menu.agent.obj_hash]) }, k, c),
+                  menu.agent.obj_type,
+                )
+              : []),
+            ...eachItem,
             {
               // 어떤 오브젝트든 신원은 있다. **막지 않는다** — 목록에 떠 있는데
               // 정체를 못 묻는 오브젝트가 있으면 그게 제일 답답하다.

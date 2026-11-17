@@ -28,6 +28,7 @@ import {
   setSelection,
   linkedSelection,
   addPanel,
+  openPinned,
   kindOf,
   setCounterLabel,
   tabLabels,
@@ -430,6 +431,31 @@ describe('XLog 말고 다른 판', () => {
     let s = initialTabs();
     for (let i = 0; i < MAX_XLOG_TABS + 2; i++) s = addPanel(s, 'eq');
     expect(s.tabs).toHaveLength(MAX_XLOG_TABS);
+  });
+});
+
+describe('대상이 박힌 판 열기 (트리 오른쪽 클릭)', () => {
+  const sel = (...names: string[]) => ({ services: new Set(names), hashes: new Set<number>() });
+
+  it('고정 판으로 연다 — 트리를 고쳐도 안 바뀐다', () => {
+    let s = openPinned(initialTabs(), 'xlog', sel('pay'));
+    expect(s.tabs).toHaveLength(2);
+    expect(s.tabs[1].pinned).toBe(true);
+    s = activate(s, s.tabs[0].key);
+    s = setSelection(s, sel('order'));
+    expect([...s.tabs[1].selection.services]).toEqual(['pay']);
+  });
+
+  it('같은 종류·같은 대상의 고정 판이 있으면 그 판을 앞으로 — 새로 열지 않는다', () => {
+    let s = openPinned(initialTabs(), 'counter', sel('pay'), 'TPS');
+    const key = s.activeKey;
+    s = activate(s, s.tabs[0].key);
+    s = openPinned(s, 'counter', sel('pay'), 'TPS');
+    expect(s.tabs).toHaveLength(2);
+    expect(s.activeKey).toBe(key);
+    // 카운터가 다르면 다른 판
+    s = openPinned(s, 'counter', sel('pay'), 'ElapsedTime');
+    expect(s.tabs).toHaveLength(3);
   });
 });
 
