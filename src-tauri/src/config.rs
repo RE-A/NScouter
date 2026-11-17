@@ -109,6 +109,13 @@ pub struct AppConfig {
     /// 떼어 낸 XLog 창들. 켤 때 같은 자리에 다시 연다
     #[serde(default)]
     pub xlog_windows: Vec<XLogWindowPrefs>,
+    /// 대시보드들 — 이름 붙은 판 배치(원본의 퍼스펙티브). **지금 대시보드의 판은 `xlog_tabs`·`xlog_split` 가 원본이다**
+    /// (여기의 같은 항목은 바꾸기 직전의 사본). 비어 있으면 화면이 처음 만든다(`dashboards.ts`)
+    #[serde(default)]
+    pub dashboards: Vec<DashboardPrefs>,
+    /// 지금 대시보드의 `id`
+    #[serde(default)]
+    pub active_dashboard: String,
     /// 어느 Task 가 어느 논리 서비스인가를 정하는 규칙.
     ///
     /// 사이트마다 이름 짃는 법이 다르다 — ECS 가 아닐 수도 있고
@@ -567,6 +574,19 @@ impl Default for XLogSplitPrefs {
     }
 }
 
+/// 대시보드 하나 — 판들의 조건과 배치에 이름을 붙인 것. 화면의 `Dashboard` 와 짝이다
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DashboardPrefs {
+    pub id: String,
+    pub name: String,
+    /// 기본 제공이면 그 이름(`original` · `xlogOnly`) — `기본으로 되돌리기` 가 쓴다
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    pub tabs: Vec<XLogTabPrefs>,
+    pub split: XLogSplitPrefs,
+}
+
 /// 탭 하나의 조건. 화면의 `XLogTab` 과 1:1 이다.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -735,6 +755,8 @@ impl Default for AppConfig {
             xlog_tabs: Vec::new(),
             xlog_split: XLogSplitPrefs::default(),
             xlog_windows: Vec::new(),
+            dashboards: Vec::new(),
+            active_dashboard: String::new(),
             group_rule: GroupRulePrefs::default(),
             auto_remove_inactive_min: 0,
             // 비워 둔다. 화면이 기본 임계를 들고 있으므로(`threshold.DEFAULT_THRESHOLDS`)

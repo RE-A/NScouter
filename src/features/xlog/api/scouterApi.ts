@@ -766,6 +766,10 @@ export interface AppConfig {
   xlog_split?: XLogSplitPrefs;
   /** 떼어 낸 XLog 창들. Rust `XLogWindowPrefs` 와 짝이다 */
   xlog_windows?: XLogWindowPrefs[];
+  /** 대시보드들. 지금 대시보드의 판은 `xlog_tabs`·`xlog_split` 가 원본이다 (`dashboards.ts`) */
+  dashboards?: DashboardPrefs[];
+  /** 지금 대시보드의 `id` */
+  active_dashboard?: string;
   /** 논리 서비스 묶기 규칙. Rust `GroupRulePrefs` 와 짝이다 */
   group_rule?: { tag_key?: string; pattern?: string };
   /** 비활성 자동 정리 주기(분). **0 이면 끕** — 전역이라 기본값이다 */
@@ -885,6 +889,16 @@ export interface XLogSplitPrefs {
    * 없거나 탭과 안 맞으면 위 `panes`·`dir` 로 다시 짠다
    */
   dock?: unknown;
+}
+
+/** 대시보드 하나. Rust `DashboardPrefs` 와 짝이다 */
+export interface DashboardPrefs {
+  id: string;
+  name: string;
+  /** 기본 제공이면 그 이름 — `기본으로 되돌리기` 가 쓴다 */
+  preset?: string;
+  tabs: XLogTabPrefs[];
+  split: XLogSplitPrefs;
 }
 
 /** 탭 하나의 조건. Rust `XLogTabPrefs` 와 짝이다 */

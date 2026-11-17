@@ -30,12 +30,11 @@ describe('matchShortcut', () => {
   it('제안한 조합을 전부 알아본다', () => {
     expect(matchShortcut(key({ key: 'Escape' }))).toBe('close-detail');
     expect(matchShortcut(key({ key: 'f', ctrlKey: true }))).toBe('focus-search');
-    // 숫자는 탭이 놓인 순서다 — 탭이 늘면 뒤가 밀린다.
-    expect(matchShortcut(key({ key: '1', ctrlKey: true }))).toBe('tab-xlog');
-    expect(matchShortcut(key({ key: '2', ctrlKey: true }))).toBe('tab-active');
-    expect(matchShortcut(key({ key: '3', ctrlKey: true }))).toBe('tab-visualize');
-    expect(matchShortcut(key({ key: '4', ctrlKey: true }))).toBe('tab-counter');
-    expect(matchShortcut(key({ key: '5', ctrlKey: true }))).toBe('tab-alert');
+    // 숫자는 대시보드가 놓인 순서다 — 하나 늘면 뒤가 밀린다.
+    expect(matchShortcut(key({ key: '1', ctrlKey: true }))).toBe('dashboard-1');
+    expect(matchShortcut(key({ key: '5', ctrlKey: true }))).toBe('dashboard-5');
+    expect(matchShortcut(key({ key: '9', ctrlKey: true }))).toBe('dashboard-9');
+    expect(matchShortcut(key({ key: '0', ctrlKey: true }))).toBeNull();
     expect(matchShortcut(key({ key: 'w', ctrlKey: true }))).toBe('close-detail-tab');
     expect(matchShortcut(key({ key: 'Tab', ctrlKey: true }))).toBe('cycle-detail-next');
     expect(matchShortcut(key({ key: 'Tab', ctrlKey: true, shiftKey: true }))).toBe(
@@ -48,7 +47,7 @@ describe('matchShortcut', () => {
 
   it('Cmd 도 Ctrl 과 같이 본다', () => {
     expect(matchShortcut(key({ key: 'f', metaKey: true }))).toBe('focus-search');
-    expect(matchShortcut(key({ key: '1', metaKey: true }))).toBe('tab-xlog');
+    expect(matchShortcut(key({ key: '1', metaKey: true }))).toBe('dashboard-1');
   });
 
   it('대문자로 와도 같다 — Shift 가 눌린 채 오는 경우가 있다', () => {

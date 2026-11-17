@@ -146,6 +146,22 @@ import {
   type XLogTabsState,
 } from './features/xlog/hooks/xlogTabs';
 import { XLogDock } from './features/xlog/components/XLogDock';
+import { DashboardBar } from './features/xlog/components/DashboardBar';
+import {
+  activeDashboard,
+  addDashboard,
+  loadDashboards,
+  presetDashboard,
+  PRESET_NAME,
+  removeDashboard,
+  renameDashboard,
+  resetPreset,
+  withCurrent,
+  type DashboardsState,
+  type PresetId,
+} from './features/xlog/hooks/dashboards';
+import { DASHBOARD_ACTIONS } from './features/xlog/hooks/shortcuts';
+import type { DashboardPrefs } from './features/xlog/api/scouterApi';
 import { CounterPanelView } from './features/xlog/components/CounterPanelView';
 import type { SerializedDockview } from 'dockview-react';
 import {
@@ -368,6 +384,13 @@ export default function App({ windowLabel }: {
    * 몰랐던 쪽(툴바·차트·상세)이 그대로 산다.
    */
   const [xlogTabs, setXLogTabs] = useState<XLogTabsState>(initialTabs);
+  /**
+   * 대시보드들(`dashboards.ts`) — 메인 창만. 화면에 떠 있는 것은 지금 대시보드 하나(`xlogTabs`)이고,
+   * 목록의 같은 항목은 저장·바꾸기 때 맞춘다. 읽기 전에는 null — 그동안은 바꾸지 않는다
+   */
+  const [dashboards, setDashboards] = useState<DashboardsState | null>(null);
+  const dashboardsRef = useRef(dashboards);
+  dashboardsRef.current = dashboards;
   /**
    * 떼어 낸 창들 — **메인 창만** 들고 있다(`detached/registry.ts`). 창마다 띄운 탭·분할·자리를
    * 설정 파일에 남겼다가 켤 때 같은 자리에 다시 연다.
@@ -670,7 +693,11 @@ export default function App({ windowLabel }: {
         setXLogWindows(windowsFromConfig(cfg.xlog_windows));
         // 조회 조건도 되살린다. **껐다 켜면 다 날아간다** 가 현장에서 가장 많이 나온 말이다.
         // 탭은 **조건만** 되살린다 — 받아 둔 것은 열면 이미 지나간 것이라 다시 조회한다.
-        const loaded = toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter, cfg.xlog_split);
+        // 대시보드 목록 — 처음이면 만든다. 예전 판이 있으면 그것이 «내 배치» 로 지금 대시보드다(화면이 그대로)
+        const ds = loadDashboards(cfg.dashboards, cfg.active_dashboard, cfg.xlog_tabs, cfg.xlog_split);
+        setDashboards(ds);
+        const cur = activeDashboard(ds);
+        const loaded = toXLogTabs(cur.tabs, cfg.xlog_chart, cfg.xlog_filter, cur.split);
         setXLogTabs(loaded);
         // 판 배치도 함께 — 판을 처음부터 다시 띄운다(탭 키가 통째로 바뀌었다)
         dockRef.current = loaded.dock ?? null;
@@ -799,6 +826,12 @@ export default function App({ windowLabel }: {
             xlog_tabs: xlogTabsToPrefs(xlogTabs),
             xlog_split: xlogSplitToPrefs(xlogTabs, dockRef.current),
             xlog_windows: windowsToConfig(xlogWindowsRef.current),
+            ...(dashboards
+              ? {
+                  dashboards: withCurrent(dashboards, xlogTabsToPrefs(xlogTabs), xlogSplitToPrefs(xlogTabs, dockRef.current)).list,
+                  active_dashboard: dashboards.activeId,
+                }
+              : {}),
           });
         } catch {
           // 탭 저장 실패가 화면을 되돌릴 이유는 없다
@@ -825,6 +858,7 @@ export default function App({ windowLabel }: {
     dockTick,
     xlogWindows,
     boundsTick,
+    dashboards,
   ]);
 
   useEffect(() => {
@@ -1193,6 +1227,92 @@ export default function App({ windowLabel }: {
   }, []);
   const xlogTabsRef = useRef(xlogTabs);
   xlogTabsRef.current = xlogTabs;
+
+  /**
+   * 대시보드 하나를 화면에 세운다 — 판을 처음부터 다시 세운다(받아 둔 점은 다시 받는다).
+   * 고른 트랜잭션은 앞 대시보드의 것이라 비운다.
+   */
+  const showDashboard = useCallback((d: DashboardPrefs) => {
+    const loaded = toXLogTabs(d.tabs, undefined, undefined, d.split);
+    setXLogTabs(loaded);
+    dockRef.current = loaded.dock ?? null;
+    setDockEpoch(n => n + 1);
+    setSelectedXLogs([]);
+  }, []);
+  /** 지금 화면의 판을 목록의 지금 대시보드에 적은 것 — 바꾸기 직전에 */
+  const snapshotDashboards = useCallback((): DashboardsState | null => {
+    const ds = dashboardsRef.current;
+    if (!ds) return null;
+    const tabs = xlogTabsRef.current;
+    return withCurrent(ds, xlogTabsToPrefs(tabs), xlogSplitToPrefs(tabs, dockRef.current));
+  }, []);
+  /** 대시보드 바꾸기 — 위쪽 줄 · `Ctrl+1~9`. 다른 화면(Active · 통계 …)에 있었으면 대시보드 화면으로 */
+  const handleSwitchDashboard = useCallback(
+    (id: string) => {
+      setActiveTab('xlog');
+      const ds = snapshotDashboards();
+      if (!ds || id === ds.activeId || !ds.list.some(d => d.id === id)) return;
+      const next = { ...ds, activeId: id };
+      setDashboards(next);
+      showDashboard(activeDashboard(next));
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  /** 대시보드 더하기 — 지금 배치 복제 또는 기본 제공 새로. 더한 것으로 바꾼다 */
+  const handleAddDashboard = useCallback(
+    (from: 'copy' | PresetId) => {
+      const ds = snapshotDashboards();
+      if (!ds) return;
+      const src = from === 'copy' ? activeDashboard(ds) : presetDashboard(from);
+      const { state, id } = addDashboard(ds, from === 'copy' ? src.name : PRESET_NAME[from], src.tabs, src.split);
+      if (id === null) return;
+      const next = { ...state, activeId: id };
+      setDashboards(next);
+      showDashboard(activeDashboard(next));
+      setActiveTab('xlog');
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  const handleRenameDashboard = useCallback((id: string, name: string) => {
+    setDashboards(ds => (ds ? renameDashboard(ds, id, name) : ds));
+  }, []);
+  /** 지운다 — 지금 것을 지웠으면 옆 것을 세운다 */
+  const handleRemoveDashboard = useCallback(
+    (id: string) => {
+      const ds = snapshotDashboards();
+      if (!ds) return;
+      const next = removeDashboard(ds, id);
+      if (next === ds) return;
+      setDashboards(next);
+      if (next.activeId !== ds.activeId) showDashboard(activeDashboard(next));
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  /** 기본으로 되돌리기 — 지금 것이면 화면도 다시 세운다 */
+  const handleResetDashboard = useCallback(
+    (id: string) => {
+      const ds = snapshotDashboards();
+      if (!ds) return;
+      const next = resetPreset(ds, id);
+      setDashboards(next);
+      if (id === next.activeId) showDashboard(activeDashboard(next));
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  /** `Ctrl+1~9` — 위쪽 줄 N 번째 */
+  const dashboardShortcuts = useMemo(
+    () =>
+      Object.fromEntries(
+        DASHBOARD_ACTIONS.map((a, i) => [
+          a,
+          () => {
+            const d = dashboardsRef.current?.list[i];
+            if (d) handleSwitchDashboard(d.id);
+          },
+        ]),
+      ),
+    [handleSwitchDashboard],
+  );
 
   /**
    * 새 창을 연다 (메인 창). 탭은 이미 보낸 쪽에서 빠졌다 — 못 열면 이 창으로 들인다.
@@ -2264,13 +2384,8 @@ export default function App({ windowLabel }: {
         searchInputRef.current?.select();
       });
     },
-    'tab-xlog': () => setActiveTab('xlog'),
-    // 뗀 창은 XLog 만 띄운다 — 다른 화면으로 가는 단축키는 안 듣는다
-    'tab-active': () => { if (isMain) setActiveTab('active'); },
-    'tab-visualize': () => { if (isMain) setActiveTab('visualize'); },
-    'tab-counter': () => { if (isMain) setActiveTab('counter'); },
-    'tab-alert': () => { if (isMain) setActiveTab('alert'); },
-    'tab-stats': () => { if (isMain) setActiveTab('stats'); },
+    // 뗀 창은 대시보드가 없다 — 목록이 비어 있어 아무것도 안 한다
+    ...dashboardShortcuts,
     'open-settings': () => setShowSettings(true),
     'toggle-mode': () => setXLogMode(m => (m === 'live' ? 'past' : 'live')),
     /**
@@ -2358,7 +2473,21 @@ export default function App({ windowLabel }: {
         {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다. 뗀 창은 XLog 만 띄운다 */}
         {!isMain && <span className="text-micro text-fg-dim">XLog · {t('떼어 낸 창')}</span>}
         {isMain && <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
-          {(['xlog', 'active', 'visualize', 'counter', 'alert', 'stats'] as TabId[]).map(tab => {
+          {/* 대시보드 이름들이 예전 `XLog` 자리다 — 누르면 그 대시보드(판 화면)로 */}
+          {dashboards && (
+            <DashboardBar
+              list={dashboards.list}
+              activeId={dashboards.activeId}
+              showing={activeTab === 'xlog'}
+              onSwitch={handleSwitchDashboard}
+              onAdd={handleAddDashboard}
+              onRename={handleRenameDashboard}
+              onRemove={handleRemoveDashboard}
+              onReset={handleResetDashboard}
+            />
+          )}
+          {dashboards && <span className="mx-1 h-4 w-px bg-line" aria-hidden />}
+          {((dashboards ? ['active', 'visualize', 'counter', 'alert', 'stats'] : ['xlog', 'active', 'visualize', 'counter', 'alert', 'stats']) as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
               <button
@@ -3556,10 +3685,11 @@ function AlertFullView({
         )}
       </div>
       <div style={{ ...colHeaderStyle, flexShrink: 0 }}>
-        <span style={{ width: 74 }}>{t('시간')}</span>
-        <span style={{ width: 60 }}>{t('레벨')}</span>
-        <span style={{ width: 110 }}>{t('에이전트')}</span>
-        <span style={{ flex: 1 }}>{t('제목 / 메시지')}</span>
+        {/* 칸 너비는 줄(아래)과 같게 줄지 않는다 — 판이 좁으면 마지막 칸이 줄어 «제목 / 메시지» 가 세로로 쌓였다 */}
+        <span style={{ width: 74, flexShrink: 0 }}>{t('시간')}</span>
+        <span style={{ width: 60, flexShrink: 0 }}>{t('레벨')}</span>
+        <span style={{ width: 110, flexShrink: 0 }}>{t('에이전트')}</span>
+        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('제목 / 메시지')}</span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {alerts.length === 0 && (
