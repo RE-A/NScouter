@@ -28,7 +28,7 @@ import {
 } from 'dockview-react';
 import { ContextMenu } from '../../../components/ContextMenu';
 import { MAX_XLOG_TABS, type SplitDir, type XLogTab } from '../hooks/xlogTabs';
-import { opsFromSplit } from '../hooks/dockLayout';
+import { gridMoves, opsFromSplit } from '../hooks/dockLayout';
 import { t } from '../../../i18n';
 
 /** 우리 토큰을 따르는 판 테마 (`styles/dockview-theme.css`) */
@@ -87,6 +87,8 @@ export interface DockCtx {
   onDetach: (key: string, at?: ScreenPoint) => void;
   onSendToMain?: (key: string) => void;
   onPin: (key: string, pinned: boolean) => void;
+  /** 판을 모두 격자로 다시 나눈다 */
+  onArrange: () => void;
 }
 
 export const DockContext = createContext<DockCtx | null>(null);
@@ -242,27 +244,50 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
     <div className="flex h-full items-center pl-1">
       <button
         type="button"
+        aria-label={t('탭 추가')}
         disabled={ctx.full || key === undefined}
         onClick={() => key && ctx.onAdd(key)}
         title={
           ctx.full
-            ? t('탭은 최대 6개입니다. 탭마다 조회한 것을 따로 들고 있어 더 늘리면 메모리를 먹습니다')
+            ? t('탭은 최대 16개입니다')
             : t('지금 조건을 복제해 탭을 하나 더 엽니다 — 날짜만 바꿔 견주는 데 씁니다')
         }
         className="btn-ghost px-1.5 py-0.5 text-micro"
       >
-        + {t('탭')}
+        +
+      </button>
+      <button
+        type="button"
+        onClick={ctx.onArrange}
+        disabled={ctx.tabs.size <= 1}
+        title={t('판을 모두 격자로 고르게 나눕니다 (받아 둔 점은 그대로)')}
+        aria-label={t('격자로 정렬')}
+        className="btn-ghost px-1.5 py-0.5 text-micro"
+      >
+        ⊞
       </button>
     </div>
   );
 }
 
 /** 판 묶음 머리 오른쪽 — 앞 탭의 차트 머리(포털 자리)와 `↗` */
-function GroupActions({ activePanel, group }: IDockviewHeaderActionsProps) {
+function GroupActions({ activePanel, group, api }: IDockviewHeaderActionsProps) {
   const ctx = useDock();
   const key = activePanel?.id;
   const { setSlot } = ctx;
-  const ref = useCallback((el: HTMLDivElement | null) => setSlot(group.id, key, el), [setSlot, group.id, key]);
+  /**
+   * **좁은 판은 차트 조작을 머리에 올리지 않는다** — 머리가 꽉 차면 dockview 가 탭 이름을 `∨` 목록으로 숨긴다.
+   * 자리를 안 주면 차트가 제 조작을 판 안 첫 줄에 그린다(`XLogChart` `headerSlot` 없을 때). 탭 이름이 먼저다
+   */
+  const [wide, setWide] = useState(() => api.width >= NARROW_PX);
+  useEffect(() => {
+    const d = api.onDidDimensionsChange(e => setWide(e.width >= NARROW_PX));
+    return () => d.dispose();
+  }, [api]);
+  const ref = useCallback(
+    (el: HTMLDivElement | null) => setSlot(group.id, key, wide ? el : null),
+    [setSlot, group.id, key, wide],
+  );
   const pinned = key !== undefined && ctx.tabs.get(key)?.pinned === true;
   return (
     <div className="flex h-full min-w-0 items-center gap-1 pr-1">
@@ -280,7 +305,8 @@ function GroupActions({ activePanel, group }: IDockviewHeaderActionsProps) {
           }
           className={`flex h-5 items-center rounded px-1 text-micro ${pinned ? 'bg-accent/15 text-fg' : 'text-fg-faint hover:bg-hover hover:text-fg'}`}
         >
-          {pinned ? `📌 ${t('고정')}` : `🔗 ${t('따라감')}`}
+          {/* 판이 좁아도 머리가 넘치지 않게 글자 없이 표시만 — 뜻은 풍선 도움말이 말한다 */}
+          {pinned ? '📌' : '🔗'}
         </button>
       )}
       {key && (
@@ -300,6 +326,9 @@ function GroupActions({ activePanel, group }: IDockviewHeaderActionsProps) {
 }
 
 const COMPONENTS = { xlog: PanelBody };
+
+/** 이보다 좁은 판 묶음은 차트 조작을 판 안으로 내린다 (`GroupActions`) */
+const NARROW_PX = 560;
 
 /** 화면 좌표가 이 창 밖인가 — 창 가장자리에서 조금 벗어난 정도는 안 친다 */
 function isOutsideScreenRect(x: number, y: number): boolean {
@@ -459,6 +488,32 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
     reportVisible();
   }, [tabs, labelMap, activeKey, reportVisible]);
 
+  /**
+   * 격자로 정렬 — 판을 **옮기기만** 해서(`gridMoves`) 받아 둔 점을 지킨다. 쪼갤 때마다 반씩이라
+   * 옮긴 뒤 줄·칸 크기를 고르게 맞춘다. 탭 순서대로 왼쪽 위부터 놓는다.
+   */
+  const arrange = useCallback(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    const keys = propsRef.current.tabs.map(tb => tb.key).filter(k => api.getPanel(k));
+    const { moves, cols, rows } = gridMoves(keys);
+    for (const m of moves) {
+      const panel = api.getPanel(m.key);
+      const ref = api.getPanel(m.ref);
+      if (!panel || !ref) continue;
+      panel.api.moveTo({ group: ref.group, position: m.position });
+    }
+    const W = api.width;
+    const H = api.height;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const g = api.getPanel(keys[r * cols + c] ?? '')?.group;
+        g?.api.setSize({ width: Math.floor(W / cols), height: Math.floor(H / rows) });
+      }
+    }
+    api.getPanel(propsRef.current.activeKey)?.api.setActive();
+  }, []);
+
   // 지금 판 → dockview (단축키·다른 곳에서 바꿨을 때)
   useEffect(() => {
     const api = apiRef.current;
@@ -488,8 +543,9 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
       onDetach,
       onSendToMain,
       onPin,
+      onArrange: arrange,
     }),
-    [tabMap, labelMap, renderTab, slotOf, setSlot, tabs.length, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain, onPin],
+    [tabMap, labelMap, renderTab, slotOf, setSlot, tabs.length, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain, onPin, arrange],
   );
 
   return (

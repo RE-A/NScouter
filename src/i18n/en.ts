@@ -1291,4 +1291,13 @@ export const EN: Record<string, string> = {
   '트리 따라감 — 트리에서 고르면 따라감 판이 모두 함께 바뀝니다. 누르면 지금 고른 대상으로 고정합니다': 'Following the tree — picking in the tree changes all following panes together. Click to pin the current target',
   '고정': 'Pinned',
   '따라감': 'Following',
+  '탭은 최대 16개입니다': 'Up to 16 tabs',
+  'XLog 점 예산 (앱 전체)': 'XLog point budget (whole app)',
+  '떠 있는 XLog 판 전부가 나눠 쓰는 최대 건수입니다. 넘으면 판 상관없이 가장 오래된 점부터 버립니다 — 판이 많을수록 판마다 남는 시간이 짧아집니다. 창(범위)은 30분인데 화면에는 그보다 짧은 구간만 남는다면 이 값이 먼저 걸린 것입니다. 올릴수록 메모리를 씁니다.': 'The most points all open XLog panes share. Beyond it the oldest points are dropped regardless of pane — the more panes, the shorter the time each keeps. If the window is 30 minutes but the chart shows less, this limit was hit first. Higher values use more memory.',
+  '메모리가 넉넉한 PC 에서만 쓰세요': 'Use only on PCs with plenty of memory',
+  '판을 모두 격자로 고르게 나눕니다 (받아 둔 점은 그대로)': 'Arrange all panes evenly in a grid (received points are kept)',
+  '격자로 정렬': 'Arrange in a grid',
+  '점 예산': 'Point budget',
+  '건(모든 판 합계, 화면 필터 이전) — 오래된 점부터 지웁니다. 판이나 서버를 줄이거나 설정에서 예산을 올리면 더 남습니다': ' points (all panes together, before display filters) — oldest points are removed. Fewer panes or servers, or a higher budget in settings, keeps more',
+  '탭 추가': 'Add tab',
 };

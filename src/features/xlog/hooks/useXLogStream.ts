@@ -74,6 +74,12 @@ export function useXLogStream(
   useEffect(() => {
     storeRef.current.setMaxItems(bufferMax);
   }, [bufferMax]);
+  // 앱 전체 점 예산에 넣는다 — 떠 있는 동안만 (`enforceBudget`)
+  useEffect(() => {
+    const store = storeRef.current;
+    store.register();
+    return () => store.unregister();
+  }, []);
 
   useEffect(() => {
     // 해지 함수가 Promise 로 오므로 직접 담아 두면 안 된다 — 정리가 먼저 돌면

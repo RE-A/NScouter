@@ -419,7 +419,11 @@ export class XLogChartRenderer {
 
     this.ctx.textAlign = 'right';
     const { plotAreaWidth } = this.layout;
-    this.ctx.fillText(modeLabel, plotAreaX + plotAreaWidth - pad, plotAreaY + pad);
+    // 좁은 판에서는 건수 글자와 겹친다 — 자리가 없으면 Y축 이름을 뺀다(건수가 먼저다)
+    const headW = this.ctx.measureText(`${head}  `).width + (this.overflowCount > 0 ? this.ctx.measureText(`▲ ${this.overflowCount.toLocaleString()} (축 위)  `).width : 0);
+    if (headW + this.ctx.measureText(modeLabel).width + pad * 3 <= plotAreaWidth) {
+      this.ctx.fillText(modeLabel, plotAreaX + plotAreaWidth - pad, plotAreaY + pad);
+    }
 
     // 비어 있을 때 **왜** 비었는지 알려준다.
     // "0 dots" 만 보면 고장인지 데이터가 없는 건지 알 수 없다.

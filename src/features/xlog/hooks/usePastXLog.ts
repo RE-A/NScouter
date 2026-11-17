@@ -44,6 +44,12 @@ export function usePastXLog(
   useEffect(() => {
     storeRef.current.setMaxItems(bufferMax);
   }, [bufferMax]);
+  // 앱 전체 점 예산에 넣는다 — 떠 있는 동안만 (`enforceBudget`)
+  useEffect(() => {
+    const store = storeRef.current;
+    store.register();
+    return () => store.unregister();
+  }, []);
 
   // objHashes 는 매 렌더 새 배열이라 그대로 의존성에 넣으면 무한 재조회가 된다.
   const hashKey = objHashes.join(',');

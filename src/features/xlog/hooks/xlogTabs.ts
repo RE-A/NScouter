@@ -69,19 +69,19 @@ export interface XLogTabsState {
   dock?: SerializedDockview | null;
 }
 
-/** 한 화면에 나란히 둘 수 있는 판 수. 넷을 넘기면 판 하나가 엽서만 해져 점을 못 읽는다 */
+/** (예전 분할) 나란히 둘 수 있던 판 수 — 예전 설정(`xlog_split.panes`)을 읽을 때만 쓴다. 지금 판 수는 탭 수까지다 */
 export const MAX_PANES = 4;
 export const MIN_RATIO = 0.2;
 export const MAX_RATIO = 0.8;
 
 /**
- * 한 번에 둘 수 있는 탭 수.
+ * 한 번에 둘 수 있는 탭(판) 수.
  *
- * **버퍼가 탭마다 따로다.** 과거 조회 한 탭이 수십만 건을 들 수 있으니
- * 무제한으로 두면 조용히 메모리를 먹는다. 비교는 둘셋을 견주는 일이지
- * 열몇 개를 늘어놓는 일이 아니다.
+ * 원본 스카우터처럼 서비스마다 XLog 를 한 화면에 늘어놓으려면 넉넉해야 한다(16). 메모리는 탭 수가 아니라
+ * **앱 전체 점 예산**이 묶는다(`XLogDataStore` `enforceBudget`) — 판이 늘면 판마다 남는 시간이 짧아질 뿐이다.
+ * 판 하나가 엽서만 해지는 것은 사용자가 정할 일이다.
  */
-export const MAX_XLOG_TABS = 6;
+export const MAX_XLOG_TABS = 16;
 
 let seq = 0;
 function nextKey(): string {

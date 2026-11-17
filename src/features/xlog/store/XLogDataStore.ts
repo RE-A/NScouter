@@ -5,7 +5,12 @@ import type { SXLog } from '../types/xlog';
 import { serverNow } from '../utils/serverClock';
 
 /**
- * 버퍼 상한 **기본값**. 설정에서 바꾼다.
+ * 점 상한 **기본값** — **앱 전체 예산**이다(판 여럿이 나눠 쓴다, 아래 `enforceBudget`). 설정에서 바꾼다.
+ *
+ * 예전에는 탭(판)마다 10만씩 따로 들었다. 판이 16개까지 늘면 따로 드는 방식은 메모리를 예측할 수 없어서
+ * 앱 전체 하나로 바꾸고 기본을 100만(≈370MB)으로 올렸다. 저장소 하나가 혼자 예산 전부를 쓸 수도 있다.
+ *
+ * (아래는 탭마다 상한일 때 적은 것이다 — 건당 크기·실측은 그대로 맞다)
  *
  * 창(1~30분)이 진짜 경계이고 이 값은 메모리가 끝없이 늘지 않게 하는 마지막 빗장이다.
  * 기본을 10만으로 두는 이유는 **메모리**다 — 10만이 약 37MB, 100만이 약 371MB 다.
@@ -20,7 +25,7 @@ import { serverNow } from '../utils/serverClock';
  * 그리기는 10만 건에 2.1ms 였으므로(perf-baseline) 몇 배로도 프레임 안에 든다 —
  * 올릴 때 걸리는 것은 시간이 아니라 메모리다.
  */
-export const DEFAULT_MAX_ITEMS = 100_000;
+export const DEFAULT_MAX_ITEMS = 1_000_000;
 
 /**
  * 설정에서 받을 수 있는 범위.
@@ -29,8 +34,9 @@ export const DEFAULT_MAX_ITEMS = 100_000;
  * (100만 ≈ 370MB 추정 — 30만에서 잰 건당 크기로 늘린 값이다).
  * 설정 파일은 사람이 여는 곳이라 **읽는 쪽에서 자른다.**
  */
-export const MIN_MAX_ITEMS = 10_000;
-export const LIMIT_MAX_ITEMS = 1_000_000;
+export const MIN_MAX_ITEMS = 100_000;
+/** 300만 ≈ 1.1GB — 고를 때 화면이 경고한다 */
+export const LIMIT_MAX_ITEMS = 3_000_000;
 
 /** 설정에서 온 값을 쓸 수 있는 수로 다듬는다 */
 export function clampMaxItems(v: unknown): number {
@@ -116,6 +122,30 @@ export class XLogDataStore {
       // 한 묶음에서 **가장 최근 것**으로 잰다. 오래된 것이 섞여 와도 시계 차가 아니다.
       this.skewMs = newest - receivedAt;
     }
+    // 받을 때도 예산을 본다 — 정리(prune)는 5초마다라, 판이 많고 바쁘면 그 사이에 예산을 한참 넘긴다
+    this.checkBudget(receivedAt);
+  }
+
+  /** 등록된 저장소면 잠깐에 한 번 앱 전체 예산을 본다 (`enforceBudget`) */
+  private checkBudget(now: number): void {
+    if (live.has(this) && now - lastEnforceAt >= ENFORCE_EVERY_MS) {
+      lastEnforceAt = now;
+      enforceBudget(now);
+    }
+  }
+
+  /** 가장 이른·늦은 시각. 시간순이면 양 끝만 본다(과거를 섞었으면 훑는다). 비었으면 null */
+  timeBounds(): [number, number] | null {
+    const n = this.items.length;
+    if (n === 0) return null;
+    if (!this.hasHistory) return [this.items[0].endTime, this.items[n - 1].endTime];
+    let lo = Number.POSITIVE_INFINITY;
+    let hi = Number.NEGATIVE_INFINITY;
+    for (const x of this.items) {
+      if (x.endTime < lo) lo = x.endTime;
+      if (x.endTime > hi) hi = x.endTime;
+    }
+    return [lo, hi];
   }
 
   /**
@@ -171,6 +201,47 @@ export class XLogDataStore {
     }
 
     if (this.items.length !== before) this.dirty = true;
+
+    // 앱 전체 예산 — 등록된 저장소만, 잠깐에 한 번
+    this.checkBudget(now);
+  }
+
+  /**
+   * 앱 전체 예산에 넣는다 — 화면에 떠 있는 차트의 저장소만. `useRef(new XLogDataStore())` 는 그릴 때마다
+   * 새 것을 만들었다 버리므로 **생성자에서 넣지 않는다** — 훅이 효과에서 넣고 뺀다.
+   */
+  register(): void {
+    live.add(this);
+  }
+
+  unregister(): void {
+    live.delete(this);
+  }
+
+  /** `t` 이후(포함) 점 수. 시간순이면 이분 탐색, 과거를 섞어 담았으면 훑는다 */
+  countSince(t: number): number {
+    if (this.hasHistory) {
+      let n = 0;
+      for (const x of this.items) if (x.endTime >= t) n++;
+      return n;
+    }
+    return this.items.length - firstAtOrAfter(this.items, t);
+  }
+
+  /** `t` 보다 오래된 점을 버린다 — 예산 때문에 버린 것으로 센다(화면이 «상한에 걸려 버림» 을 말한다) */
+  dropBefore(t: number, now: number): void {
+    const before = this.items.length;
+    if (this.hasHistory) this.items = this.items.filter(x => x.endTime >= t);
+    else {
+      const i = firstAtOrAfter(this.items, t);
+      if (i > 0) this.items = this.items.slice(i);
+    }
+    const dropped = before - this.items.length;
+    if (dropped > 0) {
+      this.droppedByCap += dropped;
+      this.lastDropAt = now;
+      this.dirty = true;
+    }
   }
 
   /** 상한 때문에 버린 누적 건수. 창 밖으로 나가 지운 것은 세지 않는다 */
@@ -239,3 +310,80 @@ export class XLogDataStore {
     return this.items.length;
   }
 }
+
+// ─── 앱 전체 점 예산 ──────────────────────────────────────────
+//
+// 판 여럿(최대 16)이 **예산 하나를 나눠 쓴다.** 넘치면 **판 상관없이 가장 오래된 점부터** 버린다 —
+// 기준 시각 하나를 찾아 모든 저장소에서 그보다 오래된 것을 버린다. 그러면 모든 실시간 판이 «같은 최근 N분» 을
+// 들게 되어 판끼리 견주기 쉽고, 한가한 판이 몫을 쥔 채 놀지 않는다. 판이 늘면 그 N분이 준다.
+
+/** 화면에 떠 있는 저장소들 */
+const live = new Set<XLogDataStore>();
+let budget = DEFAULT_MAX_ITEMS;
+let lastEnforceAt = Number.NEGATIVE_INFINITY;
+/** 예산을 보는 간격 — 판마다 매 프레임 볼 일은 아니다 */
+const ENFORCE_EVERY_MS = 500;
+
+/** 예산을 정한다 (설정 «XLog 점 예산») */
+export function setPointBudget(n: number): void {
+  budget = clampMaxItems(n);
+  lastEnforceAt = Number.NEGATIVE_INFINITY;
+}
+
+export function pointBudget(): number {
+  return budget;
+}
+
+/** 등록된 저장소 전부의 점 수 */
+export function livePointCount(): number {
+  let n = 0;
+  for (const s of live) n += s.size;
+  return n;
+}
+
+/** 시간순 배열에서 `endTime >= t` 인 첫 자리 */
+function firstAtOrAfter(items: readonly SXLog[], t: number): number {
+  let lo = 0;
+  let hi = items.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (items[mid].endTime < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * 예산을 넘었으면 기준 시각을 찾아 그보다 오래된 점을 모든 저장소에서 버린다. 버린 기준 시각(넘지 않았으면 null).
+ *
+ * 기준 시각은 **이분 탐색**으로 찾는다 — «그 시각 이후 점 수 ≤ 예산» 인 가장 이른 시각.
+ * 저장소마다 이분 탐색이라(과거를 섞은 것만 훑는다) 100만 건이어도 몇 밀리초다.
+ */
+export function enforceBudget(now: number): number | null {
+  let total = 0;
+  let oldest = Number.POSITIVE_INFINITY;
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const s of live) {
+    total += s.size;
+    const b = s.timeBounds();
+    if (b === null) continue;
+    if (b[0] < oldest) oldest = b[0];
+    if (b[1] > newest) newest = b[1];
+  }
+  if (total <= budget || !Number.isFinite(oldest)) return null;
+  const count = (t: number) => {
+    let n = 0;
+    for (const s of live) n += s.countSince(t);
+    return n;
+  };
+  let lo = oldest; // count(lo) = total > budget
+  let hi = newest + 1; // count(hi) = 0 ≤ budget
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (count(mid) > budget) lo = mid;
+    else hi = mid;
+  }
+  for (const s of live) s.dropBefore(hi, now);
+  return hi;
+}
+

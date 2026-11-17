@@ -156,3 +156,35 @@ export function opsFromSplit(
   }
   return ops;
 }
+
+/** `격자로 정렬` 의 한 걸음 — 판(`key`)을 `ref` 판의 묶음 옆(`position`)으로 옮긴다 */
+export interface GridMove {
+  key: string;
+  ref: string;
+  position: 'center' | 'bottom' | 'right';
+}
+
+/**
+ * `격자로 정렬` — 판을 판 수에 맞게 고르게 나눈다(3개 3열, 4개 2×2, 6개 3×2, 9개 3×3 …).
+ *
+ * **판을 지우고 다시 넣지 않고 옮기기만 한다** — 다시 넣으면 차트가 다시 서서 받아 둔 점을 잃는다.
+ *   1. 모두 첫 판의 묶음으로 모은다
+ *   2. 줄마다 첫 판을 앞 줄 첫 판 **아래**로 — 줄이 선다
+ *   3. 줄 안의 나머지를 바로 앞 판 **오른쪽**으로
+ * 크기는 쪼갤 때마다 반씩이라 고르지 않다 — 옮긴 뒤 크기를 맞춘다(`cols`·`rows`).
+ */
+export function gridMoves(keys: readonly string[]): { moves: GridMove[]; cols: number; rows: number } {
+  const n = keys.length;
+  if (n <= 1) return { moves: [], cols: 1, rows: 1 };
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const moves: GridMove[] = keys.slice(1).map(key => ({ key, ref: keys[0], position: 'center' as const }));
+  for (let r = 1; r < rows; r++) moves.push({ key: keys[r * cols], ref: keys[(r - 1) * cols], position: 'bottom' });
+  for (let r = 0; r < rows; r++) {
+    for (let c = 1; c < cols; c++) {
+      const i = r * cols + c;
+      if (i < n) moves.push({ key: keys[i], ref: keys[i - 1], position: 'right' });
+    }
+  }
+  return { moves, cols, rows };
+}

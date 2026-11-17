@@ -44,6 +44,11 @@ pub struct AppConfig {
     /// 화면 쪽에서 1만~100만으로 자른다.
     #[serde(default = "default_buffer_max")]
     pub xlog_buffer_max: u32,
+    /// XLog 점 **앱 전체 예산** — 떠 있는 판들이 나눠 쓰고, 넘치면 판 상관없이 가장 오래된 점부터 버린다.
+    /// 기본 1,000,000(≈370MB). 화면이 10만~300만으로 자른다. 위 `xlog_buffer_max`(탭마다 상한)는 이것으로 바뀌어
+    /// 더 쓰지 않는다 — 뜻이 달라(탭당 → 전체) 값을 옮기지 않는다
+    #[serde(default = "default_point_budget")]
+    pub xlog_point_budget: u32,
     /// 트랜잭션 찾기(넓은 구간)로 모두 모을 최대 건수. 기본 300,000.
     /// 화면 쪽에서 1만~100만으로 자른다.
     #[serde(default = "default_wide_search_max")]
@@ -674,6 +679,10 @@ fn default_wide_search_max() -> u32 {
     300_000
 }
 
+fn default_point_budget() -> u32 {
+    1_000_000
+}
+
 fn default_buffer_max() -> u32 {
     // 화면 쪽 DEFAULT_MAX_ITEMS 와 같은 수여야 한다. 갈리면 설정 창이 «기본값» 이라고
     // 보여주는 값과 실제로 도는 값이 달라진다.
@@ -704,6 +713,7 @@ impl Default for AppConfig {
             sql_bind_inline: true,
             ui_font_scale: 1.0,
             xlog_buffer_max: default_buffer_max(),
+            xlog_point_budget: default_point_budget(),
             wide_search_max: default_wide_search_max(),
             cache_max_mb: default_cache_max_mb(),
             perf: PerfPrefs::default(),

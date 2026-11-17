@@ -28,6 +28,7 @@ function tab(index: number) {
     onRename,
     onDetach: vi.fn(),
     onPin: vi.fn(),
+    onArrange: vi.fn(),
   };
   const key = s.tabs[index].key;
   const props = { api: { id: key, title: labels[index] } } as unknown as IDockviewPanelHeaderProps;

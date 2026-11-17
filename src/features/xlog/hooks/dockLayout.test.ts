@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { SerializedDockview } from 'dockview-react';
-import { decodeDock, encodeDock, opsFromSplit } from './dockLayout';
+import { decodeDock, encodeDock, gridMoves, opsFromSplit } from './dockLayout';
 
 /** 판 둘을 좌우로, 오른쪽 묶음에 탭 둘 */
 function layout(a: string, b: string, c: string): SerializedDockview {
@@ -99,5 +99,30 @@ describe('opsFromSplit — 예전 분할을 판 배치로', () => {
       { key: 'b', position: { referencePanel: 'a', direction: 'within' }, inactive: true },
     ]);
     expect(opsFromSplit([], [], 'row', '')).toEqual([]);
+  });
+});
+
+describe('gridMoves — 격자로 정렬', () => {
+  it('하나면 할 일이 없다', () => {
+    expect(gridMoves(['a'])).toEqual({ moves: [], cols: 1, rows: 1 });
+  });
+
+  it('여섯이면 3×2 — 모으고, 줄 머리를 아래로, 나머지를 오른쪽으로', () => {
+    const g = gridMoves(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect([g.cols, g.rows]).toEqual([3, 2]);
+    expect(g.moves.filter(m => m.position === 'center')).toHaveLength(5);
+    expect(g.moves.filter(m => m.position === 'bottom')).toEqual([{ key: 'd', ref: 'a', position: 'bottom' }]);
+    expect(g.moves.filter(m => m.position === 'right')).toEqual([
+      { key: 'b', ref: 'a', position: 'right' },
+      { key: 'c', ref: 'b', position: 'right' },
+      { key: 'e', ref: 'd', position: 'right' },
+      { key: 'f', ref: 'e', position: 'right' },
+    ]);
+  });
+
+  it('다섯이면 3열 2줄 — 마지막 줄이 짧다', () => {
+    const g = gridMoves(['a', 'b', 'c', 'd', 'e']);
+    expect([g.cols, g.rows]).toEqual([3, 2]);
+    expect(g.moves.filter(m => m.position === 'right').map(m => m.key)).toEqual(['b', 'c', 'e']);
   });
 });

@@ -772,6 +772,8 @@ export interface AppConfig {
   auto_remove_inactive_min?: number;
   /** XLog 버퍼 최대 건수. 없으면 300,000 */
   xlog_buffer_max?: number;
+  /** XLog 점 앱 전체 예산 (판들이 나눠 쓴다). `xlog_buffer_max`(탭마다)를 대신한다 */
+  xlog_point_budget?: number;
   /** 트랜잭션 찾기로 모두 모을 최대 건수. 없으면 300,000 */
   wide_search_max?: number;
   /** 로컬 캐시 전체 상한(MB) — 콜렉터 여럿을 합친 것. 없으면 2048 */
