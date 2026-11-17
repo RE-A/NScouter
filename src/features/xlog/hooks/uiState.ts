@@ -16,7 +16,7 @@ import { PANE } from '../../../components/paneSizing';
 import type { GroupBy } from '../components/agentTree';
 import { normalizeColWidths, type XLogColWidths } from '../components/xlogColumns';
 import type { PatternRule, XLogChartConfig, XLogFilterState, YAxisMode } from '../types/xlog';
-import { initialTabs, MAX_PANES, MAX_XLOG_TABS, setRatio, type XLogTab, type XLogTabsState } from './xlogTabs';
+import { initialTabs, MAX_PANES, MAX_XLOG_TABS, PANEL_KINDS, setRatio, type PanelKind, type XLogTab, type XLogTabsState } from './xlogTabs';
 import type { XLogMode } from '../types/timeRange';
 import type { SerializedDockview } from 'dockview-react';
 import { decodeDock, encodeDock } from './dockLayout';
@@ -241,6 +241,8 @@ export function tabToPrefs(t: XLogTab): XLogTabPrefs {
     stime: t.pastRange?.stime ?? 0,
     etime: t.pastRange?.etime ?? 0,
     pinned: !!t.pinned,
+    ...(t.kind && t.kind !== 'xlog' ? { kind: t.kind } : {}),
+    ...(t.counter ? { counter: t.counter } : {}),
   };
 }
 
@@ -296,6 +298,9 @@ export function toTabs(
       filter: f.filter,
       selection: { services: new Set(services), hashes: new Set(legacy) },
       ...(row.pinned === true ? { pinned: true } : {}),
+      // 모르는 종류는 XLog 로 — 깨진 판으로 뜨는 것보다 낫다
+      ...(PANEL_KINDS.includes(tab.kind as PanelKind) && tab.kind !== 'xlog' ? { kind: tab.kind as PanelKind } : {}),
+      ...(typeof tab.counter === 'string' && tab.counter !== '' ? { counter: tab.counter } : {}),
     };
   });
   const out = withSplit({ ...base, tabs, activeKey: tabs[0].key, panes: [tabs[0].key] }, split);

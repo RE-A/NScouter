@@ -408,3 +408,23 @@ describe('트리 따라감 / 고정 저장', () => {
     expect(s.tabs.map(t => [...t.selection.services].join())).toEqual(['pay', 'order', 'pay']);
   });
 });
+
+describe('판 종류 저장', () => {
+  it('종류·카운터를 적고 되살린다. 모르는 종류는 XLog', () => {
+    const s = toTabs(
+      [
+        { stime: 0, etime: 0, pinned: false },
+        { stime: 0, etime: 0, pinned: false, kind: 'counter', counter: 'TPS' },
+        { stime: 0, etime: 0, pinned: false, kind: 'eq' },
+        { stime: 0, etime: 0, pinned: false, kind: 'zzz' },
+      ],
+      undefined,
+      undefined,
+    );
+    expect(s.tabs.map(t => t.kind ?? 'xlog')).toEqual(['xlog', 'counter', 'eq', 'xlog']);
+    expect(s.tabs[1].counter).toBe('TPS');
+    const back = fromTabs(s);
+    expect(back.map(p => p.kind)).toEqual([undefined, 'counter', 'eq', undefined]);
+    expect(back[1].counter).toBe('TPS');
+  });
+});

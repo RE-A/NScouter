@@ -29,6 +29,26 @@ import type { SerializedDockview } from 'dockview-react';
 import type { PastRange, XLogMode } from '../types/timeRange';
 import { EMPTY_SELECTION, type GroupSelection } from './groupSelection';
 
+/**
+ * 판 종류. 탭 하나가 판 하나이고, 판은 XLog 말고도 된다 — 원본 스카우터처럼 XLog·EQ·카운터를 한 화면에.
+ * 대상(고르기·트리 따라감/고정)·이름·배치는 종류와 상관없이 같다. XLog 전용 칸(모드·구간·차트 설정·거름)은
+ * XLog 판만 쓴다 — 다른 판에서는 `filter.objHashSet`(풀린 해시)만 쓴다.
+ */
+export type PanelKind = 'xlog' | 'counter' | 'eq' | 'active' | 'summary' | 'serviceGroup' | 'alert';
+
+export const PANEL_KINDS: readonly PanelKind[] = ['xlog', 'counter', 'eq', 'active', 'summary', 'serviceGroup', 'alert'];
+
+/** 판 종류 이름 — 탭 이름의 기본값 */
+export const PANEL_KIND_LABEL: Record<PanelKind, string> = {
+  xlog: 'XLog',
+  counter: '카운터',
+  eq: 'Active Service EQ',
+  active: 'Active 목록',
+  summary: '요약',
+  serviceGroup: '서비스 그룹',
+  alert: 'Alert',
+};
+
 /** 탭 하나가 쥐는 것 */
 export interface XLogTab {
   /** 탭 식별자. 제목은 바뀌어도 이건 안 바뀐다 */
@@ -47,6 +67,15 @@ export interface XLogTab {
    * 원본 스카우터의 «대상이 박힌 창»(`XLog - PRD-FSCPS`) 이 고정 판이다.
    */
   pinned?: boolean;
+  /** 판 종류. 없으면 XLog (이 칸이 생기기 전 탭은 모두 XLog 다) */
+  kind?: PanelKind;
+  /** (카운터 판) 그릴 카운터 — counters.xml 표기 그대로 (`TPS`, `ElapsedTime` …) */
+  counter?: string;
+}
+
+/** 판 종류 — 없으면 XLog */
+export function kindOf(tab: XLogTab): PanelKind {
+  return tab.kind ?? 'xlog';
 }
 
 /** 두 판을 놓는 방향. `row` 는 좌우, `column` 은 위아래. 셋 이상은 2×2 격자다 */
@@ -121,6 +150,9 @@ export function tabTitle(tab: XLogTab): string {
 }
 
 function autoTitle(tab: XLogTab): string {
+  const kind = kindOf(tab);
+  if (kind === 'counter') return tab.counter ? (counterLabel?.(tab.counter) ?? tab.counter) : PANEL_KIND_LABEL.counter;
+  if (kind !== 'xlog') return PANEL_KIND_LABEL[kind];
   if (tab.mode === 'live') return '실시간';
   if (!tab.pastRange) return '과거';
 
@@ -343,5 +375,36 @@ export function setPinned(s: XLogTabsState, key: string, pinned: boolean): XLogT
       return shared ? { ...rest, selection: shared } : rest;
     }),
   };
+}
+
+// ─── XLog 말고 다른 판 ─────────────────────────────────────────
+
+/** 카운터 이름 → 표시명. 화면이 심는다(`counterMeta`) — 이 파일이 카운터 표를 몰라도 되게 */
+let counterLabel: ((name: string) => string) | null = null;
+export function setCounterLabel(fn: (name: string) => string): void {
+  counterLabel = fn;
+}
+
+/**
+ * 판을 하나 연다 — XLog 가 아닌 것도. 대상은 **따라감**으로 시작한다(따라감 판들의 고르기를 받는다 —
+ * 따라감 판이 없으면 지금 판의 것). 지금 판 옆(같은 묶음)에 열리고 지금 판이 된다.
+ */
+export function addPanel(s: XLogTabsState, kind: PanelKind, counter?: string): XLogTabsState {
+  if (s.tabs.length >= MAX_XLOG_TABS) return s;
+  const sel = linkedSelection(s) ?? activeTab(s).selection;
+  const tab: XLogTab = {
+    key: nextKey(),
+    mode: 'live',
+    pastRange: null,
+    config: DEFAULT_CHART_CONFIG,
+    filter: DEFAULT_FILTER,
+    selection: sel,
+    ...(kind === 'xlog' ? {} : { kind }),
+    ...(kind === 'counter' && counter ? { counter } : {}),
+  };
+  const at = s.tabs.findIndex(t => t.key === s.activeKey);
+  const tabs = [...s.tabs];
+  tabs.splice(at < 0 ? tabs.length : at + 1, 0, tab);
+  return { ...s, tabs, activeKey: tab.key, panes: s.panes.map(k => (k === s.activeKey ? tab.key : k)) };
 }
 

@@ -1300,4 +1300,13 @@ export const EN: Record<string, string> = {
   '점 예산': 'Point budget',
   '건(모든 판 합계, 화면 필터 이전) — 오래된 점부터 지웁니다. 판이나 서버를 줄이거나 설정에서 예산을 올리면 더 남습니다': ' points (all panes together, before display filters) — oldest points are removed. Fewer panes or servers, or a higher budget in settings, keeps more',
   '탭 추가': 'Add tab',
+  'Active 목록': 'Active list',
+  '카운터': 'Counter',
+  '지금 판 복제': 'duplicate this pane',
+  '판 추가 — XLog(지금 판 복제) · EQ · Active · 카운터 …': 'Add pane — XLog (duplicate) · EQ · Active · counters …',
+  '새 창으로는 XLog 판만 뗍니다': 'Only XLog panes can be moved to a new window',
+  '지금 판': 'Current pane',
+  'XLog 조건(모드·구간·거름)은 XLog 판을 누르면 여기 나옵니다': 'XLog conditions (mode, range, filters) appear here when you click an XLog pane',
+  '이 판을 그리지 못했습니다': 'Could not draw this pane',
+  '다시 그리기': 'Redraw',
 };

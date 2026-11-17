@@ -27,7 +27,8 @@ import {
   type SerializedDockview,
 } from 'dockview-react';
 import { ContextMenu } from '../../../components/ContextMenu';
-import { MAX_XLOG_TABS, type SplitDir, type XLogTab } from '../hooks/xlogTabs';
+import { PanelErrorBoundary } from '../../../components/PanelErrorBoundary';
+import { kindOf, MAX_XLOG_TABS, PANEL_KIND_LABEL, type PanelKind, type SplitDir, type XLogTab } from '../hooks/xlogTabs';
 import { gridMoves, opsFromSplit } from '../hooks/dockLayout';
 import { t } from '../../../i18n';
 
@@ -65,6 +66,10 @@ interface XLogDockProps {
   onSendToMain?: (key: string) => void;
   /** 판을 고정(📌)하거나 트리 따라감(🔗)으로 푼다 */
   onPin: (key: string, pinned: boolean) => void;
+  /** `+` 메뉴로 판을 연다 — XLog 는 지금 판 복제, 나머지는 그 종류 */
+  onAddPanel: (kind: PanelKind, counter?: string) => void;
+  /** `+` 메뉴의 카운터 목록 */
+  counterChoices: readonly { name: string; label: string }[];
   /** 배치가 바뀌었다 (판 이름 = 탭 키) */
   onLayoutChange: (dock: SerializedDockview) => void;
   /** 보이는 판들 — 판 묶음의 앞 탭들 */
@@ -89,6 +94,13 @@ export interface DockCtx {
   onPin: (key: string, pinned: boolean) => void;
   /** 판을 모두 격자로 다시 나눈다 */
   onArrange: () => void;
+  onAddPanel: (fromKey: string, kind: PanelKind, counter?: string) => void;
+  counterChoices: readonly { name: string; label: string }[];
+}
+
+/** 새 창으로 뗄 수 있는 판 — XLog 만. 카운터 스트림은 메인 창에만 돈다 */
+function detachable(ctx: DockCtx, key: string): boolean {
+  return ctx.canDetach && kindOf(ctx.tabs.get(key) ?? ({} as XLogTab)) === 'xlog';
 }
 
 export const DockContext = createContext<DockCtx | null>(null);
@@ -115,7 +127,8 @@ function PanelBody({ api }: IDockviewPanelProps) {
       // 지금 판이 바뀌어 있어야, 고른 점이 그 판의 목록으로 간다 (예전 `XLogSplit` 과 같다)
       onMouseDownCapture={() => ctx.onActivate(api.id)}
     >
-      {ctx.renderTab(tab, visible, visible ? ctx.slotOf(api.id) : null)}
+      {/* 판 하나가 넘어져도 앱 전체가 내려가지 않게 */}
+      <PanelErrorBoundary>{ctx.renderTab(tab, visible, visible ? ctx.slotOf(api.id) : null)}</PanelErrorBoundary>
     </div>
   );
 }
@@ -214,7 +227,11 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
               {
                 label: t('새 창으로 떼기'),
                 onSelect: () => ctx.onDetach(api.id),
-                disabled: ctx.canDetach ? undefined : t('이 창에 탭이 하나는 남아야 합니다'),
+                disabled: !ctx.canDetach
+                  ? t('이 창에 탭이 하나는 남아야 합니다')
+                  : detachable(ctx, api.id)
+                    ? undefined
+                    : t('새 창으로는 XLog 판만 뗍니다'),
               },
               ...(ctx.onSendToMain
                 ? [{ label: t('메인 창으로 보내기'), onSelect: () => ctx.onSendToMain?.(api.id) }]
@@ -240,22 +257,42 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
 function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
   const ctx = useDock();
   const key = activePanel?.id;
+  /** `+` 메뉴 — 원본 스카우터의 오른쪽 클릭 메뉴처럼 무엇을 띄울지 고른다 */
+  const [menu, setMenu] = useState<ScreenPoint | null>(null);
+  const others: PanelKind[] = ['eq', 'active', 'summary', 'serviceGroup', 'alert'];
   return (
     <div className="flex h-full items-center pl-1">
       <button
         type="button"
         aria-label={t('탭 추가')}
         disabled={ctx.full || key === undefined}
-        onClick={() => key && ctx.onAdd(key)}
-        title={
-          ctx.full
-            ? t('탭은 최대 16개입니다')
-            : t('지금 조건을 복제해 탭을 하나 더 엽니다 — 날짜만 바꿔 견주는 데 씁니다')
-        }
+        onClick={e => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.left, y: r.bottom + 2 });
+        }}
+        title={ctx.full ? t('탭은 최대 16개입니다') : t('판 추가 — XLog(지금 판 복제) · EQ · Active · 카운터 …')}
         className="btn-ghost px-1.5 py-0.5 text-micro"
       >
         +
       </button>
+      {menu &&
+        key &&
+        createPortal(
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            onClose={() => setMenu(null)}
+            items={[
+              { label: `XLog — ${t('지금 판 복제')}`, onSelect: () => ctx.onAddPanel(key, 'xlog') },
+              ...others.map(k => ({ label: t(PANEL_KIND_LABEL[k]), onSelect: () => ctx.onAddPanel(key, k) })),
+              ...ctx.counterChoices.map(c => ({
+                label: `${t('카운터')} · ${t(c.label)}`,
+                onSelect: () => ctx.onAddPanel(key, 'counter', c.name),
+              })),
+            ]}
+          />,
+          document.body,
+        )}
       <button
         type="button"
         onClick={ctx.onArrange}
@@ -312,9 +349,15 @@ function GroupActions({ activePanel, group, api }: IDockviewHeaderActionsProps) 
       {key && (
         <button
           type="button"
-          disabled={!ctx.canDetach}
+          disabled={!detachable(ctx, key)}
           onClick={() => ctx.onDetach(key)}
-          title={ctx.canDetach ? t('이 판을 새 창으로 뗍니다 — 다른 모니터에 띄울 때') : t('이 창에 탭이 하나는 남아야 합니다')}
+          title={
+            detachable(ctx, key)
+              ? t('이 판을 새 창으로 뗍니다 — 다른 모니터에 띄울 때')
+              : ctx.canDetach
+                ? t('새 창으로는 XLog 판만 뗍니다')
+                : t('이 창에 탭이 하나는 남아야 합니다')
+          }
           aria-label={`${ctx.labels.get(key) ?? ''} ${t('새 창으로 떼기')}`}
           className="flex h-5 w-5 items-center justify-center rounded text-fg-faint hover:bg-hover hover:text-fg disabled:opacity-40"
         >
@@ -544,8 +587,15 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
       onSendToMain,
       onPin,
       onArrange: arrange,
+      onAddPanel: (fromKey: string, kind: PanelKind, counter?: string) => {
+        // 누른 묶음의 앞 탭을 먼저 지금 탭으로 — 새 판은 그 옆(같은 묶음)에 열린다
+        if (fromKey !== propsRef.current.activeKey) onActivate(fromKey);
+        lastActiveRef.current = fromKey;
+        propsRef.current.onAddPanel(kind, counter);
+      },
+      counterChoices: props.counterChoices,
     }),
-    [tabMap, labelMap, renderTab, slotOf, setSlot, tabs.length, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain, onPin, arrange],
+    [tabMap, labelMap, renderTab, slotOf, setSlot, tabs.length, onActivate, onClose, onAdd, onRename, onDetach, onSendToMain, onPin, arrange, props.counterChoices],
   );
 
   return (

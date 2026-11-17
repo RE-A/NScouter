@@ -901,6 +901,10 @@ export interface XLogTabPrefs {
   etime?: number;
   /** 대상 고정(📌). 없으면 이 칸이 생기기 전 파일 — 고르기를 보고 정한다(`toTabs`) */
   pinned?: boolean;
+  /** 판 종류. 없으면 XLog (`PanelKind`) */
+  kind?: string;
+  /** (카운터 판) 그릴 카운터 이름 */
+  counter?: string;
 }
 
 export interface XLogChartPrefs {

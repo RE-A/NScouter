@@ -586,6 +586,12 @@ pub struct XLogTabPrefs {
     /// 대상 고정(📌). **없으면 이 칸이 생기기 전 파일**이다 — 화면이 고르기를 보고 따라감/고정을 정한다
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned: Option<bool>,
+    /// 판 종류(`xlog`·`counter`·`eq` …). 없으면 XLog — 화면이 모르는 값도 XLog 로 읽는다
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// (카운터 판) 그릴 카운터 이름
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counter: Option<String>,
 }
 
 impl Default for XLogFilterPrefs {

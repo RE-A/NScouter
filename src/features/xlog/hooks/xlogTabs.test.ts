@@ -27,6 +27,9 @@ import {
   setPinned,
   setSelection,
   linkedSelection,
+  addPanel,
+  kindOf,
+  setCounterLabel,
   tabLabels,
   tabTitle,
 } from './xlogTabs';
@@ -396,6 +399,37 @@ describe('트리 따라감 / 고정', () => {
     const base = initialTabs();
     expect(addTab(setPinned(base, base.activeKey, true)).tabs.map(t => !!t.pinned)).toEqual([true, true]);
     expect(addTab(initialTabs()).tabs.map(t => !!t.pinned)).toEqual([false, false]);
+  });
+});
+
+describe('XLog 말고 다른 판', () => {
+  const sel = (...names: string[]) => ({ services: new Set(names), hashes: new Set<number>() });
+
+  it('따라감 고르기를 받아 지금 판 옆에 열고 지금 판이 된다', () => {
+    let s = setSelection(initialTabs(), sel('pay'));
+    s = addPanel(s, 'eq');
+    expect(s.tabs.map(kindOf)).toEqual(['xlog', 'eq']);
+    expect(s.activeKey).toBe(s.tabs[1].key);
+    expect([...s.tabs[1].selection.services]).toEqual(['pay']);
+    expect(s.tabs[1].pinned).toBeUndefined();
+  });
+
+  it('따라감이라 트리를 고치면 XLog 판과 함께 바뀐다', () => {
+    let s = addPanel(initialTabs(), 'counter', 'TPS');
+    s = setSelection(s, sel('order'));
+    expect(s.tabs.every(t => [...t.selection.services].join() === 'order')).toBe(true);
+  });
+
+  it('이름은 종류에서 — 카운터는 카운터 표시명', () => {
+    setCounterLabel(n => (n === 'TPS' ? 'TPS (건/초)' : n));
+    const s = addPanel(addPanel(initialTabs(), 'counter', 'TPS'), 'alert');
+    expect(tabLabels(s.tabs)).toEqual(['실시간', 'TPS (건/초)', 'Alert']);
+  });
+
+  it('상한을 넘기면 더 안 연다', () => {
+    let s = initialTabs();
+    for (let i = 0; i < MAX_XLOG_TABS + 2; i++) s = addPanel(s, 'eq');
+    expect(s.tabs).toHaveLength(MAX_XLOG_TABS);
   });
 });
 

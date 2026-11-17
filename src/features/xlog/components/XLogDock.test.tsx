@@ -29,6 +29,8 @@ function tab(index: number) {
     onDetach: vi.fn(),
     onPin: vi.fn(),
     onArrange: vi.fn(),
+    onAddPanel: vi.fn(),
+    counterChoices: [],
   };
   const key = s.tabs[index].key;
   const props = { api: { id: key, title: labels[index] } } as unknown as IDockviewPanelHeaderProps;
