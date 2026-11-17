@@ -21,7 +21,7 @@ import {
   type GraphNode,
   type NodeLayer,
 } from './topologyGraph';
-import { CANVAS } from '../../../styles/tokens';
+import { CANVAS, canvasFont } from '../../../styles/tokens';
 import { useThemeEpoch } from '../../../styles/useThemeEpoch';
 import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
@@ -324,7 +324,7 @@ function drawTopology(
     }
     // 층 이름
     ctx.fillStyle = CANVAS.textDim;
-    ctx.font = '10px sans-serif';
+    ctx.font = canvasFont(11, 'sans');
     ctx.textAlign = 'left';
     ctx.fillText(t(LAYER_LABEL[layer]), colX[layer], 16);
   }
@@ -364,7 +364,7 @@ function drawTopology(
       const avg = avgElapsed(e);
       const text = avg === null ? `${e.count.toLocaleString()}` : `${e.count.toLocaleString()} · ${avg}ms`;
       ctx.fillStyle = CANVAS.textMuted;
-      ctx.font = '9px monospace';
+      ctx.font = canvasFont(10);
       ctx.textAlign = 'center';
       ctx.fillText(text, mid, (y1 + y2) / 2 - 4);
       ctx.textAlign = 'left';
@@ -389,7 +389,7 @@ function drawTopology(
     ctx.stroke();
 
     ctx.fillStyle = n.layer === 'agent' ? CANVAS.accent : CANVAS.textMuted;
-    ctx.font = n.layer === 'agent' ? 'bold 11px sans-serif' : '11px sans-serif';
+    ctx.font = canvasFont(12, 'sans', n.layer === 'agent' ? 'bold' : '');
     ctx.textAlign = 'left';
     ctx.fillText(fit(ctx, name, NODE_W - 14), p.x + 7, p.y + 15);
 
@@ -397,7 +397,7 @@ function drawTopology(
     // «적게 불리는데 한 번이 비싼 곳» 이고, 그건 평균이 있어야 보인다.
     const avg = avgElapsed(n);
     ctx.fillStyle = CANVAS.textDim;
-    ctx.font = '9px monospace';
+    ctx.font = canvasFont(10);
     ctx.fillText(
       avg === null ? n.calls.toLocaleString() : `${n.calls.toLocaleString()} · ${avg}ms`,
       p.x + 7,

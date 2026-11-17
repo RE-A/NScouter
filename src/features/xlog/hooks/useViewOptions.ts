@@ -13,6 +13,7 @@ import { DEFAULT_PERF } from '../api/perfDefaults';
 import { setPastParallel } from '../api/pastXLog';
 import { setLang, toLang, type Lang } from '../../../i18n';
 import { applyTheme, toTheme, DEFAULT_THEME, type ThemeId } from '../../../styles/theme';
+import { setCanvasFontScale } from '../../../styles/tokens';
 import { DEFAULT_GROUP_RULE, type GroupRule } from '../components/instanceGroup';
 import { clampMaxItems, DEFAULT_MAX_ITEMS } from '../store/XLogDataStore';
 
@@ -92,6 +93,8 @@ const listeners = new Set<(v: ViewOptions) => void>();
 
 function emit(): void {
   applyFontScale(current.fontScale);
+  // Canvas 는 `--fs-scale` 을 못 읽는다 — 숫자로 심는다. 다시 그리기는 바로 아래 applyTheme 이 알린다
+  setCanvasFontScale(current.fontScale);
   // 테마는 **문서 뿌리에 걸고 Canvas 색까지 갈아 끼우는 일**이라 한 자리에서 부른다.
   applyTheme(current.theme);
   // t() 는 모듈 함수라 여기서 언어를 심어 둔다. 컴포넌트마다 넘기면 빠뜨리는 자리가 생긴다.

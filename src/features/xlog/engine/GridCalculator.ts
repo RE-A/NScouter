@@ -39,9 +39,11 @@ export class GridCalculator {
     startTime: number,
     endTime: number,
     plotWidth: number,
+    /** 눈금 사이 최소 폭(같은 좌표 단위). 글자가 커지면 같이 넓힌다 */
+    minGap = 100,
   ): GridInfo {
     const rangeMs = endTime - startTime;
-    const desiredTicks = Math.max(3, Math.floor(plotWidth / 100));
+    const desiredTicks = Math.max(3, Math.floor(plotWidth / minGap));
     const interval = GridCalculator.calcNiceInterval(rangeMs, desiredTicks);
 
     const lines: GridLine[] = [];
@@ -77,9 +79,11 @@ export class GridCalculator {
     minValue: number,
     maxValue: number,
     plotHeight: number,
+    /** 눈금 사이 최소 높이(같은 좌표 단위) */
+    minGap = 60,
   ): GridInfo {
     const range = maxValue - minValue;
-    const desiredTicks = Math.max(3, Math.floor(plotHeight / 60));
+    const desiredTicks = Math.max(3, Math.floor(plotHeight / minGap));
     const interval = GridCalculator.calcNiceInterval(range, desiredTicks);
 
     const lines: GridLine[] = [];

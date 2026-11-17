@@ -13,7 +13,7 @@ import { passesFilter, selectInRect } from './rectSelect';
 import { clampToCeiling } from './yScale';
 import type { StreamStatus } from '../utils/streamStatus';
 // Canvas 는 var() 를 못 읽으므로 실제 색 상수를 쓴다.
-import { CANVAS } from '../../../styles/tokens';
+import { CANVAS, canvasFontScale } from '../../../styles/tokens';
 import type { ChartLayout, SXLog, XLogChartConfig, XLogFilterState } from '../types/xlog';
 import { buildLayout, Y_AXIS_CONFIGS } from '../types/xlog';
 import { getDotColor, XLOG_COLORS, XLOG_PLATE } from '../utils/colorPalette';
@@ -77,6 +77,8 @@ export class XLogChartRenderer {
    * 같은 자리에 겹쳐 색만 진해질 뿐 «몇 배인지» 는 여전히 안 보인다. 그래서 센다.
    * 프레임마다 새로 만들지 않고 크기가 바뀔 때만 다시 잡는다.
    */
+  /** 글자·여백 배율 = 화면 배율 × 글자 배율 (`textUnit`). 바뀌면 여백을 다시 잡는다 */
+  private unit = 1;
   private density = new Int32Array(0);
   private densityCols = 0;
   private densityRows = 0;
@@ -84,7 +86,8 @@ export class XLogChartRenderer {
   constructor(canvas: HTMLCanvasElement, config: XLogChartConfig) {
     this.ctx = canvas.getContext('2d')!;
     this.config = config;
-    this.layout = buildLayout(canvas.width, canvas.height);
+    this.unit = textUnit();
+    this.layout = buildLayout(canvas.width, canvas.height, this.unit);
     this.pointMap = new PointMap(canvas.width, canvas.height);
   }
 
@@ -93,7 +96,8 @@ export class XLogChartRenderer {
   }
 
   resize(width: number, height: number): void {
-    this.layout = buildLayout(width, height);
+    this.unit = textUnit();
+    this.layout = buildLayout(width, height, this.unit);
     this.pointMap = new PointMap(width, height);
     this.allocDensity();
   }
@@ -122,6 +126,9 @@ export class XLogChartRenderer {
     selection: SelectionRect | null,
     status?: StreamStatus,
   ): void {
+    // 글자 배율·화면 배율이 바뀌었으면 여백부터 다시 잡는다(설정을 바꾸거나 모니터를 옮긴 뒤)
+    const unit = textUnit();
+    if (unit !== this.unit) this.resize(this.layout.canvasWidth, this.layout.canvasHeight);
     this.effectiveYMax = this.config.yMax;
     const mapper = new CoordinateMapper(this.layout, this.config, window);
     this.lastMapper = mapper;
@@ -169,14 +176,14 @@ export class XLogChartRenderer {
   /** 3단계: Y축 그리드 */
   private drawYGrid(): void {
     const { plotAreaX, plotAreaY, plotAreaWidth, plotAreaHeight } = this.layout;
-    const grid = GridCalculator.calcValueGrid(0, this.effectiveYMax, plotAreaHeight);
+    const grid = GridCalculator.calcValueGrid(0, this.effectiveYMax, plotAreaHeight, 60 * this.unit);
 
     this.ctx.save();
     this.ctx.strokeStyle = XLOG_COLORS.GRID;
     this.ctx.lineWidth = 1;
     this.ctx.setLineDash([2, 3]);
     this.ctx.fillStyle = XLOG_COLORS.META_TEXT;
-    this.ctx.font = '11px monospace';
+    this.ctx.font = this.font(12);
     this.ctx.textAlign = 'right';
     this.ctx.textBaseline = 'middle';
 
@@ -186,7 +193,7 @@ export class XLogChartRenderer {
       this.ctx.moveTo(plotAreaX, py);
       this.ctx.lineTo(plotAreaX + plotAreaWidth, py);
       this.ctx.stroke();
-      this.ctx.fillText(line.label, plotAreaX - 5, py);
+      this.ctx.fillText(line.label, plotAreaX - 5 * this.unit, py);
     }
 
     this.ctx.restore();
@@ -199,6 +206,7 @@ export class XLogChartRenderer {
       mapper.getStartTime(),
       mapper.getEndTime(),
       plotAreaWidth,
+      100 * this.unit,
     );
 
     this.ctx.save();
@@ -206,7 +214,7 @@ export class XLogChartRenderer {
     this.ctx.lineWidth = 1;
     this.ctx.setLineDash([2, 3]);
     this.ctx.fillStyle = XLOG_COLORS.META_TEXT;
-    this.ctx.font = '10px monospace';
+    this.ctx.font = this.font(12);
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'top';
 
@@ -221,7 +229,7 @@ export class XLogChartRenderer {
       // 글자만 안으로 당긴다 — 눈금선은 제자리다.
       const half = this.ctx.measureText(line.label).width / 2;
       const lx = Math.min(px, canvasWidth - half - 2);
-      this.ctx.fillText(line.label, lx, plotAreaY + plotAreaHeight + 4);
+      this.ctx.fillText(line.label, lx, plotAreaY + plotAreaHeight + 4 * this.unit);
     }
 
     this.ctx.restore();
@@ -376,7 +384,7 @@ export class XLogChartRenderer {
 
     this.ctx.save();
     this.ctx.fillStyle = XLOG_COLORS.META_TEXT;
-    this.ctx.font = '11px monospace';
+    this.ctx.font = this.font(12);
     this.ctx.textBaseline = 'top';
 
     this.ctx.textAlign = 'left';
@@ -387,7 +395,8 @@ export class XLogChartRenderer {
     if (this.hiddenCount > 0) {
       head += `  (${this.hiddenCount.toLocaleString()} 겹침)`;
     }
-    this.ctx.fillText(head, plotAreaX + 4, plotAreaY + 4);
+    const pad = 4 * this.unit;
+    this.ctx.fillText(head, plotAreaX + pad, plotAreaY + pad);
 
     // 천장에 붙은 점이 있으면 **그 줄이 축 밖이라는 것**을 보여 준다.
     //
@@ -402,15 +411,15 @@ export class XLogChartRenderer {
       this.ctx.fillStyle = CANVAS.warn;
       this.ctx.fillText(
         `▲ ${this.overflowCount.toLocaleString()} (축 위)`,
-        plotAreaX + 4 + this.ctx.measureText(`${head}  `).width,
-        plotAreaY + 4,
+        plotAreaX + pad + this.ctx.measureText(`${head}  `).width,
+        plotAreaY + pad,
       );
       this.ctx.fillStyle = XLOG_COLORS.META_TEXT;
     }
 
     this.ctx.textAlign = 'right';
     const { plotAreaWidth } = this.layout;
-    this.ctx.fillText(modeLabel, plotAreaX + plotAreaWidth - 4, plotAreaY + 4);
+    this.ctx.fillText(modeLabel, plotAreaX + plotAreaWidth - pad, plotAreaY + pad);
 
     // 비어 있을 때 **왜** 비었는지 알려준다.
     // "0 dots" 만 보면 고장인지 데이터가 없는 건지 알 수 없다.
@@ -418,7 +427,7 @@ export class XLogChartRenderer {
       const { plotAreaHeight } = this.layout;
       this.ctx.textAlign = 'center';
       this.ctx.textBaseline = 'middle';
-      this.ctx.font = '13px sans-serif';
+      this.ctx.font = this.font(14, 'sans');
       this.ctx.fillStyle = status.kind === 'stale' ? CANVAS.error : CANVAS.textDim;
       this.ctx.fillText(
         status.message,
@@ -447,6 +456,11 @@ export class XLogChartRenderer {
   }
 
   /** 서비스명 필터가 읽을 사전을 꽂는다 */
+  /** 글꼴 — `px` 는 배율 1 일 때의 CSS px. 장치 px 로 그리므로 `unit` 을 곱한다 */
+  private font(px: number, family: 'mono' | 'sans' = 'mono'): string {
+    return `${Math.round(px * this.unit * 10) / 10}px ${family === 'mono' ? 'monospace' : 'sans-serif'}`;
+  }
+
   setServiceNameResolver(fn: (hash: number) => string | undefined): void {
     this.serviceName = fn;
   }
@@ -497,4 +511,10 @@ export class XLogChartRenderer {
   dispose(): void {
     this.dotCache.clear();
   }
+}
+
+/** 글자·여백에 곱할 값 — 장치 px 로 그리므로 화면 배율 × 글자 배율 */
+function textUnit(): number {
+  const dpr = typeof window !== 'undefined' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+  return dpr * canvasFontScale();
 }

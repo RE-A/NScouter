@@ -17,8 +17,8 @@ export type ThemeId = 'dark' | 'light' | 'slate' | 'warm' | 'contrast';
  * 색 이름을 적어 두면 골라 보기 전에는 뜻이 없다.
  */
 export const THEMES: ReadonlyArray<{ id: ThemeId; label: string; hint: string }> = [
-  { id: 'dark', label: '다크', hint: '기본. 어두운 보랏빛' },
-  { id: 'light', label: '라이트', hint: '밝은 사무실·문서 캡처용' },
+  { id: 'light', label: '라이트', hint: '기본. 밝은 사무실·문서 캡처용' },
+  { id: 'dark', label: '다크', hint: '어두운 보랏빛' },
   { id: 'slate', label: '슬레이트', hint: '중립 회색. 색으로 떠들지 않아 위험만 눈에 띈다' },
   { id: 'warm', label: '웜', hint: '푸른빛을 뺀 갈색조. 야간 당직용' },
   { id: 'contrast', label: '고대비', hint: '순흑 바탕. 상황실·벽면 모니터용' },

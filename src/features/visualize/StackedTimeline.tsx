@@ -9,7 +9,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { counterMeta } from '../xlog/types/counter';
-import { CANVAS } from '../../styles/tokens';
+import { CANVAS, canvasFont } from '../../styles/tokens';
 import { getAgentColor } from '../xlog/utils/colorPalette';
 import { useThemeEpoch } from '../../styles/useThemeEpoch';
 import { t } from '../../i18n';
@@ -32,8 +32,8 @@ import type { CounterRow } from './usePastCounters';
 const ROW_PAD = 6;
 /** 왼쪽 이름·눈금 자리 */
 const LABEL_W = 92;
-/** 아래 시각 눈금 자리 */
-const AXIS_H = 18;
+/** 아래 시각 눈금 자리 — 눈금 글자(11px)가 들어갈 만큼 */
+const AXIS_H = 20;
 /** 줄 하나의 높이 */
 const ROW_H = 62;
 
@@ -101,7 +101,7 @@ export const StackedTimeline = memo(function StackedTimeline({
       const ticks = timeTicks(r, plotW);
       ctx.strokeStyle = CANVAS.border;
       ctx.lineWidth = 1;
-      ctx.font = '9px monospace';
+      ctx.font = canvasFont(11);
       for (const tick of ticks) {
         const x = Math.round(timeToX(tick, r, plotX, plotW)) + 0.5;
         ctx.beginPath();
@@ -130,17 +130,17 @@ export const StackedTimeline = memo(function StackedTimeline({
         // 이름과 축 위쪽 값
         ctx.textAlign = 'left';
         ctx.fillStyle = CANVAS.textMuted;
-        ctx.font = '10px sans-serif';
+        ctx.font = canvasFont(12, 'sans');
         ctx.fillText(meta.disp, 6, box.y + 13);
         ctx.fillStyle = CANVAS.textDim;
-        ctx.font = '9px monospace';
+        ctx.font = canvasFont(11);
         ctx.fillText(`${formatKpi(max, max < 10 ? 1 : 0)}${meta.unit}`, 6, box.y + 26);
 
         if (row.series.length === 0) {
           // **«안 물었다» 와 «물었는데 없다» 를 가른다.** 지표 줄의 타일과 같은 말을
           // 써야 두 화면이 같은 상황을 두 가지로 설명하지 않는다.
           ctx.fillStyle = CANVAS.textDim;
-          ctx.font = '10px sans-serif';
+          ctx.font = canvasFont(12, 'sans');
           ctx.fillText(
             row.asked ? t('이 구간에 값이 없습니다') : t('이 지표를 주는 서버를 안 골랐습니다'),
             plotX + 6,
@@ -183,7 +183,7 @@ export const StackedTimeline = memo(function StackedTimeline({
             text += `${text ? '  ' : ''}${name} ${formatKpi(s.values[idx], max < 10 ? 2 : 0)}`;
           }
           if (text) {
-            ctx.font = '9px monospace';
+            ctx.font = canvasFont(11);
             ctx.textAlign = 'left';
             const tw = ctx.measureText(text).width;
             // 오른쪽 끝에서는 글자가 화면 밖으로 나간다. 그때만 왼쪽으로 뒤집는다.
@@ -210,7 +210,7 @@ export const StackedTimeline = memo(function StackedTimeline({
 
         if (hoverT !== null) {
           const label = hhmm(hoverT);
-          ctx.font = '9px monospace';
+          ctx.font = canvasFont(11);
           ctx.textAlign = 'center';
           const tw = ctx.measureText(label).width;
           ctx.fillStyle = CANVAS.accent;

@@ -162,3 +162,30 @@ export function refreshCanvasTokens(): void {
     if (v !== '') SERIES[i] = v;
   }
 }
+
+/**
+ * Canvas 글자 배율 — 설정 «글자 크기»(`--fs-scale`). CSS 는 `calc()` 로 따라가지만 Canvas 는 `ctx.font` 에
+ * 숫자를 적으므로 따로 들고 있는다(`useViewOptions` 가 심는다). 바뀌면 차트가 다시 그린다(`repaintCharts`).
+ */
+let canvasScale = 1;
+
+export function setCanvasFontScale(v: number): void {
+  canvasScale = Number.isFinite(v) && v > 0 ? v : 1;
+}
+
+export function canvasFontScale(): number {
+  return canvasScale;
+}
+
+/**
+ * Canvas 글꼴 문자열 — 글자 크기 배율을 곱한다.
+ *
+ * @param px   배율 1 일 때의 CSS px
+ * @param unit Canvas 좌표 1 이 CSS px 몇 개인가. **XLog 차트는 장치 px 로 그린다**(`ctx.scale` 없이
+ *             `canvas.width = css × devicePixelRatio`) — 그쪽은 `devicePixelRatio` 를 넘긴다. 안 넘기면
+ *             Windows 150% 에서 `11px` 가 실제로 7px 남짓이 된다.
+ */
+export function canvasFont(px: number, family: 'mono' | 'sans' = 'mono', weight = '', unit = 1): string {
+  const size = Math.round(px * canvasScale * unit * 10) / 10;
+  return `${weight ? `${weight} ` : ''}${size}px ${family === 'mono' ? 'monospace' : 'sans-serif'}`;
+}

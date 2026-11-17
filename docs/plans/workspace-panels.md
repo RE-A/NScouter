@@ -223,7 +223,8 @@ type Target =
 
 ## 11. 보기
 
-- **흰 테마를 기본**으로. 저장된 설정이 있는 PC 는 이번 이행 때 한 번만 흰색으로 돌린다(되돌리기 안내).
+- **흰 테마를 기본**으로 (새로 설치한 PC). 이미 고른 테마는 그대로 둔다. — P0 에서 함.
+- **XLog 차트는 장치 px 로 그린다** — 글자·여백에 `devicePixelRatio` 를 곱하지 않아 Windows 150% 에서 11px 글자가 7px 남짓이 됐다. 피드백 이미지의 «시간이 안 보인다» 의 주된 까닭. — P0 에서 고침.
 - **캔버스 글자도 글자 크기 배율을 따른다.** 지금 축·건수 글자가 `9~11px` 고정이라 배율을 올려도 그대로다
   (`XLogChartRenderer` · `CounterChart` · `FiveMinCounterChart` · `StackedTimeline` · `StatsCharts`).
   기본을 12px 안팎으로, 축 글자 색 대비를 올린다. `Elapsed (sec)` · `Count` 를 원본처럼 또렷하게.
