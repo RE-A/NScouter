@@ -4,7 +4,11 @@ import { memo, useEffect, useState } from 'react';
 import { t } from '../../i18n';
 import type { Sample, ServiceStats, StatsSummary } from './statsApi';
 import { StatsCharts } from './StatsCharts';
-import { statsService } from './statsApi';
+import { statsService, statsServiceRows } from './statsApi';
+import { statsDistCsv } from './statsCsv';
+import { Button } from '../../components/Button';
+import { saveCsvExport } from '../xlog/api/scouterApi';
+import { toFileStamp } from '../xlog/utils/xlogDate';
 import { fmtMetric, fmtVs, pastView } from './statsFormat';
 import { dayValue } from './statsJudge';
 import { rangeLabel } from './StatsForm';
@@ -18,6 +22,9 @@ interface StatsDetailProps {
   /** 차트의 시간축 — 기준 구간과 과거 구간들 */
   range: StatsRange;
   baselines: StatsRange[];
+  /** 파일을 남겼다 — 경로 */
+  onSaved: (path: string) => void;
+  onError: (msg: string) => void;
 }
 
 type Field = { label: string; get: (s: StatsSummary) => number; fmt: (v: number) => string; help: string };
@@ -35,9 +42,26 @@ function fields(): Field[] {
   ];
 }
 
-export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxid, range, baselines }: StatsDetailProps) {
+export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxid, range, baselines, onSaved, onError }: StatsDetailProps) {
   const [data, setData] = useState<ServiceStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rowsBusy, setRowsBusy] = useState(false);
+
+  /** 트랜잭션 한 건 한 줄 — 원본 CSV 에서 뽑거나, 없으면 콜렉터에 다시 묻는다(Rust) */
+  const exportRows = () => {
+    setRowsBusy(true);
+    statsServiceRows(jobId, service)
+      .then(r => onSaved(r.files > 1 ? `${r.path} (${t('파일')} ${r.files}${t('개')})` : r.path))
+      .catch(e => onError(String(e)))
+      .finally(() => setRowsBusy(false));
+  };
+  /** 응답시간 분포 — 결과에 든 칸 그대로 */
+  const exportDist = () => {
+    if (!data) return;
+    saveCsvExport({ name: `stats-dist-${service}`, stamp: toFileStamp(Date.now()), csv: statsDistCsv(data.current, data.baseline) })
+      .then(onSaved)
+      .catch(e => onError(String(e)));
+  };
 
   useEffect(() => {
     let alive = true;
@@ -59,6 +83,14 @@ export const StatsDetail = memo(function StatsDetail({ jobId, service, onOpenTxi
   const samples = (c?.slowest.length ?? 0) + (c?.errored.length ?? 0) > 0;
   return (
     <div className="flex flex-col gap-4">
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Button size="sm" onClick={exportRows} disabled={rowsBusy} title={t('이 서비스의 트랜잭션을 한 건 한 줄로 — 원본 CSV 를 남긴 결과는 거기서 뽑고, 아니면 콜렉터에 다시 묻습니다')}>
+        {rowsBusy ? t('받는 중…') : t('트랜잭션 CSV')}
+      </Button>
+      <Button size="sm" onClick={exportDist} title={t('응답시간 칸마다 기준·과거 건수와 누적 % — 결과에 든 분포 그대로')}>
+        {t('분포 CSV')}
+      </Button>
+    </div>
     <StatsCharts current={c} baseline={data.baseline} range={range} baselines={baselines} />
     {(data.baseline_days?.length ?? 0) >= 2 && <DaysTable data={data} baselines={baselines} />}
     <div className="flex flex-wrap items-start gap-x-10 gap-y-3">

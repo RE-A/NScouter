@@ -174,6 +174,64 @@ impl RawSink {
     }
 }
 
+/// CSV 한 줄의 n 번째 칸(0부터) — 따옴표로 감싼 칸과 그 안의 `""` 를 푼다
+fn nth_cell(line: &str, n: usize) -> Option<String> {
+    let mut i = 0;
+    let mut out = String::new();
+    let mut quoted = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    if i == n {
+                        out.push('"');
+                    }
+                } else {
+                    quoted = false;
+                }
+            } else if i == n {
+                out.push(c);
+            }
+        } else if c == '"' {
+            quoted = true;
+        } else if c == ',' {
+            if i == n {
+                return Some(out);
+            }
+            i += 1;
+        } else if c != '\r' && c != '\n' && i == n {
+            out.push(c);
+        }
+    }
+    (i == n).then_some(out)
+}
+
+/// 원본 CSV(나뉜 파일까지)에서 **서비스 한 개**의 줄만 새 파일로 옮긴다 — 머리글은 같다. 옮긴 줄 수를 돌려준다.
+/// 서비스 이름은 완전히 같아야 한다(«포함» 이 아니다)
+pub fn extract_service(first: &Path, files: u32, service: &str, out: &Path) -> Result<u64, String> {
+    use std::io::{BufRead, BufReader};
+    let mut w = open(out)?;
+    let mut n = 0u64;
+    for part in 1..=files.max(1) {
+        let path = part_path(first, part);
+        let f = File::open(&path).map_err(|e| format!("원본 CSV 를 열지 못했습니다 ({}): {e}", path.display()))?;
+        for (i, line) in BufReader::with_capacity(1 << 20, f).lines().enumerate() {
+            let line = line.map_err(|e| format!("원본 CSV 읽기 실패 ({}): {e}", path.display()))?;
+            if i == 0 {
+                continue; // 머리글
+            }
+            if nth_cell(&line, 2).as_deref() == Some(service) {
+                write!(w, "{line}\r\n").map_err(|e| e.to_string())?;
+                n += 1;
+            }
+        }
+    }
+    w.flush().map_err(|e| e.to_string())?;
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,5 +289,38 @@ mod tests {
         assert!(read(3).starts_with('\u{feff}'));
         assert_eq!(part_path(&path, 2).file_name().unwrap(), "x_2.csv");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn 서비스_한_개의_줄만_나뉜_파일까지_옮긴다() {
+        let dir = std::env::temp_dir().join(format!("nscouter-raw-extract-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let first = dir.join("raw.csv");
+        let sink = RawSink::with_limit(&first, 2).unwrap();
+        let x = XLogPack { end_time: 1_794_441_600_123, elapsed: 120, ..XLogPack::default() };
+        sink.append(&[
+            line(true, &x, "/a,b", "s1", 0),
+            line(true, &x, "/a", "s1", 0),
+            line(false, &x, "/a,b", "s2", 0),
+            line(false, &x, "/a,bc", "s2", 0),
+            line(true, &x, "/a,b", "s3", 0),
+        ]);
+        let (_, rows, files, err) = sink.finish();
+        assert_eq!((rows, files, err), (5, 3, None));
+        let out = dir.join("one.csv");
+        assert_eq!(extract_service(&first, files, "/a,b", &out).unwrap(), 3);
+        let body = std::fs::read_to_string(&out).unwrap();
+        let lines: Vec<&str> = body.split("\r\n").filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].ends_with(HEADER));
+        assert!(lines[1..].iter().all(|l| l.contains(",\"/a,b\",")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 칸_꺼내기는_따옴표를_푼다() {
+        assert_eq!(nth_cell("기준,t,\"say \"\"hi\"\", x\",s", 2).as_deref(), Some("say \"hi\", x"));
+        assert_eq!(nth_cell("a,b,c", 2).as_deref(), Some("c"));
+        assert_eq!(nth_cell("a,b", 2), None);
     }
 }

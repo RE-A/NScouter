@@ -178,6 +178,7 @@ pub fn run() {
             stats::stats_jobs,
             stats::stats_result,
             stats::stats_service,
+            stats::stats_service_rows,
             stats::stats_delete,
             stats::stats_save_rules,
             stats::stats_shutdown,

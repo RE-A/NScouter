@@ -36,6 +36,8 @@ interface WideSearchDialogProps {
   running: boolean;
   /** 찾는 중의 진행. 안 찾고 있으면 null */
   progress: WideProgress | null;
+  /** 찾다가 난 오류 — 없으면 null */
+  error?: string | null;
   /** 찾는 것을 멈춘다 — 그때까지 모은 것은 목록으로 간다 */
   onCancel: () => void;
   /** 모두 모을 최대 건수 (설정 «트랜잭션 찾기 상한») */
@@ -60,6 +62,7 @@ export const WideSearchDialog = memo(function WideSearchDialog({
   agents,
   running,
   progress,
+  error = null,
   onCancel,
   cap,
   onSearch,
@@ -110,6 +113,11 @@ export const WideSearchDialog = memo(function WideSearchDialog({
       footer={
         <>
           {/* 넓은 구간은 조각으로 나눠 여러 번 묻는다 — 몇 건 모았고 어디까지 왔는지 보여 줘야 기다릴지 정한다 */}
+          {error && !progress && (
+            <span className="mr-auto min-w-0 text-micro break-all text-danger" role="alert">
+              {t('찾지 못했습니다')}: {error}
+            </span>
+          )}
           {progress && (
             <span className="mr-auto text-micro text-fg-dim" role="status">
               <span className="tnum font-mono text-fg-muted">{progress.found.toLocaleString()}</span>

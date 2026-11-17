@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StatsSummary } from './statsApi';
-import { statsCsv } from './statsCsv';
+import { statsCsv, statsDistCsv, statsViewCsv } from './statsCsv';
 import { DEFAULT_RULES as D } from './statsJudge';
 
 // 판정 논리 시험 — 고정한 규칙으로(기본값 1.3배·1000ms 와 상관없이)
@@ -37,5 +37,65 @@ describe('statsCsv', () => {
     expect(cells[head.indexOf('평균 과거 대비(%)')]).toBe('100');
     expect(lines[2].startsWith('/new,기준에만 있음,')).toBe(true);
     expect(lines[2].split(',').length).toBe(head.length);
+    // 화면에서 쓰지 않는 열은 뺐다 — 기준·과거 11열씩, 39 → 31열
+    for (const gone of ['p95', 'CPU', 'SQL 횟수', 'API 횟수']) expect(head.some(h => h.includes(gone))).toBe(false);
+    expect(head).toContain('기준 SQL(ms)');
+    expect(head).toContain('과거 일평균 API(ms)');
+    expect(head.length).toBe(31);
+  });
+});
+
+describe('statsViewCsv', () => {
+  it('화면 그대로 — 넘긴 줄 순서대로, 판정은 이유까지, 과거 대비는 화면 표기', () => {
+    const csv = statsViewCsv(
+      [
+        { service: '/new', current: s(), baseline: null },
+        { service: '/slow', current: s({ avg_ms: 400 }), baseline: s() },
+      ],
+      DEFAULT_RULES,
+      3,
+    );
+    const lines = csv.split('\r\n');
+    const head = lines[0].split(',');
+    expect(head.slice(0, 5)).toEqual(['서비스', '판정', '건수 기준', '건수 과거 일평균', '건수 과거 대비']);
+    expect(head).toContain('p50(ms) 기준');
+    expect(head).toContain('에러율(%) 과거 대비');
+    expect(head).not.toContain('SQL(ms)');
+    expect(lines.length).toBe(3);
+    expect(lines[1].startsWith('/new,기준에만 있음,1000,,')).toBe(true);
+    const cells = lines[2].split(',');
+    expect(cells[1]).toBe('느려짐 평균 ×2.0');
+    expect(cells[head.indexOf('평균(ms) 기준')]).toBe('400');
+    expect(cells[head.indexOf('평균(ms) 과거 일평균')]).toBe('200');
+    expect(cells[head.indexOf('평균(ms) 과거 대비')]).toBe('×2.0');
+    expect(cells[head.indexOf('에러율(%) 기준')]).toBe('1');
+    // 작은 변화는 빈 칸(화면과 같다)
+    expect(cells[head.indexOf('p90(ms) 과거 대비')]).toBe('');
+    expect(cells.length).toBe(head.length);
+  });
+
+  it('늘어난 쪽 + 는 ▲ — 엑셀이 + 로 시작하는 칸을 수식으로 읽지 않게', () => {
+    const csv = statsViewCsv([{ service: '/up', current: s({ p50_ms: 225, error_rate: 0.03, p90_ms: 300 }), baseline: s() }], DEFAULT_RULES);
+    const [h, line] = csv.split('\r\n');
+    const head = h.split(',');
+    const cells = line.split(',');
+    expect(cells[head.indexOf('p50(ms) 과거 대비')]).toBe('▲50%');
+    expect(cells[head.indexOf('에러율(%) 과거 대비')]).toBe('▲2.0%p');
+    expect(cells[head.indexOf('p90(ms) 과거 대비')]).toBe('−25%');
+    expect(cells.slice(2).some(c => c.startsWith('+'))).toBe(false);
+  });
+});
+
+describe('statsDistCsv', () => {
+  it('기준·과거 칸을 합쳐 오름차순, 건수와 누적 % 를 나란히', () => {
+    const csv = statsDistCsv(s({ dist: [[10, 1], [100, 3]] }), s({ dist: [[50, 2], [100, 2]] }));
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe('응답시간(ms 이하),기준 건수,기준 누적(%),과거 건수(합계),과거 누적(%)');
+    expect(lines.slice(1)).toEqual(['10,1,25,0,0', '50,0,25,2,50', '100,3,100,2,100']);
+  });
+
+  it('한쪽이 없으면 그쪽 누적은 빈 칸', () => {
+    const csv = statsDistCsv(s({ dist: [[10, 2]] }), null);
+    expect(csv.split('\r\n')[1]).toBe('10,2,100,0,');
   });
 });

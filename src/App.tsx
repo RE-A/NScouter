@@ -1535,11 +1535,14 @@ export default function App({ windowLabel }: {
     stoppedAt: number | null;
   } | null>(null);
   const [wideProgress, setWideProgress] = useState<WideProgress | null>(null);
+  /** 찾다가 난 오류 — 창에 띄운다(말없이 끝나면 «결과가 안 나온다» 로만 보인다) */
+  const [wideError, setWideError] = useState<string | null>(null);
   const wideCancelRef = useRef(false);
 
   const runWideSearch = useCallback(
     (v: WideSearchValues) => {
       setWideRunning(true);
+      setWideError(null);
       wideCancelRef.current = false;
       setWideProgress({ found: 0, done: 0, requests: 0 });
       // 그날 붙었던 오브젝트 + 지금 붙어 있는 것. 지난 Task(ECS)는 지금 목록에 없다
@@ -1567,7 +1570,7 @@ export default function App({ windowLabel }: {
             res.cut === 'none' ? null : { kind: res.cut, stoppedAt: res.stoppedAt },
           );
         })
-        .catch(() => {})
+        .catch(e => setWideError(String(e)))
         .finally(() => {
           setWideRunning(false);
           setWideProgress(null);
@@ -2318,10 +2321,11 @@ export default function App({ windowLabel }: {
           agents={[...agentMap].map(([obj_hash, obj_name]) => ({ obj_hash, obj_name }) as AgentObject)}
           running={wideRunning}
           progress={wideProgress}
+          error={wideError}
           cap={wideSearchMax}
           onCancel={() => { wideCancelRef.current = true; }}
           onSearch={runWideSearch}
-          onClose={() => setShowWideSearch(false)}
+          onClose={() => { setShowWideSearch(false); setWideError(null); }}
         />
       )}
 
@@ -2465,11 +2469,13 @@ export default function App({ windowLabel }: {
                       {wideTruncated && (
                         <span
                           className="shrink-0 whitespace-nowrap rounded border border-warn/50 px-1 text-micro normal-case text-warn"
-                          title={t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')}
+                          title={wideTruncated.kind === 'cap'
+                            ? t('뒤쪽은 찾지 않았습니다. 구간을 그 뒤로 잡아 다시 찾으십시오.')
+                            : t('멈출 때까지 모은 것을 다 담았습니다. 그 시각 뒤는 일부만 찾았으니, 빠짐없이 보려면 구간을 그 뒤로 잡아 다시 찾으십시오.')}
                         >
-                          {`${wideTruncated.kind === 'cap'
-                            ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')}`
-                            : t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`}
+                          {wideTruncated.kind === 'cap'
+                            ? `${wideSearchMax.toLocaleString()}${t('건에서 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 찾음')}`
+                            : `${t('찾다 멈춤')} — ${wideTruncated.stoppedAt === null ? '' : formatTime(wideTruncated.stoppedAt)}${t('까지 빠짐없이, 그 뒤는 일부')}`}
                         </span>
                       )}
                       <Button

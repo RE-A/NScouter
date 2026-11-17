@@ -181,6 +181,21 @@ export function statsService(id: string, service: string): Promise<ServiceStats>
   return invoke<ServiceStats>('stats_service', { id, service });
 }
 
+/** 서비스 하나의 트랜잭션 CSV — Rust `RowsExport` */
+export interface RowsExport {
+  /** 첫 파일 경로 (100만 줄이 넘으면 `_2.csv` … 로 이어진다) */
+  path: string;
+  rows: number;
+  files: number;
+  /** `raw` = 통계 때 남긴 원본 CSV 에서 뽑음 · `collector` = 콜렉터에 다시 물음 */
+  source: 'raw' | 'collector';
+}
+
+/** 결과의 서비스 하나를 트랜잭션 한 건 한 줄로 내보낸다 (열은 원본 CSV 와 같다) */
+export function statsServiceRows(id: string, service: string): Promise<RowsExport> {
+  return invoke<RowsExport>('stats_service_rows', { id, service });
+}
+
 /** 이름 붙여 저장한 Task 이름 규칙 */
 export interface StatsTaskRule {
   name: string;

@@ -63,7 +63,7 @@ export interface WideResult<T = XLogPack> {
   /**
    * 다 못 찾았을 때 그 까닭.
    *   · `cap`   — 다 모은 것이 상한(`cap`)에 닿아 멈췄다. `stoppedAt` 뒤는 안 훑었다
-   *   · `cancelled` — 멈춤을 눌렀다
+   *   · `cancelled` — 멈춤을 눌렀다. 모은 것은 다 담는다 — `stoppedAt` 뒤의 것은 일부다
    */
   cut: 'none' | 'cap' | 'cancelled';
   /** `cap`·`cancelled` 일 때 **빈틈없이** 어디까지 훑었나 (epoch ms) */
@@ -142,7 +142,10 @@ export async function searchAll<T = XLogPack>(
       let cursor: PastCursor | null = null;
       for (;;) {
         if (opts.isCancelled?.()) stop ??= 'cancelled';
-        if (stop !== null) return;
+        if (stop === 'cancelled') return;
+        // 상한에 닿으면 **가장 이른 덜 끝난 조각만** 끝까지 받는다. 다 같이 멈추면 조각 넷이 모두 덜 끝난 채라
+        // «빈틈없이 찾은 데» 가 시작 시각이 되어 모은 것을 전부 버린다(트래픽이 많을 때 결과가 비던 까닭)
+        if (stop === 'cap' && i !== finished.indexOf(false)) return;
         const res = await page({ ...filter, stime: pc.s, etime: pc.e }, pc.date, hashes, cursor);
         requests++;
         // 조각 경계의 같은 시각은 양쪽에서 다 온다 — txid 로 한 번만 담는다
@@ -155,7 +158,7 @@ export async function searchAll<T = XLogPack>(
         if (out.length >= cap) {
           stop ??= 'cap';
           report();
-          return;
+          if (i !== finished.indexOf(false)) return;
         }
         cursor = res.cursor;
       }
@@ -175,8 +178,10 @@ export async function searchAll<T = XLogPack>(
   return finish(stop, stoppedAt);
 
   function finish(cut: WideResult<T>['cut'], stoppedAt: number | null): WideResult<T> {
-    // 멈췄으면 **빈틈없이 훑은 데까지만** 담는다 — 그 뒤의 것까지 두면 «어디까지 찾았나» 가 거짓이 된다
-    const kept = stoppedAt === null ? out : out.filter(o => o.t <= stoppedAt);
+    // 상한이면 **빈틈없이 훑은 데까지만** 담는다 — 그 뒤의 것까지 두면 «어디까지 찾았나» 가 거짓이 된다.
+    // 멈춤은 **모은 것을 다** 담는다 — 조각들이 다 덜 끝난 채 멈추면 빈틈없이 훑은 데가 시작 시각이라
+    // 모은 것이 다 버려진다. 대신 화면이 «그 시각까지는 빠짐없이, 그 뒤는 일부» 라고 말한다
+    const kept = stoppedAt === null || cut === 'cancelled' ? out : out.filter(o => o.t <= stoppedAt);
     kept.sort((a, b) => a.t - b.t);
     return { xlogs: kept.map(o => o.v), cut, stoppedAt, requests };
   }
