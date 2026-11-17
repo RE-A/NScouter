@@ -74,6 +74,8 @@ interface XLogDockProps {
   onLayoutChange: (dock: SerializedDockview) => void;
   /** 보이는 판들 — 판 묶음의 앞 탭들 */
   onVisibleChange: (keys: string[]) => void;
+  /** 바뀔 때마다 한 번 격자로 정렬한다 — 판을 여럿 연 뒤(«고른 것 각각 XLog»). 0 이면 하지 않는다 */
+  arrangeRequest?: number;
 }
 
 export interface DockCtx {
@@ -556,6 +558,16 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
     }
     api.getPanel(propsRef.current.activeKey)?.api.setActive();
   }, []);
+
+  // 정렬 요청 — 판을 놓는 효과(위) 다음에 돈다. 같은 커밋에 열린 판까지 넣고 정렬한다
+  // 처음 설 때(다시 세울 때 포함)의 값은 이미 지난 요청이다 — 그때는 저장된 배치를 따른다
+  const arrangeRequest = props.arrangeRequest ?? 0;
+  const arrangedRef = useRef(arrangeRequest);
+  useEffect(() => {
+    if (arrangeRequest === arrangedRef.current) return;
+    arrangedRef.current = arrangeRequest;
+    arrange();
+  }, [arrangeRequest, arrange]);
 
   // 지금 판 → dockview (단축키·다른 곳에서 바꿨을 때)
   useEffect(() => {

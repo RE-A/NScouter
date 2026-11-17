@@ -19,6 +19,12 @@ export interface GroupSelection {
 
 export const EMPTY_SELECTION: GroupSelection = { services: new Set(), hashes: new Set() };
 
+/** 고른 것이 같은가 — 서비스 이름과 낱개 해시 모두 */
+export function sameSelection(a: GroupSelection, b: GroupSelection): boolean {
+  const eq = <T,>(x: ReadonlySet<T>, y: ReadonlySet<T>) => x.size === y.size && [...x].every(v => y.has(v));
+  return eq(a.services, b.services) && eq(a.hashes, b.hashes);
+}
+
 /** 고른 것이 하나도 없는가 */
 export function isEmptySelection(sel: GroupSelection): boolean {
   return sel.services.size === 0 && sel.hashes.size === 0;

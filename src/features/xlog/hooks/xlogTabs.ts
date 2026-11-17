@@ -27,7 +27,7 @@ import {
 } from '../types/xlog';
 import type { SerializedDockview } from 'dockview-react';
 import type { PastRange, XLogMode } from '../types/timeRange';
-import { EMPTY_SELECTION, type GroupSelection } from './groupSelection';
+import { EMPTY_SELECTION, sameSelection, type GroupSelection } from './groupSelection';
 
 /**
  * 판 종류. 탭 하나가 판 하나이고, 판은 XLog 말고도 된다 — 원본 스카우터처럼 XLog·EQ·카운터를 한 화면에.
@@ -406,5 +406,21 @@ export function addPanel(s: XLogTabsState, kind: PanelKind, counter?: string): X
   const tabs = [...s.tabs];
   tabs.splice(at < 0 ? tabs.length : at + 1, 0, tab);
   return { ...s, tabs, activeKey: tab.key, panes: s.panes.map(k => (k === s.activeKey ? tab.key : k)) };
+}
+
+/**
+ * **대상이 박힌 판**을 연다 — 트리 오른쪽 클릭(원본 스카우터의 «XLog - PRD-FSCPS» 창).
+ *
+ * 같은 종류(카운터면 같은 카운터)·같은 대상의 **고정 판이 이미 있으면 그 판을 앞으로** 한다 — 원본과 같다.
+ * 없으면 지금 판 옆에 고정 판으로 연다.
+ */
+export function openPinned(s: XLogTabsState, kind: PanelKind, sel: GroupSelection, counter?: string): XLogTabsState {
+  const hit = s.tabs.find(
+    t => t.pinned && kindOf(t) === kind && (kind !== 'counter' || t.counter === counter) && sameSelection(t.selection, sel),
+  );
+  if (hit) return activate(s, hit.key);
+  const added = kind === 'xlog' ? addPanel(s, 'xlog') : addPanel(s, kind, counter);
+  if (added === s) return s;
+  return patchTab(added, added.activeKey, () => ({ pinned: true, selection: sel }));
 }
 

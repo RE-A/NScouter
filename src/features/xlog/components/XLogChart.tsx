@@ -22,6 +22,7 @@ import { stepYMax } from '../engine/yScale';
 import { T, F } from '../../../styles/tokens';
 import { t } from '../../../i18n';
 import { pointBudget } from '../store/XLogDataStore';
+import { xlogKeyAction } from '../engine/xlogKeys';
 import { Button } from '../../../components/Button';
 import { XLogChartSettings } from './XLogChartSettings';
 import { CLOCK_NOTICE_MS, serverClockOffset, serverNow, setServerClockOffset } from '../utils/serverClock';
@@ -284,6 +285,22 @@ export const XLogChart = memo(function XLogChart({
     [pastRange, onPastRangeChange, onConfigChange, yMaxNow],
   );
 
+  /**
+   * 원본 스카우터의 차트 키 — `↑↓` Y축 · `+-` 시간 폭 · `←→` 과거 구간 10초 이동 (`xlogKeys.ts`).
+   * 차트를 누르면 차트가 키를 받는다(누를 때 초점을 준다).
+   */
+  const handleKey = React.useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const act = xlogKeyAction(e.key, { yMax: yMaxNow, timeRangeMs: config.timeRangeMs, pastRange: pastRange ?? null });
+      if (!act) return;
+      e.preventDefault();
+      if ('pastRange' in act) onPastRangeChange?.(act.pastRange);
+      else onConfigChange?.(act);
+    },
+    [yMaxNow, config.timeRangeMs, pastRange, onPastRangeChange, onConfigChange],
+  );
+
   const { canvasRef, selectedXLogs, clearSelection } = useXLogCanvas(
     store,
     config,
@@ -464,6 +481,12 @@ export const XLogChart = memo(function XLogChart({
       <div
         style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0 }}
         onWheel={handleWheel}
+        tabIndex={0}
+        onKeyDown={handleKey}
+        // 누르면 키를 받게 — 초점 테두리는 그리지 않는다(차트 전체가 파랗게 테두리 지면 점을 가린다)
+        onMouseDown={e => e.currentTarget.focus({ preventScroll: true })}
+        className="outline-none"
+        aria-label={t('XLog 차트 — ↑↓ Y축, + - 시간 폭, ← → 과거 구간 10초 이동')}
       >
         <canvas
           ref={canvasRef}

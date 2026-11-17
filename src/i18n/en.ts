@@ -1309,4 +1309,6 @@ export const EN: Record<string, string> = {
   'XLog 조건(모드·구간·거름)은 XLog 판을 누르면 여기 나옵니다': 'XLog conditions (mode, range, filters) appear here when you click an XLog pane',
   '이 판을 그리지 못했습니다': 'Could not draw this pane',
   '다시 그리기': 'Redraw',
+  'XLog 차트 — ↑↓ Y축, + - 시간 폭, ← → 과거 구간 10초 이동': 'XLog chart — ↑↓ Y axis, + - time width, ← → move past range 10 s',
+  '고른 것 각각 XLog 로 열기 (격자)': 'Open each selected as XLog (grid)',
 };

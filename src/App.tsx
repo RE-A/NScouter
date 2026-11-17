@@ -132,6 +132,8 @@ import {
   setPinned as setTabPinned,
   kindOf,
   addPanel as addXLogPanel,
+  openPinned,
+  MAX_XLOG_TABS,
   setCounterLabel,
   type PanelKind,
   setResolved as setTabResolved,
@@ -457,6 +459,55 @@ export default function App({ windowLabel }: {
     setXLogTabs(s => (kind === 'xlog' ? addXLogTab(s) : addXLogPanel(s, kind, counter)));
     setSelectedXLogs([]);
   }, []);
+  /**
+   * 트리 오른쪽 클릭 «… 열기» — 그 대상으로 **고정** 판을 연다. 같은 종류·대상의 고정 판이 있으면 그 판을 앞으로.
+   * 원본에서 서버를 오른쪽 클릭해 카운터 창을 띄우던 손버릇이다. 트리를 바꿔도 이 판은 그대로다.
+   */
+  const handleOpenPanel = useCallback((target: GroupSelection, kind: PanelKind, counter?: string) => {
+    setXLogTabs(s => openPinned(s, kind, target, counter));
+    setSelectedXLogs([]);
+  }, []);
+  /** 판을 열고 나서 격자로 정렬하라는 신호 — 바뀔 때마다 XLogDock 이 한 번 정렬한다 */
+  const [arrangeReq, setArrangeReq] = useState(0);
+  /**
+   * «고른 것 각각 XLog 로 열기» — 고른 서비스마다(없으면 고른 서버마다) 고정 XLog 판을 하나씩 열고 격자로 놓는다.
+   * 원본에서 서버마다 XLog 창을 띄워 나란히 두던 것. 판은 16개까지라 넘치는 것은 열지 않는다.
+   */
+  const handleOpenEach = useCallback(() => {
+    setXLogTabs(s => {
+      const sel = activeXLogTab(s).selection;
+      const targets: GroupSelection[] =
+        sel.services.size > 0
+          ? [...sel.services].map(name => ({ services: new Set([name]), hashes: new Set<number>() }))
+          : [...sel.hashes].map(h => ({ services: new Set<string>(), hashes: new Set([h]) }));
+      let next = s;
+      for (const tg of targets.slice(0, MAX_XLOG_TABS)) next = openPinned(next, 'xlog', tg);
+      return next;
+    });
+    setSelectedXLogs([]);
+    setArrangeReq(n => n + 1);
+  }, []);
+  /**
+   * 에이전트 두 번 누르기 — 그 서버만 보기(원본의 더블클릭). 같은 서버를 다시 두 번 누르면 그 전 고르기로 돌아간다.
+   * 지금 판 기준이다(`setGroupSel`) — 고정 판이면 그 판만 바뀐다.
+   */
+  const soloRef = useRef<{ hash: number; prev: GroupSelection } | null>(null);
+  const handleSoloAgent = useCallback(
+    (agent: AgentObject) => {
+      const back = soloRef.current;
+      if (back && back.hash === agent.obj_hash) {
+        soloRef.current = null;
+        setGroupSel(back.prev);
+        return;
+      }
+      setGroupSel(prev => {
+        // 두 번 누르기 앞의 두 번 클릭이 고르기를 켰다 껐다 했다 — 되돌릴 것은 그 전 그대로다
+        soloRef.current = { hash: agent.obj_hash, prev: back?.prev ?? prev };
+        return { services: new Set(), hashes: new Set([agent.obj_hash]) };
+      });
+    },
+    [setGroupSel],
+  );
   /** 판을 고정하거나 따라감으로 푼다 (판 머리 🔗/📌 · 탭 오른쪽 클릭) */
   const handleXLogPin = useCallback((key: string, pinned: boolean) => {
     setXLogTabs(s => setTabPinned(s, key, pinned));
@@ -2471,6 +2522,9 @@ export default function App({ windowLabel }: {
             selectedServices={groupSel.services}
             onToggleService={handleToggleService}
             onPickTask={handlePickTask}
+            onOpenPanel={handleOpenPanel}
+            onOpenEach={groupSel.services.size + groupSel.hashes.size > 1 ? handleOpenEach : undefined}
+            onSoloAgent={handleSoloAgent}
             onCleanup={handleCleanupInactive}
             onAgentsLoaded={handleAgentsLoaded}
             groupBy={agentGroupBy}
@@ -2552,6 +2606,7 @@ export default function App({ windowLabel }: {
                   counterChoices={COUNTER_PANEL_CHOICES}
                   onLayoutChange={handleDockLayout}
                   onVisibleChange={handleDockVisible}
+                  arrangeRequest={arrangeReq}
                 />
               </Pane>
 
