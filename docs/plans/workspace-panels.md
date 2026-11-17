@@ -140,6 +140,13 @@ type Target =
     창마다 dockview 를 하나씩 두고, 창 사이 옮기기는 지금처럼 «창 밖으로 끌면 새 Tauri 창» 으로 한다.
   - P1 첫 일: dockview 로 XLog 판 둘을 띄워 ① 옮겨도 점이 남나 ② 창 밖 끌기를 잡을 수 있나 ③ 16판 렌더 비용
     ④ 테마 토큰 연결 — 넷을 확인하고 확정한다. 안 되면 `flexlayout-react`, 그다음 직접 넓히기.
+  - **확인 결과 (2026-11-17, `dockview-react` 8.9.0, 브라우저에서 실제 XLog 렌더러로)** — 채택.
+    ① `defaultRenderer="always"`: 판을 다른 묶음 뒤로 넣고 빼고, 마우스로 끌어 옮겨도 판이 한 번만 만들어지고
+       받아 둔 점이 이어진다 ② `dndStrategy="html5"`: 탭을 끌면 `onWillDragPanel`(DragEvent) 과 문서의 `dragend`(좌표) 가
+       온다 — 지금 탭 줄의 «창 밖이면 새 창» 감지(`XLogTabBar`)를 그대로 붙일 수 있다. **창 밖(Tauri) 은 붙인 뒤 앱에서 확인**
+       ③ 판 16개·판마다 점 5천을 매 프레임 그려도 판마다 59.5fps ④ `dockview-theme-light dockview-theme-ns`
+       (`src/styles/dockview-theme.css`) 로 라이트·다크 모두 토큰을 따른다.
+    - 발견: 판이 아주 작으면 XLog 머리 글자(`dots`·`Elapsed`)와 축 글자가 겹친다 — 좁은 판에서는 줄이거나 숨긴다(P1).
 
 ## 6. 여는 길
 
