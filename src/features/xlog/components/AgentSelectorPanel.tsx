@@ -259,7 +259,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   const [groupMenu, setGroupMenu] = useState<{ items: MenuItem[]; x: number; y: number } | null>(null);
   /** 고른 것 각각 XLog — 여러 곳에서 같은 항목 */
   const eachItem: MenuItem[] = onOpenEach
-    ? [{ label: t('고른 것 각각 XLog 로 열기 (격자)'), onSelect: onOpenEach }]
+    ? [{ label: t('고른 것 각각 XLog 로 열기 (격자)'), onSelect: onOpenEach, divider: true }]
     : [];
 
   return (
@@ -593,6 +593,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               : []),
             ...eachItem,
             {
+              // 판 열기와 «들여다보기»(속성 · 스레드 …) 사이 가름선
+              divider: onOpenPanel !== undefined,
               // 어떤 오브젝트든 신원은 있다. **막지 않는다** — 목록에 떠 있는데
               // 정체를 못 묻는 오브젝트가 있으면 그게 제일 답답하다.
               label: t('속성'),

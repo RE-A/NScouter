@@ -434,7 +434,6 @@ export const EN: Record<string, string> = {
   '이 판을 내립니다 — 탭은 남습니다': 'Close this pane — the tab stays',
   '판 내리기': 'close pane',
   '판 경계': 'Pane border',
-  '이 판을 누르고 왼쪽에서 볼 서버를 고르세요.': 'Click this pane and pick servers on the left.',
   '탭 닫기': 'Close tab',
   '탭': 'tab',
   '지금 조건을 복제해 탭을 하나 더 엽니다 — 날짜만 바꿔 견주는 데 씁니다':
@@ -1335,4 +1334,7 @@ export const EN: Record<string, string> = {
   '분석': 'Analysis',
   '카운터 위주': 'Counters',
   '카운터 전체': 'All counters',
+  '외': '+',
+  '고정 판 — 이 판을 누르고 왼쪽에서 서버를 고르세요.': 'Pinned pane — click it and pick servers on the left.',
+  '서버를 고르면 여기 나옵니다': 'Pick servers to show this',
 };

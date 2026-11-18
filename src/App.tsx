@@ -2138,7 +2138,35 @@ export default function App({ windowLabel }: {
         : t('고른 서비스에 살아 있는 Task 가 없습니다.')
       : t('왼쪽에서 볼 서버를 고르세요.');
 
-  const xlogTabLabels = useMemo(() => xlogTabLabelsOf(xlogTabs.tabs), [xlogTabs.tabs]);
+  /**
+   * 고정 판 이름에 붙일 대상 — 서비스는 이름, 서버는 짧은 이름. 여럿이면 «첫 것 외 n».
+   * 해시가 이름으로 안 풀리면(명단을 아직 못 받았다) 붙이지 않는다
+   */
+  const pinTarget = useCallback(
+    (sel: GroupSelection): string | null => {
+      const names = [
+        ...sel.services,
+        ...[...sel.hashes].map(h => agentMap.get(h)).filter((v): v is string => !!v).map(shortName),
+      ];
+      if (names.length === 0) return null;
+      return names.length === 1 ? names[0] : `${names[0]} ${t('외')} ${names.length - 1}`;
+    },
+    [agentMap],
+  );
+  const xlogTabLabels = useMemo(() => xlogTabLabelsOf(xlogTabs.tabs, pinTarget), [xlogTabs.tabs, pinTarget]);
+  /**
+   * 고른 서버가 없는 판에 띄울 말 — **크게 말하는 것은 지금 판 하나뿐이다.** 판마다 같은 말을 크게 띄우면
+   * 원본 기본에서 일곱 번 되풀이됐다. 따라감 판은 트리만 고르면 같이 바뀌므로 판을 누를 필요가 없고,
+   * 고정 판만 «이 판을 누르고» 고른다.
+   */
+  const panelEmpty = (tab: XLogTab) =>
+    tab.key === xlogTabs.activeKey ? (
+      <EmptyState text={emptyPickText} />
+    ) : tab.pinned ? (
+      <EmptyState quiet text={t('고정 판 — 이 판을 누르고 왼쪽에서 서버를 고르세요.')} />
+    ) : (
+      <EmptyState quiet text={t('서버를 고르면 여기 나옵니다')} />
+    );
   /**
    * 고른 점은 **지금 판의 것만** 목록으로 받는다. 판을 누르는 순간 지금 판이 바뀌므로
    * (XLogDock) 끌어서 고른 판이 곧 지금 판이지만, 옆 판이 늦게 알려 오는 것은 버린다.
@@ -2244,11 +2272,7 @@ export default function App({ windowLabel }: {
     }
     if (!isConnected) return <EmptyState text={t('연결 후 사용 가능합니다.')} />;
     if (picked.size === 0) {
-      return (
-        <EmptyState
-          text={tab.key === xlogTabs.activeKey ? emptyPickText : t('이 판을 누르고 왼쪽에서 볼 서버를 고르세요.')}
-        />
-      );
+      return panelEmpty(tab);
     }
     const javaee = counterHashes.javaee.filter(h => picked.has(h));
     const javaeeTypes = typesOf(javaee, objTypeOf);
@@ -2336,11 +2360,7 @@ export default function App({ windowLabel }: {
       // 트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다.
       // 지금 판이 아니면 그 판의 고르기 사정을 따로 풀지 않는다 — 고르라는 말만 한다.
       if (visible && isConnected && tab.filter.objHashSet.size === 0) {
-        return (
-          <EmptyState
-            text={tab.key === xlogTabs.activeKey ? emptyPickText : t('이 판을 누르고 왼쪽에서 볼 서버를 고르세요.')}
-          />
-        );
+        return panelEmpty(tab);
       }
       return (
         <XLogChart
@@ -2753,9 +2773,16 @@ export default function App({ windowLabel }: {
               onOpenFilters={() => setShowFilters(true)}
             />
           ) : (
-            <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-micro text-fg-dim">
+            // 툴바와 **같은 높이**로 둔다 — 판을 오갈 때 이 줄 높이가 바뀌어 아래 판들이 몇 px 씩 튀었다
+            <div
+              className="flex shrink-0 items-center gap-2 border-b border-line bg-raised px-3 py-1 text-micro text-fg-dim"
+              style={{ minHeight: XLOG_TOOLBAR_H }}
+            >
               {t('지금 판')}: <span className="text-fg-muted">{xlogTabLabels[xlogTabs.tabs.findIndex(tb => tb.key === xlogTabs.activeKey)]}</span>
-              <span className="text-fg-faint">— {t('XLog 조건(모드·구간·거름)은 XLog 판을 누르면 여기 나옵니다')}</span>
+              {/* XLog 판이 없는 대시보드(분석 · 카운터 위주)에서는 «XLog 판을 누르면» 이 맞지 않는다 */}
+              {dashboardHasXLog && (
+                <span className="text-fg-faint">— {t('XLog 조건(모드·구간·거름)은 XLog 판을 누르면 여기 나옵니다')}</span>
+              )}
             </div>
           )}
           {/* 분할 배치.
@@ -3823,9 +3850,10 @@ function AlertBurstLine({
   );
 }
 
-function EmptyState({ text }: { text: string }) {
+/** 빈 자리의 말. `quiet` — 판 여럿에 함께 뜨는 곁말(작고 옅게) */
+function EmptyState({ text, quiet }: { text: string; quiet?: boolean }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: T.textFaint, fontSize: F.base, letterSpacing: 0.3 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, textAlign: 'center', padding: '0 8px', color: T.textFaint, fontSize: quiet ? F.micro : F.base, letterSpacing: 0.3, opacity: quiet ? 0.8 : 1 }}>
       {text}
     </div>
   );
@@ -3849,6 +3877,9 @@ function typesOf(hashes: readonly number[], typeOf: ReadonlyMap<number, string>)
 }
 
 // ─── 상수 ─────────────────────────────────────────────────────
+
+/** XLog 툴바 한 줄의 높이(테두리 포함) — 툴바가 없을 때 그 자리를 같은 높이로 둔다 */
+const XLOG_TOOLBAR_H = 33;
 
 const TAB_LABELS: Record<TabId, string> = {
   xlog: 'XLog',

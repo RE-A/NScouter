@@ -194,12 +194,25 @@ function autoTitle(tab: XLogTab): string {
  * **이름이 겹치면 순번을 붙인다.** 붙인 이름이 없는 실시간 탭 둘이 둘 다 «실시간» 이면
  * 어느 쪽이 어느 쪽인지 눌러 보기 전에는 모른다. 첫 것은 그대로, 다음부터 «실시간 2» 다.
  */
-export function tabLabels(tabs: readonly XLogTab[]): string[] {
+export function tabLabels(
+  tabs: readonly XLogTab[],
+  /**
+   * 고정 판의 대상 이름 — 있으면 붙인 이름이 없는 고정 판에 `실시간 · 결제` 처럼 덧붙인다(원본의 `XLog - 대상`).
+   * 고정 판이 여럿이면 이름만으로는 어느 서비스인지 알 수 없었다(`실시간 2`, `실시간 3` …)
+   */
+  targetOf?: (sel: GroupSelection) => string | null,
+): string[] {
+  const base = (tab: XLogTab): string => {
+    const name = tabTitle(tab);
+    if (!tab.pinned || !targetOf || (tab.title?.trim() ?? '') !== '') return name;
+    const target = targetOf(tab.selection);
+    return target ? `${name} · ${target}` : name;
+  };
   const total = new Map<string, number>();
-  for (const tab of tabs) total.set(tabTitle(tab), (total.get(tabTitle(tab)) ?? 0) + 1);
+  for (const tab of tabs) total.set(base(tab), (total.get(base(tab)) ?? 0) + 1);
   const seen = new Map<string, number>();
   return tabs.map(tab => {
-    const name = tabTitle(tab);
+    const name = base(tab);
     if ((total.get(name) ?? 0) <= 1) return name;
     const n = (seen.get(name) ?? 0) + 1;
     seen.set(name, n);
