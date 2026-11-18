@@ -1337,4 +1337,6 @@ export const EN: Record<string, string> = {
   '외': '+',
   '고정 판 — 이 판을 누르고 왼쪽에서 서버를 고르세요.': 'Pinned pane — click it and pick servers on the left.',
   '서버를 고르면 여기 나옵니다': 'Pick servers to show this',
+  '차트에서 구간을 드래그하면 여기 펼쳐집니다': 'Drag a range on the chart to open this',
+  '전체 목록': 'All',
 };

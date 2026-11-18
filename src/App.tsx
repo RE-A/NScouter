@@ -2827,21 +2827,32 @@ export default function App({ windowLabel }: {
               {/* XLog 판이 없는 대시보드(분석 · 카운터 위주)에서는 목록을 접는다 — 고른 트랜잭션이 있으면 남긴다 */}
               {(dashboardHasXLog || hasSelected) && (
               <>
-              <Divider
-                orientation="horizontal"
-                label={t('트랜잭션 목록 높이')}
-                onDrag={d =>
-                  setTableH(h =>
-                    isMeasured(wsSize) ? clampPane(h - d, PANE.tableMinH, tableRoom(wsSize.h)) : h,
-                  )
-                }
-              />
+              {/* **고른 것이 없으면 제목 줄만 남긴다.** 늘 220px 를 펴 두면 원본 기본·각각 열기에서 판 높이의
+                  4분의 1 을 빈 표가 먹었다. 줄은 남겨 «여기 나온다» 는 것은 보이게 하고, 구간을 고르면 펼친다
+                  (펼칠 때 판 높이가 한 번 바뀐다 — 빈 자리를 늘 먹는 것보다 낫다) */}
+              {hasSelected && (
+                <Divider
+                  orientation="horizontal"
+                  label={t('트랜잭션 목록 높이')}
+                  onDrag={d =>
+                    setTableH(h =>
+                      isMeasured(wsSize) ? clampPane(h - d, PANE.tableMinH, tableRoom(wsSize.h)) : h,
+                    )
+                  }
+                />
+              )}
               <Pane
                 title={t('트랜잭션')}
-                className="shrink-0"
-                style={{ height: tableH }}
+                className={hasSelected ? 'shrink-0' : 'mt-1 shrink-0'}
+                // 접혀도 안의 것은 그대로 둔다(높이만 줄인다) — Ctrl+F 검색칸 ref 가 살아 있어야 한다
+                style={{ height: hasSelected ? tableH : TABLE_FOLDED_H }}
                 aside={
                   <span className="flex min-w-0 items-center gap-2">
+                  {!hasSelected && (
+                    <span className="truncate text-micro normal-case text-fg-faint">
+                      {t('차트에서 구간을 드래그하면 여기 펼쳐집니다')}
+                    </span>
+                  )}
                   {hasSelected && (
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="shrink-0 whitespace-nowrap text-micro normal-case text-fg-dim">
@@ -3877,6 +3888,9 @@ function typesOf(hashes: readonly number[], typeOf: ReadonlyMap<number, string>)
 }
 
 // ─── 상수 ─────────────────────────────────────────────────────
+
+/** 트랜잭션 목록을 접었을 때의 높이 — 제목 줄(26px)과 테두리 */
+const TABLE_FOLDED_H = 28;
 
 /** XLog 툴바 한 줄의 높이(테두리 포함) — 툴바가 없을 때 그 자리를 같은 높이로 둔다 */
 const XLOG_TOOLBAR_H = 33;

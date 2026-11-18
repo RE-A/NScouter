@@ -31,7 +31,20 @@
   --dv-floating-border: 1px solid var(--border-strong);
 }
 
-/* 지금 판(마지막에 누른 판)은 머리 아래에 강조선 — 툴바·목록·아래 표가 그 판의 것이다 */
+/* 지금 판(마지막에 누른 판)은 머리를 강조색으로 옅게 칠하고 아래에 강조선 — 툴바·목록·아래 표·왼쪽 트리가
+   그 판의 것이다. 선 하나만으로는 판이 여럿일 때 어느 판인지 잘 안 보였다 */
 .dockview-theme-ns .dv-groupview.dv-active-group > .dv-tabs-and-actions-container {
+  background-color: var(--accent-soft);
   box-shadow: inset 0 -2px 0 var(--accent);
+}
+.dockview-theme-ns .dv-groupview.dv-active-group .dv-tab.dv-active-tab {
+  font-weight: 600;
+}
+
+/* 판이 좁으면 탭이 줄어든다(이름은 말줄임) — 안 줄면 dockview 가 넘친 탭을 `∨ 1` 목록으로 접어,
+   탭 하나뿐인 판도 탭이 숨은 것처럼 보였다 */
+.dockview-theme-ns .dv-tabs-container .dv-tab {
+  flex-shrink: 1;
+  min-width: 64px;
+  overflow: hidden;
 }

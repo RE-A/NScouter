@@ -513,9 +513,9 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 // 전부 보이는 중(plain)에는 칠하지 않는다 — 전부를 강조하면 강조가 아니다.
                 state === 'picked'
                   ? 'border-l-accent bg-accent/12'
-                  : state === 'excluded'
-                    ? 'border-l-transparent opacity-45 hover:opacity-75'
-                    : 'border-l-transparent hover:bg-hover/60',
+                  // 고르지 않은 것은 **흐리게 하지 않는다** — 투명도를 내리면 꺼진 서버(아래 opacity-40)와
+                  // 구별되지 않았고, 다크 테마에서는 이름이 거의 안 읽혔다. 글자 색만 한 단계 낮춘다
+                  : 'border-l-transparent hover:bg-hover/60',
                 agent.alive ? '' : 'opacity-40',
               ].join(' ')}
             >
@@ -533,7 +533,11 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                   aria-hidden
                 />
               )}
-              <span className="min-w-0 flex-1 truncate text-fg">
+              <span
+                className={`min-w-0 flex-1 truncate ${
+                  state === 'excluded' ? 'text-fg-muted' : state === 'picked' ? 'font-medium text-fg' : 'text-fg'
+                }`}
+              >
                 {name || `[${agent.obj_hash}]`}
               </span>
               {/* 종류. **이름으로 추측한 게 아니라 콜렉터가 준 `objType` 이다.**

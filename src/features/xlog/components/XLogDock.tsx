@@ -26,7 +26,8 @@ import {
   type IDockviewPanelProps,
   type SerializedDockview,
 } from 'dockview-react';
-import { ContextMenu } from '../../../components/ContextMenu';
+import { ContextMenu, type MenuItem } from '../../../components/ContextMenu';
+import { JAVAEE_MENU_COUNTERS } from './panelMenu';
 import { PanelErrorBoundary } from '../../../components/PanelErrorBoundary';
 import { kindOf, MAX_XLOG_TABS, PANEL_KIND_LABEL, type PanelKind, type SplitDir, type XLogTab } from '../hooks/xlogTabs';
 import { gridMoves, opsFromSplit } from '../hooks/dockLayout';
@@ -173,7 +174,7 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
   return (
     <div
       ref={boxRef}
-      className="flex h-full items-center gap-1 pl-2 pr-1 text-micro"
+      className="flex h-full min-w-0 items-center gap-1 overflow-hidden pl-2 pr-1 text-micro"
       onDoubleClick={startEdit}
       onContextMenu={e => {
         e.preventDefault();
@@ -259,12 +260,48 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
 }
 
 /** 판 묶음 머리, 탭들 바로 뒤 — `+ 탭` */
-function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
+function GroupAdd({ activePanel, api }: IDockviewHeaderActionsProps) {
   const ctx = useDock();
   const key = activePanel?.id;
+  // 좁은 판은 `⊞` 를 머리에서 뺀다 — 머리가 넘치면 dockview 가 탭 이름을 `∨ 1` 로 접어 탭이 숨은 것처럼 보였다.
+  // 격자 정렬은 판 하나만 넓으면 그 판에서 누를 수 있다
+  const [roomy, setRoomy] = useState(() => api.width >= TIGHT_PX);
+  useEffect(() => {
+    const d = api.onDidDimensionsChange(e => setRoomy(e.width >= TIGHT_PX));
+    return () => d.dispose();
+  }, [api]);
   /** `+` 메뉴 — 원본 스카우터의 오른쪽 클릭 메뉴처럼 무엇을 띄울지 고른다 */
   const [menu, setMenu] = useState<ScreenPoint | null>(null);
+  /** 카운터 전부를 펼친 메뉴인가 — 처음에는 자주 보는 것만 둔다(전부 두면 40여 줄이라 고르기 어려웠다) */
+  const [allCounters, setAllCounters] = useState(false);
   const others: PanelKind[] = ['eq', 'active', 'summary', 'serviceGroup', 'alert', 'visualize', 'counterBoard'];
+  const frequent = new Set<string>(JAVAEE_MENU_COUNTERS);
+  const counterItem = (c: { name: string; label: string }, i: number): MenuItem => ({
+    label: `${t('카운터')} · ${t(c.label)}`,
+    onSelect: () => key && ctx.onAddPanel(key, 'counter', c.name),
+    ...(i === 0 ? { divider: true } : {}),
+  });
+  const items: MenuItem[] =
+    key === undefined
+      ? []
+      : allCounters
+        ? ctx.counterChoices.map((c, i) => ({ ...counterItem(c, i), divider: false }))
+        : [
+            { label: `XLog — ${t('지금 판 복제')}`, onSelect: () => ctx.onAddPanel(key, 'xlog') },
+            ...others.map(k => ({ label: t(PANEL_KIND_LABEL[k]), onSelect: () => ctx.onAddPanel(key, k) })),
+            ...ctx.counterChoices.filter(c => frequent.has(c.name)).map(counterItem),
+            {
+              label: `${t('카운터')} · ${t('전체 목록')} (${ctx.counterChoices.length})…`,
+              // 같은 자리에 카운터 전부를 다시 띄운다 — 메뉴가 닫힌 뒤 다음 틀에 연다
+              onSelect: () => {
+                const at = menu;
+                requestAnimationFrame(() => {
+                  setAllCounters(true);
+                  setMenu(at);
+                });
+              },
+            },
+          ];
   return (
     <div className="flex h-full items-center pl-1">
       <button
@@ -273,6 +310,7 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
         disabled={ctx.full || key === undefined}
         onClick={e => {
           const r = e.currentTarget.getBoundingClientRect();
+          setAllCounters(false);
           setMenu({ x: r.left, y: r.bottom + 2 });
         }}
         title={ctx.full ? t('탭은 최대 16개입니다') : t('판 추가 — XLog(지금 판 복제) · EQ · Active · 카운터 …')}
@@ -287,18 +325,11 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
             x={menu.x}
             y={menu.y}
             onClose={() => setMenu(null)}
-            items={[
-              { label: `XLog — ${t('지금 판 복제')}`, onSelect: () => ctx.onAddPanel(key, 'xlog') },
-              ...others.map(k => ({ label: t(PANEL_KIND_LABEL[k]), onSelect: () => ctx.onAddPanel(key, k) })),
-              ...ctx.counterChoices.map(c => ({
-                label: `${t('카운터')} · ${t(c.label)}`,
-                onSelect: () => ctx.onAddPanel(key, 'counter', c.name),
-              })),
-            ]}
+            items={items}
           />,
           document.body,
         )}
-      <button
+      {roomy && <button
         type="button"
         onClick={ctx.onArrange}
         disabled={ctx.tabs.size <= 1}
@@ -307,7 +338,7 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
         className="btn-ghost px-1.5 py-0.5 text-micro"
       >
         ⊞
-      </button>
+      </button>}
     </div>
   );
 }
@@ -351,7 +382,8 @@ function GroupActions({ activePanel, group, api }: IDockviewHeaderActionsProps) 
           {pinned ? '📌' : '🔗'}
         </button>
       )}
-      {key && (
+      {/* 새 창으로는 XLog 판만 뗀다 — 다른 판에는 늘 눌리지 않는 단추라 두지 않는다(머리 자리만 먹었다) */}
+      {key && kindOf(ctx.tabs.get(key) ?? ({} as XLogTab)) === 'xlog' && (
         <button
           type="button"
           disabled={!detachable(ctx, key)}
@@ -377,6 +409,8 @@ const COMPONENTS = { xlog: PanelBody };
 
 /** 이보다 좁은 판 묶음은 차트 조작을 판 안으로 내린다 (`GroupActions`) */
 const NARROW_PX = 560;
+/** 이보다 좁은 판 묶음은 머리에서 `⊞` 를 뺀다 (`GroupAdd`) */
+const TIGHT_PX = 360;
 
 /** 화면 좌표가 이 창 밖인가 — 창 가장자리에서 조금 벗어난 정도는 안 친다 */
 function isOutsideScreenRect(x: number, y: number): boolean {

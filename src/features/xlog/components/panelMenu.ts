@@ -9,7 +9,7 @@ import { counterMeta, isHostObjectType, isJavaeeObjectType, type CounterName } f
 import { t } from '../../../i18n';
 
 /** 메뉴에 올릴 카운터 — 원본 기본 배치의 것(Recent User · TPS · Elapsed · Heap) 과 자주 보는 것 */
-const JAVAEE_MENU_COUNTERS: CounterName[] = ['TPS', 'ElapsedTime', 'ActiveService', 'RecentUser', 'ErrorRate', 'HeapUsed'];
+export const JAVAEE_MENU_COUNTERS: CounterName[] = ['TPS', 'ElapsedTime', 'ActiveService', 'RecentUser', 'ErrorRate', 'HeapUsed'];
 const HOST_MENU_COUNTERS: CounterName[] = ['Cpu', 'Mem', 'NetInBound', 'NetOutBound'];
 
 export type OpenPanel = (kind: PanelKind, counter?: string) => void;
