@@ -17,6 +17,7 @@ import {
   fromSplit,
 } from './uiState';
 import { MAX_XLOG_TABS } from './xlogTabs';
+import { presetDashboard } from './dashboards';
 import { DEFAULT_CHART_CONFIG, DEFAULT_FILTER } from '../types/xlog';
 import type { XLogChartPrefs, XLogFilterPrefs } from '../api/scouterApi';
 
@@ -426,5 +427,22 @@ describe('판 종류 저장', () => {
     const back = fromTabs(s);
     expect(back.map(p => p.kind)).toEqual([undefined, 'counter', 'eq', undefined]);
     expect(back[1].counter).toBe('TPS');
+  });
+});
+
+describe('판 배치가 있으면 보이는 판을 자르지 않는다', () => {
+  it('판 7개 — 지금 판(0번)이 보이는 판 뒤쪽에 있어도 지금 판이 그대로', () => {
+    const d = presetDashboard('original');
+    const split = { ...d.split, panes: [1, 2, 3, 4, 5, 6, 0], active: 0 };
+    const s = toTabs(d.tabs, undefined, undefined, split);
+    expect(s.activeKey).toBe(s.tabs[0].key);
+    expect(s.panes).toHaveLength(7);
+    expect(s.dock).not.toBeNull();
+  });
+
+  it('배치가 없으면 예전처럼 4개까지', () => {
+    const tabs = Array.from({ length: 6 }, () => ({ title: '', sel_services: [], sel_hashes: [], stime: 0, etime: 0 }));
+    const s = toTabs(tabs, undefined, undefined, { panes: [0, 1, 2, 3, 4, 5], active: 5 });
+    expect(s.panes).toHaveLength(4);
   });
 });
