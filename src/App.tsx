@@ -133,6 +133,8 @@ import {
   kindOf,
   addPanel as addXLogPanel,
   openPinned,
+  linkedSelection,
+  focusXLog,
   MAX_XLOG_TABS,
   setCounterLabel,
   type PanelKind,
@@ -275,7 +277,11 @@ const C = {
   success: T.success, warn: T.warn, error: T.error,
 };
 
-type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert' | 'stats';
+/**
+ * 본문에 무엇을 띄우나 — 대시보드(판들) 또는 통계(도구 화면).
+ * 예전 Active · Visualize · Counter · Alert 탭은 판이 됐다(`PanelKind`). 저장된 값이 그것이면 대시보드로 읽는다
+ */
+type TabId = 'xlog' | 'stats';
 
 /** 열린 탭이 하나도 없을 때 상세 패널에 줄 빈 상태 */
 /** 고른 것 없음. 매 렌더 새 객체를 만들면 목록 memo 가 매번 다시 돈다 */
@@ -578,9 +584,12 @@ export default function App({ windowLabel }: {
     const quiet = quietAlerts(alertRows);
     return alertStream.alerts.slice(0, alertStream.unread).filter(a => !quiet.has(a)).length;
   }, [alertRows, alertStream.alerts, alertStream.unread]);
+  /** Alert 판이 보이면 읽은 것으로 — 예전 Alert 탭을 연 것과 같다 */
+  const alertPanelShown =
+    activeTab === 'xlog' && xlogTabs.tabs.some(tb => kindOf(tb) === 'alert' && xlogTabs.panes.includes(tb.key));
   useEffect(() => {
-    if (activeTab === 'alert' && alertStream.unread > 0) markAlertsRead();
-  }, [activeTab, alertStream.unread, markAlertsRead]);
+    if (alertPanelShown && alertStream.unread > 0) markAlertsRead();
+  }, [alertPanelShown, alertStream.unread, markAlertsRead]);
 
   // 상세는 **여러 개** 열어 둘 수 있다. 느린 트랜잭션은 정상인 것과 나란히 놓고 봐야 안다.
   const detail = useXLogDetailTabs();
@@ -684,7 +693,7 @@ export default function App({ windowLabel }: {
         setServicesW(l.servicesW);
         setDetailW(l.detailW);
         setTableH(l.tableH);
-        setActiveTab(l.activeTab);
+        setActiveTab(l.activeTab === 'stats' ? 'stats' : 'xlog');
         setAgentGroupBy(l.agentGroupBy);
         setXLogCols(l.xlogCols);
         setSavedFilters(normalizeSavedFilters(cfg.saved_filters));
@@ -1234,7 +1243,9 @@ export default function App({ windowLabel }: {
    */
   const showDashboard = useCallback((d: DashboardPrefs) => {
     const loaded = toXLogTabs(d.tabs, undefined, undefined, d.split);
-    setXLogTabs(loaded);
+    // 트리는 하나다 — 따라감 판은 바꾸기 전 트리에서 고른 것을 이어받는다(고정 판은 제 것)
+    const carried = linkedSelection(xlogTabsRef.current);
+    setXLogTabs(carried ? { ...loaded, tabs: loaded.tabs.map(tb => (tb.pinned ? tb : { ...tb, selection: carried })) } : loaded);
     dockRef.current = loaded.dock ?? null;
     setDockEpoch(n => n + 1);
     setSelectedXLogs([]);
@@ -1724,7 +1735,14 @@ export default function App({ windowLabel }: {
     setClearSignal(n => n + 1);
     setWideTruncated(null);
   }, []);
-  const handleAlertBadgeClick = useCallback(() => setActiveTab('alert'), []);
+  /** 알림 배지 — 지금 대시보드의 Alert 판을 앞으로, 없으면 하나 연다 */
+  const handleAlertBadgeClick = useCallback(() => {
+    setActiveTab('xlog');
+    setXLogTabs(s => {
+      const hit = s.tabs.find(tb => kindOf(tb) === 'alert');
+      return hit ? activateXLogTab(s, hit.key) : addXLogPanel(s, 'alert');
+    });
+  }, []);
 
   /**
    * 넓은 구간에서 찾기 — 구간을 받아 Rust 가 **대소문자 없이** 거른다 (`wideSearchAll.ts`).
@@ -2022,15 +2040,6 @@ export default function App({ windowLabel }: {
     };
   }, [counterHashes, filter.objHashSet]);
 
-  /** 고른 서버들의 종류 — 종류 단위 요청은 이 종류마다 한 번씩 묻고 합친다 */
-  const pickedJavaeeTypes = useMemo(
-    () => typesOf(shownHashes.javaee, objTypeOf),
-    [shownHashes.javaee, objTypeOf],
-  );
-  const pickedHostTypes = useMemo(
-    () => typesOf(shownHashes.host, objTypeOf),
-    [shownHashes.host, objTypeOf],
-  );
 
   /**
    * 값을 받아야 할 커넥션 풀 — **고른 WAS 아래 것까지 스스로 찾는다.**
@@ -2064,7 +2073,7 @@ export default function App({ windowLabel }: {
    */
   /** 보이는 카운터 판들이 그릴 서버 — 카운터 스트림에 합친다 */
   const counterPanelSig = xlogTabs.tabs
-    .filter(tb => kindOf(tb) === 'counter' && xlogTabs.panes.includes(tb.key))
+    .filter(tb => (kindOf(tb) === 'counter' || kindOf(tb) === 'counterBoard') && xlogTabs.panes.includes(tb.key))
     .flatMap(tb => [...tb.filter.objHashSet])
     .sort((a, b) => a - b)
     .join(',');
@@ -2099,8 +2108,6 @@ export default function App({ windowLabel }: {
     startCounterStream(hashes, ALL_CHART_COUNTERS).catch(() => {});
   }, [isConnected, isMain, filter.objHashSet, poolHashes, counterPanelHashes, connectionEpoch]);
 
-  /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
-  const nothingPicked = filter.objHashSet.size === 0;
   /**
    * 빈 화면에 적을 말.
    *
@@ -2231,6 +2238,8 @@ export default function App({ windowLabel }: {
     }
     const javaee = counterHashes.javaee.filter(h => picked.has(h));
     const javaeeTypes = typesOf(javaee, objTypeOf);
+    const host = counterHashes.host.filter(h => picked.has(h));
+    const datasource = counterHashes.datasource.filter(h => picked.has(h));
     const on = visible && isConnected;
     const body = (() => {
       switch (kind) {
@@ -2264,11 +2273,46 @@ export default function App({ windowLabel }: {
               refreshSignal={refreshSignal}
             />
           );
+        case 'visualize': {
+          // 지표마다 주는 Family 가 정해져 있다 — CPU 는 host 만. 안 고른 Family 는 «안 골랐다» 고 말한다
+          const families = new Set<string>();
+          if (javaee.length > 0) families.add('javaee');
+          if (host.length > 0) families.add('host');
+          if (datasource.length > 0) families.add('datasource');
+          return (
+            <VisualizeTab
+              enabled={on}
+              javaeeTypes={javaeeTypes}
+              hostTypes={typesOf(host, objTypeOf)}
+              picked={picked}
+              javaeeHashes={javaee}
+              families={families}
+              agentMap={agentMap}
+              onDrill={drillToXLog}
+              onDrillService={drillToService}
+            />
+          );
+        }
+        case 'counterBoard':
+          return (
+            <CounterBoard
+              enabled={on}
+              hashes={{ javaee, host, datasource }}
+              javaeeTypes={javaeeTypes}
+              hostTypes={typesOf(host, objTypeOf)}
+              isStreaming={isStreaming}
+              agentMap={agentMap}
+              serviceOf={serviceOf}
+              onOpenTxid={openSummaryTxid}
+              onDrill={drillToXLog}
+            />
+          );
         default:
           return null;
       }
     })();
-    return <div key={`${kind}-${refreshSignal}`} className="h-full min-h-0 overflow-auto">{body}</div>;
+    // F5 — 판을 다시 세워 전부 다시 받는다(판 안의 펼침·정렬은 처음으로)
+    return <div key={`${kind}-${refreshSignal}`} className="flex h-full min-h-0 flex-col overflow-auto">{body}</div>;
   };
 
   const renderXLogTab = useCallback(
@@ -2311,19 +2355,6 @@ export default function App({ windowLabel }: {
     [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, handleReload, refreshing],
   );
 
-  /**
-   * 고른 서버들이 속한 Family.
-   *
-   * 지표마다 주는 Family 가 정해져 있다 — CPU 는 host 만 준다. tomcat 만 골라 두면
-   * CPU 값이 영영 안 오는데, 그걸 «수집이 안 된다» 로 읽으면 엉뚱한 데를 뒤진다.
-   */
-  const pickedFamilies = useMemo(() => {
-    const out = new Set<string>();
-    if (shownHashes.javaee.length > 0) out.add('javaee');
-    if (shownHashes.host.length > 0) out.add('host');
-    if (shownHashes.datasource.length > 0) out.add('datasource');
-    return out;
-  }, [shownHashes]);
 
   /** Ctrl+F 로 옮겨 갈 자리 */
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -2345,7 +2376,8 @@ export default function App({ windowLabel }: {
    */
   const drillToXLog = useCallback((objHash: number) => {
     // 고르기를 그 한 대로 바꾼다 — 해시만 적으면 다음 명단 갱신 때 고르기에서 다시 풀려 사라진다
-    setXLogTabs(s => setTabSelection(s, { services: new Set(), hashes: new Set([objHash]) }));
+    // Visualize · 카운터 판에서 눌렀으면 XLog 판으로 옮겨 그 판을 고친다
+    setXLogTabs(s => setTabSelection(focusXLog(s), { services: new Set(), hashes: new Set([objHash]) }));
     setActiveTab('xlog');
   }, []);
 
@@ -2359,6 +2391,8 @@ export default function App({ windowLabel }: {
    * 서비스를 바꿔도 유지되는 편이 맞다 (`drillToXLog` 와 같은 규칙).
    */
   const drillToService = useCallback((serviceName: string) => {
+    // 조건은 XLog 판의 것이다 — 지금 판이 Visualize 판이면 XLog 판으로 옮긴 뒤 고친다
+    setXLogTabs(focusXLog);
     setFilter(prev => ({
       ...prev,
       patterns: [
@@ -2402,6 +2436,8 @@ export default function App({ windowLabel }: {
   const isStreaming = isConnected;
   const hasDetail = detail.tabs.length > 0;
   const hasSelected = selectedXLogs.length > 0;
+  /** 지금 대시보드에 XLog 판이 있나 — 없으면 아래 트랜잭션 목록을 접는다 */
+  const dashboardHasXLog = xlogTabs.tabs.some(tb => kindOf(tb) === 'xlog');
   /**
    * 고른 구간의 요약.
    *
@@ -2487,7 +2523,8 @@ export default function App({ windowLabel }: {
             />
           )}
           {dashboards && <span className="mx-1 h-4 w-px bg-line" aria-hidden />}
-          {((dashboards ? ['active', 'visualize', 'counter', 'alert', 'stats'] : ['xlog', 'active', 'visualize', 'counter', 'alert', 'stats']) as TabId[]).map(tab => {
+          {/* 통계는 대시보드 밖의 도구 화면이다 — 누르면 본문을 차지하고, 대시보드 이름을 누르면 돌아온다 */}
+          {((dashboards ? ['stats'] : ['xlog', 'stats']) as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
               <button
@@ -2642,7 +2679,7 @@ export default function App({ windowLabel }: {
           title={t('서버')}
           className="shrink-0"
           // 클래스(hidden)로 숨기면 Pane 의 flex 와 부딪쳐 어느 쪽이 이길지 순서에 달린다
-          style={activeTab === 'alert' || activeTab === 'stats' ? { width: servicesW, display: 'none' } : { width: servicesW }}
+          style={activeTab === 'stats' ? { width: servicesW, display: 'none' } : { width: servicesW }}
         >
           <AgentSelectorPanel
             isConnected={isConnected}
@@ -2661,7 +2698,7 @@ export default function App({ windowLabel }: {
           />
         </Pane>
 
-        {activeTab !== 'alert' && activeTab !== 'stats' && <Divider
+        {activeTab !== 'stats' && <Divider
           orientation="vertical"
           label={t('서비스 목록 너비')}
           onDrag={d =>
@@ -2742,6 +2779,9 @@ export default function App({ windowLabel }: {
               {/* 목록은 **항상 자리를 지킨다.**
                   선택했을 때만 나타나게 하면 기본 화면에 아예 없어서 기능이 있는 줄도 모르고,
                   선택할 때마다 차트 높이가 튄다. 비어 있을 때는 비어 있다고 말한다. */}
+              {/* XLog 판이 없는 대시보드(분석 · 카운터 위주)에서는 목록을 접는다 — 고른 트랜잭션이 있으면 남긴다 */}
+              {(dashboardHasXLog || hasSelected) && (
+              <>
               <Divider
                 orientation="horizontal"
                 label={t('트랜잭션 목록 높이')}
@@ -2838,6 +2878,7 @@ export default function App({ windowLabel }: {
                   </div>
                 </div>
               </Pane>
+              </>)}
             </div>
 
             {hasDetail && (
@@ -2882,167 +2923,6 @@ export default function App({ windowLabel }: {
         </div>
       )}
 
-      {/* ── Active 탭 ── */}
-      {/* 「지금 이 순간 무엇이 걸려 있는가」. 나머지 탭은 전부 이미 지나간 것을 본다. */}
-      {activeTab === 'active' && (
-        <div style={tabBodyStyle}>
-          {!isConnected ? (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
-          ) : nothingPicked ? (
-            <EmptyState text={emptyPickText} />
-          ) : (
-            <ActiveTab
-              enabled={activeTab === 'active'}
-              javaeeTypes={pickedJavaeeTypes}
-              picked={filter.objHashSet}
-              expectedHashes={shownHashes.javaee}
-              agentMap={agentMap}
-              poolHashes={poolHashes}
-              anyDatasource={counterHashes.datasource.length > 0}
-              connectionEpoch={connectionEpoch}
-              refreshSignal={refreshSignal}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── Visualize 탭 ── */}
-      {/* Counter 탭과 나눠 둔 이유는 VisualizeTab.tsx 머리말 참고 —
-          여기는 «지금 정상인가», 저기는 «무엇이 어떻게 변했나» 다. */}
-      {activeTab === 'visualize' && (
-        <div style={tabBodyStyle}>
-          {!isConnected ? (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
-          ) : nothingPicked ? (
-            <EmptyState text={emptyPickText} />
-          ) : (
-            /* **F5 는 패널을 다시 세운다.** 이 탭의 패널마다 조회 훅이 따로 있어
-               신호를 일일이 내려보내면 손이 많이 가고 빠뜨리기 쉽다. 다시 세우면
-               전부가 한 번에 다시 받는다 — 대신 패널 안의 펼침·정렬 같은 상태는
-               초기화된다(접속·고른 서버·필터는 이 바깥에 있어 그대로다). */
-            <VisualizeTab
-              key={`visualize-${refreshSignal}`}
-              enabled={activeTab === 'visualize'}
-              javaeeTypes={pickedJavaeeTypes}
-              hostTypes={pickedHostTypes}
-              picked={filter.objHashSet}
-              javaeeHashes={shownHashes.javaee}
-              families={pickedFamilies}
-              agentMap={agentMap}
-              onDrill={drillToXLog}
-              onDrillService={drillToService}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── Counter 탭 ── */}
-      {/* **Counter 탭은 떠나도 내리지 않고 숨긴다.** 카운터 스트림은 탭과 무관하게 고른
-          서버 것을 계속 받는데, 차트는 쌓아 둔 표본을 자기 안에 든다. 탭을 오갈 때마다
-          새로 세우면 그동안 받은 것을 버리고 0 부터 다시 쌓아, 들어올 때마다 선이 오른쪽
-          끝에만 붙어 있었다. 폴링하는 패널은 `enabled` 로 탭이 보일 때만 돈다. */}
-      {isMain && (activeTab === 'counter' || isConnected) && (
-        <div style={activeTab === 'counter' ? tabBodyStyle : HIDDEN_TAB_STYLE}>
-          {!isConnected ? (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
-          ) : nothingPicked ? (
-            <EmptyState text={emptyPickText} />
-          ) : (
-            /* F5 — Visualize 탭과 같은 규칙으로 패널을 다시 세운다 */
-            <div key={`counter-${refreshSignal}`} className="min-h-0 flex-1 overflow-y-auto p-3">
-              {/* 추세(카운터 차트)보다 **지금**이 먼저다. 장애 중이면 여기부터 본다. */}
-              <ActiveServicePanel
-                objTypes={pickedJavaeeTypes}
-                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
-                agentMap={agentMap}
-              />
-              <SummaryPanel
-                objTypes={pickedJavaeeTypes}
-                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
-                onOpenTxid={openSummaryTxid}
-              />
-              <TopologyPanel
-                objTypes={pickedJavaeeTypes}
-                agentMap={agentMap}
-                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
-                onDrill={drillToXLog}
-              />
-              {/* 카운터가 "서버가 견디는가"라면 이건 "무엇이 들어오는가"다.
-                  objType 이 아니라 objHash 목록으로 묻는다 (F-44). */}
-              <ServiceGroupPanel
-                objHashes={shownHashes.javaee}
-                enabled={activeTab === 'counter' && shownHashes.javaee.length > 0}
-              />
-
-              {/* Family 를 섞으면 CPU 와 TPS 가 같은 줄에 놓여 읽히지 않는다.
-                  요청은 한 번에 보내지만(실측 확인) 화면은 나눈다. */}
-              <CounterSection
-                title={t('애플리케이션')}
-                subtitle={`${shownHashes.javaee.length}${t('개 오브젝트')} · javaee`}
-                counters={JAVAEE_CHARTS}
-                isStreaming={isStreaming}
-                agentMap={agentMap}
-                serviceOf={serviceOf}
-                hashes={shownHashes.javaee}
-                empty={shownHashes.javaee.length === 0 ? t('고른 서버 중 자바 에이전트가 없습니다.') : null}
-                // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
-                footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
-              />
-              <CounterSection
-                title={t('호스트')}
-                subtitle={`${shownHashes.host.length}${t('개 오브젝트')} · host`}
-                counters={HOST_CHART_COUNTERS}
-                isStreaming={isStreaming}
-                agentMap={agentMap}
-                serviceOf={serviceOf}
-                hashes={shownHashes.host}
-                empty={
-                  shownHashes.host.length === 0
-                    ? t('고른 것 중 호스트 에이전트가 없습니다. 왼쪽 목록에서 linux · windows 오브젝트를 함께 고르면 CPU·메모리·네트워크가 표시됩니다.')
-                    : null
-                }
-              />
-              {/* 실시간 팩에 없는 카운터는 여기서만 보인다 (F-42).
-                  같은 "호스트" 안에 섞으면 갱신 주기가 2초와 5분으로 섞여 오해를 부른다. */}
-              <FiveMinSection
-                objTypes={pickedHostTypes}
-                enabled={activeTab === 'counter' && pickedHostTypes.length > 0}
-                agentMap={agentMap}
-              />
-              <CounterSection
-                title={t('커넥션 풀')}
-                subtitle={`${shownHashes.datasource.length}${t('개 풀')} · datasource`}
-                counters={DATASOURCE_CHART_COUNTERS}
-                isStreaming={isStreaming}
-                agentMap={agentMap}
-                serviceOf={serviceOf}
-                hashes={shownHashes.datasource}
-                empty={
-                  shownHashes.datasource.length === 0
-                    ? // 두 관문이 모두 닫혀 있으면 0건이다. 어느 쪽인지 말해 주지 않으면 고장으로 읽힌다 (F-41).
-                      t('고른 것 중 커넥션 풀이 없습니다. 풀이 아예 안 잡힌다면 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')
-                    : null
-                }
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Alert 탭 ── */}
-      {activeTab === 'alert' && (
-        <div style={tabBodyStyle}>
-          <AlertFullView
-            alerts={alertStream.alerts}
-            rows={alertRows}
-            since={alertStream.since}
-            connected={isStreaming}
-            onClear={alertStream.clear}
-            agentMap={agentMap}
-          />
-        </div>
-      )}
-
       {/* ── 통계 탭 ── */}
       {/* **떠나도 내리지 않고 숨긴다.** 작업은 Rust 가 백그라운드에서 돌리지만, 넣던 조건·열어 둔 결과가
           탭을 오갈 때마다 날아가면 다시 넣어야 한다. 왼쪽 서버 목록은 쓰지 않는다 — 대상은 탭 안에서 하나 고른다. */}
@@ -3064,6 +2944,113 @@ export default function App({ windowLabel }: {
 }
 
 // ─── Counter 탭 구역 ──────────────────────────────────────────
+
+
+/**
+ * 카운터 전체 판 — 예전 Counter 탭 통째. 지금 정상인가(EQ · 요약 · 토폴로지 · 서비스 그룹) 다음에
+ * Family 별 카운터 구역(앱 · 호스트 · 5분 · 커넥션 풀). 묻는 패널은 판이 보일 때만 돈다(`enabled`).
+ * 카운터 차트는 앱 전체 카운터 스트림에서 그린다 — 이 판의 서버를 스트림에 합치는 것은 App 이 한다.
+ */
+function CounterBoard({
+  enabled,
+  hashes,
+  javaeeTypes,
+  hostTypes,
+  isStreaming,
+  agentMap,
+  serviceOf,
+  onOpenTxid,
+  onDrill,
+}: {
+  enabled: boolean;
+  hashes: { javaee: number[]; host: number[]; datasource: number[] };
+  javaeeTypes: string[];
+  hostTypes: string[];
+  isStreaming: boolean;
+  agentMap: Map<number, string>;
+  serviceOf?: (objHash: number) => string | null;
+  onOpenTxid: (txid: string, date: string) => void;
+  onDrill: (objHash: number) => void;
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      {/* 추세(카운터 차트)보다 **지금**이 먼저다. 장애 중이면 여기부터 본다. */}
+      <ActiveServicePanel
+        objTypes={javaeeTypes}
+        enabled={enabled && javaeeTypes.length > 0}
+        agentMap={agentMap}
+      />
+      <SummaryPanel
+        objTypes={javaeeTypes}
+        enabled={enabled && javaeeTypes.length > 0}
+        onOpenTxid={onOpenTxid}
+      />
+      <TopologyPanel
+        objTypes={javaeeTypes}
+        agentMap={agentMap}
+        enabled={enabled && javaeeTypes.length > 0}
+        onDrill={onDrill}
+      />
+      {/* 카운터가 "서버가 견디는가"라면 이건 "무엇이 들어오는가"다.
+          objType 이 아니라 objHash 목록으로 묻는다 (F-44). */}
+      <ServiceGroupPanel
+        objHashes={hashes.javaee}
+        enabled={enabled && hashes.javaee.length > 0}
+      />
+
+      {/* Family 를 섞으면 CPU 와 TPS 가 같은 줄에 놓여 읽히지 않는다.
+          요청은 한 번에 보내지만(실측 확인) 화면은 나눈다. */}
+      <CounterSection
+        title={t('애플리케이션')}
+        subtitle={`${hashes.javaee.length}${t('개 오브젝트')} · javaee`}
+        counters={JAVAEE_CHARTS}
+        isStreaming={isStreaming}
+        agentMap={agentMap}
+        serviceOf={serviceOf}
+        hashes={hashes.javaee}
+        empty={hashes.javaee.length === 0 ? t('고른 서버 중 자바 에이전트가 없습니다.') : null}
+        // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
+        footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
+      />
+      <CounterSection
+        title={t('호스트')}
+        subtitle={`${hashes.host.length}${t('개 오브젝트')} · host`}
+        counters={HOST_CHART_COUNTERS}
+        isStreaming={isStreaming}
+        agentMap={agentMap}
+        serviceOf={serviceOf}
+        hashes={hashes.host}
+        empty={
+          hashes.host.length === 0
+            ? t('고른 것 중 호스트 에이전트가 없습니다. 왼쪽 목록에서 linux · windows 오브젝트를 함께 고르면 CPU·메모리·네트워크가 표시됩니다.')
+            : null
+        }
+      />
+      {/* 실시간 팩에 없는 카운터는 여기서만 보인다 (F-42).
+          같은 "호스트" 안에 섞으면 갱신 주기가 2초와 5분으로 섞여 오해를 부른다. */}
+      <FiveMinSection
+        objTypes={hostTypes}
+        enabled={enabled && hostTypes.length > 0}
+        agentMap={agentMap}
+      />
+      <CounterSection
+        title={t('커넥션 풀')}
+        subtitle={`${hashes.datasource.length}${t('개 풀')} · datasource`}
+        counters={DATASOURCE_CHART_COUNTERS}
+        isStreaming={isStreaming}
+        agentMap={agentMap}
+        serviceOf={serviceOf}
+        hashes={hashes.datasource}
+        empty={
+          hashes.datasource.length === 0
+            ? // 두 관문이 모두 닫혀 있으면 0건이다. 어느 쪽인지 말해 주지 않으면 고장으로 읽힌다 (F-41).
+              t('고른 것 중 커넥션 풀이 없습니다. 풀이 아예 안 잡힌다면 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')
+            : null
+        }
+      />
+    </div>
+  );
+}
 
 /**
  * 실시간에는 오지 않는 host 카운터 구역.
@@ -3847,10 +3834,6 @@ function typesOf(hashes: readonly number[], typeOf: ReadonlyMap<number, string>)
 
 const TAB_LABELS: Record<TabId, string> = {
   xlog: 'XLog',
-  active: 'Active',
-  visualize: 'Visualize',
-  counter: 'Counter',
-  alert: 'Alert',
   stats: '통계',
 };
 

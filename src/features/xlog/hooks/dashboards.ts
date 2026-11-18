@@ -11,14 +11,16 @@
 
 import type { DashboardPrefs, XLogSplitPrefs, XLogTabPrefs } from '../api/scouterApi';
 
-export type PresetId = 'original' | 'xlogOnly';
+export type PresetId = 'original' | 'xlogOnly' | 'analysis' | 'counters';
 
-export const PRESET_IDS: readonly PresetId[] = ['original', 'xlogOnly'];
+export const PRESET_IDS: readonly PresetId[] = ['original', 'xlogOnly', 'analysis', 'counters'];
 
 /** 기본 제공 이름 — 저장도 이 글자로 한다(화면은 `t()` 로 옮긴다) */
 export const PRESET_NAME: Record<PresetId, string> = {
   original: '원본 기본',
   xlogOnly: 'XLog 만',
+  analysis: '분석',
+  counters: '카운터 위주',
 };
 
 /** 예전 판을 옮겨 담은 대시보드의 이름 */
@@ -69,10 +71,14 @@ const leaf = (i: number, size: number): Leaf => ({
  * └────────┴─────────────┴──────────────┘
  * ```
  * 서버 목록(Objects)은 왼쪽 트리가 맡는다. 원본의 CPU 판은 호스트 카운터라 트리 따라감(자바 서버)으로는 비어서 뺐다.
+ *
+ * `analysis` · `counters` 는 예전 Visualize · Counter 탭이다 — 위쪽 탭이 판이 되며 대시보드로 옮겼다.
  */
 export function presetDashboard(id: PresetId): DashboardPrefs {
-  if (id === 'xlogOnly') {
-    return { id, name: PRESET_NAME[id], preset: id, tabs: [panel('xlog')], split: { panes: [0], active: 0, dir: 'row', ratio: 0.5 } };
+  // 판 하나짜리 — `XLog 만` · `분석`(예전 Visualize 탭) · `카운터 위주`(예전 Counter 탭)
+  const single = { xlogOnly: 'xlog', analysis: 'visualize', counters: 'counterBoard' } as const;
+  if (id !== 'original') {
+    return { id, name: PRESET_NAME[id], preset: id, tabs: [panel(single[id])], split: { panes: [0], active: 0, dir: 'row', ratio: 0.5 } };
   }
   const tabs = [
     panel('xlog'),

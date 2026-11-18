@@ -261,7 +261,7 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
   const key = activePanel?.id;
   /** `+` 메뉴 — 원본 스카우터의 오른쪽 클릭 메뉴처럼 무엇을 띄울지 고른다 */
   const [menu, setMenu] = useState<ScreenPoint | null>(null);
-  const others: PanelKind[] = ['eq', 'active', 'summary', 'serviceGroup', 'alert'];
+  const others: PanelKind[] = ['eq', 'active', 'summary', 'serviceGroup', 'alert', 'visualize', 'counterBoard'];
   return (
     <div className="flex h-full items-center pl-1">
       <button

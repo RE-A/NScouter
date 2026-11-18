@@ -27,21 +27,23 @@ describe('presetDashboard', () => {
     expect(decodeDock(d.split.dock, d.tabs.map((_, i) => `k${i}`))).not.toBeNull();
   });
 
-  it('XLog 만 — 판 하나', () => {
-    expect(presetDashboard('xlogOnly').tabs).toHaveLength(1);
+  it('XLog 만 · 분석 · 카운터 위주 — 판 하나씩', () => {
+    expect(presetDashboard('xlogOnly').tabs.map(t => t.kind ?? 'xlog')).toEqual(['xlog']);
+    expect(presetDashboard('analysis').tabs.map(t => t.kind)).toEqual(['visualize']);
+    expect(presetDashboard('counters').tabs.map(t => t.kind)).toEqual(['counterBoard']);
   });
 });
 
 describe('loadDashboards', () => {
   it('새로 설치 — 기본 제공 둘, 원본 기본부터', () => {
     const s = loadDashboards(undefined, undefined, [], undefined);
-    expect(s.list.map(d => d.id)).toEqual(['original', 'xlogOnly']);
+    expect(s.list.map(d => d.id)).toEqual(['original', 'xlogOnly', 'analysis', 'counters']);
     expect(s.activeId).toBe('original');
   });
 
   it('업데이트 — 예전 판을 «내 배치» 로, 화면은 그대로', () => {
     const s = loadDashboards([], '', [tab('a'), tab('b')], { panes: [0, 1] });
-    expect(s.list.map(d => d.name)).toEqual(['내 배치', '원본 기본', 'XLog 만']);
+    expect(s.list.map(d => d.name)).toEqual(['내 배치', '원본 기본', 'XLog 만', '분석', '카운터 위주']);
     expect(s.activeId).toBe('mine');
     expect(activeDashboard(s).tabs.map(t => t.title)).toEqual(['a', 'b']);
   });
@@ -92,9 +94,11 @@ describe('바꾸기', () => {
 
   it('removeDashboard — 지금 것을 지우면 옆 것이 지금 것, 마지막 하나는 남긴다', () => {
     const s = removeDashboard(base, 'original');
-    expect(s.list.map(d => d.id)).toEqual(['xlogOnly']);
+    expect(s.list.map(d => d.id)).toEqual(['xlogOnly', 'analysis', 'counters']);
     expect(s.activeId).toBe('xlogOnly');
-    expect(removeDashboard(s, 'xlogOnly')).toBe(s);
+    let one = s;
+    for (const id of ['analysis', 'counters']) one = removeDashboard(one, id);
+    expect(removeDashboard(one, 'xlogOnly')).toBe(one);
   });
 
   it('resetPreset — 판만 처음 모양으로, 이름은 둔다', () => {

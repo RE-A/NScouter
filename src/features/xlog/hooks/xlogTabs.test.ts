@@ -29,6 +29,7 @@ import {
   linkedSelection,
   addPanel,
   openPinned,
+  focusXLog,
   kindOf,
   setCounterLabel,
   tabLabels,
@@ -459,3 +460,23 @@ describe('대상이 박힌 판 열기 (트리 오른쪽 클릭)', () => {
   });
 });
 
+
+describe('focusXLog — 파고들 XLog 판', () => {
+  it('지금 판이 XLog 면 그대로, 아니면 보이는 따라감 XLog 판으로', () => {
+    let s = initialTabs();
+    const x0 = s.activeKey;
+    s = addPanel(s, 'visualize');
+    expect(focusXLog(s).activeKey).toBe(x0);
+    const x1 = addPanel(initialTabs(), 'xlog');
+    expect(focusXLog(x1)).toBe(x1);
+  });
+
+  it('XLog 판이 없으면 하나 연다', () => {
+    let s = initialTabs();
+    s = addPanel(s, 'alert');
+    const only = closeTab(s, s.tabs[0].key);
+    const out = focusXLog(only);
+    expect(out.tabs.map(kindOf)).toEqual(['alert', 'xlog']);
+    expect(kindOf(activeTab(out))).toBe('xlog');
+  });
+});

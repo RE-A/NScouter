@@ -34,9 +34,22 @@ import { EMPTY_SELECTION, sameSelection, type GroupSelection } from './groupSele
  * 대상(고르기·트리 따라감/고정)·이름·배치는 종류와 상관없이 같다. XLog 전용 칸(모드·구간·차트 설정·거름)은
  * XLog 판만 쓴다 — 다른 판에서는 `filter.objHashSet`(풀린 해시)만 쓴다.
  */
-export type PanelKind = 'xlog' | 'counter' | 'eq' | 'active' | 'summary' | 'serviceGroup' | 'alert';
+export type PanelKind =
+  | 'xlog'
+  | 'counter'
+  | 'eq'
+  | 'active'
+  | 'summary'
+  | 'serviceGroup'
+  | 'alert'
+  /** 예전 Visualize 탭 통째 — KPI · 인스턴스 격자 · 타임라인 · 분포 · 느린 서비스 */
+  | 'visualize'
+  /** 예전 Counter 탭 통째 — EQ · 요약 · 토폴로지 · 서비스 그룹 · 카운터 구역(앱 · 호스트 · 5분 · 커넥션 풀) */
+  | 'counterBoard';
 
-export const PANEL_KINDS: readonly PanelKind[] = ['xlog', 'counter', 'eq', 'active', 'summary', 'serviceGroup', 'alert'];
+export const PANEL_KINDS: readonly PanelKind[] = [
+  'xlog', 'counter', 'eq', 'active', 'summary', 'serviceGroup', 'alert', 'visualize', 'counterBoard',
+];
 
 /** 판 종류 이름 — 탭 이름의 기본값 */
 export const PANEL_KIND_LABEL: Record<PanelKind, string> = {
@@ -47,6 +60,8 @@ export const PANEL_KIND_LABEL: Record<PanelKind, string> = {
   summary: '요약',
   serviceGroup: '서비스 그룹',
   alert: 'Alert',
+  visualize: 'Visualize',
+  counterBoard: '카운터 전체',
 };
 
 /** 탭 하나가 쥐는 것 */
@@ -265,6 +280,21 @@ export function activate(s: XLogTabsState, key: string): XLogTabsState {
   if (!s.tabs.some(t => t.key === key)) return s;
   if (s.panes.includes(key)) return { ...s, activeKey: key };
   return { ...s, activeKey: key, panes: s.panes.map(k => (k === s.activeKey ? key : k)) };
+}
+
+/**
+ * XLog 판을 지금 판으로 — Visualize · 카운터 판에서 «이 서버/서비스의 트랜잭션 보기» 로 파고들 때.
+ * 지금 판이 XLog 면 그대로. 아니면 보이는 따라감 XLog 판 → 보이는 XLog 판 → 아무 XLog 판 차례로 고른다.
+ * XLog 판이 하나도 없으면(`분석` 대시보드) 지금 판 옆 탭으로 하나 연다 — 판이 꽉 찼으면 그대로.
+ */
+export function focusXLog(s: XLogTabsState): XLogTabsState {
+  if (kindOf(activeTab(s)) === 'xlog') return s;
+  const xlogs = s.tabs.filter(t => kindOf(t) === 'xlog');
+  const hit =
+    xlogs.find(t => s.panes.includes(t.key) && !t.pinned) ??
+    xlogs.find(t => s.panes.includes(t.key)) ??
+    xlogs[0];
+  return hit ? activate(s, hit.key) : addPanel(s, 'xlog');
 }
 
 /**

@@ -1332,4 +1332,7 @@ export const EN: Record<string, string> = {
   '7 번째 대시보드': 'Dashboard 7',
   '8 번째 대시보드': 'Dashboard 8',
   '9 번째 대시보드': 'Dashboard 9',
+  '분석': 'Analysis',
+  '카운터 위주': 'Counters',
+  '카운터 전체': 'All counters',
 };
