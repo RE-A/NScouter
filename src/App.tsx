@@ -497,24 +497,36 @@ export default function App({ windowLabel }: {
     setSelectedXLogs([]);
   }, []);
   /** 판을 열고 나서 격자로 정렬하라는 신호 — 바뀔 때마다 XLogDock 이 한 번 정렬한다 */
-  const [arrangeReq, setArrangeReq] = useState(0);
+  const [arrangeReq, setArrangeReq] = useState<{ n: number; keys?: readonly string[] }>({ n: 0 });
   /**
    * «고른 것 각각 XLog 로 열기» — 고른 서비스마다(없으면 고른 서버마다) 고정 XLog 판을 하나씩 열고 격자로 놓는다.
    * 원본에서 서버마다 XLog 창을 띄워 나란히 두던 것. 판은 16개까지라 넘치는 것은 열지 않는다.
    */
   const handleOpenEach = useCallback(() => {
-    setXLogTabs(s => {
+    // 연 판의 키가 있어야 그 판들만 정렬한다 — 업데이트 함수 안에서 다른 상태를 고치지 않게 지금 상태로 바로 계산한다
+    {
+      const s = xlogTabsRef.current;
       const sel = activeXLogTab(s).selection;
       const targets: GroupSelection[] =
         sel.services.size > 0
           ? [...sel.services].map(name => ({ services: new Set([name]), hashes: new Set<number>() }))
           : [...sel.hashes].map(h => ({ services: new Set<string>(), hashes: new Set([h]) }));
       let next = s;
-      for (const tg of targets.slice(0, MAX_XLOG_TABS)) next = openPinned(next, 'xlog', tg);
-      return next;
-    });
+      // 나눌 자리는 누른 판(XLog 판이면)의 자리다 — 그 판이 맨 앞(왼쪽 위), 연 판들이 뒤를 잇는다
+      const keys: string[] = kindOf(activeXLogTab(s)) === 'xlog' ? [s.activeKey] : [];
+      for (const tg of targets.slice(0, MAX_XLOG_TABS)) {
+        // 옆에 세우지 않는다 — 맨 위 줄에 열이 늘면 열들이 고르게 다시 나뉘어 옆 판(카운터 열 등)까지 흐트러진다.
+        // 누른 판의 묶음에 탭으로 넣고 아래 정렬이 그 자리만 나눈다
+        const opened = openPinned(next, 'xlog', tg, undefined, false);
+        if (opened === next) break; // 판이 꽉 찼다
+        next = opened;
+        if (!keys.includes(next.activeKey)) keys.push(next.activeKey);
+      }
+      setXLogTabs(next);
+      // 연 판들만 그 자리에서 격자로 — 대시보드의 다른 판(원본 기본의 카운터 등)은 그대로 둔다
+      setArrangeReq(r => ({ n: r.n + 1, keys }));
+    }
     setSelectedXLogs([]);
-    setArrangeReq(n => n + 1);
   }, []);
   /**
    * 에이전트 두 번 누르기 — 그 서버만 보기(원본의 더블클릭). 같은 서버를 다시 두 번 누르면 그 전 고르기로 돌아간다.
@@ -1956,11 +1968,13 @@ export default function App({ windowLabel }: {
    * 판마다 제 서버만 그리므로(`filter.objHashSet`) 합쳐 받아도 섞이지 않는다.
    */
   // 실시간 XLog 판과 **Active 목록 판**(트래픽 차트가 이 스트림을 쓴다) — 다른 종류의 판은 이 스트림을 안 쓴다
-  const liveVisible = xlogTabs.tabs.filter(
+  // 통계 화면에 있는 동안은 판이 내려가 있다 — 받아도 그릴 데가 없어 버린다. 돌아오면 판이 서며 지난 구간을 채운다
+  const liveVisible = activeTab !== 'xlog' ? [] : xlogTabs.tabs.filter(
     t => xlogTabs.panes.includes(t.key) && t.mode === 'live' && (kindOf(t) === 'xlog' || kindOf(t) === 'active'),
   );
   const streamKey = (() => {
-    const set = new Set<number>(filter.objHashSet);
+    // 지금 판도 보이는 판이라 아래에 든다 — 지금 판이 카운터 판·과거 XLog 판이면 그 서버는 받지 않는다
+    const set = new Set<number>();
     for (const tab of liveVisible) for (const h of tab.filter.objHashSet) set.add(h);
     return [...set].sort((a, b) => a - b).join(',');
   })();
@@ -2421,7 +2435,11 @@ export default function App({ windowLabel }: {
     // 뗀 창은 대시보드가 없다 — 목록이 비어 있어 아무것도 안 한다
     ...dashboardShortcuts,
     'open-settings': () => setShowSettings(true),
-    'toggle-mode': () => setXLogMode(m => (m === 'live' ? 'past' : 'live')),
+    // XLog 판의 모드다 — 지금 판이 카운터 · Active 목록 판이면 하지 않는다(Active 목록은 과거가 되면 트래픽이 멎는다)
+    'toggle-mode': () => {
+      if (kindOf(activeXLogTab(xlogTabsRef.current)) !== 'xlog') return;
+      setXLogMode(m => (m === 'live' ? 'past' : 'live'));
+    },
     /**
      * F5 — **웹뷰를 통째로 다시 띄우지 않는다.** 그러면 접속·고른 서버·열어 둔 상세가
      * 다 날아간다. 지금 보는 화면의 **데이터만** 다시 받는다:

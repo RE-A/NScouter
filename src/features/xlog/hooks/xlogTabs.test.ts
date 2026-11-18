@@ -480,3 +480,21 @@ describe('focusXLog — 파고들 XLog 판', () => {
     expect(kindOf(activeTab(out))).toBe('xlog');
   });
 });
+
+describe('openBeside — 새 판을 옆에 세우나', () => {
+  const sel = { services: new Set<string>(), hashes: new Set([7]) };
+
+  it('트리에서 연 고정 판은 옆에, 여럿을 열어 격자로 놓을 때는 탭으로', () => {
+    const one = openPinned(initialTabs(), 'counter', sel, 'TPS');
+    expect(activeTab(one).openBeside).toBe(true);
+    const many = openPinned(initialTabs(), 'xlog', sel, undefined, false);
+    expect(activeTab(many).openBeside).toBeUndefined();
+    expect(activeTab(many).pinned).toBe(true);
+  });
+
+  it('파고들며 연 XLog 판도 옆에', () => {
+    let s = addPanel(initialTabs(), 'visualize');
+    s = closeTab(s, s.tabs[0].key);
+    expect(activeTab(focusXLog(s)).openBeside).toBe(true);
+  });
+});

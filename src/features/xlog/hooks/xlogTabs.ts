@@ -86,6 +86,11 @@ export interface XLogTab {
   kind?: PanelKind;
   /** (카운터 판) 그릴 카운터 — counters.xml 표기 그대로 (`TPS`, `ElapsedTime` …) */
   counter?: string;
+  /**
+   * 새 판을 지금 판 **옆(오른쪽)** 에 세운다 — 트리에서 연 판·파고들며 연 XLog 판. 없으면 지금 판 묶음의 뒤쪽 탭으로 든다.
+   * 판이 처음 놓일 때만 쓴다(저장하지 않는다). 탭으로 들면 지금 보던 판이 그 뒤로 가려져 «나란히 보기» 가 안 된다
+   */
+  openBeside?: boolean;
 }
 
 /** 판 종류 — 없으면 XLog */
@@ -294,7 +299,9 @@ export function focusXLog(s: XLogTabsState): XLogTabsState {
     xlogs.find(t => s.panes.includes(t.key) && !t.pinned) ??
     xlogs.find(t => s.panes.includes(t.key)) ??
     xlogs[0];
-  return hit ? activate(s, hit.key) : addPanel(s, 'xlog');
+  if (hit) return activate(s, hit.key);
+  const added = addPanel(s, 'xlog');
+  return added === s ? s : patchTab(added, added.activeKey, () => ({ openBeside: true }));
 }
 
 /**
@@ -444,13 +451,20 @@ export function addPanel(s: XLogTabsState, kind: PanelKind, counter?: string): X
  * 같은 종류(카운터면 같은 카운터)·같은 대상의 **고정 판이 이미 있으면 그 판을 앞으로** 한다 — 원본과 같다.
  * 없으면 지금 판 옆에 고정 판으로 연다.
  */
-export function openPinned(s: XLogTabsState, kind: PanelKind, sel: GroupSelection, counter?: string): XLogTabsState {
+export function openPinned(
+  s: XLogTabsState,
+  kind: PanelKind,
+  sel: GroupSelection,
+  counter?: string,
+  /** 지금 판 옆에 세운다(기본). 여럿을 열어 곧 격자로 놓을 때는 끈다 — 지금 판 묶음의 탭으로 들어 그 자리만 나눈다 */
+  beside = true,
+): XLogTabsState {
   const hit = s.tabs.find(
     t => t.pinned && kindOf(t) === kind && (kind !== 'counter' || t.counter === counter) && sameSelection(t.selection, sel),
   );
   if (hit) return activate(s, hit.key);
   const added = kind === 'xlog' ? addPanel(s, 'xlog') : addPanel(s, kind, counter);
   if (added === s) return s;
-  return patchTab(added, added.activeKey, () => ({ pinned: true, selection: sel }));
+  return patchTab(added, added.activeKey, () => ({ pinned: true, selection: sel, ...(beside ? { openBeside: true } : {}) }));
 }
 
