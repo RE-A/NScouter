@@ -21,6 +21,7 @@ import { toDateString } from '../utils/xlogDate';
 import { SectionHeader } from '../../../components/SectionHeader';
 import { t } from '../../../i18n';
 import { Button } from '../../../components/Button';
+import type { ActiveSpeed } from '../api/scouterApi';
 
 interface ActiveServicePanelProps {
   /**
@@ -30,6 +31,11 @@ interface ActiveServicePanelProps {
   objTypes: readonly string[];
   enabled: boolean;
   agentMap: Map<number, string>;
+  /**
+   * 고른 서버 — 있으면 **이 서버들만** 그린다. 값은 종류 단위로 받으므로(콜렉터가 종류로만 답한다) 받은 뒤 거른다.
+   * 거르지 않으면 `order-api` 만 골라도 같은 종류의 `order-batch` · `cart` … 가 함께 나와, 서버가 많은 곳에서 오해를 샀다
+   */
+  picked?: ReadonlySet<number>;
 }
 
 /** 단계별 색과 이름. 느릴수록 경고색으로 간다 */
@@ -50,6 +56,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
   objTypes,
   enabled,
   agentMap,
+  picked,
 }: ActiveServicePanelProps) {
   /**
    * 보고 있는 날. 빈 문자열이면 오늘이다.
@@ -65,17 +72,25 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
 
   if (!enabled) return null;
 
-  const group = stats.group;
+  const perObject = picked ? stats.perObject.filter(a => picked.has(a.obj_hash)) : stats.perObject;
+  // 종류의 일부만 골랐으면 «전체» 는 고른 서버의 합이다. TPS 는 콜렉터가 종류 합계로만 주므로 이때는 비운다
+  const partial = picked !== undefined && perObject.length < stats.perObject.length;
+  const group: ActiveSpeed | null = partial
+    ? perObject.reduce(
+        (acc, a) => ({ ...acc, act1: acc.act1 + a.act1, act2: acc.act2 + a.act2, act3: acc.act3 + a.act3 }),
+        { obj_hash: 0, act1: 0, act2: 0, act3: 0, tps: 0 },
+      )
+    : stats.group;
   const todayCalls = todayTotal(stats.todayCount);
   // 오브젝트별 막대의 공통 눈금. **가장 바쁜 오브젝트**에 맞춘다 —
   // 합계에 맞추면 오브젝트가 늘수록 모든 막대가 짧아져 아무것도 안 보인다.
-  const eqScale = eqMaxValue(Math.max(0, ...stats.perObject.map(speedTotal)));
+  const eqScale = eqMaxValue(Math.max(0, ...perObject.map(speedTotal)));
 
   return (
     <section className="mb-4">
       <SectionHeader
         title={t('액티브 서비스')}
-        subtitle={`${objTypes.join(' · ')} · ${t('지금 이 순간')}`}
+        subtitle={`${objTypes.join(' · ')}${partial ? ` · ${t('고른')} ${perObject.length}${t('대')}` : ''} · ${t('지금 이 순간')}`}
       />
 
       {stats.error && (
@@ -88,10 +103,16 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
         {/* 타입 전체 */}
         <div className="rounded border border-line bg-surface p-3">
           <div className="flex items-baseline justify-between">
-            <span className="text-micro tracking-wide text-fg-dim uppercase">{t('전체')}</span>
-            <span className="tnum font-mono text-micro text-fg-dim">
-              TPS <span className="text-fg-muted">{(group?.tps ?? 0).toFixed(1)}</span>
-            </span>
+            <span className="text-micro tracking-wide text-fg-dim uppercase">{partial ? t('고른 서버') : t('전체')}</span>
+            {partial ? (
+              <span className="tnum font-mono text-micro text-fg-faint" title={t('TPS 는 콜렉터가 종류 전체 합계로만 줍니다 — 일부 서버만 고르면 적지 않습니다')}>
+                TPS —
+              </span>
+            ) : (
+              <span className="tnum font-mono text-micro text-fg-dim">
+                TPS <span className="text-fg-muted">{(group?.tps ?? 0).toFixed(1)}</span>
+              </span>
+            )}
           </div>
 
           <div className="tnum mt-1 font-mono">
@@ -121,12 +142,12 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
             막대는 **오브젝트를 통틀어 하나의 자**로 잰다 (ASIS EQView). */}
         <div className="rounded border border-line bg-surface p-3">
           <span className="text-micro tracking-wide text-fg-dim uppercase">{t('오브젝트별')}</span>
-          {stats.perObject.length === 0 ? (
+          {perObject.length === 0 ? (
             <p className="mt-2 text-small text-fg-faint">{t('받은 값이 없습니다')}</p>
           ) : (
             <>
               <ul className="mt-1.5 space-y-1.5">
-                {stats.perObject.map(a => (
+                {perObject.map(a => (
                   <li key={a.obj_hash}>
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="truncate text-micro text-fg-muted">
@@ -211,7 +232,7 @@ export const ActiveServicePanel = memo(function ActiveServicePanel({
       {/* 막대가 "몇 건"이라면 목록은 "무엇이". 기본은 접어 둔다 —
           에이전트에 스레드 스택을 뜨게 하는 요청이라 공짜가 아니다. */}
       <div className="mt-2">
-        <ActiveServiceList objTypes={objTypes} agentMap={agentMap} />
+        <ActiveServiceList objTypes={objTypes} agentMap={agentMap} picked={picked} />
       </div>
     </section>
   );

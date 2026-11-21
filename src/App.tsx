@@ -522,6 +522,9 @@ export default function App({ windowLabel }: {
         next = opened;
         if (!keys.includes(next.activeKey)) keys.push(next.activeKey);
       }
+      // 지금 판은 누른 판으로 되돌린다 — 마지막에 연 고정 판이 지금 판이 되면 왼쪽 트리가 그 판의 고르기
+      // (서비스 하나)를 보여 줘, 서비스 열을 골랐던 것이 사라진 것처럼 보였다
+      if (next !== s) next = activateXLogTab(next, s.activeKey);
       setXLogTabs(next);
       // 연 판들만 그 자리에서 격자로 — 대시보드의 다른 판(원본 기본의 카운터 등)은 그대로 둔다
       setArrangeReq(r => ({ n: r.n + 1, keys }));
@@ -2292,7 +2295,7 @@ export default function App({ windowLabel }: {
             />
           );
         case 'eq':
-          return <ActiveServicePanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} agentMap={agentMap} />;
+          return <ActiveServicePanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} agentMap={agentMap} picked={picked} />;
         case 'summary':
           return <SummaryPanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} onOpenTxid={openSummaryTxid} />;
         case 'serviceGroup':
@@ -2335,6 +2338,7 @@ export default function App({ windowLabel }: {
           return (
             <CounterBoard
               enabled={on}
+              picked={picked}
               hashes={{ javaee, host, datasource }}
               javaeeTypes={javaeeTypes}
               hostTypes={typesOf(host, objTypeOf)}
@@ -3009,6 +3013,7 @@ export default function App({ windowLabel }: {
  */
 function CounterBoard({
   enabled,
+  picked,
   hashes,
   javaeeTypes,
   hostTypes,
@@ -3019,6 +3024,8 @@ function CounterBoard({
   onDrill,
 }: {
   enabled: boolean;
+  /** 고른 서버 — EQ 의 서버별 막대를 이 서버들로 거른다(받기는 종류 단위) */
+  picked: ReadonlySet<number>;
   hashes: { javaee: number[]; host: number[]; datasource: number[] };
   javaeeTypes: string[];
   hostTypes: string[];
@@ -3035,6 +3042,7 @@ function CounterBoard({
         objTypes={javaeeTypes}
         enabled={enabled && javaeeTypes.length > 0}
         agentMap={agentMap}
+        picked={picked}
       />
       <SummaryPanel
         objTypes={javaeeTypes}

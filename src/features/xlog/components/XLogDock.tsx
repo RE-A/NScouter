@@ -492,6 +492,9 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
     propsRef.current.onVisibleChange(keys);
   }, []);
 
+  /** 격자 정렬 중인가 — 그동안 dockview 의 «지금 판» 알림을 받지 않는다(`arrange`) */
+  const arrangingRef = useRef(false);
+
   /** 직전에 지금 판이던 키 — 새 탭을 그 판의 묶음에 놓는다 */
   const lastActiveRef = useRef(activeKey);
 
@@ -527,6 +530,9 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
       lastActiveRef.current = p.activeKey;
 
       api.onDidActivePanelChange(({ panel }) => {
+        // 격자 정렬 중에는 dockview 가 옮기는 판마다 «지금 판» 을 알린다 — 받으면 그 알림들이 정렬이 끝난 뒤에
+        // 반영돼 마지막에 옮긴 판이 지금 판이 됐다. 정렬이 끝나면 원래 판을 되돌린다(`arrange`)
+        if (arrangingRef.current) return;
         if (panel && panel.id !== propsRef.current.activeKey) propsRef.current.onActivate(panel.id);
         reportVisible();
       });
@@ -581,6 +587,7 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
   const arrange = useCallback((only?: readonly string[]) => {
     const api = apiRef.current;
     if (!api) return;
+    arrangingRef.current = true;
     // 옮기는 동안 dockview 가 다른 판을 지금 판으로 알린다 — 끝나고 되돌릴 판을 먼저 잡아 둔다
     const want = propsRef.current.activeKey;
     const order = propsRef.current.tabs.map(tb => tb.key);
@@ -607,7 +614,11 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
           g?.api.setSize({ width: Math.floor(W / inRow), height: Math.floor(H / rows) });
         }
       }
-      api.getPanel(want)?.api.setActive();
+      // 판만 앞으로 하면 그 판 묶음이 지금 묶음이 아닐 때 그대로다 — 묶음도 지금 묶음으로
+      const back = api.getPanel(want);
+      back?.api.setActive();
+      back?.group.api.setActive();
+      arrangingRef.current = false;
     });
   }, []);
 

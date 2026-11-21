@@ -316,6 +316,7 @@ export const VisualizeTab = memo(function VisualizeTab({
         objTypes={javaeeTypes}
         enabled={enabled && javaeeTypes.length > 0}
         agentMap={agentMap}
+        picked={picked}
       />
 
       {showThresholds && (

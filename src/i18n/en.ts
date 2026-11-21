@@ -1339,4 +1339,7 @@ export const EN: Record<string, string> = {
   '서버를 고르면 여기 나옵니다': 'Pick servers to show this',
   '차트에서 구간을 드래그하면 여기 펼쳐집니다': 'Drag a range on the chart to open this',
   '전체 목록': 'All',
+  '고른': 'Picked',
+  '고른 서버': 'Picked servers',
+  'TPS 는 콜렉터가 종류 전체 합계로만 줍니다 — 일부 서버만 고르면 적지 않습니다': 'The collector only reports TPS per type — it is left blank when only some servers are picked',
 };
