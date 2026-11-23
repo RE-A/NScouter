@@ -675,15 +675,48 @@ export default function App({ windowLabel }: {
     [serviceIndex.sig],
   );
   /**
-   * 서비스로 묶어 볼 때는 **서비스가 색을 정한다.** Task 마다 색을 주면 4대짜리 서비스가
+   * 색을 정하는 서비스 — 묶기와 상관없이 이름 규칙(태그)으로 푼다. 아래 «큰 환경» 에서 쓴다.
+   * 서비스로 묶어 볼 때의 `serviceIndex` 와 같은 셈이다.
+   */
+  const colorIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const seen of objectHistory().values()) {
+      const svc = serviceNameOf(asAgent(seen), groupRule);
+      if (svc !== null) map.set(seen.obj_hash, svc);
+    }
+    return { map, sig: [...map].map(([h, svc]) => `${h}=${svc}`).join('|') };
+    // objects 는 본문에서 안 읽는다 — objectHistory 가 갱신됐다는 신호로만 지켜본다
+  }, [objects, groupRule]);
+  /**
+   * 자바 서버가 이보다 많은 «큰 환경» 이면 묶기와 상관없이 **서비스 색**을 쓴다. 서버 색은 수십 개라
+   * 서버가 수십 대면 같은 색이 여러 번 나와 XLog 점 · 카운터 선에서 서버를 가를 수 없었다.
+   * 서비스로 안 풀리는 서버(이름 규칙에 안 맞는 것)는 서버 색 그대로다.
+   */
+  const bigEnv = counterHashes.javaee.length > SERVICE_COLOR_OVER;
+  const colorKey = useMemo(
+    () => {
+      if (agentGroupBy === 'service') return serviceOf;
+      if (!bigEnv || colorIndex.sig === '') return undefined;
+      const map = colorIndex.map;
+      return (h: number): string | null => map.get(h) ?? null;
+    },
+    // sig 가 같으면 map 의 내용도 같다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentGroupBy, serviceOf, bigEnv, colorIndex.sig],
+  );
+  /**
+   * 서비스로 묶어 볼 때(또는 큰 환경)는 **서비스가 색을 정한다.** Task 마다 색을 주면 4대짜리 서비스가
    * 네 색으로 흩어지고, 재배포할 때마다 색이 바뀐다.
    *
    * 그리기 전에 건다(layout) — 목록의 색 칸이 옛 기준으로 한 번 그려졌다 바뀌지 않게.
    */
   useLayoutEffect(() => {
-    setAgentColorKey(serviceOf ?? null);
+    // 서비스 이름순 차례로 색을 준다 — 해시로 고르면 서비스 몇 개에서도 같은 색이 났다(`keyColor`)
+    setAgentColorKey(colorKey ?? null, colorKey ? [...colorIndex.map.values()] : undefined);
     repaintCharts();
-  }, [serviceOf]);
+    // colorIndex 는 colorKey 가 바뀔 때만 다시 읽는다(서비스 구성이 바뀌면 sig 로 colorKey 도 바뀐다)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colorKey]);
   /**
    * 저장해 둔 배치·차트 설정을 한 번 읽어 온다.
    *
@@ -3897,6 +3930,9 @@ function typesOf(hashes: readonly number[], typeOf: ReadonlyMap<number, string>)
 }
 
 // ─── 상수 ─────────────────────────────────────────────────────
+
+/** 자바 서버가 이보다 많으면 묶기와 상관없이 서비스 색을 쓴다 (App `colorKey`) */
+const SERVICE_COLOR_OVER = 10;
 
 /** 트랜잭션 목록을 접었을 때의 높이 — 제목 줄(26px)과 테두리 */
 const TABLE_FOLDED_H = 28;
