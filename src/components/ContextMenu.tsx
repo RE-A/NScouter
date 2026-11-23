@@ -11,6 +11,8 @@ export interface MenuItem {
   onSelect: () => void;
   /** 지금은 못 쓰는 항목. 이유를 title 로 보여준다 */
   disabled?: string;
+  /** 이 항목 위에 가름선 — 성격이 다른 항목 묶음을 나눈다 */
+  divider?: boolean;
 }
 
 interface ContextMenuProps {
@@ -58,11 +60,12 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={ref}
       role="menu"
-      style={{ left: pos.x, top: pos.y }}
+      // 화면보다 길면 안에서 굴린다 — 높이를 묶지 않으면 아래 항목이 창 밖으로 나가 고를 수 없었다(카운터 40여 개)
+      style={{ left: pos.x, top: pos.y, maxHeight: 'calc(100vh - 8px)' }}
       // 메뉴 안에서 시작한 pointerdown 이 위 리스너까지 올라가면 즉시 닫힌다.
       onPointerDown={e => e.stopPropagation()}
       onContextMenu={e => e.preventDefault()}
-      className="fixed z-50 min-w-[168px] overflow-hidden rounded border border-line-strong bg-overlay py-1 shadow-lg"
+      className="fixed z-50 min-w-[168px] overflow-y-auto rounded border border-line-strong bg-overlay py-1 shadow-lg"
     >
       {items.map(item => (
         <button
@@ -75,7 +78,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             item.onSelect();
             onClose();
           }}
-          className={`block w-full px-3 py-1 text-left text-body ${
+          className={`block w-full px-3 py-1 text-left text-body ${item.divider ? 'mt-1 border-t border-line pt-1.5' : ''} ${
             item.disabled
               ? 'cursor-not-allowed text-fg-faint'
               : 'text-fg-muted hover:bg-hover hover:text-fg'

@@ -321,20 +321,26 @@ function withSplit(s: XLogTabsState, split: XLogSplitPrefs | undefined): XLogTab
   if (!split) return s;
   const keyAt = (i: unknown) =>
     typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < s.tabs.length ? s.tabs[i].key : null;
+  // 판 배치 — 탭과 딱 맞을 때만 되살린다(`decodeDock`). 아니면 null 이고 `panes`·`dir` 로 짠다
+  const dock = decodeDock(split.dock, s.tabs.map(t => t.key));
+  // 배치가 있으면 `panes` 는 «보이는 판» 일 뿐이라 예전 분할의 상한(4)으로 자르지 않는다 — 자르면 판이 7개인
+  // 원본 기본에서 지금 판(XLog)이 잘려 나가, 다시 켤 때마다 첫 판(Alert)이 지금 판이 됐다
+  const cap = dock ? MAX_XLOG_TABS : MAX_PANES;
   const panes: string[] = [];
   for (const i of Array.isArray(split.panes) ? split.panes : []) {
     const k = keyAt(i);
-    if (k !== null && !panes.includes(k) && panes.length < MAX_PANES) panes.push(k);
+    if (k !== null && !panes.includes(k) && panes.length < cap) panes.push(k);
   }
   if (panes.length === 0) panes.push(s.tabs[0].key);
   const active = keyAt(split.active);
+  // 배치가 있으면 지금 판은 저장된 그대로다(보이는 판 목록은 판이 서면 dockview 가 다시 알린다)
+  if (dock && active !== null && !panes.includes(active)) panes.push(active);
   const out: XLogTabsState = {
     ...s,
     panes,
     activeKey: active !== null && panes.includes(active) ? active : panes[0],
     dir: split.dir === 'column' ? 'column' : 'row',
-    // 판 배치 — 탭과 딱 맞을 때만 되살린다(`decodeDock`). 아니면 null 이고 `panes`·`dir` 로 짠다
-    dock: decodeDock(split.dock, s.tabs.map(t => t.key)),
+    dock,
   };
   return typeof split.ratio === 'number' ? setRatio(out, split.ratio) : out;
 }

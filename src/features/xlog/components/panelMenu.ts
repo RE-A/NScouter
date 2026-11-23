@@ -9,7 +9,7 @@ import { counterMeta, isHostObjectType, isJavaeeObjectType, type CounterName } f
 import { t } from '../../../i18n';
 
 /** 메뉴에 올릴 카운터 — 원본 기본 배치의 것(Recent User · TPS · Elapsed · Heap) 과 자주 보는 것 */
-const JAVAEE_MENU_COUNTERS: CounterName[] = ['TPS', 'ElapsedTime', 'ActiveService', 'RecentUser', 'ErrorRate', 'HeapUsed'];
+export const JAVAEE_MENU_COUNTERS: CounterName[] = ['TPS', 'ElapsedTime', 'ActiveService', 'RecentUser', 'ErrorRate', 'HeapUsed'];
 const HOST_MENU_COUNTERS: CounterName[] = ['Cpu', 'Mem', 'NetInBound', 'NetOutBound'];
 
 export type OpenPanel = (kind: PanelKind, counter?: string) => void;
@@ -21,9 +21,11 @@ export type OpenPanel = (kind: PanelKind, counter?: string) => void;
 export function panelMenuItems(open: OpenPanel, objType: string | null): MenuItem[] {
   const javaee = objType === null || isJavaeeObjectType(objType);
   const host = objType === null || isHostObjectType(objType);
-  const counter = (c: CounterName): MenuItem => ({
+  // 카운터 묶음의 첫 항목 위에 가름선 — 판(XLog · EQ …)과 카운터를 나눈다
+  const counter = (c: CounterName, i: number): MenuItem => ({
     label: `${t('카운터')} · ${t(counterMeta(c).disp)} ${t('열기')}`,
     onSelect: () => open('counter', c),
+    ...(i === 0 ? { divider: true } : {}),
   });
   return [
     ...(javaee
@@ -35,6 +37,7 @@ export function panelMenuItems(open: OpenPanel, objType: string | null): MenuIte
           ...JAVAEE_MENU_COUNTERS.map(counter),
         ]
       : []),
-    ...(host ? HOST_MENU_COUNTERS.map(counter) : []),
+    // 호스트 카운터는 판 항목이 없는 메뉴면 맨 위이고, 섞인 묶음이면 자바 카운터를 잇는다 — 어느 쪽이든 가름선이 필요 없다
+    ...(host ? HOST_MENU_COUNTERS.map(c => counter(c, 1)) : []),
   ];
 }

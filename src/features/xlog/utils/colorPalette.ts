@@ -104,14 +104,27 @@ const agentColorMap = new Map<number, string>();
  */
 let colorKeyOf: ((objHash: number) => string | null) | null = null;
 
-/** 무리 열쇠를 건다. **캐시도 비운다** — 안 비우면 옛 기준의 색이 남는다 */
-export function setAgentColorKey(fn: ((objHash: number) => string | null) | null): void {
+/**
+ * 열쇠(서비스 이름) → 색 차례. 있으면 해시 대신 **차례대로** 색을 준다 — 해시로 고르면 서비스가 몇 개 안 돼도
+ * 같은 색이 나왔다(서비스 14개에서 `cart-api` 와 `order-api` 가 같은 초록). 차례면 색 수(12)까지는 겹치지 않는다.
+ * 대신 서비스가 새로 생기면 이름순으로 그 뒤의 색이 한 칸씩 밀린다.
+ */
+let keyOrder: ReadonlyMap<string, number> | null = null;
+
+/**
+ * 무리 열쇠를 건다. **캐시도 비운다** — 안 비우면 옛 기준의 색이 남는다.
+ * @param keys 쓰는 열쇠 전부 — 주면 이름순 차례로 색을 준다(위 `keyOrder`)
+ */
+export function setAgentColorKey(fn: ((objHash: number) => string | null) | null, keys?: readonly string[]): void {
   colorKeyOf = fn;
+  keyOrder = fn && keys ? new Map([...new Set(keys)].sort().map((k, i) => [k, i])) : null;
   agentColorMap.clear();
 }
 
-/** 문자열 → 색. Java `String.hashCode` 와 같은 식이라 재시작해도 같은 이름은 같은 색이다 */
+/** 문자열 → 색. 차례가 걸려 있으면 그 차례, 아니면 Java `String.hashCode` 와 같은 식이라 재시작해도 같은 이름은 같은 색이다 */
 export function keyColor(key: string): string {
+  const at = keyOrder?.get(key);
+  if (at !== undefined) return AGENT_COLORS[at % AGENT_COLORS.length];
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
   return AGENT_COLORS[Math.abs(h) % AGENT_COLORS.length];

@@ -133,6 +133,8 @@ import {
   kindOf,
   addPanel as addXLogPanel,
   openPinned,
+  linkedSelection,
+  focusXLog,
   MAX_XLOG_TABS,
   setCounterLabel,
   type PanelKind,
@@ -146,6 +148,22 @@ import {
   type XLogTabsState,
 } from './features/xlog/hooks/xlogTabs';
 import { XLogDock } from './features/xlog/components/XLogDock';
+import { DashboardBar } from './features/xlog/components/DashboardBar';
+import {
+  activeDashboard,
+  addDashboard,
+  loadDashboards,
+  presetDashboard,
+  PRESET_NAME,
+  removeDashboard,
+  renameDashboard,
+  resetPreset,
+  withCurrent,
+  type DashboardsState,
+  type PresetId,
+} from './features/xlog/hooks/dashboards';
+import { DASHBOARD_ACTIONS } from './features/xlog/hooks/shortcuts';
+import type { DashboardPrefs } from './features/xlog/api/scouterApi';
 import { CounterPanelView } from './features/xlog/components/CounterPanelView';
 import type { SerializedDockview } from 'dockview-react';
 import {
@@ -242,8 +260,8 @@ import {
   JAVAEE_UNCOLLECTED_COUNTERS,
   DATASOURCE_CHART_COUNTERS,
   counterMeta,
-  isTotalCapable,
 } from './features/xlog/types/counter';
+import { isFoldable } from './features/xlog/components/counterTotal';
 import { T, F, FONT_UI } from './styles/tokens';
 import { SectionHeader } from './components/SectionHeader';
 import { t, useT } from './i18n';
@@ -259,7 +277,11 @@ const C = {
   success: T.success, warn: T.warn, error: T.error,
 };
 
-type TabId = 'xlog' | 'active' | 'visualize' | 'counter' | 'alert' | 'stats';
+/**
+ * 본문에 무엇을 띄우나 — 대시보드(판들) 또는 통계(도구 화면).
+ * 예전 Active · Visualize · Counter · Alert 탭은 판이 됐다(`PanelKind`). 저장된 값이 그것이면 대시보드로 읽는다
+ */
+type TabId = 'xlog' | 'stats';
 
 /** 열린 탭이 하나도 없을 때 상세 패널에 줄 빈 상태 */
 /** 고른 것 없음. 매 렌더 새 객체를 만들면 목록 memo 가 매번 다시 돈다 */
@@ -369,6 +391,13 @@ export default function App({ windowLabel }: {
    */
   const [xlogTabs, setXLogTabs] = useState<XLogTabsState>(initialTabs);
   /**
+   * 대시보드들(`dashboards.ts`) — 메인 창만. 화면에 떠 있는 것은 지금 대시보드 하나(`xlogTabs`)이고,
+   * 목록의 같은 항목은 저장·바꾸기 때 맞춘다. 읽기 전에는 null — 그동안은 바꾸지 않는다
+   */
+  const [dashboards, setDashboards] = useState<DashboardsState | null>(null);
+  const dashboardsRef = useRef(dashboards);
+  dashboardsRef.current = dashboards;
+  /**
    * 떼어 낸 창들 — **메인 창만** 들고 있다(`detached/registry.ts`). 창마다 띄운 탭·분할·자리를
    * 설정 파일에 남겼다가 켤 때 같은 자리에 다시 연다.
    */
@@ -468,24 +497,39 @@ export default function App({ windowLabel }: {
     setSelectedXLogs([]);
   }, []);
   /** 판을 열고 나서 격자로 정렬하라는 신호 — 바뀔 때마다 XLogDock 이 한 번 정렬한다 */
-  const [arrangeReq, setArrangeReq] = useState(0);
+  const [arrangeReq, setArrangeReq] = useState<{ n: number; keys?: readonly string[] }>({ n: 0 });
   /**
    * «고른 것 각각 XLog 로 열기» — 고른 서비스마다(없으면 고른 서버마다) 고정 XLog 판을 하나씩 열고 격자로 놓는다.
    * 원본에서 서버마다 XLog 창을 띄워 나란히 두던 것. 판은 16개까지라 넘치는 것은 열지 않는다.
    */
   const handleOpenEach = useCallback(() => {
-    setXLogTabs(s => {
+    // 연 판의 키가 있어야 그 판들만 정렬한다 — 업데이트 함수 안에서 다른 상태를 고치지 않게 지금 상태로 바로 계산한다
+    {
+      const s = xlogTabsRef.current;
       const sel = activeXLogTab(s).selection;
       const targets: GroupSelection[] =
         sel.services.size > 0
           ? [...sel.services].map(name => ({ services: new Set([name]), hashes: new Set<number>() }))
           : [...sel.hashes].map(h => ({ services: new Set<string>(), hashes: new Set([h]) }));
       let next = s;
-      for (const tg of targets.slice(0, MAX_XLOG_TABS)) next = openPinned(next, 'xlog', tg);
-      return next;
-    });
+      // 나눌 자리는 누른 판(XLog 판이면)의 자리다 — 그 판이 맨 앞(왼쪽 위), 연 판들이 뒤를 잇는다
+      const keys: string[] = kindOf(activeXLogTab(s)) === 'xlog' ? [s.activeKey] : [];
+      for (const tg of targets.slice(0, MAX_XLOG_TABS)) {
+        // 옆에 세우지 않는다 — 맨 위 줄에 열이 늘면 열들이 고르게 다시 나뉘어 옆 판(카운터 열 등)까지 흐트러진다.
+        // 누른 판의 묶음에 탭으로 넣고 아래 정렬이 그 자리만 나눈다
+        const opened = openPinned(next, 'xlog', tg, undefined, false);
+        if (opened === next) break; // 판이 꽉 찼다
+        next = opened;
+        if (!keys.includes(next.activeKey)) keys.push(next.activeKey);
+      }
+      // 지금 판은 누른 판으로 되돌린다 — 마지막에 연 고정 판이 지금 판이 되면 왼쪽 트리가 그 판의 고르기
+      // (서비스 하나)를 보여 줘, 서비스 열을 골랐던 것이 사라진 것처럼 보였다
+      if (next !== s) next = activateXLogTab(next, s.activeKey);
+      setXLogTabs(next);
+      // 연 판들만 그 자리에서 격자로 — 대시보드의 다른 판(원본 기본의 카운터 등)은 그대로 둔다
+      setArrangeReq(r => ({ n: r.n + 1, keys }));
+    }
     setSelectedXLogs([]);
-    setArrangeReq(n => n + 1);
   }, []);
   /**
    * 에이전트 두 번 누르기 — 그 서버만 보기(원본의 더블클릭). 같은 서버를 다시 두 번 누르면 그 전 고르기로 돌아간다.
@@ -555,9 +599,12 @@ export default function App({ windowLabel }: {
     const quiet = quietAlerts(alertRows);
     return alertStream.alerts.slice(0, alertStream.unread).filter(a => !quiet.has(a)).length;
   }, [alertRows, alertStream.alerts, alertStream.unread]);
+  /** Alert 판이 보이면 읽은 것으로 — 예전 Alert 탭을 연 것과 같다 */
+  const alertPanelShown =
+    activeTab === 'xlog' && xlogTabs.tabs.some(tb => kindOf(tb) === 'alert' && xlogTabs.panes.includes(tb.key));
   useEffect(() => {
-    if (activeTab === 'alert' && alertStream.unread > 0) markAlertsRead();
-  }, [activeTab, alertStream.unread, markAlertsRead]);
+    if (alertPanelShown && alertStream.unread > 0) markAlertsRead();
+  }, [alertPanelShown, alertStream.unread, markAlertsRead]);
 
   // 상세는 **여러 개** 열어 둘 수 있다. 느린 트랜잭션은 정상인 것과 나란히 놓고 봐야 안다.
   const detail = useXLogDetailTabs();
@@ -628,15 +675,48 @@ export default function App({ windowLabel }: {
     [serviceIndex.sig],
   );
   /**
-   * 서비스로 묶어 볼 때는 **서비스가 색을 정한다.** Task 마다 색을 주면 4대짜리 서비스가
+   * 색을 정하는 서비스 — 묶기와 상관없이 이름 규칙(태그)으로 푼다. 아래 «큰 환경» 에서 쓴다.
+   * 서비스로 묶어 볼 때의 `serviceIndex` 와 같은 셈이다.
+   */
+  const colorIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const seen of objectHistory().values()) {
+      const svc = serviceNameOf(asAgent(seen), groupRule);
+      if (svc !== null) map.set(seen.obj_hash, svc);
+    }
+    return { map, sig: [...map].map(([h, svc]) => `${h}=${svc}`).join('|') };
+    // objects 는 본문에서 안 읽는다 — objectHistory 가 갱신됐다는 신호로만 지켜본다
+  }, [objects, groupRule]);
+  /**
+   * 자바 서버가 이보다 많은 «큰 환경» 이면 묶기와 상관없이 **서비스 색**을 쓴다. 서버 색은 수십 개라
+   * 서버가 수십 대면 같은 색이 여러 번 나와 XLog 점 · 카운터 선에서 서버를 가를 수 없었다.
+   * 서비스로 안 풀리는 서버(이름 규칙에 안 맞는 것)는 서버 색 그대로다.
+   */
+  const bigEnv = counterHashes.javaee.length > SERVICE_COLOR_OVER;
+  const colorKey = useMemo(
+    () => {
+      if (agentGroupBy === 'service') return serviceOf;
+      if (!bigEnv || colorIndex.sig === '') return undefined;
+      const map = colorIndex.map;
+      return (h: number): string | null => map.get(h) ?? null;
+    },
+    // sig 가 같으면 map 의 내용도 같다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentGroupBy, serviceOf, bigEnv, colorIndex.sig],
+  );
+  /**
+   * 서비스로 묶어 볼 때(또는 큰 환경)는 **서비스가 색을 정한다.** Task 마다 색을 주면 4대짜리 서비스가
    * 네 색으로 흩어지고, 재배포할 때마다 색이 바뀐다.
    *
    * 그리기 전에 건다(layout) — 목록의 색 칸이 옛 기준으로 한 번 그려졌다 바뀌지 않게.
    */
   useLayoutEffect(() => {
-    setAgentColorKey(serviceOf ?? null);
+    // 서비스 이름순 차례로 색을 준다 — 해시로 고르면 서비스 몇 개에서도 같은 색이 났다(`keyColor`)
+    setAgentColorKey(colorKey ?? null, colorKey ? [...colorIndex.map.values()] : undefined);
     repaintCharts();
-  }, [serviceOf]);
+    // colorIndex 는 colorKey 가 바뀔 때만 다시 읽는다(서비스 구성이 바뀌면 sig 로 colorKey 도 바뀐다)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colorKey]);
   /**
    * 저장해 둔 배치·차트 설정을 한 번 읽어 온다.
    *
@@ -661,7 +741,7 @@ export default function App({ windowLabel }: {
         setServicesW(l.servicesW);
         setDetailW(l.detailW);
         setTableH(l.tableH);
-        setActiveTab(l.activeTab);
+        setActiveTab(l.activeTab === 'stats' ? 'stats' : 'xlog');
         setAgentGroupBy(l.agentGroupBy);
         setXLogCols(l.xlogCols);
         setSavedFilters(normalizeSavedFilters(cfg.saved_filters));
@@ -670,7 +750,11 @@ export default function App({ windowLabel }: {
         setXLogWindows(windowsFromConfig(cfg.xlog_windows));
         // 조회 조건도 되살린다. **껐다 켜면 다 날아간다** 가 현장에서 가장 많이 나온 말이다.
         // 탭은 **조건만** 되살린다 — 받아 둔 것은 열면 이미 지나간 것이라 다시 조회한다.
-        const loaded = toXLogTabs(cfg.xlog_tabs, cfg.xlog_chart, cfg.xlog_filter, cfg.xlog_split);
+        // 대시보드 목록 — 처음이면 만든다. 예전 판이 있으면 그것이 «내 배치» 로 지금 대시보드다(화면이 그대로)
+        const ds = loadDashboards(cfg.dashboards, cfg.active_dashboard, cfg.xlog_tabs, cfg.xlog_split);
+        setDashboards(ds);
+        const cur = activeDashboard(ds);
+        const loaded = toXLogTabs(cur.tabs, cfg.xlog_chart, cfg.xlog_filter, cur.split);
         setXLogTabs(loaded);
         // 판 배치도 함께 — 판을 처음부터 다시 띄운다(탭 키가 통째로 바뀌었다)
         dockRef.current = loaded.dock ?? null;
@@ -799,6 +883,12 @@ export default function App({ windowLabel }: {
             xlog_tabs: xlogTabsToPrefs(xlogTabs),
             xlog_split: xlogSplitToPrefs(xlogTabs, dockRef.current),
             xlog_windows: windowsToConfig(xlogWindowsRef.current),
+            ...(dashboards
+              ? {
+                  dashboards: withCurrent(dashboards, xlogTabsToPrefs(xlogTabs), xlogSplitToPrefs(xlogTabs, dockRef.current)).list,
+                  active_dashboard: dashboards.activeId,
+                }
+              : {}),
           });
         } catch {
           // 탭 저장 실패가 화면을 되돌릴 이유는 없다
@@ -825,6 +915,7 @@ export default function App({ windowLabel }: {
     dockTick,
     xlogWindows,
     boundsTick,
+    dashboards,
   ]);
 
   useEffect(() => {
@@ -1193,6 +1284,94 @@ export default function App({ windowLabel }: {
   }, []);
   const xlogTabsRef = useRef(xlogTabs);
   xlogTabsRef.current = xlogTabs;
+
+  /**
+   * 대시보드 하나를 화면에 세운다 — 판을 처음부터 다시 세운다(받아 둔 점은 다시 받는다).
+   * 고른 트랜잭션은 앞 대시보드의 것이라 비운다.
+   */
+  const showDashboard = useCallback((d: DashboardPrefs) => {
+    const loaded = toXLogTabs(d.tabs, undefined, undefined, d.split);
+    // 트리는 하나다 — 따라감 판은 바꾸기 전 트리에서 고른 것을 이어받는다(고정 판은 제 것)
+    const carried = linkedSelection(xlogTabsRef.current);
+    setXLogTabs(carried ? { ...loaded, tabs: loaded.tabs.map(tb => (tb.pinned ? tb : { ...tb, selection: carried })) } : loaded);
+    dockRef.current = loaded.dock ?? null;
+    setDockEpoch(n => n + 1);
+    setSelectedXLogs([]);
+  }, []);
+  /** 지금 화면의 판을 목록의 지금 대시보드에 적은 것 — 바꾸기 직전에 */
+  const snapshotDashboards = useCallback((): DashboardsState | null => {
+    const ds = dashboardsRef.current;
+    if (!ds) return null;
+    const tabs = xlogTabsRef.current;
+    return withCurrent(ds, xlogTabsToPrefs(tabs), xlogSplitToPrefs(tabs, dockRef.current));
+  }, []);
+  /** 대시보드 바꾸기 — 위쪽 줄 · `Ctrl+1~9`. 다른 화면(Active · 통계 …)에 있었으면 대시보드 화면으로 */
+  const handleSwitchDashboard = useCallback(
+    (id: string) => {
+      setActiveTab('xlog');
+      const ds = snapshotDashboards();
+      if (!ds || id === ds.activeId || !ds.list.some(d => d.id === id)) return;
+      const next = { ...ds, activeId: id };
+      setDashboards(next);
+      showDashboard(activeDashboard(next));
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  /** 대시보드 더하기 — 지금 배치 복제 또는 기본 제공 새로. 더한 것으로 바꾼다 */
+  const handleAddDashboard = useCallback(
+    (from: 'copy' | PresetId) => {
+      const ds = snapshotDashboards();
+      if (!ds) return;
+      const src = from === 'copy' ? activeDashboard(ds) : presetDashboard(from);
+      const { state, id } = addDashboard(ds, from === 'copy' ? src.name : PRESET_NAME[from], src.tabs, src.split);
+      if (id === null) return;
+      const next = { ...state, activeId: id };
+      setDashboards(next);
+      showDashboard(activeDashboard(next));
+      setActiveTab('xlog');
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  const handleRenameDashboard = useCallback((id: string, name: string) => {
+    setDashboards(ds => (ds ? renameDashboard(ds, id, name) : ds));
+  }, []);
+  /** 지운다 — 지금 것을 지웠으면 옆 것을 세운다 */
+  const handleRemoveDashboard = useCallback(
+    (id: string) => {
+      const ds = snapshotDashboards();
+      if (!ds) return;
+      const next = removeDashboard(ds, id);
+      if (next === ds) return;
+      setDashboards(next);
+      if (next.activeId !== ds.activeId) showDashboard(activeDashboard(next));
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  /** 기본으로 되돌리기 — 지금 것이면 화면도 다시 세운다 */
+  const handleResetDashboard = useCallback(
+    (id: string) => {
+      const ds = snapshotDashboards();
+      if (!ds) return;
+      const next = resetPreset(ds, id);
+      setDashboards(next);
+      if (id === next.activeId) showDashboard(activeDashboard(next));
+    },
+    [snapshotDashboards, showDashboard],
+  );
+  /** `Ctrl+1~9` — 위쪽 줄 N 번째 */
+  const dashboardShortcuts = useMemo(
+    () =>
+      Object.fromEntries(
+        DASHBOARD_ACTIONS.map((a, i) => [
+          a,
+          () => {
+            const d = dashboardsRef.current?.list[i];
+            if (d) handleSwitchDashboard(d.id);
+          },
+        ]),
+      ),
+    [handleSwitchDashboard],
+  );
 
   /**
    * 새 창을 연다 (메인 창). 탭은 이미 보낸 쪽에서 빠졌다 — 못 열면 이 창으로 들인다.
@@ -1604,7 +1783,14 @@ export default function App({ windowLabel }: {
     setClearSignal(n => n + 1);
     setWideTruncated(null);
   }, []);
-  const handleAlertBadgeClick = useCallback(() => setActiveTab('alert'), []);
+  /** 알림 배지 — 지금 대시보드의 Alert 판을 앞으로, 없으면 하나 연다 */
+  const handleAlertBadgeClick = useCallback(() => {
+    setActiveTab('xlog');
+    setXLogTabs(s => {
+      const hit = s.tabs.find(tb => kindOf(tb) === 'alert');
+      return hit ? activateXLogTab(s, hit.key) : addXLogPanel(s, 'alert');
+    });
+  }, []);
 
   /**
    * 넓은 구간에서 찾기 — 구간을 받아 Rust 가 **대소문자 없이** 거른다 (`wideSearchAll.ts`).
@@ -1818,11 +2004,13 @@ export default function App({ windowLabel }: {
    * 판마다 제 서버만 그리므로(`filter.objHashSet`) 합쳐 받아도 섞이지 않는다.
    */
   // 실시간 XLog 판과 **Active 목록 판**(트래픽 차트가 이 스트림을 쓴다) — 다른 종류의 판은 이 스트림을 안 쓴다
-  const liveVisible = xlogTabs.tabs.filter(
+  // 통계 화면에 있는 동안은 판이 내려가 있다 — 받아도 그릴 데가 없어 버린다. 돌아오면 판이 서며 지난 구간을 채운다
+  const liveVisible = activeTab !== 'xlog' ? [] : xlogTabs.tabs.filter(
     t => xlogTabs.panes.includes(t.key) && t.mode === 'live' && (kindOf(t) === 'xlog' || kindOf(t) === 'active'),
   );
   const streamKey = (() => {
-    const set = new Set<number>(filter.objHashSet);
+    // 지금 판도 보이는 판이라 아래에 든다 — 지금 판이 카운터 판·과거 XLog 판이면 그 서버는 받지 않는다
+    const set = new Set<number>();
     for (const tab of liveVisible) for (const h of tab.filter.objHashSet) set.add(h);
     return [...set].sort((a, b) => a - b).join(',');
   })();
@@ -1902,15 +2090,6 @@ export default function App({ windowLabel }: {
     };
   }, [counterHashes, filter.objHashSet]);
 
-  /** 고른 서버들의 종류 — 종류 단위 요청은 이 종류마다 한 번씩 묻고 합친다 */
-  const pickedJavaeeTypes = useMemo(
-    () => typesOf(shownHashes.javaee, objTypeOf),
-    [shownHashes.javaee, objTypeOf],
-  );
-  const pickedHostTypes = useMemo(
-    () => typesOf(shownHashes.host, objTypeOf),
-    [shownHashes.host, objTypeOf],
-  );
 
   /**
    * 값을 받아야 할 커넥션 풀 — **고른 WAS 아래 것까지 스스로 찾는다.**
@@ -1944,7 +2123,7 @@ export default function App({ windowLabel }: {
    */
   /** 보이는 카운터 판들이 그릴 서버 — 카운터 스트림에 합친다 */
   const counterPanelSig = xlogTabs.tabs
-    .filter(tb => kindOf(tb) === 'counter' && xlogTabs.panes.includes(tb.key))
+    .filter(tb => (kindOf(tb) === 'counter' || kindOf(tb) === 'counterBoard') && xlogTabs.panes.includes(tb.key))
     .flatMap(tb => [...tb.filter.objHashSet])
     .sort((a, b) => a - b)
     .join(',');
@@ -1979,8 +2158,6 @@ export default function App({ windowLabel }: {
     startCounterStream(hashes, ALL_CHART_COUNTERS).catch(() => {});
   }, [isConnected, isMain, filter.objHashSet, poolHashes, counterPanelHashes, connectionEpoch]);
 
-  /** 아무것도 안 골랐는가. 화면마다 «고르세요» 로 갈리는 자리다 */
-  const nothingPicked = filter.objHashSet.size === 0;
   /**
    * 빈 화면에 적을 말.
    *
@@ -1997,7 +2174,35 @@ export default function App({ windowLabel }: {
         : t('고른 서비스에 살아 있는 Task 가 없습니다.')
       : t('왼쪽에서 볼 서버를 고르세요.');
 
-  const xlogTabLabels = useMemo(() => xlogTabLabelsOf(xlogTabs.tabs), [xlogTabs.tabs]);
+  /**
+   * 고정 판 이름에 붙일 대상 — 서비스는 이름, 서버는 짧은 이름. 여럿이면 «첫 것 외 n».
+   * 해시가 이름으로 안 풀리면(명단을 아직 못 받았다) 붙이지 않는다
+   */
+  const pinTarget = useCallback(
+    (sel: GroupSelection): string | null => {
+      const names = [
+        ...sel.services,
+        ...[...sel.hashes].map(h => agentMap.get(h)).filter((v): v is string => !!v).map(shortName),
+      ];
+      if (names.length === 0) return null;
+      return names.length === 1 ? names[0] : `${names[0]} ${t('외')} ${names.length - 1}`;
+    },
+    [agentMap],
+  );
+  const xlogTabLabels = useMemo(() => xlogTabLabelsOf(xlogTabs.tabs, pinTarget), [xlogTabs.tabs, pinTarget]);
+  /**
+   * 고른 서버가 없는 판에 띄울 말 — **크게 말하는 것은 지금 판 하나뿐이다.** 판마다 같은 말을 크게 띄우면
+   * 원본 기본에서 일곱 번 되풀이됐다. 따라감 판은 트리만 고르면 같이 바뀌므로 판을 누를 필요가 없고,
+   * 고정 판만 «이 판을 누르고» 고른다.
+   */
+  const panelEmpty = (tab: XLogTab) =>
+    tab.key === xlogTabs.activeKey ? (
+      <EmptyState text={emptyPickText} />
+    ) : tab.pinned ? (
+      <EmptyState quiet text={t('고정 판 — 이 판을 누르고 왼쪽에서 서버를 고르세요.')} />
+    ) : (
+      <EmptyState quiet text={t('서버를 고르면 여기 나옵니다')} />
+    );
   /**
    * 고른 점은 **지금 판의 것만** 목록으로 받는다. 판을 누르는 순간 지금 판이 바뀌므로
    * (XLogDock) 끌어서 고른 판이 곧 지금 판이지만, 옆 판이 늦게 알려 오는 것은 버린다.
@@ -2103,14 +2308,12 @@ export default function App({ windowLabel }: {
     }
     if (!isConnected) return <EmptyState text={t('연결 후 사용 가능합니다.')} />;
     if (picked.size === 0) {
-      return (
-        <EmptyState
-          text={tab.key === xlogTabs.activeKey ? emptyPickText : t('이 판을 누르고 왼쪽에서 볼 서버를 고르세요.')}
-        />
-      );
+      return panelEmpty(tab);
     }
     const javaee = counterHashes.javaee.filter(h => picked.has(h));
     const javaeeTypes = typesOf(javaee, objTypeOf);
+    const host = counterHashes.host.filter(h => picked.has(h));
+    const datasource = counterHashes.datasource.filter(h => picked.has(h));
     const on = visible && isConnected;
     const body = (() => {
       switch (kind) {
@@ -2125,7 +2328,7 @@ export default function App({ windowLabel }: {
             />
           );
         case 'eq':
-          return <ActiveServicePanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} agentMap={agentMap} />;
+          return <ActiveServicePanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} agentMap={agentMap} picked={picked} />;
         case 'summary':
           return <SummaryPanel objTypes={javaeeTypes} enabled={on && javaeeTypes.length > 0} onOpenTxid={openSummaryTxid} />;
         case 'serviceGroup':
@@ -2144,11 +2347,47 @@ export default function App({ windowLabel }: {
               refreshSignal={refreshSignal}
             />
           );
+        case 'visualize': {
+          // 지표마다 주는 Family 가 정해져 있다 — CPU 는 host 만. 안 고른 Family 는 «안 골랐다» 고 말한다
+          const families = new Set<string>();
+          if (javaee.length > 0) families.add('javaee');
+          if (host.length > 0) families.add('host');
+          if (datasource.length > 0) families.add('datasource');
+          return (
+            <VisualizeTab
+              enabled={on}
+              javaeeTypes={javaeeTypes}
+              hostTypes={typesOf(host, objTypeOf)}
+              picked={picked}
+              javaeeHashes={javaee}
+              families={families}
+              agentMap={agentMap}
+              onDrill={drillToXLog}
+              onDrillService={drillToService}
+            />
+          );
+        }
+        case 'counterBoard':
+          return (
+            <CounterBoard
+              enabled={on}
+              picked={picked}
+              hashes={{ javaee, host, datasource }}
+              javaeeTypes={javaeeTypes}
+              hostTypes={typesOf(host, objTypeOf)}
+              isStreaming={isStreaming}
+              agentMap={agentMap}
+              serviceOf={serviceOf}
+              onOpenTxid={openSummaryTxid}
+              onDrill={drillToXLog}
+            />
+          );
         default:
           return null;
       }
     })();
-    return <div key={`${kind}-${refreshSignal}`} className="h-full min-h-0 overflow-auto">{body}</div>;
+    // F5 — 판을 다시 세워 전부 다시 받는다(판 안의 펼침·정렬은 처음으로)
+    return <div key={`${kind}-${refreshSignal}`} className="flex h-full min-h-0 flex-col overflow-auto">{body}</div>;
   };
 
   const renderXLogTab = useCallback(
@@ -2158,11 +2397,7 @@ export default function App({ windowLabel }: {
       // 트래픽이 없는 것인지 안 고른 것인지 구별되지 않는다.
       // 지금 판이 아니면 그 판의 고르기 사정을 따로 풀지 않는다 — 고르라는 말만 한다.
       if (visible && isConnected && tab.filter.objHashSet.size === 0) {
-        return (
-          <EmptyState
-            text={tab.key === xlogTabs.activeKey ? emptyPickText : t('이 판을 누르고 왼쪽에서 볼 서버를 고르세요.')}
-          />
-        );
+        return panelEmpty(tab);
       }
       return (
         <XLogChart
@@ -2191,19 +2426,6 @@ export default function App({ windowLabel }: {
     [isConnected, xlogTabs.activeKey, emptyPickText, connectionEpoch, clearSignal, refreshSignal, handleReload, refreshing],
   );
 
-  /**
-   * 고른 서버들이 속한 Family.
-   *
-   * 지표마다 주는 Family 가 정해져 있다 — CPU 는 host 만 준다. tomcat 만 골라 두면
-   * CPU 값이 영영 안 오는데, 그걸 «수집이 안 된다» 로 읽으면 엉뚱한 데를 뒤진다.
-   */
-  const pickedFamilies = useMemo(() => {
-    const out = new Set<string>();
-    if (shownHashes.javaee.length > 0) out.add('javaee');
-    if (shownHashes.host.length > 0) out.add('host');
-    if (shownHashes.datasource.length > 0) out.add('datasource');
-    return out;
-  }, [shownHashes]);
 
   /** Ctrl+F 로 옮겨 갈 자리 */
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -2225,7 +2447,8 @@ export default function App({ windowLabel }: {
    */
   const drillToXLog = useCallback((objHash: number) => {
     // 고르기를 그 한 대로 바꾼다 — 해시만 적으면 다음 명단 갱신 때 고르기에서 다시 풀려 사라진다
-    setXLogTabs(s => setTabSelection(s, { services: new Set(), hashes: new Set([objHash]) }));
+    // Visualize · 카운터 판에서 눌렀으면 XLog 판으로 옮겨 그 판을 고친다
+    setXLogTabs(s => setTabSelection(focusXLog(s), { services: new Set(), hashes: new Set([objHash]) }));
     setActiveTab('xlog');
   }, []);
 
@@ -2239,6 +2462,8 @@ export default function App({ windowLabel }: {
    * 서비스를 바꿔도 유지되는 편이 맞다 (`drillToXLog` 와 같은 규칙).
    */
   const drillToService = useCallback((serviceName: string) => {
+    // 조건은 XLog 판의 것이다 — 지금 판이 Visualize 판이면 XLog 판으로 옮긴 뒤 고친다
+    setXLogTabs(focusXLog);
     setFilter(prev => ({
       ...prev,
       patterns: [
@@ -2264,15 +2489,14 @@ export default function App({ windowLabel }: {
         searchInputRef.current?.select();
       });
     },
-    'tab-xlog': () => setActiveTab('xlog'),
-    // 뗀 창은 XLog 만 띄운다 — 다른 화면으로 가는 단축키는 안 듣는다
-    'tab-active': () => { if (isMain) setActiveTab('active'); },
-    'tab-visualize': () => { if (isMain) setActiveTab('visualize'); },
-    'tab-counter': () => { if (isMain) setActiveTab('counter'); },
-    'tab-alert': () => { if (isMain) setActiveTab('alert'); },
-    'tab-stats': () => { if (isMain) setActiveTab('stats'); },
+    // 뗀 창은 대시보드가 없다 — 목록이 비어 있어 아무것도 안 한다
+    ...dashboardShortcuts,
     'open-settings': () => setShowSettings(true),
-    'toggle-mode': () => setXLogMode(m => (m === 'live' ? 'past' : 'live')),
+    // XLog 판의 모드다 — 지금 판이 카운터 · Active 목록 판이면 하지 않는다(Active 목록은 과거가 되면 트래픽이 멎는다)
+    'toggle-mode': () => {
+      if (kindOf(activeXLogTab(xlogTabsRef.current)) !== 'xlog') return;
+      setXLogMode(m => (m === 'live' ? 'past' : 'live'));
+    },
     /**
      * F5 — **웹뷰를 통째로 다시 띄우지 않는다.** 그러면 접속·고른 서버·열어 둔 상세가
      * 다 날아간다. 지금 보는 화면의 **데이터만** 다시 받는다:
@@ -2287,6 +2511,8 @@ export default function App({ windowLabel }: {
   const isStreaming = isConnected;
   const hasDetail = detail.tabs.length > 0;
   const hasSelected = selectedXLogs.length > 0;
+  /** 지금 대시보드에 XLog 판이 있나 — 없으면 아래 트랜잭션 목록을 접는다 */
+  const dashboardHasXLog = xlogTabs.tabs.some(tb => kindOf(tb) === 'xlog');
   /**
    * 고른 구간의 요약.
    *
@@ -2358,7 +2584,22 @@ export default function App({ windowLabel }: {
         {/* 탐색 — 유일하게 밝은 요소여야 현재 위치가 읽힌다. 뗀 창은 XLog 만 띄운다 */}
         {!isMain && <span className="text-micro text-fg-dim">XLog · {t('떼어 낸 창')}</span>}
         {isMain && <nav className="flex items-center gap-0.5" aria-label={t('화면 전환')}>
-          {(['xlog', 'active', 'visualize', 'counter', 'alert', 'stats'] as TabId[]).map(tab => {
+          {/* 대시보드 이름들이 예전 `XLog` 자리다 — 누르면 그 대시보드(판 화면)로 */}
+          {dashboards && (
+            <DashboardBar
+              list={dashboards.list}
+              activeId={dashboards.activeId}
+              showing={activeTab === 'xlog'}
+              onSwitch={handleSwitchDashboard}
+              onAdd={handleAddDashboard}
+              onRename={handleRenameDashboard}
+              onRemove={handleRemoveDashboard}
+              onReset={handleResetDashboard}
+            />
+          )}
+          {dashboards && <span className="mx-1 h-4 w-px bg-line" aria-hidden />}
+          {/* 통계는 대시보드 밖의 도구 화면이다 — 누르면 본문을 차지하고, 대시보드 이름을 누르면 돌아온다 */}
+          {((dashboards ? ['stats'] : ['xlog', 'stats']) as TabId[]).map(tab => {
             const active = activeTab === tab;
             return (
               <button
@@ -2513,7 +2754,7 @@ export default function App({ windowLabel }: {
           title={t('서버')}
           className="shrink-0"
           // 클래스(hidden)로 숨기면 Pane 의 flex 와 부딪쳐 어느 쪽이 이길지 순서에 달린다
-          style={activeTab === 'alert' || activeTab === 'stats' ? { width: servicesW, display: 'none' } : { width: servicesW }}
+          style={activeTab === 'stats' ? { width: servicesW, display: 'none' } : { width: servicesW }}
         >
           <AgentSelectorPanel
             isConnected={isConnected}
@@ -2532,7 +2773,7 @@ export default function App({ windowLabel }: {
           />
         </Pane>
 
-        {activeTab !== 'alert' && activeTab !== 'stats' && <Divider
+        {activeTab !== 'stats' && <Divider
           orientation="vertical"
           label={t('서비스 목록 너비')}
           onDrag={d =>
@@ -2569,9 +2810,16 @@ export default function App({ windowLabel }: {
               onOpenFilters={() => setShowFilters(true)}
             />
           ) : (
-            <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-micro text-fg-dim">
+            // 툴바와 **같은 높이**로 둔다 — 판을 오갈 때 이 줄 높이가 바뀌어 아래 판들이 몇 px 씩 튀었다
+            <div
+              className="flex shrink-0 items-center gap-2 border-b border-line bg-raised px-3 py-1 text-micro text-fg-dim"
+              style={{ minHeight: XLOG_TOOLBAR_H }}
+            >
               {t('지금 판')}: <span className="text-fg-muted">{xlogTabLabels[xlogTabs.tabs.findIndex(tb => tb.key === xlogTabs.activeKey)]}</span>
-              <span className="text-fg-faint">— {t('XLog 조건(모드·구간·거름)은 XLog 판을 누르면 여기 나옵니다')}</span>
+              {/* XLog 판이 없는 대시보드(분석 · 카운터 위주)에서는 «XLog 판을 누르면» 이 맞지 않는다 */}
+              {dashboardHasXLog && (
+                <span className="text-fg-faint">— {t('XLog 조건(모드·구간·거름)은 XLog 판을 누르면 여기 나옵니다')}</span>
+              )}
             </div>
           )}
           {/* 분할 배치.
@@ -2613,21 +2861,35 @@ export default function App({ windowLabel }: {
               {/* 목록은 **항상 자리를 지킨다.**
                   선택했을 때만 나타나게 하면 기본 화면에 아예 없어서 기능이 있는 줄도 모르고,
                   선택할 때마다 차트 높이가 튄다. 비어 있을 때는 비어 있다고 말한다. */}
-              <Divider
-                orientation="horizontal"
-                label={t('트랜잭션 목록 높이')}
-                onDrag={d =>
-                  setTableH(h =>
-                    isMeasured(wsSize) ? clampPane(h - d, PANE.tableMinH, tableRoom(wsSize.h)) : h,
-                  )
-                }
-              />
+              {/* XLog 판이 없는 대시보드(분석 · 카운터 위주)에서는 목록을 접는다 — 고른 트랜잭션이 있으면 남긴다 */}
+              {(dashboardHasXLog || hasSelected) && (
+              <>
+              {/* **고른 것이 없으면 제목 줄만 남긴다.** 늘 220px 를 펴 두면 원본 기본·각각 열기에서 판 높이의
+                  4분의 1 을 빈 표가 먹었다. 줄은 남겨 «여기 나온다» 는 것은 보이게 하고, 구간을 고르면 펼친다
+                  (펼칠 때 판 높이가 한 번 바뀐다 — 빈 자리를 늘 먹는 것보다 낫다) */}
+              {hasSelected && (
+                <Divider
+                  orientation="horizontal"
+                  label={t('트랜잭션 목록 높이')}
+                  onDrag={d =>
+                    setTableH(h =>
+                      isMeasured(wsSize) ? clampPane(h - d, PANE.tableMinH, tableRoom(wsSize.h)) : h,
+                    )
+                  }
+                />
+              )}
               <Pane
                 title={t('트랜잭션')}
-                className="shrink-0"
-                style={{ height: tableH }}
+                className={hasSelected ? 'shrink-0' : 'mt-1 shrink-0'}
+                // 접혀도 안의 것은 그대로 둔다(높이만 줄인다) — Ctrl+F 검색칸 ref 가 살아 있어야 한다
+                style={{ height: hasSelected ? tableH : TABLE_FOLDED_H }}
                 aside={
                   <span className="flex min-w-0 items-center gap-2">
+                  {!hasSelected && (
+                    <span className="truncate text-micro normal-case text-fg-faint">
+                      {t('차트에서 구간을 드래그하면 여기 펼쳐집니다')}
+                    </span>
+                  )}
                   {hasSelected && (
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="shrink-0 whitespace-nowrap text-micro normal-case text-fg-dim">
@@ -2709,6 +2971,7 @@ export default function App({ windowLabel }: {
                   </div>
                 </div>
               </Pane>
+              </>)}
             </div>
 
             {hasDetail && (
@@ -2753,167 +3016,6 @@ export default function App({ windowLabel }: {
         </div>
       )}
 
-      {/* ── Active 탭 ── */}
-      {/* 「지금 이 순간 무엇이 걸려 있는가」. 나머지 탭은 전부 이미 지나간 것을 본다. */}
-      {activeTab === 'active' && (
-        <div style={tabBodyStyle}>
-          {!isConnected ? (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
-          ) : nothingPicked ? (
-            <EmptyState text={emptyPickText} />
-          ) : (
-            <ActiveTab
-              enabled={activeTab === 'active'}
-              javaeeTypes={pickedJavaeeTypes}
-              picked={filter.objHashSet}
-              expectedHashes={shownHashes.javaee}
-              agentMap={agentMap}
-              poolHashes={poolHashes}
-              anyDatasource={counterHashes.datasource.length > 0}
-              connectionEpoch={connectionEpoch}
-              refreshSignal={refreshSignal}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── Visualize 탭 ── */}
-      {/* Counter 탭과 나눠 둔 이유는 VisualizeTab.tsx 머리말 참고 —
-          여기는 «지금 정상인가», 저기는 «무엇이 어떻게 변했나» 다. */}
-      {activeTab === 'visualize' && (
-        <div style={tabBodyStyle}>
-          {!isConnected ? (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
-          ) : nothingPicked ? (
-            <EmptyState text={emptyPickText} />
-          ) : (
-            /* **F5 는 패널을 다시 세운다.** 이 탭의 패널마다 조회 훅이 따로 있어
-               신호를 일일이 내려보내면 손이 많이 가고 빠뜨리기 쉽다. 다시 세우면
-               전부가 한 번에 다시 받는다 — 대신 패널 안의 펼침·정렬 같은 상태는
-               초기화된다(접속·고른 서버·필터는 이 바깥에 있어 그대로다). */
-            <VisualizeTab
-              key={`visualize-${refreshSignal}`}
-              enabled={activeTab === 'visualize'}
-              javaeeTypes={pickedJavaeeTypes}
-              hostTypes={pickedHostTypes}
-              picked={filter.objHashSet}
-              javaeeHashes={shownHashes.javaee}
-              families={pickedFamilies}
-              agentMap={agentMap}
-              onDrill={drillToXLog}
-              onDrillService={drillToService}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── Counter 탭 ── */}
-      {/* **Counter 탭은 떠나도 내리지 않고 숨긴다.** 카운터 스트림은 탭과 무관하게 고른
-          서버 것을 계속 받는데, 차트는 쌓아 둔 표본을 자기 안에 든다. 탭을 오갈 때마다
-          새로 세우면 그동안 받은 것을 버리고 0 부터 다시 쌓아, 들어올 때마다 선이 오른쪽
-          끝에만 붙어 있었다. 폴링하는 패널은 `enabled` 로 탭이 보일 때만 돈다. */}
-      {isMain && (activeTab === 'counter' || isConnected) && (
-        <div style={activeTab === 'counter' ? tabBodyStyle : HIDDEN_TAB_STYLE}>
-          {!isConnected ? (
-            <EmptyState text={t('연결 후 사용 가능합니다.')} />
-          ) : nothingPicked ? (
-            <EmptyState text={emptyPickText} />
-          ) : (
-            /* F5 — Visualize 탭과 같은 규칙으로 패널을 다시 세운다 */
-            <div key={`counter-${refreshSignal}`} className="min-h-0 flex-1 overflow-y-auto p-3">
-              {/* 추세(카운터 차트)보다 **지금**이 먼저다. 장애 중이면 여기부터 본다. */}
-              <ActiveServicePanel
-                objTypes={pickedJavaeeTypes}
-                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
-                agentMap={agentMap}
-              />
-              <SummaryPanel
-                objTypes={pickedJavaeeTypes}
-                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
-                onOpenTxid={openSummaryTxid}
-              />
-              <TopologyPanel
-                objTypes={pickedJavaeeTypes}
-                agentMap={agentMap}
-                enabled={activeTab === 'counter' && pickedJavaeeTypes.length > 0}
-                onDrill={drillToXLog}
-              />
-              {/* 카운터가 "서버가 견디는가"라면 이건 "무엇이 들어오는가"다.
-                  objType 이 아니라 objHash 목록으로 묻는다 (F-44). */}
-              <ServiceGroupPanel
-                objHashes={shownHashes.javaee}
-                enabled={activeTab === 'counter' && shownHashes.javaee.length > 0}
-              />
-
-              {/* Family 를 섞으면 CPU 와 TPS 가 같은 줄에 놓여 읽히지 않는다.
-                  요청은 한 번에 보내지만(실측 확인) 화면은 나눈다. */}
-              <CounterSection
-                title={t('애플리케이션')}
-                subtitle={`${shownHashes.javaee.length}${t('개 오브젝트')} · javaee`}
-                counters={JAVAEE_CHARTS}
-                isStreaming={isStreaming}
-                agentMap={agentMap}
-                serviceOf={serviceOf}
-                hashes={shownHashes.javaee}
-                empty={shownHashes.javaee.length === 0 ? t('고른 서버 중 자바 에이전트가 없습니다.') : null}
-                // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
-                footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
-              />
-              <CounterSection
-                title={t('호스트')}
-                subtitle={`${shownHashes.host.length}${t('개 오브젝트')} · host`}
-                counters={HOST_CHART_COUNTERS}
-                isStreaming={isStreaming}
-                agentMap={agentMap}
-                serviceOf={serviceOf}
-                hashes={shownHashes.host}
-                empty={
-                  shownHashes.host.length === 0
-                    ? t('고른 것 중 호스트 에이전트가 없습니다. 왼쪽 목록에서 linux · windows 오브젝트를 함께 고르면 CPU·메모리·네트워크가 표시됩니다.')
-                    : null
-                }
-              />
-              {/* 실시간 팩에 없는 카운터는 여기서만 보인다 (F-42).
-                  같은 "호스트" 안에 섞으면 갱신 주기가 2초와 5분으로 섞여 오해를 부른다. */}
-              <FiveMinSection
-                objTypes={pickedHostTypes}
-                enabled={activeTab === 'counter' && pickedHostTypes.length > 0}
-                agentMap={agentMap}
-              />
-              <CounterSection
-                title={t('커넥션 풀')}
-                subtitle={`${shownHashes.datasource.length}${t('개 풀')} · datasource`}
-                counters={DATASOURCE_CHART_COUNTERS}
-                isStreaming={isStreaming}
-                agentMap={agentMap}
-                serviceOf={serviceOf}
-                hashes={shownHashes.datasource}
-                empty={
-                  shownHashes.datasource.length === 0
-                    ? // 두 관문이 모두 닫혀 있으면 0건이다. 어느 쪽인지 말해 주지 않으면 고장으로 읽힌다 (F-41).
-                      t('고른 것 중 커넥션 풀이 없습니다. 풀이 아예 안 잡힌다면 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')
-                    : null
-                }
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Alert 탭 ── */}
-      {activeTab === 'alert' && (
-        <div style={tabBodyStyle}>
-          <AlertFullView
-            alerts={alertStream.alerts}
-            rows={alertRows}
-            since={alertStream.since}
-            connected={isStreaming}
-            onClear={alertStream.clear}
-            agentMap={agentMap}
-          />
-        </div>
-      )}
-
       {/* ── 통계 탭 ── */}
       {/* **떠나도 내리지 않고 숨긴다.** 작업은 Rust 가 백그라운드에서 돌리지만, 넣던 조건·열어 둔 결과가
           탭을 오갈 때마다 날아가면 다시 넣어야 한다. 왼쪽 서버 목록은 쓰지 않는다 — 대상은 탭 안에서 하나 고른다. */}
@@ -2935,6 +3037,117 @@ export default function App({ windowLabel }: {
 }
 
 // ─── Counter 탭 구역 ──────────────────────────────────────────
+
+
+/**
+ * 카운터 전체 판 — 예전 Counter 탭 통째. 지금 정상인가(EQ · 요약 · 토폴로지 · 서비스 그룹) 다음에
+ * Family 별 카운터 구역(앱 · 호스트 · 5분 · 커넥션 풀). 묻는 패널은 판이 보일 때만 돈다(`enabled`).
+ * 카운터 차트는 앱 전체 카운터 스트림에서 그린다 — 이 판의 서버를 스트림에 합치는 것은 App 이 한다.
+ */
+function CounterBoard({
+  enabled,
+  picked,
+  hashes,
+  javaeeTypes,
+  hostTypes,
+  isStreaming,
+  agentMap,
+  serviceOf,
+  onOpenTxid,
+  onDrill,
+}: {
+  enabled: boolean;
+  /** 고른 서버 — EQ 의 서버별 막대를 이 서버들로 거른다(받기는 종류 단위) */
+  picked: ReadonlySet<number>;
+  hashes: { javaee: number[]; host: number[]; datasource: number[] };
+  javaeeTypes: string[];
+  hostTypes: string[];
+  isStreaming: boolean;
+  agentMap: Map<number, string>;
+  serviceOf?: (objHash: number) => string | null;
+  onOpenTxid: (txid: string, date: string) => void;
+  onDrill: (objHash: number) => void;
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      {/* 추세(카운터 차트)보다 **지금**이 먼저다. 장애 중이면 여기부터 본다. */}
+      <ActiveServicePanel
+        objTypes={javaeeTypes}
+        enabled={enabled && javaeeTypes.length > 0}
+        agentMap={agentMap}
+        picked={picked}
+      />
+      <SummaryPanel
+        objTypes={javaeeTypes}
+        enabled={enabled && javaeeTypes.length > 0}
+        onOpenTxid={onOpenTxid}
+      />
+      <TopologyPanel
+        objTypes={javaeeTypes}
+        agentMap={agentMap}
+        enabled={enabled && javaeeTypes.length > 0}
+        onDrill={onDrill}
+      />
+      {/* 카운터가 "서버가 견디는가"라면 이건 "무엇이 들어오는가"다.
+          objType 이 아니라 objHash 목록으로 묻는다 (F-44). */}
+      <ServiceGroupPanel
+        objHashes={hashes.javaee}
+        enabled={enabled && hashes.javaee.length > 0}
+      />
+
+      {/* Family 를 섞으면 CPU 와 TPS 가 같은 줄에 놓여 읽히지 않는다.
+          요청은 한 번에 보내지만(실측 확인) 화면은 나눈다. */}
+      <CounterSection
+        title={t('애플리케이션')}
+        subtitle={`${hashes.javaee.length}${t('개 오브젝트')} · javaee`}
+        counters={JAVAEE_CHARTS}
+        isStreaming={isStreaming}
+        agentMap={agentMap}
+        serviceOf={serviceOf}
+        hashes={hashes.javaee}
+        empty={hashes.javaee.length === 0 ? t('고른 서버 중 자바 에이전트가 없습니다.') : null}
+        // 없는 것을 없다고 적어 두지 않으면 볼 때마다 같은 조사를 다시 하게 된다.
+        footnote={`${JAVAEE_UNCOLLECTED_LABEL}${t(' 는 에이전트 2.21.3 에 수집 코드가 없어 받을 수 없습니다.')}`}
+      />
+      <CounterSection
+        title={t('호스트')}
+        subtitle={`${hashes.host.length}${t('개 오브젝트')} · host`}
+        counters={HOST_CHART_COUNTERS}
+        isStreaming={isStreaming}
+        agentMap={agentMap}
+        serviceOf={serviceOf}
+        hashes={hashes.host}
+        empty={
+          hashes.host.length === 0
+            ? t('고른 것 중 호스트 에이전트가 없습니다. 왼쪽 목록에서 linux · windows 오브젝트를 함께 고르면 CPU·메모리·네트워크가 표시됩니다.')
+            : null
+        }
+      />
+      {/* 실시간 팩에 없는 카운터는 여기서만 보인다 (F-42).
+          같은 "호스트" 안에 섞으면 갱신 주기가 2초와 5분으로 섞여 오해를 부른다. */}
+      <FiveMinSection
+        objTypes={hostTypes}
+        enabled={enabled && hostTypes.length > 0}
+        agentMap={agentMap}
+      />
+      <CounterSection
+        title={t('커넥션 풀')}
+        subtitle={`${hashes.datasource.length}${t('개 풀')} · datasource`}
+        counters={DATASOURCE_CHART_COUNTERS}
+        isStreaming={isStreaming}
+        agentMap={agentMap}
+        serviceOf={serviceOf}
+        hashes={hashes.datasource}
+        empty={
+          hashes.datasource.length === 0
+            ? // 두 관문이 모두 닫혀 있으면 0건이다. 어느 쪽인지 말해 주지 않으면 고장으로 읽힌다 (F-41).
+              t('고른 것 중 커넥션 풀이 없습니다. 풀이 아예 안 잡힌다면 앱의 spring.datasource.hikari.register-mbeans 와 에이전트의 jmx_counter_enabled 를 모두 켜야 합니다.')
+            : null
+        }
+      />
+    </div>
+  );
+}
 
 /**
  * 실시간에는 오지 않는 host 카운터 구역.
@@ -3018,7 +3231,7 @@ function CounterSection({
    * 어떤 건 개별인 채로 나란히 놓여 서로 비교하는 순간 틀린다.
    * 서비스로 묶어 볼 때는 서비스별이 기본이다 (useSectionFold).
    */
-  const { fold, setFold, choices: folds } = useSectionFold(serviceOf !== undefined);
+  const { fold, setFold, choices: folds } = useSectionFold(serviceOf !== undefined, hashes.length);
 
   /**
    * 차트에 넘길 «그릴 서버».
@@ -3034,7 +3247,7 @@ function CounterSection({
         title={title}
         subtitle={subtitle}
         action={
-          !empty && counters.some(isTotalCapable) ? (
+          !empty && counters.some(isFoldable) ? (
             <div className="flex gap-0.5">
               {folds.map(v => (
                 <button
@@ -3045,7 +3258,8 @@ function CounterSection({
                     fold === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
                   }`}
                 >
-                  {v === 'total' ? t('합계') : v === 'service' ? t('서비스별') : t('개별')}
+                  {/* «합계» 가 아니라 «전체» — 응답시간 · CPU 처럼 평균으로 접는 카운터도 있다(차트 머리글이 합계/평균을 말한다) */}
+                  {v === 'total' ? t('전체') : v === 'service' ? t('서비스별') : t('개별')}
                 </button>
               ))}
             </div>
@@ -3556,10 +3770,11 @@ function AlertFullView({
         )}
       </div>
       <div style={{ ...colHeaderStyle, flexShrink: 0 }}>
-        <span style={{ width: 74 }}>{t('시간')}</span>
-        <span style={{ width: 60 }}>{t('레벨')}</span>
-        <span style={{ width: 110 }}>{t('에이전트')}</span>
-        <span style={{ flex: 1 }}>{t('제목 / 메시지')}</span>
+        {/* 칸 너비는 줄(아래)과 같게 줄지 않는다 — 판이 좁으면 마지막 칸이 줄어 «제목 / 메시지» 가 세로로 쌓였다 */}
+        <span style={{ width: 74, flexShrink: 0 }}>{t('시간')}</span>
+        <span style={{ width: 60, flexShrink: 0 }}>{t('레벨')}</span>
+        <span style={{ width: 110, flexShrink: 0 }}>{t('에이전트')}</span>
+        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('제목 / 메시지')}</span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {alerts.length === 0 && (
@@ -3688,9 +3903,10 @@ function AlertBurstLine({
   );
 }
 
-function EmptyState({ text }: { text: string }) {
+/** 빈 자리의 말. `quiet` — 판 여럿에 함께 뜨는 곁말(작고 옅게) */
+function EmptyState({ text, quiet }: { text: string; quiet?: boolean }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: T.textFaint, fontSize: F.base, letterSpacing: 0.3 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, textAlign: 'center', padding: '0 8px', color: T.textFaint, fontSize: quiet ? F.micro : F.base, letterSpacing: 0.3, opacity: quiet ? 0.8 : 1 }}>
       {text}
     </div>
   );
@@ -3715,12 +3931,17 @@ function typesOf(hashes: readonly number[], typeOf: ReadonlyMap<number, string>)
 
 // ─── 상수 ─────────────────────────────────────────────────────
 
+/** 자바 서버가 이보다 많으면 묶기와 상관없이 서비스 색을 쓴다 (App `colorKey`) */
+const SERVICE_COLOR_OVER = 10;
+
+/** 트랜잭션 목록을 접었을 때의 높이 — 제목 줄(26px)과 테두리 */
+const TABLE_FOLDED_H = 28;
+
+/** XLog 툴바 한 줄의 높이(테두리 포함) — 툴바가 없을 때 그 자리를 같은 높이로 둔다 */
+const XLOG_TOOLBAR_H = 33;
+
 const TAB_LABELS: Record<TabId, string> = {
   xlog: 'XLog',
-  active: 'Active',
-  visualize: 'Visualize',
-  counter: 'Counter',
-  alert: 'Alert',
   stats: '통계',
 };
 

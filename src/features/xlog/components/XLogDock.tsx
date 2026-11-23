@@ -26,7 +26,8 @@ import {
   type IDockviewPanelProps,
   type SerializedDockview,
 } from 'dockview-react';
-import { ContextMenu } from '../../../components/ContextMenu';
+import { ContextMenu, type MenuItem } from '../../../components/ContextMenu';
+import { JAVAEE_MENU_COUNTERS } from './panelMenu';
 import { PanelErrorBoundary } from '../../../components/PanelErrorBoundary';
 import { kindOf, MAX_XLOG_TABS, PANEL_KIND_LABEL, type PanelKind, type SplitDir, type XLogTab } from '../hooks/xlogTabs';
 import { gridMoves, opsFromSplit } from '../hooks/dockLayout';
@@ -74,8 +75,11 @@ interface XLogDockProps {
   onLayoutChange: (dock: SerializedDockview) => void;
   /** 보이는 판들 — 판 묶음의 앞 탭들 */
   onVisibleChange: (keys: string[]) => void;
-  /** 바뀔 때마다 한 번 격자로 정렬한다 — 판을 여럿 연 뒤(«고른 것 각각 XLog»). 0 이면 하지 않는다 */
-  arrangeRequest?: number;
+  /**
+   * 바뀔 때마다(`n`) 한 번 격자로 정렬한다 — 판을 여럿 연 뒤(«고른 것 각각 XLog»). `keys` 가 있으면 **그 판들만**
+   * 첫 판의 자리 안에서 나눈다(대시보드의 다른 판은 그대로). 없으면 전부
+   */
+  arrangeRequest?: { n: number; keys?: readonly string[] };
 }
 
 export interface DockCtx {
@@ -170,7 +174,7 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
   return (
     <div
       ref={boxRef}
-      className="flex h-full items-center gap-1 pl-2 pr-1 text-micro"
+      className="flex h-full min-w-0 items-center gap-1 overflow-hidden pl-2 pr-1 text-micro"
       onDoubleClick={startEdit}
       onContextMenu={e => {
         e.preventDefault();
@@ -256,12 +260,48 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
 }
 
 /** 판 묶음 머리, 탭들 바로 뒤 — `+ 탭` */
-function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
+function GroupAdd({ activePanel, api }: IDockviewHeaderActionsProps) {
   const ctx = useDock();
   const key = activePanel?.id;
+  // 좁은 판은 `⊞` 를 머리에서 뺀다 — 머리가 넘치면 dockview 가 탭 이름을 `∨ 1` 로 접어 탭이 숨은 것처럼 보였다.
+  // 격자 정렬은 판 하나만 넓으면 그 판에서 누를 수 있다
+  const [roomy, setRoomy] = useState(() => api.width >= TIGHT_PX);
+  useEffect(() => {
+    const d = api.onDidDimensionsChange(e => setRoomy(e.width >= TIGHT_PX));
+    return () => d.dispose();
+  }, [api]);
   /** `+` 메뉴 — 원본 스카우터의 오른쪽 클릭 메뉴처럼 무엇을 띄울지 고른다 */
   const [menu, setMenu] = useState<ScreenPoint | null>(null);
-  const others: PanelKind[] = ['eq', 'active', 'summary', 'serviceGroup', 'alert'];
+  /** 카운터 전부를 펼친 메뉴인가 — 처음에는 자주 보는 것만 둔다(전부 두면 40여 줄이라 고르기 어려웠다) */
+  const [allCounters, setAllCounters] = useState(false);
+  const others: PanelKind[] = ['eq', 'active', 'summary', 'serviceGroup', 'alert', 'visualize', 'counterBoard'];
+  const frequent = new Set<string>(JAVAEE_MENU_COUNTERS);
+  const counterItem = (c: { name: string; label: string }, i: number): MenuItem => ({
+    label: `${t('카운터')} · ${t(c.label)}`,
+    onSelect: () => key && ctx.onAddPanel(key, 'counter', c.name),
+    ...(i === 0 ? { divider: true } : {}),
+  });
+  const items: MenuItem[] =
+    key === undefined
+      ? []
+      : allCounters
+        ? ctx.counterChoices.map((c, i) => ({ ...counterItem(c, i), divider: false }))
+        : [
+            { label: `XLog — ${t('지금 판 복제')}`, onSelect: () => ctx.onAddPanel(key, 'xlog') },
+            ...others.map(k => ({ label: t(PANEL_KIND_LABEL[k]), onSelect: () => ctx.onAddPanel(key, k) })),
+            ...ctx.counterChoices.filter(c => frequent.has(c.name)).map(counterItem),
+            {
+              label: `${t('카운터')} · ${t('전체 목록')} (${ctx.counterChoices.length})…`,
+              // 같은 자리에 카운터 전부를 다시 띄운다 — 메뉴가 닫힌 뒤 다음 틀에 연다
+              onSelect: () => {
+                const at = menu;
+                requestAnimationFrame(() => {
+                  setAllCounters(true);
+                  setMenu(at);
+                });
+              },
+            },
+          ];
   return (
     <div className="flex h-full items-center pl-1">
       <button
@@ -270,6 +310,7 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
         disabled={ctx.full || key === undefined}
         onClick={e => {
           const r = e.currentTarget.getBoundingClientRect();
+          setAllCounters(false);
           setMenu({ x: r.left, y: r.bottom + 2 });
         }}
         title={ctx.full ? t('탭은 최대 16개입니다') : t('판 추가 — XLog(지금 판 복제) · EQ · Active · 카운터 …')}
@@ -284,18 +325,11 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
             x={menu.x}
             y={menu.y}
             onClose={() => setMenu(null)}
-            items={[
-              { label: `XLog — ${t('지금 판 복제')}`, onSelect: () => ctx.onAddPanel(key, 'xlog') },
-              ...others.map(k => ({ label: t(PANEL_KIND_LABEL[k]), onSelect: () => ctx.onAddPanel(key, k) })),
-              ...ctx.counterChoices.map(c => ({
-                label: `${t('카운터')} · ${t(c.label)}`,
-                onSelect: () => ctx.onAddPanel(key, 'counter', c.name),
-              })),
-            ]}
+            items={items}
           />,
           document.body,
         )}
-      <button
+      {roomy && <button
         type="button"
         onClick={ctx.onArrange}
         disabled={ctx.tabs.size <= 1}
@@ -304,7 +338,7 @@ function GroupAdd({ activePanel }: IDockviewHeaderActionsProps) {
         className="btn-ghost px-1.5 py-0.5 text-micro"
       >
         ⊞
-      </button>
+      </button>}
     </div>
   );
 }
@@ -348,7 +382,8 @@ function GroupActions({ activePanel, group, api }: IDockviewHeaderActionsProps) 
           {pinned ? '📌' : '🔗'}
         </button>
       )}
-      {key && (
+      {/* 새 창으로는 XLog 판만 뗀다 — 다른 판에는 늘 눌리지 않는 단추라 두지 않는다(머리 자리만 먹었다) */}
+      {key && kindOf(ctx.tabs.get(key) ?? ({} as XLogTab)) === 'xlog' && (
         <button
           type="button"
           disabled={!detachable(ctx, key)}
@@ -374,6 +409,8 @@ const COMPONENTS = { xlog: PanelBody };
 
 /** 이보다 좁은 판 묶음은 차트 조작을 판 안으로 내린다 (`GroupActions`) */
 const NARROW_PX = 560;
+/** 이보다 좁은 판 묶음은 머리에서 `⊞` 를 뺀다 (`GroupAdd`) */
+const TIGHT_PX = 360;
 
 /** 화면 좌표가 이 창 밖인가 — 창 가장자리에서 조금 벗어난 정도는 안 친다 */
 function isOutsideScreenRect(x: number, y: number): boolean {
@@ -455,6 +492,9 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
     propsRef.current.onVisibleChange(keys);
   }, []);
 
+  /** 격자 정렬 중인가 — 그동안 dockview 의 «지금 판» 알림을 받지 않는다(`arrange`) */
+  const arrangingRef = useRef(false);
+
   /** 직전에 지금 판이던 키 — 새 탭을 그 판의 묶음에 놓는다 */
   const lastActiveRef = useRef(activeKey);
 
@@ -490,6 +530,9 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
       lastActiveRef.current = p.activeKey;
 
       api.onDidActivePanelChange(({ panel }) => {
+        // 격자 정렬 중에는 dockview 가 옮기는 판마다 «지금 판» 을 알린다 — 받으면 그 알림들이 정렬이 끝난 뒤에
+        // 반영돼 마지막에 옮긴 판이 지금 판이 됐다. 정렬이 끝나면 원래 판을 되돌린다(`arrange`)
+        if (arrangingRef.current) return;
         if (panel && panel.id !== propsRef.current.activeKey) propsRef.current.onActivate(panel.id);
         reportVisible();
       });
@@ -508,7 +551,7 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
     [reportVisible],
   );
 
-  // 탭 상태 → 판. 닫힌 탭의 판은 내리고, 새 탭은 직전 지금 판의 묶음에 연다. 이름도 맞춘다
+  // 탭 상태 → 판. 닫힌 탭의 판은 내리고, 새 탭은 직전 지금 판의 묶음에 연다(`openBeside` 면 그 옆에). 이름도 맞춘다
   useEffect(() => {
     const api = apiRef.current;
     if (!api) return;
@@ -521,7 +564,10 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
         id: tb.key,
         component: 'xlog',
         title: labelMap.get(tb.key) ?? '',
-        ...(ref ? { position: { referencePanel: ref.id, direction: 'within' as const } } : {}),
+        ...(ref ? { position: { referencePanel: ref.id, direction: tb.openBeside ? ('right' as const) : ('within' as const) } } : {}),
+        // 옆에 세울 때는 기준 판의 반만 — 크기를 안 주면 같은 줄의 판들이 모두 고르게 다시 나뉘어
+        // 원본 기본의 Alert · 카운터 열까지 폭이 바뀌었다
+        ...(ref && tb.openBeside ? { initialWidth: Math.floor(ref.group.width / 2) } : {}),
         // 지금 판이 될 탭만 앞으로 — 다른 창에서 들어온 탭 여럿은 뒤쪽 탭으로 쌓인다
         ...(tb.key === activeKey ? {} : { inactive: true }),
       });
@@ -536,37 +582,54 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
   /**
    * 격자로 정렬 — 판을 **옮기기만** 해서(`gridMoves`) 받아 둔 점을 지킨다. 쪼갤 때마다 반씩이라
    * 옮긴 뒤 줄·칸 크기를 고르게 맞춘다. 탭 순서대로 왼쪽 위부터 놓는다.
+   * `only` 가 있으면 그 판들만 — 첫 판의 묶음에 모은 뒤 **그 자리**를 나눈다.
    */
-  const arrange = useCallback(() => {
+  const arrange = useCallback((only?: readonly string[]) => {
     const api = apiRef.current;
     if (!api) return;
-    const keys = propsRef.current.tabs.map(tb => tb.key).filter(k => api.getPanel(k));
+    arrangingRef.current = true;
+    // 옮기는 동안 dockview 가 다른 판을 지금 판으로 알린다 — 끝나고 되돌릴 판을 먼저 잡아 둔다
+    const want = propsRef.current.activeKey;
+    const order = propsRef.current.tabs.map(tb => tb.key);
+    const keys = (only ? order.filter(k => only.includes(k)) : order).filter(k => api.getPanel(k));
     const { moves, cols, rows } = gridMoves(keys);
-    for (const m of moves) {
+    const move = (m: (typeof moves)[number]) => {
       const panel = api.getPanel(m.key);
       const ref = api.getPanel(m.ref);
-      if (!panel || !ref) continue;
-      panel.api.moveTo({ group: ref.group, position: m.position });
-    }
-    const W = api.width;
-    const H = api.height;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const g = api.getPanel(keys[r * cols + c] ?? '')?.group;
-        g?.api.setSize({ width: Math.floor(W / cols), height: Math.floor(H / rows) });
+      if (panel && ref) panel.api.moveTo({ group: ref.group, position: m.position });
+    };
+    // 나눌 자리 — 전부면 판 전체, 일부면 **옮기기 전** 첫 판 묶음의 크기(그 판들은 이미 이 묶음의 탭이다).
+    // 옮긴 직후의 묶음 크기는 아직 새로 재지 않은 값이라 쓰지 않는다
+    const first = api.getPanel(keys[0] ?? '')?.group;
+    const W = only && first ? first.width : api.width;
+    const H = only && first ? first.height : api.height;
+    for (const m of moves) move(m);
+    // 크기는 다음 프레임에 맞춘다 — 옮긴 직후에는 나뉜 묶음들의 크기가 아직 서지 않아 맞춘 값이 어긋났다
+    requestAnimationFrame(() => {
+      for (let r = 0; r < rows; r++) {
+        // 마지막 줄이 짧으면 그 줄의 판 수로 나눈다 — 빈칸이 없으니 칸 수로 나누면 한 판이 남는 몫을 다 가졌다
+        const inRow = Math.min(cols, keys.length - r * cols);
+        for (let c = 0; c < inRow; c++) {
+          const g = api.getPanel(keys[r * cols + c] ?? '')?.group;
+          g?.api.setSize({ width: Math.floor(W / inRow), height: Math.floor(H / rows) });
+        }
       }
-    }
-    api.getPanel(propsRef.current.activeKey)?.api.setActive();
+      // 판만 앞으로 하면 그 판 묶음이 지금 묶음이 아닐 때 그대로다 — 묶음도 지금 묶음으로
+      const back = api.getPanel(want);
+      back?.api.setActive();
+      back?.group.api.setActive();
+      arrangingRef.current = false;
+    });
   }, []);
 
   // 정렬 요청 — 판을 놓는 효과(위) 다음에 돈다. 같은 커밋에 열린 판까지 넣고 정렬한다
   // 처음 설 때(다시 세울 때 포함)의 값은 이미 지난 요청이다 — 그때는 저장된 배치를 따른다
-  const arrangeRequest = props.arrangeRequest ?? 0;
-  const arrangedRef = useRef(arrangeRequest);
+  const arrangeRequest = props.arrangeRequest;
+  const arrangedRef = useRef(arrangeRequest?.n ?? 0);
   useEffect(() => {
-    if (arrangeRequest === arrangedRef.current) return;
-    arrangedRef.current = arrangeRequest;
-    arrange();
+    if (!arrangeRequest || arrangeRequest.n === arrangedRef.current) return;
+    arrangedRef.current = arrangeRequest.n;
+    arrange(arrangeRequest.keys);
   }, [arrangeRequest, arrange]);
 
   // 지금 판 → dockview (단축키·다른 곳에서 바꿨을 때)
@@ -598,7 +661,8 @@ export const XLogDock = memo(function XLogDock(props: XLogDockProps) {
       onDetach,
       onSendToMain,
       onPin,
-      onArrange: arrange,
+      // 단추가 클릭 이벤트를 넘기므로 감싼다 — 그대로 주면 이벤트가 `only` 로 들어간다
+      onArrange: () => arrange(),
       onAddPanel: (fromKey: string, kind: PanelKind, counter?: string) => {
         // 누른 묶음의 앞 탭을 먼저 지금 탭으로 — 새 판은 그 옆(같은 묶음)에 열린다
         if (fromKey !== propsRef.current.activeKey) onActivate(fromKey);

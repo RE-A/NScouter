@@ -9,15 +9,18 @@
 //   2. **Ctrl 과 Meta 를 같이 본다.** 지금은 Windows 뿐이지만 mac 에서 Cmd 가 안 먹으면
 //      «단축키가 없는 앱» 이 된다 — 조합을 여기 한 곳에만 적어 둔다.
 
+/** `Ctrl+N` — N 번째 대시보드 (위쪽 줄에 놓인 순서) */
+export type DashboardAction = `dashboard-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`;
+
+export const DASHBOARD_ACTIONS: readonly DashboardAction[] = [
+  'dashboard-1', 'dashboard-2', 'dashboard-3', 'dashboard-4', 'dashboard-5',
+  'dashboard-6', 'dashboard-7', 'dashboard-8', 'dashboard-9',
+];
+
 export type ShortcutAction =
   | 'close-detail'
   | 'focus-search'
-  | 'tab-xlog'
-  | 'tab-active'
-  | 'tab-visualize'
-  | 'tab-counter'
-  | 'tab-alert'
-  | 'tab-stats'
+  | DashboardAction
   | 'close-detail-tab'
   | 'cycle-detail-next'
   | 'cycle-detail-prev'
@@ -40,14 +43,9 @@ export interface KeyEventLike {
 export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; action: ShortcutAction }> = [
   { keys: 'Esc', action: 'close-detail' },
   { keys: 'Ctrl+F', action: 'focus-search' },
-  // **숫자는 탭이 놓인 순서다.** 탭이 하나 늘면 뒤가 밀린다 — 화면에 보이는 자리와
-  // 다른 숫자를 외우게 하는 것보다, 위치를 세면 되는 쪽이 낫다.
-  { keys: 'Ctrl+1', action: 'tab-xlog' },
-  { keys: 'Ctrl+2', action: 'tab-active' },
-  { keys: 'Ctrl+3', action: 'tab-visualize' },
-  { keys: 'Ctrl+4', action: 'tab-counter' },
-  { keys: 'Ctrl+5', action: 'tab-alert' },
-  { keys: 'Ctrl+6', action: 'tab-stats' },
+  // **숫자는 대시보드가 놓인 순서다.** 하나 늘면 뒤가 밀린다 — 화면에 보이는 자리와
+  // 다른 숫자를 외우게 하는 것보다, 위치를 세면 되는 쪽이 낫다. 도움말에는 첫 줄만 적는다(뜻이 «1 ~ 9»)
+  { keys: 'Ctrl+1', action: 'dashboard-1' },
   { keys: 'Ctrl+W', action: 'close-detail-tab' },
   { keys: 'Ctrl+Tab', action: 'cycle-detail-next' },
   { keys: 'Ctrl+Shift+Tab', action: 'cycle-detail-prev' },
@@ -81,17 +79,15 @@ export function matchShortcut(e: KeyEventLike): ShortcutAction | null {
     case 'F':
       return 'focus-search';
     case '1':
-      return 'tab-xlog';
     case '2':
-      return 'tab-active';
     case '3':
-      return 'tab-visualize';
     case '4':
-      return 'tab-counter';
     case '5':
-      return 'tab-alert';
     case '6':
-      return 'tab-stats';
+    case '7':
+    case '8':
+    case '9':
+      return DASHBOARD_ACTIONS[Number(e.key) - 1];
     case 'w':
     case 'W':
       return 'close-detail-tab';

@@ -96,11 +96,19 @@ describe('CounterChart 합계 모드', () => {
   });
 
   it('counters.xml 이 막은 카운터는 합계를 요청받아도 개별로 그리고 그렇다고 말한다', async () => {
-    // Cpu 는 total="false" 다. 조용히 개별로 그리면 옆 차트와 같은 자로 읽힌다.
-    render(<CounterChart isStreaming counter="Cpu" agentMap={AGENTS} fold="total" />);
-    await emitCounter(update('Cpu', [[1, 40], [2, 60]]));
+    // Heap Total 은 total="false" 이고 평균으로도 접지 않는다(서버마다 다른 상한을 섞는 값). 조용히 개별로 그리면 옆 차트와 같은 자로 읽힌다.
+    render(<CounterChart isStreaming counter="HeapTotal" agentMap={AGENTS} fold="total" />);
+    await emitCounter(update('HeapTotal', [[1, 400], [2, 600]]));
     expect(screen.getByText(/합계 없음/)).toBeDefined();
     expect(screen.queryByText(/평균 ·/)).toBeNull();
+  });
+
+  it('합계가 막혀도 평균으로 접을 수 있는 것(CPU · 응답시간 · Heap Used)은 평균으로 접는다', async () => {
+    // 서버가 수십 대면 개별 선은 못 읽는다 — «평균 CPU» 는 답이 되는 질문이다
+    render(<CounterChart isStreaming counter="Cpu" agentMap={AGENTS} fold="total" />);
+    await emitCounter(update('Cpu', [[1, 40], [2, 60]]));
+    expect(screen.getByText(/평균 · 2개 에이전트/)).toBeDefined();
+    expect(screen.queryByText(/합계 없음/)).toBeNull();
   });
 
   it('접어도 몇 대를 접었는지는 남긴다', async () => {
@@ -143,10 +151,16 @@ describe('CounterChart 접기 전환', () => {
   });
 
   it('counters.xml 이 막은 카운터는 서비스별도 개별로 그리고 그렇다고 말한다', async () => {
-    render(<CounterChart isStreaming counter="Cpu" agentMap={AGENTS} fold="service" serviceOf={() => 'shop'} />);
-    await emitCounter(update('Cpu', [[1, 40], [2, 60]]));
+    render(<CounterChart isStreaming counter="HeapTotal" agentMap={AGENTS} fold="service" serviceOf={() => 'shop'} />);
+    await emitCounter(update('HeapTotal', [[1, 400], [2, 600]]));
     expect(screen.getByText(/합계 없음/)).toBeDefined();
     expect(screen.queryByText(/서비스별/)).toBeNull();
+  });
+
+  it('응답시간은 서비스별로 접으면 서비스별 평균이다', async () => {
+    render(<CounterChart isStreaming counter="ElapsedTime" agentMap={AGENTS} fold="service" serviceOf={() => 'shop'} />);
+    await emitCounter(update('ElapsedTime', [[1, 100], [2, 300]]));
+    expect(screen.getByText(/서비스별 평균 · 2개 에이전트/)).toBeDefined();
   });
 
   it('고른 것만 센다 — 접어도 안 고른 오브젝트는 대수에 안 들어간다', async () => {

@@ -34,9 +34,22 @@ import { EMPTY_SELECTION, sameSelection, type GroupSelection } from './groupSele
  * 대상(고르기·트리 따라감/고정)·이름·배치는 종류와 상관없이 같다. XLog 전용 칸(모드·구간·차트 설정·거름)은
  * XLog 판만 쓴다 — 다른 판에서는 `filter.objHashSet`(풀린 해시)만 쓴다.
  */
-export type PanelKind = 'xlog' | 'counter' | 'eq' | 'active' | 'summary' | 'serviceGroup' | 'alert';
+export type PanelKind =
+  | 'xlog'
+  | 'counter'
+  | 'eq'
+  | 'active'
+  | 'summary'
+  | 'serviceGroup'
+  | 'alert'
+  /** 예전 Visualize 탭 통째 — KPI · 인스턴스 격자 · 타임라인 · 분포 · 느린 서비스 */
+  | 'visualize'
+  /** 예전 Counter 탭 통째 — EQ · 요약 · 토폴로지 · 서비스 그룹 · 카운터 구역(앱 · 호스트 · 5분 · 커넥션 풀) */
+  | 'counterBoard';
 
-export const PANEL_KINDS: readonly PanelKind[] = ['xlog', 'counter', 'eq', 'active', 'summary', 'serviceGroup', 'alert'];
+export const PANEL_KINDS: readonly PanelKind[] = [
+  'xlog', 'counter', 'eq', 'active', 'summary', 'serviceGroup', 'alert', 'visualize', 'counterBoard',
+];
 
 /** 판 종류 이름 — 탭 이름의 기본값 */
 export const PANEL_KIND_LABEL: Record<PanelKind, string> = {
@@ -47,6 +60,8 @@ export const PANEL_KIND_LABEL: Record<PanelKind, string> = {
   summary: '요약',
   serviceGroup: '서비스 그룹',
   alert: 'Alert',
+  visualize: 'Visualize',
+  counterBoard: '카운터 전체',
 };
 
 /** 탭 하나가 쥐는 것 */
@@ -71,6 +86,11 @@ export interface XLogTab {
   kind?: PanelKind;
   /** (카운터 판) 그릴 카운터 — counters.xml 표기 그대로 (`TPS`, `ElapsedTime` …) */
   counter?: string;
+  /**
+   * 새 판을 지금 판 **옆(오른쪽)** 에 세운다 — 트리에서 연 판·파고들며 연 XLog 판. 없으면 지금 판 묶음의 뒤쪽 탭으로 든다.
+   * 판이 처음 놓일 때만 쓴다(저장하지 않는다). 탭으로 들면 지금 보던 판이 그 뒤로 가려져 «나란히 보기» 가 안 된다
+   */
+  openBeside?: boolean;
 }
 
 /** 판 종류 — 없으면 XLog */
@@ -174,12 +194,25 @@ function autoTitle(tab: XLogTab): string {
  * **이름이 겹치면 순번을 붙인다.** 붙인 이름이 없는 실시간 탭 둘이 둘 다 «실시간» 이면
  * 어느 쪽이 어느 쪽인지 눌러 보기 전에는 모른다. 첫 것은 그대로, 다음부터 «실시간 2» 다.
  */
-export function tabLabels(tabs: readonly XLogTab[]): string[] {
+export function tabLabels(
+  tabs: readonly XLogTab[],
+  /**
+   * 고정 판의 대상 이름 — 있으면 붙인 이름이 없는 고정 판에 `실시간 · 결제` 처럼 덧붙인다(원본의 `XLog - 대상`).
+   * 고정 판이 여럿이면 이름만으로는 어느 서비스인지 알 수 없었다(`실시간 2`, `실시간 3` …)
+   */
+  targetOf?: (sel: GroupSelection) => string | null,
+): string[] {
+  const base = (tab: XLogTab): string => {
+    const name = tabTitle(tab);
+    if (!tab.pinned || !targetOf || (tab.title?.trim() ?? '') !== '') return name;
+    const target = targetOf(tab.selection);
+    return target ? `${name} · ${target}` : name;
+  };
   const total = new Map<string, number>();
-  for (const tab of tabs) total.set(tabTitle(tab), (total.get(tabTitle(tab)) ?? 0) + 1);
+  for (const tab of tabs) total.set(base(tab), (total.get(base(tab)) ?? 0) + 1);
   const seen = new Map<string, number>();
   return tabs.map(tab => {
-    const name = tabTitle(tab);
+    const name = base(tab);
     if ((total.get(name) ?? 0) <= 1) return name;
     const n = (seen.get(name) ?? 0) + 1;
     seen.set(name, n);
@@ -265,6 +298,23 @@ export function activate(s: XLogTabsState, key: string): XLogTabsState {
   if (!s.tabs.some(t => t.key === key)) return s;
   if (s.panes.includes(key)) return { ...s, activeKey: key };
   return { ...s, activeKey: key, panes: s.panes.map(k => (k === s.activeKey ? key : k)) };
+}
+
+/**
+ * XLog 판을 지금 판으로 — Visualize · 카운터 판에서 «이 서버/서비스의 트랜잭션 보기» 로 파고들 때.
+ * 지금 판이 XLog 면 그대로. 아니면 보이는 따라감 XLog 판 → 보이는 XLog 판 → 아무 XLog 판 차례로 고른다.
+ * XLog 판이 하나도 없으면(`분석` 대시보드) 지금 판 옆 탭으로 하나 연다 — 판이 꽉 찼으면 그대로.
+ */
+export function focusXLog(s: XLogTabsState): XLogTabsState {
+  if (kindOf(activeTab(s)) === 'xlog') return s;
+  const xlogs = s.tabs.filter(t => kindOf(t) === 'xlog');
+  const hit =
+    xlogs.find(t => s.panes.includes(t.key) && !t.pinned) ??
+    xlogs.find(t => s.panes.includes(t.key)) ??
+    xlogs[0];
+  if (hit) return activate(s, hit.key);
+  const added = addPanel(s, 'xlog');
+  return added === s ? s : patchTab(added, added.activeKey, () => ({ openBeside: true }));
 }
 
 /**
@@ -414,13 +464,20 @@ export function addPanel(s: XLogTabsState, kind: PanelKind, counter?: string): X
  * 같은 종류(카운터면 같은 카운터)·같은 대상의 **고정 판이 이미 있으면 그 판을 앞으로** 한다 — 원본과 같다.
  * 없으면 지금 판 옆에 고정 판으로 연다.
  */
-export function openPinned(s: XLogTabsState, kind: PanelKind, sel: GroupSelection, counter?: string): XLogTabsState {
+export function openPinned(
+  s: XLogTabsState,
+  kind: PanelKind,
+  sel: GroupSelection,
+  counter?: string,
+  /** 지금 판 옆에 세운다(기본). 여럿을 열어 곧 격자로 놓을 때는 끈다 — 지금 판 묶음의 탭으로 들어 그 자리만 나눈다 */
+  beside = true,
+): XLogTabsState {
   const hit = s.tabs.find(
     t => t.pinned && kindOf(t) === kind && (kind !== 'counter' || t.counter === counter) && sameSelection(t.selection, sel),
   );
   if (hit) return activate(s, hit.key);
   const added = kind === 'xlog' ? addPanel(s, 'xlog') : addPanel(s, kind, counter);
   if (added === s) return s;
-  return patchTab(added, added.activeKey, () => ({ pinned: true, selection: sel }));
+  return patchTab(added, added.activeKey, () => ({ pinned: true, selection: sel, ...(beside ? { openBeside: true } : {}) }));
 }
 

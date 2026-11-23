@@ -6,7 +6,7 @@
 // **전부 더하면 안 된다.** CPU 두 대가 각각 50% 인데 100% 라고 그리면 거짓말이다.
 // ASIS 도 카운터마다 sum / avg 를 갈라 쓴다 (`CounterUtil.getTotalMode`).
 
-import { counterMeta, type CounterName } from '../types/counter';
+import { counterMeta, isTotalCapable, type CounterName } from '../types/counter';
 
 export type TotalMode = 'sum' | 'avg';
 
@@ -17,6 +17,28 @@ export type TotalMode = 'sum' | 'avg';
  * 한 서버가 200ms 인 것은 전혀 다른 상황인데 합계는 같다.
  */
 const AVG_COUNTERS: readonly string[] = ['ErrorRate', 'ElapsedTime', 'Elapsed90%'];
+
+/**
+ * 더하면 뜻이 없지만 **평균으로는 접을 수 있는** 카운터 — 응답시간 · 큐 대기 · Heap · GC · CPU · 메모리.
+ *
+ * counters.xml 은 이것들에 합계를 허락하지 않는다(`isTotalCapable`) — 더하면 거짓말이라서다. 그런데 서버가 수십 대면
+ * 개별 선 수십 개는 읽을 수 없다. «이 서비스 Task 들의 평균 응답시간» 은 답이 되는 질문이라 평균으로는 접는다.
+ */
+const AVG_FOLDABLE: readonly string[] = [
+  'ElapsedTime', 'Elapsed90%', 'QueuingTime', 'SqlTimeByService', 'ApiTimeByService', 'HeapUsed', 'GcTime',
+  'Cpu', 'SysCpu', 'UserCpu', 'Mem', 'Swap',
+];
+
+/** 접는 법 — 합계를 허락한 카운터는 그 방식(sum/avg), 평균으로만 접을 수 있는 것은 avg, 둘 다 아니면 null(개별만) */
+export function foldMode(counter: CounterName, totalCapable: boolean): TotalMode | null {
+  if (totalCapable) return totalMode(counter);
+  return AVG_FOLDABLE.includes(counter) ? 'avg' : null;
+}
+
+/** 개별 말고 접어 볼 수 있나 — 접기 단추를 둘지 */
+export function isFoldable(counter: string): boolean {
+  return foldMode(counter as CounterName, isTotalCapable(counter)) !== null;
+}
 
 export function totalMode(counter: CounterName): TotalMode {
   if (AVG_COUNTERS.includes(counter)) return 'avg';

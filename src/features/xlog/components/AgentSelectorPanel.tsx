@@ -175,6 +175,21 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
       ),
     [agents, query, groupBy, multiType, pickedTypes, groupRule, selectedServices],
   );
+  /**
+   * «고른 것만» — 서버가 수십 대면 고른 것이 어디 있는지 목록을 훑어야 했다. 켜면 고른 서버(와 고른 서비스의 빈 마디)만 남는다.
+   * 고른 것이 없으면 의미가 없어 꺼진 것과 같다
+   */
+  const [onlyPicked, setOnlyPicked] = useState(false);
+  const pickedOnly = onlyPicked && selectedHashes.size > 0;
+  const listed = useMemo(
+    () =>
+      pickedOnly
+        ? groups
+            .map(g => ({ ...g, agents: g.agents.filter(a => selectedHashes.has(a.obj_hash)) }))
+            .filter(g => g.agents.length > 0 || (selectedServices?.has(g.type) ?? false))
+        : groups,
+    [pickedOnly, groups, selectedHashes, selectedServices],
+  );
   const shown = groups.reduce((n, g) => n + g.agents.length, 0);
   const typeFiltering = multiType && pickedTypes.size > 0;
 
@@ -259,7 +274,7 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
   const [groupMenu, setGroupMenu] = useState<{ items: MenuItem[]; x: number; y: number } | null>(null);
   /** 고른 것 각각 XLog — 여러 곳에서 같은 항목 */
   const eachItem: MenuItem[] = onOpenEach
-    ? [{ label: t('고른 것 각각 XLog 로 열기 (격자)'), onSelect: onOpenEach }]
+    ? [{ label: t('고른 것 각각 XLog 로 열기 (격자)'), onSelect: onOpenEach, divider: true }]
     : [];
 
   return (
@@ -271,8 +286,10 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         <span className="text-micro text-fg-dim">
           {isConnected ? (
             <>
-              <span className="tnum font-mono text-fg-muted">{aliveCount}</span>
-              <span className="text-fg-faint">/{agents.length}</span> {t('활성')}
+              <span title={t('살아 있는 서버 / 전체')}>
+                <span className="tnum font-mono text-fg-muted">{aliveCount}</span>
+                <span className="text-fg-faint">/{agents.length}</span>
+              </span>
             </>
           ) : (
             '—'
@@ -288,23 +305,35 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               title={t('콜렉터에서 내려간 서버를 지웁니다. **같은 콜렉터를 보는 다른 사람 화면에서도** 사라집니다')}
               className="btn-ghost ml-2 px-1.5 py-0 text-micro"
             >
-              {cleaning ? t('정리 중…') : `${t('비활성 정리')} ${agents.length - aliveCount}`}
+              {/* 머리글이 한 줄에 들도록 짧게 — 무엇을 하는지는 풍선 도움말이 말한다 */}
+              {cleaning ? t('정리 중…') : `${t('정리')} ${agents.length - aliveCount}`}
             </button>
           )}
         </span>
         {/* **«전부» 라는 상태는 없다.** 고른 것이 곧 보는 것이라, 여기 적히는 수가
             화면에 그려지는 서버 수와 같다. 0 이면 화면도 비어 있다. */}
         {filtering ? (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={handleClearFilter}
-            title={t('고른 서버를 모두 풉니다')}
-            className="text-accent-bright"
-          >
-            <span className="tnum font-mono">{selectedHashes.size}</span>
-            {t('대 선택 · 해제')}
-          </Button>
+          <span className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setOnlyPicked(v => !v)}
+              aria-pressed={onlyPicked}
+              title={t('목록에 고른 서버만 남깁니다 — 서버가 많을 때 무엇을 골랐는지 봅니다')}
+              className={`rounded px-1.5 py-0.5 text-micro ${onlyPicked ? 'bg-accent/15 text-fg' : 'text-fg-dim hover:bg-hover hover:text-fg'}`}
+            >
+              {t('고른 것만')}
+            </button>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={handleClearFilter}
+              title={t('고른 서버를 모두 풉니다')}
+              className="text-accent-bright"
+            >
+              <span className="tnum font-mono">{selectedHashes.size}</span>
+              {t('대 선택')} ✕
+            </Button>
+          </span>
         ) : (
           <span className="px-1.5 text-micro text-fg-faint">{t('고른 서버 없음')}</span>
         )}
@@ -403,8 +432,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         {isConnected && agents.length > 0 && groups.length === 0 && (
           <Empty>{t('조건에 맞는 항목이 없습니다.')}</Empty>
         )}
-        {groups.map(group => {
-          const open = searching || !collapsed.has(group.type);
+        {listed.map(group => {
+          const open = searching || pickedOnly || !collapsed.has(group.type);
           // **보이는 것만 고른다.** 검색으로 걸러 낸 상태에서 묶음을 켜면
           // 안 보이는 서버까지 딸려 오는데, 그건 무엇을 골랐는지 알 수 없게 만든다.
           const groupHashes = group.agents.map(a => a.obj_hash);
@@ -513,9 +542,9 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                 // 전부 보이는 중(plain)에는 칠하지 않는다 — 전부를 강조하면 강조가 아니다.
                 state === 'picked'
                   ? 'border-l-accent bg-accent/12'
-                  : state === 'excluded'
-                    ? 'border-l-transparent opacity-45 hover:opacity-75'
-                    : 'border-l-transparent hover:bg-hover/60',
+                  // 고르지 않은 것은 **흐리게 하지 않는다** — 투명도를 내리면 꺼진 서버(아래 opacity-40)와
+                  // 구별되지 않았고, 다크 테마에서는 이름이 거의 안 읽혔다. 글자 색만 한 단계 낮춘다
+                  : 'border-l-transparent hover:bg-hover/60',
                 agent.alive ? '' : 'opacity-40',
               ].join(' ')}
             >
@@ -533,9 +562,10 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                   aria-hidden
                 />
               )}
-              <span className="min-w-0 flex-1 truncate text-fg">
-                {name || `[${agent.obj_hash}]`}
-              </span>
+              <TailName
+                text={name || `[${agent.obj_hash}]`}
+                className={state === 'excluded' ? 'text-fg-muted' : state === 'picked' ? 'font-medium text-fg' : 'text-fg'}
+              />
               {/* 종류. **이름으로 추측한 게 아니라 콜렉터가 준 `objType` 이다.**
                   색은 Family(javaee · host · datasource)로 준다 — 처음 보는 종류가
                   와도 이름은 그대로 뜬다. 타입으로 묶었을 때는 묶음 머리와 같은 말이라 접는다. */}
@@ -593,6 +623,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               : []),
             ...eachItem,
             {
+              // 판 열기와 «들여다보기»(속성 · 스레드 …) 사이 가름선
+              divider: onOpenPanel !== undefined,
               // 어떤 오브젝트든 신원은 있다. **막지 않는다** — 목록에 떠 있는데
               // 정체를 못 묻는 오브젝트가 있으면 그게 제일 답답하다.
               label: t('속성'),
@@ -707,3 +739,27 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-2.5 py-6 text-center text-small text-fg-faint">{children}</div>;
 }
 
+/**
+ * 줄일 때 남기는 끝 글자 수 — ECS 이름의 IP 꼬리에서 서버를 가르는 끝(`75-12-100`).
+ * 12자(`10-75-12-100`)를 남기면 기본 폭(200px)에 종류 표시까지 있을 때 꼬리 끝이 잘렸다
+ */
+const NAME_TAIL = 9;
+
+/**
+ * 이름을 **앞에서** 줄인다(끝은 남긴다). ECS Task 이름은 `payment-api-ip-10-75-12-100` 처럼 앞이 같고 끝(IP)만 달라,
+ * 뒤를 자르면 한 서비스의 Task 들이 전부 `payment-api-ip-10-75-1…` 로 똑같아 보였다.
+ * 자리가 넉넉하면 이어 붙어 그대로 보인다.
+ */
+function TailName({ text, className }: { text: string; className: string }) {
+  if (text.length <= NAME_TAIL + 6) return <span className={`min-w-0 flex-1 truncate ${className}`}>{text}</span>;
+  return (
+    // 자리를 넘지 않는다 — 꼬리를 줄지 않게 두면 오른쪽 종류 표시(`PRD-ORDER`) 위로 넘쳐 겹쳤다
+    <span className={`flex min-w-0 flex-1 overflow-hidden ${className}`}>
+      {/* 읽는 쪽(화면 낭독 · 찾기)에는 이름 한 덩어리로 — 보이는 두 조각은 읽지 않게 한다 */}
+      <span className="sr-only">{text}</span>
+      {/* 앞은 적어도 «c…» 만큼 — 한 글자로 줄면 말줄임표가 안 보여 이름이 `c10-75-18-100` 처럼 읽혔다 */}
+      <span aria-hidden className="min-w-[1.6em] truncate">{text.slice(0, -NAME_TAIL)}</span>
+      <span aria-hidden className="shrink-0">{text.slice(-NAME_TAIL)}</span>
+    </span>
+  );
+}

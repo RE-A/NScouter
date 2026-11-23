@@ -100,7 +100,17 @@ describe('AgentSelectorPanel — 머리글', () => {
     // 여기 적히는 수가 곧 화면에 그려지는 서버 수다.
     draw([11, 22]);
     await waitFor(() => expect(screen.getByText('2')).toBeTruthy());
-    expect(screen.getByText(/선택 · 해제/)).toBeTruthy();
+    expect(screen.getByText(/대 선택/)).toBeTruthy();
+  });
+
+  it('«고른 것만» 을 켜면 고른 서버만 남는다', async () => {
+    draw([11]);
+    await screen.findByText('shop-app');
+    expect(screen.getByText('order-app')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '고른 것만' }));
+    expect(screen.getByText('shop-app')).toBeTruthy();
+    expect(screen.queryByText('order-app')).toBeNull();
+    expect(screen.queryByText('test-host')).toBeNull();
   });
 });
 

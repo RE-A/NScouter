@@ -7,7 +7,8 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { CounterChart } from './CounterChart';
-import { isTotalCapable, type CounterName } from '../types/counter';
+import { type CounterName } from '../types/counter';
+import { isFoldable } from './counterTotal';
 import { useSectionFold } from '../hooks/useSectionFold';
 import { t } from '../../../i18n';
 
@@ -40,12 +41,12 @@ export const CounterPanelView = memo(function CounterPanelView({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const { fold, setFold, choices } = useSectionFold(serviceOf !== undefined);
+  const { fold, setFold, choices } = useSectionFold(serviceOf !== undefined, hashes.size);
   const visible = useMemo(() => new Set(hashes), [hashes]);
 
   return (
     <div ref={boxRef} className="flex h-full min-h-0 flex-col gap-1">
-      {isTotalCapable(counter) && (
+      {isFoldable(counter) && (
         <div className="flex shrink-0 justify-end gap-0.5">
           {choices.map(v => (
             <button
@@ -55,7 +56,7 @@ export const CounterPanelView = memo(function CounterPanelView({
               aria-pressed={fold === v}
               className={`rounded px-2 py-0.5 text-micro ${fold === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'}`}
             >
-              {v === 'total' ? t('합계') : v === 'service' ? t('서비스별') : t('개별')}
+              {v === 'total' ? t('전체') : v === 'service' ? t('서비스별') : t('개별')}
             </button>
           ))}
         </div>

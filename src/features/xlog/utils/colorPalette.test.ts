@@ -62,3 +62,24 @@ function otherKeyThan(color: string): string {
   for (let i = 0; i < 100; i++) if (keyColor(`k${i}`) !== color) return `k${i}`;
   throw new Error('팔레트가 한 색뿐이다');
 }
+
+describe('setAgentColorKey — 열쇠 차례', () => {
+  afterEach(() => setAgentColorKey(null));
+
+  it('열쇠를 주면 이름순 차례로 색을 줘, 색 수(12)까지는 겹치지 않는다', () => {
+    const keys = Array.from({ length: 12 }, (_, i) => `svc-${String(i).padStart(2, '0')}`);
+    setAgentColorKey(h => keys[h] ?? null, keys);
+    const colors = keys.map((_, i) => getAgentColor(i));
+    expect(new Set(colors).size).toBe(12);
+    // 서비스 접기의 선 색(keyColor)도 같은 차례다
+    expect(keyColor('svc-03')).toBe(getAgentColor(3));
+  });
+
+  it('열쇠를 안 주거나 풀면 해시로 돌아간다', () => {
+    const before = keyColor('order-api');
+    setAgentColorKey(() => 'order-api', ['zzz', 'order-api']);
+    expect(keyColor('order-api')).not.toBe(undefined);
+    setAgentColorKey(null);
+    expect(keyColor('order-api')).toBe(before);
+  });
+});

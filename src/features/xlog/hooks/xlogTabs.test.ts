@@ -29,6 +29,7 @@ import {
   linkedSelection,
   addPanel,
   openPinned,
+  focusXLog,
   kindOf,
   setCounterLabel,
   tabLabels,
@@ -459,3 +460,62 @@ describe('대상이 박힌 판 열기 (트리 오른쪽 클릭)', () => {
   });
 });
 
+
+describe('focusXLog — 파고들 XLog 판', () => {
+  it('지금 판이 XLog 면 그대로, 아니면 보이는 따라감 XLog 판으로', () => {
+    let s = initialTabs();
+    const x0 = s.activeKey;
+    s = addPanel(s, 'visualize');
+    expect(focusXLog(s).activeKey).toBe(x0);
+    const x1 = addPanel(initialTabs(), 'xlog');
+    expect(focusXLog(x1)).toBe(x1);
+  });
+
+  it('XLog 판이 없으면 하나 연다', () => {
+    let s = initialTabs();
+    s = addPanel(s, 'alert');
+    const only = closeTab(s, s.tabs[0].key);
+    const out = focusXLog(only);
+    expect(out.tabs.map(kindOf)).toEqual(['alert', 'xlog']);
+    expect(kindOf(activeTab(out))).toBe('xlog');
+  });
+});
+
+describe('openBeside — 새 판을 옆에 세우나', () => {
+  const sel = { services: new Set<string>(), hashes: new Set([7]) };
+
+  it('트리에서 연 고정 판은 옆에, 여럿을 열어 격자로 놓을 때는 탭으로', () => {
+    const one = openPinned(initialTabs(), 'counter', sel, 'TPS');
+    expect(activeTab(one).openBeside).toBe(true);
+    const many = openPinned(initialTabs(), 'xlog', sel, undefined, false);
+    expect(activeTab(many).openBeside).toBeUndefined();
+    expect(activeTab(many).pinned).toBe(true);
+  });
+
+  it('파고들며 연 XLog 판도 옆에', () => {
+    let s = addPanel(initialTabs(), 'visualize');
+    s = closeTab(s, s.tabs[0].key);
+    expect(activeTab(focusXLog(s)).openBeside).toBe(true);
+  });
+});
+
+describe('tabLabels — 고정 판 이름에 대상', () => {
+  it('붙인 이름이 없는 고정 판만 «이름 · 대상»', () => {
+    const sel = (h: number) => ({ services: new Set<string>(), hashes: new Set([h]) });
+    let s = initialTabs();
+    s = openPinned(s, 'counter', sel(1), 'TPS');
+    s = openPinned(s, 'xlog', sel(2));
+    // 같은 종류·대상의 고정 판이 있으니 새로 열지 않는다
+    expect(openPinned(s, 'xlog', sel(2), undefined, false).tabs).toHaveLength(3);
+    const name = (g: { hashes: ReadonlySet<number> }) => (g.hashes.has(1) ? 'shop-1' : g.hashes.has(2) ? 'shop-2' : null);
+    const labels = tabLabels(s.tabs, name);
+    // 카운터 이름은 다른 시험이 바꿔 둔 표기를 따른다(`setCounterLabel`) — 대상만 본다
+    expect(labels.some(l => l.startsWith('TPS') && l.endsWith(' · shop-1'))).toBe(true);
+    expect(labels).toContain('실시간 · shop-2');
+    // 따라감 판(첫 판)은 대상을 안 붙인다
+    expect(labels[0]).toBe('실시간');
+    // 이름을 붙였으면 그대로
+    const renamed = renameTab(s, s.tabs[1].key, '결제');
+    expect(tabLabels(renamed.tabs, name)).toContain('결제');
+  });
+});
