@@ -8,7 +8,7 @@ import { onCounterData } from '../api/scouterApi';
 import { subscribe } from '../api/subscribe';
 import { deriveStreamStatus } from '../utils/streamStatus';
 import { axisLabel, minuteTicks, sampleX, totalLineVisible } from './counterGeometry';
-import { totalMode } from './counterTotal';
+import { foldMode, totalMode } from './counterTotal';
 import { foldSeries, legendLabel, shownObjectCount, type DrawSeries, type FoldMode } from './counterSeries';
 import { CANVAS, SERIES, canvasFont, canvasFontScale } from '../../../styles/tokens';
 import { formatTime } from '../utils/colorPalette';
@@ -61,9 +61,11 @@ export const CounterChart = memo(function CounterChart({
 }: CounterChartProps) {
   // **counters.xml 이 안 된다고 한 카운터는 접지 않는다.** CPU 를 더하거나
   // Heap Total 을 더한 값은 아무 질문에도 답하지 않는다 — 요청받아도 개별로 그린다.
-  const capable = isTotalCapable(counter);
+  // 합계를 허락하지 않은 것 중 평균으로는 접을 수 있는 것(응답시간 · Heap · CPU …)은 평균으로 접는다(`foldMode`)
+  const foldAs = foldMode(counter, isTotalCapable(counter));
+  const capable = foldAs !== null;
   const drawn: FoldMode = capable ? fold : 'each';
-  const mode = totalMode(counter);
+  const mode = foldAs ?? totalMode(counter);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // 테마가 바뀜 때 한 번 더 그린다 — 캔버스에 칠해 둔 픽셀은 CSS 변수를 따라오지 않는다
@@ -195,14 +197,24 @@ export const CounterChart = memo(function CounterChart({
       // 여기서 "합계인가 평균인가"를 말해 주지 않으면 두 배로 읽거나 절반으로 읽는다.
       // 글자가 커지면 범례 칸도 넓힌다 — 이름끼리 겹치지 않게
       const step = Math.round(90 * canvasFontScale());
-      lines.forEach((s, i) => {
+      // **들어갈 만큼만** 적고 나머지는 «외 N» — 서버가 수십 대면 범례가 캔버스 밖으로 나가 몇 개만 보이고
+      // 나머지가 있는지조차 알 수 없었다
+      const room = Math.max(1, Math.floor((w - 8) / step));
+      const shown = lines.length > room ? lines.slice(0, room - 1) : lines;
+      shown.forEach((s, i) => {
         ctx.fillStyle = s.color ?? PALETTE[0];
         ctx.fillRect(8 + i * step, h - 16, 10, 2);
         ctx.fillStyle = CANVAS.textMuted;
         ctx.font = canvasFont(11);
         const label = s.color === null ? (mode === 'avg' ? t('평균') : t('합계')) : s.label;
-        ctx.fillText(legendLabel(label), 22 + i * step, h - 8);
+        // 칸(90px)에 12자까지 들어간다 — 10자로 줄이면 ECS 이름의 꼬리가 `0-100` 만 남아 서비스끼리 겹쳤다
+        ctx.fillText(legendLabel(label, 12), 22 + i * step, h - 8);
       });
+      if (shown.length < lines.length) {
+        ctx.fillStyle = CANVAS.textDim;
+        ctx.font = canvasFont(11);
+        ctx.fillText(`${t('외')} ${lines.length - shown.length}`, 8 + shown.length * step, h - 8);
+      }
 
       rafId = requestAnimationFrame(render);
     };

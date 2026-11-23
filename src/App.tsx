@@ -260,8 +260,8 @@ import {
   JAVAEE_UNCOLLECTED_COUNTERS,
   DATASOURCE_CHART_COUNTERS,
   counterMeta,
-  isTotalCapable,
 } from './features/xlog/types/counter';
+import { isFoldable } from './features/xlog/components/counterTotal';
 import { T, F, FONT_UI } from './styles/tokens';
 import { SectionHeader } from './components/SectionHeader';
 import { t, useT } from './i18n';
@@ -3198,7 +3198,7 @@ function CounterSection({
    * 어떤 건 개별인 채로 나란히 놓여 서로 비교하는 순간 틀린다.
    * 서비스로 묶어 볼 때는 서비스별이 기본이다 (useSectionFold).
    */
-  const { fold, setFold, choices: folds } = useSectionFold(serviceOf !== undefined);
+  const { fold, setFold, choices: folds } = useSectionFold(serviceOf !== undefined, hashes.length);
 
   /**
    * 차트에 넘길 «그릴 서버».
@@ -3214,7 +3214,7 @@ function CounterSection({
         title={title}
         subtitle={subtitle}
         action={
-          !empty && counters.some(isTotalCapable) ? (
+          !empty && counters.some(isFoldable) ? (
             <div className="flex gap-0.5">
               {folds.map(v => (
                 <button
@@ -3225,7 +3225,8 @@ function CounterSection({
                     fold === v ? 'bg-hover text-fg' : 'text-fg-dim hover:text-fg'
                   }`}
                 >
-                  {v === 'total' ? t('합계') : v === 'service' ? t('서비스별') : t('개별')}
+                  {/* «합계» 가 아니라 «전체» — 응답시간 · CPU 처럼 평균으로 접는 카운터도 있다(차트 머리글이 합계/평균을 말한다) */}
+                  {v === 'total' ? t('전체') : v === 'service' ? t('서비스별') : t('개별')}
                 </button>
               ))}
             </div>

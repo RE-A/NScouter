@@ -533,13 +533,10 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
                   aria-hidden
                 />
               )}
-              <span
-                className={`min-w-0 flex-1 truncate ${
-                  state === 'excluded' ? 'text-fg-muted' : state === 'picked' ? 'font-medium text-fg' : 'text-fg'
-                }`}
-              >
-                {name || `[${agent.obj_hash}]`}
-              </span>
+              <TailName
+                text={name || `[${agent.obj_hash}]`}
+                className={state === 'excluded' ? 'text-fg-muted' : state === 'picked' ? 'font-medium text-fg' : 'text-fg'}
+              />
               {/* 종류. **이름으로 추측한 게 아니라 콜렉터가 준 `objType` 이다.**
                   색은 Family(javaee · host · datasource)로 준다 — 처음 보는 종류가
                   와도 이름은 그대로 뜬다. 타입으로 묶었을 때는 묶음 머리와 같은 말이라 접는다. */}
@@ -713,3 +710,27 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-2.5 py-6 text-center text-small text-fg-faint">{children}</div>;
 }
 
+/**
+ * 줄일 때 남기는 끝 글자 수 — ECS 이름의 IP 꼬리에서 서버를 가르는 끝(`75-12-100`).
+ * 12자(`10-75-12-100`)를 남기면 기본 폭(200px)에 종류 표시까지 있을 때 꼬리 끝이 잘렸다
+ */
+const NAME_TAIL = 9;
+
+/**
+ * 이름을 **앞에서** 줄인다(끝은 남긴다). ECS Task 이름은 `payment-api-ip-10-75-12-100` 처럼 앞이 같고 끝(IP)만 달라,
+ * 뒤를 자르면 한 서비스의 Task 들이 전부 `payment-api-ip-10-75-1…` 로 똑같아 보였다.
+ * 자리가 넉넉하면 이어 붙어 그대로 보인다.
+ */
+function TailName({ text, className }: { text: string; className: string }) {
+  if (text.length <= NAME_TAIL + 6) return <span className={`min-w-0 flex-1 truncate ${className}`}>{text}</span>;
+  return (
+    // 자리를 넘지 않는다 — 꼬리를 줄지 않게 두면 오른쪽 종류 표시(`PRD-ORDER`) 위로 넘쳐 겹쳤다
+    <span className={`flex min-w-0 flex-1 overflow-hidden ${className}`}>
+      {/* 읽는 쪽(화면 낭독 · 찾기)에는 이름 한 덩어리로 — 보이는 두 조각은 읽지 않게 한다 */}
+      <span className="sr-only">{text}</span>
+      {/* 앞은 적어도 «c…» 만큼 — 한 글자로 줄면 말줄임표가 안 보여 이름이 `c10-75-18-100` 처럼 읽혔다 */}
+      <span aria-hidden className="min-w-[1.6em] truncate">{text.slice(0, -NAME_TAIL)}</span>
+      <span aria-hidden className="shrink-0">{text.slice(-NAME_TAIL)}</span>
+    </span>
+  );
+}

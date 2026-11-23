@@ -38,4 +38,14 @@ describe('useSectionFold', () => {
     rerender({ by: true });
     expect(result.current.fold).toBe('total');
   });
+
+  it('서버가 많으면(10대 넘게) 묶지 않아도 전체가 기본, 사람이 고르면 그것을 지킨다', () => {
+    const { result, rerender } = renderHook(({ n }) => useSectionFold(false, n), { initialProps: { n: 3 } });
+    expect(result.current.fold).toBe('each');
+    rerender({ n: 40 });
+    expect(result.current.fold).toBe('total');
+    act(() => result.current.setFold('each'));
+    rerender({ n: 50 });
+    expect(result.current.fold).toBe('each');
+  });
 });
