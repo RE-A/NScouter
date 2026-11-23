@@ -290,8 +290,11 @@ describe('서비스로 묶기', () => {
     expect(g).toEqual([]);
   });
 
-  it('묶음은 이름순 — 살아 있는 수로 정렬하면 10초마다 목록이 춤춘다', () => {
-    const g = groupAgents([...tasks, task('/CJFW/AAA-ip-10-0-0-9'), task('/CJFW/AAA-ip-10-0-0-8')], '', 'service');
-    expect(g.map(x => x.type)).toEqual([...g.map(x => x.type)].sort((a, b) => a.localeCompare(b)));
+  it('묶음은 이름순 — 살아 있는 수로 정렬하면 10초마다 목록이 춤춘다. «(그룹 없음)» 만 맨 아래', () => {
+    const g = groupAgents([...tasks, task('/CJFW/AAA-ip-10-0-0-9'), task('/CJFW/AAA-ip-10-0-0-8'), task('/host-1')], '', 'service');
+    const names = g.map(x => x.type);
+    expect(names[names.length - 1]).toBe(NO_GROUP);
+    const rest = names.filter(n => n !== NO_GROUP);
+    expect(rest).toEqual([...rest].sort((a, b) => a.localeCompare(b)));
   });
 });

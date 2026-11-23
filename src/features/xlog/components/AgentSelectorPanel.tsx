@@ -175,6 +175,21 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
       ),
     [agents, query, groupBy, multiType, pickedTypes, groupRule, selectedServices],
   );
+  /**
+   * «고른 것만» — 서버가 수십 대면 고른 것이 어디 있는지 목록을 훑어야 했다. 켜면 고른 서버(와 고른 서비스의 빈 마디)만 남는다.
+   * 고른 것이 없으면 의미가 없어 꺼진 것과 같다
+   */
+  const [onlyPicked, setOnlyPicked] = useState(false);
+  const pickedOnly = onlyPicked && selectedHashes.size > 0;
+  const listed = useMemo(
+    () =>
+      pickedOnly
+        ? groups
+            .map(g => ({ ...g, agents: g.agents.filter(a => selectedHashes.has(a.obj_hash)) }))
+            .filter(g => g.agents.length > 0 || (selectedServices?.has(g.type) ?? false))
+        : groups,
+    [pickedOnly, groups, selectedHashes, selectedServices],
+  );
   const shown = groups.reduce((n, g) => n + g.agents.length, 0);
   const typeFiltering = multiType && pickedTypes.size > 0;
 
@@ -271,8 +286,10 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         <span className="text-micro text-fg-dim">
           {isConnected ? (
             <>
-              <span className="tnum font-mono text-fg-muted">{aliveCount}</span>
-              <span className="text-fg-faint">/{agents.length}</span> {t('활성')}
+              <span title={t('살아 있는 서버 / 전체')}>
+                <span className="tnum font-mono text-fg-muted">{aliveCount}</span>
+                <span className="text-fg-faint">/{agents.length}</span>
+              </span>
             </>
           ) : (
             '—'
@@ -288,23 +305,35 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
               title={t('콜렉터에서 내려간 서버를 지웁니다. **같은 콜렉터를 보는 다른 사람 화면에서도** 사라집니다')}
               className="btn-ghost ml-2 px-1.5 py-0 text-micro"
             >
-              {cleaning ? t('정리 중…') : `${t('비활성 정리')} ${agents.length - aliveCount}`}
+              {/* 머리글이 한 줄에 들도록 짧게 — 무엇을 하는지는 풍선 도움말이 말한다 */}
+              {cleaning ? t('정리 중…') : `${t('정리')} ${agents.length - aliveCount}`}
             </button>
           )}
         </span>
         {/* **«전부» 라는 상태는 없다.** 고른 것이 곧 보는 것이라, 여기 적히는 수가
             화면에 그려지는 서버 수와 같다. 0 이면 화면도 비어 있다. */}
         {filtering ? (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={handleClearFilter}
-            title={t('고른 서버를 모두 풉니다')}
-            className="text-accent-bright"
-          >
-            <span className="tnum font-mono">{selectedHashes.size}</span>
-            {t('대 선택 · 해제')}
-          </Button>
+          <span className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setOnlyPicked(v => !v)}
+              aria-pressed={onlyPicked}
+              title={t('목록에 고른 서버만 남깁니다 — 서버가 많을 때 무엇을 골랐는지 봅니다')}
+              className={`rounded px-1.5 py-0.5 text-micro ${onlyPicked ? 'bg-accent/15 text-fg' : 'text-fg-dim hover:bg-hover hover:text-fg'}`}
+            >
+              {t('고른 것만')}
+            </button>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={handleClearFilter}
+              title={t('고른 서버를 모두 풉니다')}
+              className="text-accent-bright"
+            >
+              <span className="tnum font-mono">{selectedHashes.size}</span>
+              {t('대 선택')} ✕
+            </Button>
+          </span>
         ) : (
           <span className="px-1.5 text-micro text-fg-faint">{t('고른 서버 없음')}</span>
         )}
@@ -403,8 +432,8 @@ export const AgentSelectorPanel = memo(function AgentSelectorPanel({
         {isConnected && agents.length > 0 && groups.length === 0 && (
           <Empty>{t('조건에 맞는 항목이 없습니다.')}</Empty>
         )}
-        {groups.map(group => {
-          const open = searching || !collapsed.has(group.type);
+        {listed.map(group => {
+          const open = searching || pickedOnly || !collapsed.has(group.type);
           // **보이는 것만 고른다.** 검색으로 걸러 낸 상태에서 묶음을 켜면
           // 안 보이는 서버까지 딸려 오는데, 그건 무엇을 골랐는지 알 수 없게 만든다.
           const groupHashes = group.agents.map(a => a.obj_hash);

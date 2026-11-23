@@ -17,7 +17,9 @@ export const PANE = {
   chartMinH: 140,
   /** 기본 목록 높이 — 약 8행. "기본으로 보여야 한다"가 요구사항이다 */
   tableDefaultH: 220,
-  servicesDefaultW: 200,
+  // ECS 이름(`payment-api-ip-10-75-12-100`)이 대부분 다 보이는 폭. 200 이면 이름 끝(IP)이 잘렸다.
+  // 끌어 정한 폭은 저장돼 그대로다 — 처음 켜는 사람에게만 해당한다
+  servicesDefaultW: 260,
   detailDefaultW: 320,
   /** 구분선 두께 */
   divider: 4,

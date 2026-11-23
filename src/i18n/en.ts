@@ -1342,4 +1342,9 @@ export const EN: Record<string, string> = {
   '고른': 'Picked',
   '고른 서버': 'Picked servers',
   'TPS 는 콜렉터가 종류 전체 합계로만 줍니다 — 일부 서버만 고르면 적지 않습니다': 'The collector only reports TPS per type — it is left blank when only some servers are picked',
+  '살아 있는 서버 / 전체': 'Alive / total servers',
+  '정리': 'Clean',
+  '고른 것만': 'Picked only',
+  '목록에 고른 서버만 남깁니다 — 서버가 많을 때 무엇을 골랐는지 봅니다': 'Show only picked servers in the list',
+  '대 선택': ' picked',
 };

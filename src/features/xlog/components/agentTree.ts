@@ -206,5 +206,7 @@ export function groupAgents(
       }),
       aliveCount: list.filter(a => a.alive).length,
     }))
-    .sort((a, b) => a.type.localeCompare(b.type));
+    // «(그룹 없음)» 은 맨 아래 — 이름순이면 괄호가 맨 앞이라, 서비스별로 묶었을 때 호스트 여럿이 맨 위를 차지해
+    // 고른 서비스를 보려면 한참 내려가야 했다
+    .sort((a, b) => (a.type === NO_GROUP ? 1 : 0) - (b.type === NO_GROUP ? 1 : 0) || a.type.localeCompare(b.type));
 }
